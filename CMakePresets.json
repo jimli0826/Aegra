@@ -1,0 +1,60 @@
+{
+  "version": 8,
+  "cmakeMinimumRequired": {
+    "major": 4,
+    "minor": 3,
+    "patch": 1
+  },
+  "configurePresets": [
+    {
+      "name": "vs2026-debug",
+      "displayName": "Visual Studio 2026 Insiders - Debug x64",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "cacheVariables": {
+        "AEGRA_WARNINGS_AS_ERRORS": "ON",
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_STANDARD": "20",
+        "CMAKE_CXX_STANDARD_REQUIRED": "ON",
+        "CMAKE_CXX_EXTENSIONS": "OFF",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_MAKE_PROGRAM": "C:/Program Files/Microsoft Visual Studio/18/Insiders/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe"
+      }
+    },
+    {
+      "name": "vs2026-release",
+      "displayName": "Visual Studio 2026 Insiders - Release x64",
+      "inherits": "vs2026-debug",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "vs2026-debug",
+      "configurePreset": "vs2026-debug"
+    },
+    {
+      "name": "vs2026-release",
+      "configurePreset": "vs2026-release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "vs2026-debug",
+      "configurePreset": "vs2026-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "vs2026-release",
+      "configurePreset": "vs2026-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

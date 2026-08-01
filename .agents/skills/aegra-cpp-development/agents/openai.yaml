@@ -1,0 +1,4 @@
+interface:
+  display_name: "Aegra C++ Development"
+  short_description: "Guide safe modular C++ refactoring and implementation"
+  default_prompt: "Use $aegra-cpp-development to implement the next Aegra refactoring slice."

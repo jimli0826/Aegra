@@ -1,0 +1,33 @@
+Checks: >
+  -*,
+  clang-analyzer-*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  cppcoreguidelines-init-variables,
+  cppcoreguidelines-owning-memory,
+  cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  cppcoreguidelines-pro-bounds-constant-array-index,
+  cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  cppcoreguidelines-pro-type-const-cast,
+  cppcoreguidelines-pro-type-cstyle-cast,
+  cppcoreguidelines-pro-type-reinterpret-cast,
+  cppcoreguidelines-slicing,
+  cppcoreguidelines-special-member-functions,
+  cppcoreguidelines-virtual-class-destructor,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-using,
+  performance-*,
+  -performance-enum-size,
+  portability-*,
+  -portability-avoid-pragma-once,
+  readability-function-cognitive-complexity,
+  readability-function-size
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*[\\/]src[\\/].*'
+CheckOptions:
+  readability-function-cognitive-complexity.Threshold: '10'
+  readability-function-size.LineThreshold: '60'
+  readability-function-size.StatementThreshold: '60'
+  readability-function-size.ParameterThreshold: '5'
+  readability-function-size.NestingThreshold: '4'

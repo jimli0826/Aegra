@@ -24,7 +24,7 @@ Memory Adapter 是正式的端口参考实现，只保存进程内临时数据�
 
 Archive Reader 分别限制 metadata、chunk stored payload 和展开后的 chunk logical size。ZERO run、压缩块和其它稀疏表示在分配恢复缓冲区前都必须通过 logical size 上限检查。
 
-密码 Adapter 使用 Argon2id v1.3 派生 master key、HKDF-SHA256 分离 metadata/sidecar key，并使用 XChaCha20-Poly1305 detached tag；内容散列使用 SHA-256。KDF 参数、salt 和 nonce 都持久化在对应格式字段中；读取前先执行产品上下限检查。压缩 Adapter 要求调用者提供期望输出大小和硬上限。
+密码 Adapter 使用 Argon2id v1.3 派生 master key、HKDF-SHA256 分离 metadata、Chunk Payload 和 Sidecar key，并使用 XChaCha20-Poly1305 detached tag；内容散列使用 SHA-256。每个 Chunk 使用独立随机 nonce，Header 和 BlockEntry 作为 AAD，Reader 认证完整 ciphertext 后才解压。KDF 参数、salt 和 nonce 都持久化在对应格式字段中；读取前先执行产品上下限检查。压缩 Adapter 要求调用者提供期望输出大小和硬上限。
 
 ## 通用规则
 

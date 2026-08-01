@@ -3,6 +3,7 @@ find_package(unofficial-sodium CONFIG REQUIRED)
 add_library(aegra_adapter_crypto_sodium STATIC
     src/content_hash.cpp
     src/metadata_crypto.cpp
+    src/payload_crypto.cpp
     src/secure_string.cpp
     src/sidecar_crypto.cpp
 )

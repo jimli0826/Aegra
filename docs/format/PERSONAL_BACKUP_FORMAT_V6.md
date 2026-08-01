@@ -15,7 +15,7 @@ V6 使用固定二进制启动结构、加密 CBOR 元数据和 chunk 内索引�
 
 - 固定二进制 `BackupHeader`：用于启动读取。
 - 加密 CBOR 元数据：用于保存磁盘、分区、系统信息和原始分区表数据。
-- `ChunkHeader`：描述一个 chunk 所属数据源（当前为 volume）、块索引区和 payload 区。
+- `ChunkHeader`：描述一个 chunk 所属数据源、块索引区和 Payload AEAD 参数。
 - chunk 内部紧凑二进制 `BlockEntry[]`：作为该 chunk 内的权威块索引。
 - 固定二进制 `BackupFooter`：作为完成标记和全局统计信息。
 
@@ -49,7 +49,7 @@ V6 使用固定二进制启动结构、加密 CBOR 元数据和 chunk 内索引�
 - CBOR 保存可扩展的描述性元数据，并在文件中以加密 envelope 形式存储。
 - 每个 chunk 的索引位于 payload 之前。
 - 还原程序顺序读到一个 chunk 后，可以先从 `ChunkHeader` 得到该 chunk 所属分区，再读取 `BlockEntry[]`，随后顺序读取 payload 并写回目标分区。
-- `Block Payloads` 只保存真实块数据，不再为每个块写入 `BlockHeader`。
+- `Block Payloads` 保存经过压缩和 Chunk 级认证加密的真实块数据，不再为每个块写入 `BlockHeader`。
 - chunk 内 `BlockEntry[]` 是该 chunk 内块恢复元数据的唯一权威来源。
 - 每个 chunk 只能属于一个数据源；当前数据源类型为 volume，由 `ChunkHeader.source_type + ChunkHeader.source_index` 指定。
 - `BackupFooter` 保存备份完成标记和全局统计信息；正常顺序恢复不依赖 Footer 中的索引偏移。
@@ -109,6 +109,17 @@ constexpr uint32_t BACKUP_FLAG_ENCRYPTED    = 0x00000010;
 constexpr uint32_t BACKUP_FLAG_SPLIT        = 0x00000020; // 多文件分卷
 ```
 
+正式 V6 文件固定使用以下 Payload 算法编号：
+
+```cpp
+constexpr uint8_t PAYLOAD_ENC_NONE                   = 0;
+constexpr uint8_t PAYLOAD_ENC_XCHACHA20_POLY1305     = 2;
+```
+
+`BACKUP_FLAG_ENCRYPTED` 必须设置，`BackupHeader.encryption_method` 必须为
+`PAYLOAD_ENC_XCHACHA20_POLY1305`。该标志表示 metadata、Chunk 索引和 Payload 均受到 AEAD 保护；
+正式 Reader 不接受 Payload 明文文件。
+
 备份链通过三个 UUID 字段表达：
 
 - `file_uuid`：本备份文件的唯一标识。
@@ -154,7 +165,7 @@ V6 写入器固定将 `split_part_count` 写为 0：首卷 Header 同时是 meta
 constexpr uint32_t DEFAULT_CHUNK_SIZE = 512 * 1024 * 1024;
 ```
 
-`ChunkHeader` 采用固定大小结构。因为一个 chunk 只能包含一个分区的数据，所以分区定位字段直接放在 header 中，不再需要 range 表。
+`ChunkHeader` 采用固定大小结构。因为一个 chunk 只能包含一个分区的数据，所以分区定位字段直接放在 header 中，不再需要 range 表。每个 Chunk 使用独立随机 nonce 和 detached authentication tag。
 
 ```cpp
 #pragma pack(push, 1)
@@ -174,8 +185,12 @@ struct ChunkHeader {
 
     uint32_t flags;                // 预留 chunk 级标志；未使用时为 0
     uint32_t header_crc32;         // 可选；未启用时为 0
+
+    uint8_t  payload_nonce[24];    // 本 Chunk 独立 XChaCha20 nonce
+    uint8_t  payload_authentication_tag[16]; // detached AEAD tag
+    uint8_t  reserved1[4];         // 预留，必须初始化为 0
 };
-static_assert(sizeof(ChunkHeader) == 52);
+static_assert(sizeof(ChunkHeader) == 96);
 #pragma pack(pop)
 ```
 
@@ -187,7 +202,14 @@ BlockEntry[]
 Payloads
 ```
 
-读取端读取固定 `ChunkHeader` 后，直接读取 `block_entry_count * sizeof(BlockEntry)` 字节的块索引，再顺序读取 `payload_size` 字节的 payload。
+读取端读取固定 `ChunkHeader` 后，读取 `block_entry_count * sizeof(BlockEntry)` 字节的块索引，再顺序读取 `payload_size` 字节的 ciphertext。范围预检可以使用明文索引，但在 AEAD 认证成功前不得解压、展开或向恢复目标返回任何数据。
+
+Chunk Payload 使用 XChaCha20-Poly1305 detached 模式整体加密。AAD 按以下顺序拼接：
+
+1. 将 `payload_authentication_tag` 清零后的完整 96 字节 `ChunkHeader`；
+2. 当前 Chunk 的全部编码后 `BlockEntry[]`。
+
+Payload ciphertext 与 plaintext 长度相同。只有 ZERO entry 的 Chunk 允许 `payload_size == 0`，但仍须生成独立 nonce/tag，以空明文 AEAD 认证 Header 和 BlockEntry。nonce 必须由密码学安全随机源生成；同一 Payload key 下不得重复。
 
 下一个记录的 magic 如果是 `MYBKCHK`，表示继续读取下一个 chunk；如果是 `MYBKEND`，表示 chunk 流结束并进入 Footer。
 
@@ -213,7 +235,7 @@ static_assert(sizeof(BlockEntry) == 25);
 #pragma pack(pop)
 ```
 
-`stored_size` 表示 payload 在文件中的字节数。如果启用 payload 加密，`stored_size` 是加密后大小，可能包含 XTS 对齐填充。
+`stored_size` 表示 Payload ciphertext 中该块压缩流的字节数。XChaCha20-Poly1305 detached 模式不改变 Payload 长度，因此它也等于解密后对应压缩流的字节数；authentication tag 只保存在 `ChunkHeader`，不计入 `stored_size`。
 
 `logical_size` 在当前 V6 实现中的语义：
 
@@ -359,6 +381,13 @@ metadata_key = HKDF-SHA256(
     input_key_material = backup_master_key,
     salt = CborMetadataEnvelopeHeader.salt,
     info = "MYBACKUP-V6-CBOR-METADATA",
+    output_length = 32
+)
+
+payload_key = HKDF-SHA256(
+    input_key_material = backup_master_key,
+    salt = CborMetadataEnvelopeHeader.salt,
+    info = "MYBACKUP-V6-CHUNK-PAYLOAD",
     output_length = 32
 )
 ```
@@ -855,14 +884,16 @@ identity 与逻辑大小保持一致。
 6. 派生 metadata_key，生成 metadata nonce，并用 AEAD 加密 CBOR plaintext。
 7. 写入 CborMetadataEnvelopeHeader、可选 CborKeySlot[]、CBOR ciphertext 和 AEAD tag。
 8. 从 VSS snapshot 的 volume 逻辑地址空间读取数据，并按 default_chunk_size 组织一个 chunk 的输入块。
-9. 对该 chunk 内的块进行压缩、加密、去重处理，生成临时 payload 和本 chunk 的 BlockEntry[]。
-10. 写入 ChunkHeader。
-11. 写入本 chunk 的 BlockEntry[]。
-12. 写入本 chunk 的 Payloads。
-13. 重复步骤 8-12，直到所有数据写完。
-14. 计算 footer.file_size = currentOffset + sizeof(BackupFooter)。
-15. 写入 BackupFooter。
-16. 写完 `.bkf` 后生成完整状态的 sidecar 文件 `<backup>.bkf.bhx`（见“增量与差异备份”）。
+9. 对该 chunk 内的块进行压缩和去重处理，生成明文临时 payload 和本 chunk 的 BlockEntry[]。
+10. 生成独立 Payload nonce，以 tag 清零的 ChunkHeader 和 BlockEntry[] 为 AAD，加密临时 payload。
+11. 把 detached tag 写入 ChunkHeader。
+12. 写入 ChunkHeader。
+13. 写入本 chunk 的 BlockEntry[]。
+14. 写入本 chunk 的 Payload ciphertext。
+15. 重复步骤 8-14，直到所有数据写完。
+16. 计算 footer.file_size = currentOffset + sizeof(BackupFooter)。
+17. 写入 BackupFooter。
+18. 写完 `.bkf` 后生成完整状态的 sidecar 文件 `<backup>.bkf.bhx`（见“增量与差异备份”）。
 ```
 
 `currentOffset` 应在每次成功写入后递增。`BlockEntry.ptr.payload_offset` 保存的是相对于当前 chunk payload 起始位置的偏移，不是文件绝对偏移。
@@ -875,10 +906,10 @@ identity 与逻辑大小保持一致。
 
 ```text
 1. 读取若干逻辑块。
-2. 压缩/加密后写入临时文件或内存缓冲。
+2. 压缩后写入临时文件或内存缓冲。
 3. 同时生成 BlockEntry[]。
 4. 写 ChunkHeader + BlockEntry[]。
-5. 从临时 spool 顺序拷贝 payload 到备份文件。
+5. 认证加密完整 payload，并顺序写入 ciphertext。
 ```
 
 ## 读取流程
@@ -892,10 +923,11 @@ identity 与逻辑大小保持一致。
 6. 从 first_chunk_offset 开始顺序读取 ChunkHeader。
 7. 读取本 chunk 的 BlockEntry[]。
 8. 根据 ChunkHeader.source_type + source_index 判断本 chunk 是否包含目标 volume 数据。
-9. 顺序读取本 chunk 的 Payloads。
-10. 对目标分区相关的 BlockEntry，按 logical_block_index 写回目标分区位置。
-11. 跳到下一个 chunk，重复步骤 6-10。
-12. 读到 BackupFooter 后校验 footer magic 和 file_size。
+9. 顺序读取本 chunk 的 Payload ciphertext。
+10. 派生 Payload key，以 ChunkHeader 和 BlockEntry[] 为 AAD 验证 tag 并解密；失败时立即中止。
+11. 认证成功后解压目标块，并按 logical_block_index 写回目标分区位置。
+12. 跳到下一个 chunk，重复步骤 6-11。
+13. 读到 BackupFooter 后校验 footer magic 和 file_size。
 ```
 
 顺序恢复的关键点是：读取 payload 前已经拿到了本 chunk 的索引，因此不需要 seek 到文件尾部读取全局索引，也不需要随机读取备份文件。
@@ -927,9 +959,11 @@ identity 与逻辑大小保持一致。
 - KDF 参数版本不支持、Argon2id 参数为零，或参数超出产品允许的资源上限。
 - `plaintext_size`、`ciphertext_size`、`key_slot_count` 推导出的 envelope 总大小与 `BackupHeader.cbor_size` 不一致。
 - metadata AEAD tag 校验失败。
+- `BackupHeader.encryption_method` 不是 XChaCha20-Poly1305。
 - 解密后的 CBOR plaintext 长度不等于 `plaintext_size`。
 - CBOR 任意 Map 使用了非 text string key，或根 Map 缺少字符串字段 `schema_version`。
 - Chunk magic、chunk version 或 chunk header size 无效。
+- Chunk nonce 全零，或保留字段、flags、`header_crc32` 非零。
 - Chunk 中 header/index/payload 大小之和超出文件范围。
 - `chunk_index` 在同一逻辑备份流中不连续，包括跨分卷边界时。
 - `disks[]` 中存在重复的 disk number。
@@ -937,6 +971,7 @@ identity 与逻辑大小保持一致。
 - `ChunkHeader.source_type + source_index` 引用不存在的 volume。
 - `logical_block_index * block_size >= volume.total_size`。
 - `payload_offset + stored_size > 当前 chunk 的 payload_size`。
+- Chunk Payload AEAD tag 校验失败；包括 ChunkHeader、BlockEntry 或 ciphertext 被篡改。
 - 加密 payload 解密后有效数据不足 `logical_size`。
 - `DEDUP ref_index` 不在当前 chunk 范围内，或引用了当前 entry 之后的 entry。
 - GUID byte string 长度不是 16 字节。

@@ -153,6 +153,38 @@ bool archive_contains_zero_run(const std::filesystem::path& path) {
     return false;
 }
 
+bool tampered_payload_is_rejected(const TemporaryArchive& source,
+                                  const TemporaryArchive& tampered) {
+    namespace archive = aegra::format::personal_archive;
+    std::error_code filesystem_error;
+    std::filesystem::copy_file(source.path(), tampered.path(), filesystem_error);
+    if (filesystem_error) {
+        return false;
+    }
+    std::ifstream input(tampered.path(), std::ios::binary);
+    const auto header =
+        archive::decode_backup_header(read_at<archive::kBackupHeaderSize>(input, 0));
+    if (!header) {
+        return false;
+    }
+    const auto chunk_offset = header.value().first_chunk_offset;
+    const auto chunk =
+        archive::decode_chunk_header(read_at<archive::kChunkHeaderSize>(input, chunk_offset));
+    if (!chunk || chunk.value().payload_size == 0) {
+        return false;
+    }
+    const auto payload_offset = chunk_offset + archive::kChunkHeaderSize +
+                                chunk.value().block_entry_count * archive::kBlockEntrySize;
+    auto byte = read_at<1>(input, payload_offset);
+    input.close();
+    byte.front() ^= std::byte{0x01};
+    if (!write_at(tampered.path(), payload_offset, byte)) {
+        return false;
+    }
+    auto reader = personal::PersonalArchiveReader::open({tampered.path(), "test-password"});
+    return reader && !reader.value()->read_chunk(0, {}).has_value();
+}
+
 aegra::format::Manifest make_manifest(const std::uint64_t logical_size) {
     aegra::format::Manifest manifest;
     manifest.backup_job.created_utc = "2026-08-01T09:00:00Z";
@@ -513,6 +545,9 @@ bool run_incremental_roundtrip(const TemporaryArchive& base, const TemporaryArch
 int run_tests() {
     TemporaryArchive archive;
     bool passed = run_roundtrip(archive);
+    TemporaryArchive tampered_archive;
+    passed &= expect(tampered_payload_is_rejected(archive, tampered_archive),
+                     "tampered chunk ciphertext is rejected before restore");
     const auto wrong_password =
         personal::PersonalArchiveReader::open({archive.path(), "wrong-password"});
     passed &= expect(!wrong_password.has_value(), "wrong archive password is rejected");

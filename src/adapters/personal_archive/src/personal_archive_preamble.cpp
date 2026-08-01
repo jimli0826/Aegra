@@ -159,6 +159,16 @@ make_protected_metadata(const archive::MetadataEnvelopeHeader& envelope,
 
 } // namespace
 
+format::BackupType archive_backup_type(const archive::BackupHeader& header) noexcept {
+    if ((header.flags & archive::kBackupFlagIncremental) != 0) {
+        return format::BackupType::kIncremental;
+    }
+    if ((header.flags & archive::kBackupFlagDifferential) != 0) {
+        return format::BackupType::kDifferential;
+    }
+    return format::BackupType::kFull;
+}
+
 base::Result<ParsedPreamble> read_archive_preamble(std::ifstream& input,
                                                    const ArchiveOpenRequest& request,
                                                    const std::uint64_t file_size) {
@@ -175,7 +185,11 @@ base::Result<ParsedPreamble> read_archive_preamble(std::ifstream& input,
         return base::Result<ParsedPreamble>::failure(binding.error());
     }
     return base::Result<ParsedPreamble>::success(
-        {encoded.value().header, std::move(manifest).value()});
+        {encoded.value().header,
+         std::move(manifest).value(),
+         {encoded.value().envelope.kdf_opslimit, encoded.value().envelope.kdf_memlimit_bytes,
+          encoded.value().envelope.kdf_parameters_version},
+         encoded.value().envelope.salt});
 }
 
 } // namespace aegra::adapters::personal_archive::detail

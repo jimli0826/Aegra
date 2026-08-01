@@ -1,5 +1,6 @@
 #include "aegra/adapters/crypto_sodium/content_hash.h"
 #include "aegra/adapters/crypto_sodium/metadata_crypto.h"
+#include "aegra/adapters/crypto_sodium/payload_crypto.h"
 #include "aegra/adapters/crypto_sodium/secure_string.h"
 #include "aegra/adapters/crypto_sodium/sidecar_crypto.h"
 
@@ -96,6 +97,8 @@ bool test_sidecar_crypto_and_hash() {
     if (!protected_payload) {
         return false;
     }
+    passed &= expect(protected_payload.value().ciphertext != plaintext,
+                     "payload is not stored as plaintext");
     const auto decrypted = crypto::unprotect_sidecar_payload(protected_payload.value().ciphertext,
                                                              protected_payload.value().tag,
                                                              "password", aad, context.value());
@@ -105,6 +108,49 @@ bool test_sidecar_crypto_and_hash() {
     passed &= expect(digest.has_value() && digest.value().front() == std::byte{0xBA} &&
                          digest.value().back() == std::byte{0xAD},
                      "SHA-256 digest matches the known abc vector");
+    return passed;
+}
+
+bool test_payload_crypto() {
+    namespace crypto = aegra::adapters::crypto_sodium;
+    const auto context =
+        crypto::create_metadata_protection_context(crypto::minimum_kdf_parameters());
+    if (!context) {
+        return false;
+    }
+    auto cipher =
+        crypto::PayloadCipher::create("password", context.value().kdf, context.value().salt);
+    auto nonce = crypto::create_payload_nonce();
+    if (!cipher || !nonce) {
+        return false;
+    }
+    const auto plaintext = bytes("compressed chunk payload");
+    auto aad = bytes("chunk header and block entries");
+    auto protected_payload = cipher.value()->protect(plaintext, aad, nonce.value());
+    bool passed = expect(protected_payload.has_value(), "payload encryption succeeds");
+    if (!protected_payload) {
+        return false;
+    }
+    auto decrypted = cipher.value()->unprotect(protected_payload.value().ciphertext, aad,
+                                               nonce.value(), protected_payload.value().tag);
+    passed &= expect(decrypted.has_value() && decrypted.value() == plaintext,
+                     "payload survives encrypted roundtrip");
+    aad.front() ^= std::byte{0x01};
+    auto tampered_aad = cipher.value()->unprotect(protected_payload.value().ciphertext, aad,
+                                                  nonce.value(), protected_payload.value().tag);
+    passed &= expect(!tampered_aad.has_value(), "payload AAD tampering is rejected");
+    auto tampered_ciphertext = protected_payload.value().ciphertext;
+    tampered_ciphertext.front() ^= std::byte{0x01};
+    auto tampered_payload =
+        cipher.value()->unprotect(tampered_ciphertext, bytes("chunk header and block entries"),
+                                  nonce.value(), protected_payload.value().tag);
+    passed &= expect(!tampered_payload.has_value(), "payload ciphertext tampering is rejected");
+    auto tampered_tag = protected_payload.value().tag;
+    tampered_tag.front() ^= std::byte{0x01};
+    auto rejected_tag = cipher.value()->unprotect(protected_payload.value().ciphertext,
+                                                  bytes("chunk header and block entries"),
+                                                  nonce.value(), tampered_tag);
+    passed &= expect(!rejected_tag.has_value(), "payload tag tampering is rejected");
     return passed;
 }
 
@@ -118,7 +164,8 @@ bool test_secure_string_lifecycle() {
 
 int run_tests() {
     return test_authenticated_roundtrip() && test_authentication_failures() &&
-                   test_sidecar_crypto_and_hash() && test_secure_string_lifecycle()
+                   test_sidecar_crypto_and_hash() && test_payload_crypto() &&
+                   test_secure_string_lifecycle()
                ? EXIT_SUCCESS
                : EXIT_FAILURE;
 }

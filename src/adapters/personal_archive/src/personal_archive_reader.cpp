@@ -1,8 +1,10 @@
 #include "aegra/adapters/personal_archive/personal_archive.h"
 
+#include "personal_archive_payload.h"
 #include "personal_archive_preamble.h"
 
 #include "aegra/adapters/compression_zstd/zstd_codec.h"
+#include "aegra/adapters/crypto_sodium/payload_crypto.h"
 #include "aegra/base/error.h"
 #include "aegra/format/personal_archive.h"
 
@@ -11,6 +13,7 @@
 #include <iomanip>
 #include <limits>
 #include <optional>
+#include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -21,9 +24,11 @@ namespace aegra::adapters::personal_archive {
 namespace {
 
 namespace archive = format::personal_archive;
+using detail::archive_backup_type;
 using detail::ParsedPreamble;
 
 struct ChunkRecord final {
+    archive::ChunkHeader header;
     ports::ChunkDescriptor descriptor;
     std::uint64_t payload_offset{0};
     std::uint64_t stored_payload_size{0};
@@ -82,6 +87,9 @@ read_exact(std::ifstream& input, const std::uint64_t offset, const std::size_t s
     if (size > static_cast<std::size_t>((std::numeric_limits<std::streamsize>::max)())) {
         return base::Result<std::vector<std::byte>>::failure(
             error(base::ErrorCode::kCorruptData, "archive read size exceeds stream limit"));
+    }
+    if (size == 0) {
+        return base::Result<std::vector<std::byte>>::success({});
     }
     input.clear();
     input.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
@@ -406,8 +414,8 @@ read_chunk_record(std::ifstream& input, const std::uint64_t offset, const Parsed
             error(base::ErrorCode::kCorruptData, "archive chunk logical size exceeds limit"));
     }
     return base::Result<ChunkRecord>::success(
-        {descriptor.value(), payload_offset, chunk.value().payload_size, chunk.value().source_index,
-         std::move(entries).value(), part.path});
+        {chunk.value(), descriptor.value(), payload_offset, chunk.value().payload_size,
+         chunk.value().source_index, std::move(entries).value(), part.path});
 }
 
 [[nodiscard]] base::Result<std::uint64_t> append_chunk(std::ifstream& input,
@@ -583,9 +591,8 @@ read_chunk_record(std::ifstream& input, const std::uint64_t offset, const Parsed
 }
 
 [[nodiscard]] base::Result<std::vector<std::byte>>
-read_entry_payload(std::ifstream& input, const ChunkRecord& record,
-                   const archive::BlockEntry& entry, const std::uint32_t block_size,
-                   const std::uint64_t logical_size) {
+read_entry_payload(const std::span<const std::byte> chunk_payload, const archive::BlockEntry& entry,
+                   const std::uint32_t block_size, const std::uint64_t logical_size) {
     auto entry_size = validate_entry_size(entry, block_size, logical_size);
     if (!entry_size) {
         return base::Result<std::vector<std::byte>>::failure(entry_size.error());
@@ -594,25 +601,38 @@ read_entry_payload(std::ifstream& input, const ChunkRecord& record,
         return base::Result<std::vector<std::byte>>::success(
             std::vector<std::byte>(static_cast<std::size_t>(entry_size.value()), std::byte{0}));
     }
-    auto stored = read_exact(input, record.payload_offset + entry.data_offset_or_reference,
-                             entry.stored_size);
-    if (!stored) {
-        return base::Result<std::vector<std::byte>>::failure(stored.error());
-    }
+    const auto stored = chunk_payload.subspan(
+        static_cast<std::size_t>(entry.data_offset_or_reference), entry.stored_size);
     if (entry.flags == archive::kBlockFlagRaw) {
-        return stored;
+        return base::Result<std::vector<std::byte>>::success(
+            std::vector<std::byte>(stored.begin(), stored.end()));
     }
-    return compression_zstd::decompress(stored.value(),
-                                        static_cast<std::size_t>(entry_size.value()), block_size);
+    return compression_zstd::decompress(stored, static_cast<std::size_t>(entry_size.value()),
+                                        block_size);
 }
 
 [[nodiscard]] base::Result<std::vector<std::byte>>
 read_record_payload(const ChunkRecord& record, const std::uint32_t block_size,
-                    const std::uint64_t logical_size, const base::CancellationToken& cancellation) {
+                    const std::uint64_t logical_size, const base::CancellationToken& cancellation,
+                    const crypto_sodium::PayloadCipher& payload_cipher) {
     std::ifstream input(record.part_path, std::ios::binary);
     if (!input) {
         return base::Result<std::vector<std::byte>>::failure(
             error(base::ErrorCode::kIoFailure, "failed to reopen personal archive"));
+    }
+    if (cancellation.stop_requested()) {
+        return base::Result<std::vector<std::byte>>::failure(
+            error(base::ErrorCode::kCancelled, "restore cancelled"));
+    }
+    auto ciphertext = read_exact(input, record.payload_offset,
+                                 static_cast<std::size_t>(record.stored_payload_size));
+    if (!ciphertext) {
+        return base::Result<std::vector<std::byte>>::failure(ciphertext.error());
+    }
+    auto plaintext = detail::unprotect_archive_chunk(record.header, record.entries,
+                                                     ciphertext.value(), payload_cipher);
+    if (!plaintext) {
+        return base::Result<std::vector<std::byte>>::failure(plaintext.error());
     }
     std::vector<std::byte> result;
     result.reserve(static_cast<std::size_t>(record.descriptor.logical_size));
@@ -621,23 +641,13 @@ read_record_payload(const ChunkRecord& record, const std::uint32_t block_size,
             return base::Result<std::vector<std::byte>>::failure(
                 error(base::ErrorCode::kCancelled, "restore cancelled"));
         }
-        auto payload = read_entry_payload(input, record, entry, block_size, logical_size);
+        auto payload = read_entry_payload(plaintext.value(), entry, block_size, logical_size);
         if (!payload) {
             return base::Result<std::vector<std::byte>>::failure(payload.error());
         }
         result.insert(result.end(), payload.value().begin(), payload.value().end());
     }
     return base::Result<std::vector<std::byte>>::success(std::move(result));
-}
-
-[[nodiscard]] format::BackupType archive_backup_type(const archive::BackupHeader& header) noexcept {
-    if ((header.flags & archive::kBackupFlagIncremental) != 0) {
-        return format::BackupType::kIncremental;
-    }
-    if ((header.flags & archive::kBackupFlagDifferential) != 0) {
-        return format::BackupType::kDifferential;
-    }
-    return format::BackupType::kFull;
 }
 
 [[nodiscard]] base::Result<void> validate_layer_shape(const ParsedPreamble& preamble,
@@ -678,6 +688,7 @@ struct PersonalArchiveReader::Impl final {
     std::uint32_t block_size{0};
     std::uint64_t logical_size{0};
     std::vector<ChunkRecord> records;
+    std::unique_ptr<crypto_sodium::PayloadCipher> payload_cipher;
 };
 
 PersonalArchiveReader::PersonalArchiveReader(std::unique_ptr<Impl> implementation) noexcept
@@ -716,6 +727,12 @@ PersonalArchiveReader::open(const ArchiveOpenRequest& request) {
     if (!shape) {
         return base::Result<std::unique_ptr<PersonalArchiveReader>>::failure(shape.error());
     }
+    auto payload_cipher = crypto_sodium::PayloadCipher::create(
+        request.password, preamble.value().kdf, preamble.value().salt);
+    if (!payload_cipher) {
+        return base::Result<std::unique_ptr<PersonalArchiveReader>>::failure(
+            payload_cipher.error());
+    }
     auto parsed = std::move(preamble).value();
     auto scanned = std::move(scan).value();
     auto implementation = std::make_unique<Impl>();
@@ -726,6 +743,7 @@ PersonalArchiveReader::open(const ArchiveOpenRequest& request) {
     implementation->block_size = parsed.header.block_size;
     implementation->logical_size = implementation->manifest.volumes.front().total_size;
     implementation->records = std::move(scanned.records);
+    implementation->payload_cipher = std::move(payload_cipher).value();
     return base::Result<std::unique_ptr<PersonalArchiveReader>>::success(
         std::unique_ptr<PersonalArchiveReader>(
             new PersonalArchiveReader(std::move(implementation))));
@@ -765,8 +783,9 @@ PersonalArchiveReader::read_chunk(const std::uint64_t chunk_index,
         return base::Result<ports::ChunkData>::failure(descriptor.error());
     }
     const auto& record = implementation_->records[static_cast<std::size_t>(chunk_index)];
-    auto payload = read_record_payload(record, implementation_->block_size,
-                                       implementation_->logical_size, cancellation);
+    auto payload =
+        read_record_payload(record, implementation_->block_size, implementation_->logical_size,
+                            cancellation, *implementation_->payload_cipher);
     if (!payload) {
         return base::Result<ports::ChunkData>::failure(payload.error());
     }

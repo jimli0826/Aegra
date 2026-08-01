@@ -16,7 +16,7 @@ inline constexpr std::uint16_t kEnvelopeVersion = 1;
 inline constexpr std::uint16_t kFooterVersion = 1;
 inline constexpr std::size_t kBackupHeaderSize = 256;
 inline constexpr std::size_t kMetadataEnvelopeHeaderSize = 124;
-inline constexpr std::size_t kChunkHeaderSize = 52;
+inline constexpr std::size_t kChunkHeaderSize = 96;
 inline constexpr std::size_t kBlockEntrySize = 25;
 inline constexpr std::size_t kBackupFooterSize = 512;
 
@@ -40,7 +40,7 @@ enum class CompressionMethod : std::uint8_t {
 
 enum class PayloadEncryptionMethod : std::uint8_t {
     kNone = 0,
-    kAes256Xts = 1,
+    kXChaCha20Poly1305 = 2,
 };
 
 enum class MetadataEncryptionMethod : std::uint8_t {
@@ -97,6 +97,8 @@ struct ChunkHeader final {
     std::uint64_t payload_size{0};
     std::uint32_t flags{0};
     std::uint32_t header_crc32{0};
+    std::array<std::byte, 24> payload_nonce{};
+    std::array<std::byte, 16> payload_authentication_tag{};
 };
 
 struct BlockEntry final {

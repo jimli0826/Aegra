@@ -81,6 +81,12 @@ template <std::size_t Size>
                        [](const std::byte item) { return item == std::byte{0}; });
 }
 
+template <std::size_t Size>
+[[nodiscard]] bool is_zero_bytes(const std::array<std::byte, Size>& value) noexcept {
+    return std::all_of(value.begin(), value.end(),
+                       [](const std::byte item) { return item == std::byte{0}; });
+}
+
 [[nodiscard]] base::Result<void> validate_parent_uuid(const BackupHeader& header,
                                                       const std::uint32_t backup_type) {
     const bool parent_is_zero = is_zero_uuid(header.parent_uuid);
@@ -99,6 +105,10 @@ template <std::size_t Size>
     if (header.block_size == 0 || header.default_chunk_size == 0 ||
         (header.flags & kBackupFlagEncrypted) == 0 || (header.flags & ~known_flags) != 0) {
         return base::Result<void>::failure(corrupt("backup header fields are invalid"));
+    }
+    if (header.compression_method != CompressionMethod::kZstandard ||
+        header.encryption_method != PayloadEncryptionMethod::kXChaCha20Poly1305) {
+        return base::Result<void>::failure(corrupt("backup algorithms are unsupported"));
     }
     if (backup_type != kBackupFlagFull && backup_type != kBackupFlagIncremental &&
         backup_type != kBackupFlagDifferential) {
@@ -321,9 +331,10 @@ decode_metadata_envelope_header(std::span<const std::byte> bytes) {
 }
 
 base::Result<EncodedChunkHeader> encode_chunk_header(const ChunkHeader& header) {
-    if (header.block_entry_count == 0) {
+    if (header.block_entry_count == 0 || header.flags != 0 || header.header_crc32 != 0 ||
+        is_zero_bytes(header.payload_nonce)) {
         return base::Result<EncodedChunkHeader>::failure(
-            corrupt("chunk contains no block entries"));
+            corrupt("chunk encryption fields are invalid"));
     }
     EncodedChunkHeader output{};
     write_magic(output, kChunkMagic);
@@ -335,6 +346,8 @@ base::Result<EncodedChunkHeader> encode_chunk_header(const ChunkHeader& header) 
     write_integer(output, 36, header.payload_size);
     write_integer(output, 44, header.flags);
     write_integer(output, 48, header.header_crc32);
+    write_bytes(output, 52, header.payload_nonce);
+    write_bytes(output, 76, header.payload_authentication_tag);
     return base::Result<EncodedChunkHeader>::success(output);
 }
 
@@ -351,8 +364,20 @@ base::Result<ChunkHeader> decode_chunk_header(std::span<const std::byte> bytes) 
     result.payload_size = read_integer<std::uint64_t>(bytes, 36);
     result.flags = read_integer<std::uint32_t>(bytes, 44);
     result.header_crc32 = read_integer<std::uint32_t>(bytes, 48);
-    if (result.block_entry_count == 0) {
-        return base::Result<ChunkHeader>::failure(corrupt("chunk contains no block entries"));
+    result.payload_nonce = read_bytes<24>(bytes, 52);
+    result.payload_authentication_tag = read_bytes<16>(bytes, 76);
+    const bool reserved_source_is_zero =
+        std::all_of(bytes.begin() + 21, bytes.begin() + 24,
+                    [](const std::byte value) { return value == std::byte{0}; });
+    const bool reserved_fields_are_zero =
+        std::all_of(bytes.begin() + 32, bytes.begin() + 36,
+                    [](const std::byte value) { return value == std::byte{0}; }) &&
+        std::all_of(bytes.begin() + 92, bytes.begin() + 96,
+                    [](const std::byte value) { return value == std::byte{0}; });
+    if (result.block_entry_count == 0 || result.flags != 0 || result.header_crc32 != 0 ||
+        is_zero_bytes(result.payload_nonce) || !reserved_source_is_zero ||
+        !reserved_fields_are_zero) {
+        return base::Result<ChunkHeader>::failure(corrupt("chunk header fields are invalid"));
     }
     return base::Result<ChunkHeader>::success(result);
 }

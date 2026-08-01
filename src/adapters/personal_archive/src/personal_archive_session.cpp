@@ -1,9 +1,11 @@
 #include "aegra/adapters/personal_archive/personal_archive.h"
 
 #include "personal_archive_chunk_builder.h"
+#include "personal_archive_payload.h"
 #include "personal_archive_sidecar_io.h"
 
 #include "aegra/adapters/crypto_sodium/metadata_crypto.h"
+#include "aegra/adapters/crypto_sodium/payload_crypto.h"
 #include "aegra/adapters/crypto_sodium/secure_string.h"
 #include "aegra/base/error.h"
 #include "aegra/format/manifest_codec.h"
@@ -52,11 +54,13 @@ struct IncrementalBaseline final {
     return reinterpret_cast<const char*>(value);
 }
 
-[[nodiscard]] bool has_selected_volume(const ArchiveCreateRequest& request) {
-    return std::any_of(request.manifest.volumes.begin(), request.manifest.volumes.end(),
-                       [&request](const format::Volume& candidate) {
-                           return candidate.volume_index == request.source_index;
-                       });
+[[nodiscard]] const format::Volume* find_selected_volume(const ArchiveCreateRequest& request) {
+    const auto selected =
+        std::find_if(request.manifest.volumes.begin(), request.manifest.volumes.end(),
+                     [&request](const format::Volume& candidate) {
+                         return candidate.volume_index == request.source_index;
+                     });
+    return selected == request.manifest.volumes.end() ? nullptr : &*selected;
 }
 
 [[nodiscard]] base::Result<void> validate_create_geometry(const ArchiveCreateRequest& request) {
@@ -78,7 +82,7 @@ struct IncrementalBaseline final {
             error(base::ErrorCode::kInvalidArgument,
                   "personal archive MVP requires exactly one source volume"));
     }
-    if (!has_selected_volume(request)) {
+    if (find_selected_volume(request) == nullptr) {
         return base::Result<void>::failure(error(base::ErrorCode::kInvalidArgument,
                                                  "archive source volume is absent from manifest"));
     }
@@ -212,6 +216,7 @@ make_header(const ArchiveCreateRequest& request, const std::uint64_t metadata_si
     header.first_chunk_offset = header.cbor_offset + header.cbor_size;
     header.default_chunk_size = request.chunk_size;
     header.compression_method = archive::CompressionMethod::kZstandard;
+    header.encryption_method = archive::PayloadEncryptionMethod::kXChaCha20Poly1305;
     return header;
 }
 
@@ -248,6 +253,12 @@ prepare_preamble(const ArchiveCreateRequest& request,
     }
     return base::Result<ArchivePreamble>::success(
         {logical_header, header.value(), envelope.value(), std::move(metadata).value()});
+}
+
+[[nodiscard]] base::Result<std::unique_ptr<crypto_sodium::PayloadCipher>>
+create_payload_cipher(const ArchiveCreateRequest& request, const ArchivePreamble& preamble) {
+    return crypto_sodium::PayloadCipher::create(request.password, preamble.metadata.kdf,
+                                                preamble.metadata.salt);
 }
 
 [[nodiscard]] base::Result<void> write_bytes(std::ofstream& output,
@@ -333,6 +344,22 @@ prepare_preamble(const ArchiveCreateRequest& request,
     return result;
 }
 
+[[nodiscard]] base::Result<void>
+validate_output_paths(const std::filesystem::path& destination,
+                      const std::filesystem::path& partial,
+                      const std::filesystem::path& sidecar_destination,
+                      const std::filesystem::path& sidecar_partial) {
+    std::error_code filesystem_error;
+    if (std::filesystem::exists(destination, filesystem_error) ||
+        std::filesystem::exists(partial, filesystem_error) ||
+        std::filesystem::exists(sidecar_destination, filesystem_error) ||
+        std::filesystem::exists(sidecar_partial, filesystem_error)) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kConflict, "archive destination already exists"));
+    }
+    return base::Result<void>::success();
+}
+
 [[nodiscard]] base::Result<void> publish_outputs(const std::vector<PartArtifact>& parts,
                                                  const std::filesystem::path& sidecar_partial,
                                                  const std::filesystem::path& sidecar_destination) {
@@ -362,7 +389,9 @@ prepare_preamble(const ArchiveCreateRequest& request,
 } // namespace
 
 struct PersonalArchiveSession::Impl final {
-    explicit Impl(const std::string_view archive_password) : password(archive_password) {}
+    Impl(const std::string_view archive_password,
+         std::unique_ptr<crypto_sodium::PayloadCipher> archive_payload_cipher)
+        : password(archive_password), payload_cipher(std::move(archive_payload_cipher)) {}
 
     archive::BackupHeader primary_header;
     std::filesystem::path destination;
@@ -371,6 +400,7 @@ struct PersonalArchiveSession::Impl final {
     std::vector<PartArtifact> parts;
     std::ofstream output;
     crypto_sodium::SecureString password;
+    std::unique_ptr<crypto_sodium::PayloadCipher> payload_cipher;
     std::array<std::byte, 16> file_uuid{};
     crypto_sodium::KdfParameters kdf;
     std::array<std::byte, crypto_sodium::kMetadataSaltSize> salt{};
@@ -442,6 +472,10 @@ struct PersonalArchiveSession::Impl final {
 
     [[nodiscard]] base::Result<void> persist_chunks(detail::PreparedArchiveInput& prepared) {
         for (auto& chunk : prepared.chunks) {
+            auto protected_payload = detail::protect_archive_chunk(chunk, *payload_cipher);
+            if (!protected_payload) {
+                return protected_payload;
+            }
             auto rotated = rotate_if_needed(chunk);
             if (!rotated) {
                 return rotated;
@@ -469,22 +503,15 @@ PersonalArchiveSession::create(const ArchiveCreateRequest& request) {
     if (!validation) {
         return base::Result<std::unique_ptr<PersonalArchiveSession>>::failure(validation.error());
     }
-    std::error_code filesystem_error;
     const auto partial = partial_path(request.destination);
     const auto sidecar_destination = sidecar_path(request.destination);
     const auto sidecar_partial = partial_path(sidecar_destination);
-    if (std::filesystem::exists(request.destination, filesystem_error) ||
-        std::filesystem::exists(partial, filesystem_error) ||
-        std::filesystem::exists(sidecar_destination, filesystem_error) ||
-        std::filesystem::exists(sidecar_partial, filesystem_error)) {
-        return base::Result<std::unique_ptr<PersonalArchiveSession>>::failure(
-            error(base::ErrorCode::kConflict, "archive destination already exists"));
+    auto available =
+        validate_output_paths(request.destination, partial, sidecar_destination, sidecar_partial);
+    if (!available) {
+        return base::Result<std::unique_ptr<PersonalArchiveSession>>::failure(available.error());
     }
-    const auto volume =
-        std::find_if(request.manifest.volumes.begin(), request.manifest.volumes.end(),
-                     [&request](const format::Volume& candidate) {
-                         return candidate.volume_index == request.source_index;
-                     });
+    const auto* volume = find_selected_volume(request);
     auto baseline = load_incremental_baseline(request, *volume);
     if (!baseline) {
         return base::Result<std::unique_ptr<PersonalArchiveSession>>::failure(baseline.error());
@@ -494,7 +521,13 @@ PersonalArchiveSession::create(const ArchiveCreateRequest& request) {
     if (!preamble) {
         return base::Result<std::unique_ptr<PersonalArchiveSession>>::failure(preamble.error());
     }
-    auto implementation = std::make_unique<Impl>(request.password);
+    auto payload_cipher = create_payload_cipher(request, preamble.value());
+    if (!payload_cipher) {
+        return base::Result<std::unique_ptr<PersonalArchiveSession>>::failure(
+            payload_cipher.error());
+    }
+    auto implementation =
+        std::make_unique<Impl>(request.password, std::move(payload_cipher).value());
     implementation->primary_header = preamble.value().logical_header;
     implementation->destination = request.destination;
     implementation->sidecar_destination = sidecar_destination;
@@ -513,6 +546,7 @@ PersonalArchiveSession::create(const ArchiveCreateRequest& request) {
     implementation->logical_size = volume->total_size;
     implementation->output.open(partial, std::ios::binary | std::ios::trunc);
     if (!implementation->output || !write_preamble(implementation->output, preamble.value())) {
+        std::error_code filesystem_error;
         implementation->output.close();
         std::filesystem::remove(partial, filesystem_error);
         return base::Result<std::unique_ptr<PersonalArchiveSession>>::failure(

@@ -26,6 +26,7 @@ bool test_backup_header() {
     header.first_chunk_offset = archive::kBackupHeaderSize + header.cbor_size;
     header.default_chunk_size = 1024 * 1024;
     header.compression_method = archive::CompressionMethod::kZstandard;
+    header.encryption_method = archive::PayloadEncryptionMethod::kXChaCha20Poly1305;
 
     const auto encoded = archive::encode_backup_header(header);
     bool passed = expect(encoded.has_value(), "backup header encodes");
@@ -44,6 +45,9 @@ bool test_backup_header() {
     passed &= expect(decoded.has_value(), "backup header decodes");
     passed &= expect(decoded.has_value() && decoded.value().cbor_size == 180,
                      "backup header offsets survive roundtrip");
+    header.encryption_method = archive::PayloadEncryptionMethod::kNone;
+    passed &= expect(!archive::encode_backup_header(header).has_value(),
+                     "backup header rejects plaintext payloads");
     return passed;
 }
 
@@ -55,6 +59,8 @@ bool test_split_backup_headers() {
     primary.cbor_size = 180;
     primary.first_chunk_offset = archive::kBackupHeaderSize + primary.cbor_size;
     primary.default_chunk_size = 8192;
+    primary.compression_method = archive::CompressionMethod::kZstandard;
+    primary.encryption_method = archive::PayloadEncryptionMethod::kXChaCha20Poly1305;
     primary.split_size_bytes = 16ULL * 1024ULL;
     bool passed =
         expect(archive::encode_backup_header(primary).has_value(), "split primary header encodes");
@@ -86,6 +92,8 @@ bool test_backup_parent_rules() {
     incremental.cbor_size = 180;
     incremental.first_chunk_offset = archive::kBackupHeaderSize + incremental.cbor_size;
     incremental.default_chunk_size = 8192;
+    incremental.compression_method = archive::CompressionMethod::kZstandard;
+    incremental.encryption_method = archive::PayloadEncryptionMethod::kXChaCha20Poly1305;
     bool passed = expect(archive::encode_backup_header(incremental).has_value(),
                          "incremental header accepts a parent UUID");
     incremental.parent_uuid.fill(std::byte{0});
@@ -142,10 +150,19 @@ bool test_chunk_and_footer() {
     chunk.chunk_index = 3;
     chunk.block_entry_count = 1;
     chunk.payload_size = 100;
+    chunk.payload_nonce.front() = std::byte{0xA5};
+    chunk.payload_authentication_tag.back() = std::byte{0x5A};
     const auto encoded_chunk = archive::encode_chunk_header(chunk);
     passed &= expect(encoded_chunk.has_value(), "chunk header encodes");
-    passed &= expect(archive::decode_chunk_header(encoded_chunk.value()).has_value(),
-                     "chunk header decodes");
+    const auto decoded_chunk = archive::decode_chunk_header(encoded_chunk.value());
+    passed &= expect(decoded_chunk.has_value(), "chunk header decodes");
+    passed &= expect(decoded_chunk.has_value() && encoded_chunk.value().size() == 96 &&
+                         decoded_chunk.value().payload_nonce.front() == std::byte{0xA5} &&
+                         decoded_chunk.value().payload_authentication_tag.back() == std::byte{0x5A},
+                     "chunk encryption fields survive roundtrip");
+    chunk.payload_nonce.fill(std::byte{0});
+    passed &= expect(!archive::encode_chunk_header(chunk).has_value(),
+                     "chunk header requires a non-zero payload nonce");
 
     archive::BackupFooter footer;
     footer.chunk_count = 4;

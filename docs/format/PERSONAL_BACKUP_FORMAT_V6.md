@@ -821,12 +821,11 @@ V1 固定使用 SHA-256（`hash_size = 32`）。DATA record 保存内容散列�
 
 ### 链恢复
 
-恢复差异/增量备份时需要应用整条链。`ResolveChain` 从用户给定的备份文件出发解析出完整链：
-
-1. 读取该文件的 `BackupHeader`；若是全量，链即自身。
-2. 否则在同目录扫描所有 `.bkf`，按 `backup_set_uuid` 过滤，建立 `file_uuid → 文件` 映射。
-3. 从给定文件沿 `parent_uuid` 逐级回溯到基准全量。
-4. 反转为 **base-first**（基准在前、最新在后）顺序返回。
+恢复差异/增量备份时需要应用整条链。Application 根据用户选择、备份目录或本地目录索引解析
+`parent_uuid`，并为每一层取得对应凭据，最终向 Archive Adapter 提交显式 **base-first** 层列表。
+Adapter 不扫描目录猜测父文件，也不对无关文件批量执行 KDF。Chain Reader 必须验证：第一层为全量、
+后续层的 `parent_uuid` 精确指向前一层、`backup_set_uuid` 一致、UUID 不重复，并且 block size、volume
+identity 与逻辑大小保持一致。
 
 恢复采用**多遍叠加（multi-pass overlay）**：按 base-first 顺序逐个文件恢复到同一目标，后写覆盖先写。由于差异/增量只含变化块、且“变为零”的块以显式 ZERO 写入，按时间顺序应用即可得到正确的最终状态。
 
@@ -843,7 +842,7 @@ V1 固定使用 SHA-256（`hash_size = 32`）。DATA record 保存内容散列�
 
 ### 链挂载与随机读取
 
-挂载/检视（mount / inspect）通过 `BackupReader` 随机读取实现，同样支持链。`BackupReader` 以分层方式打开整条链（base-first），每层持有各自的文件句柄和 payload 解密上下文（每个文件 salt 独立）。构建块索引时按 base-first 遍历所有层，后层的同一逻辑块覆盖前层；读取某块时使用其所属层的句柄与解密上下文。因此挂载一个差异备份会自动呈现合并后的完整视图。若同目录缺少父备份，挂载会明确报错，而不是返回不完整数据。
+挂载/检视（mount / inspect）通过 Chain Reader 的分层随机读取实现。每层持有独立 Reader 和解密上下文；输出 descriptor 沿用基准全量层的连续 chunk 边界，读取时按 base-first 顺序应用与该范围相交的稀疏覆盖，后层覆盖前层。因此链视图可以直接交给普通 Restore Pipeline。缺层、顺序错误或父 UUID 不匹配时必须明确报错，不能返回不完整数据。
 
 ## 写入流程
 

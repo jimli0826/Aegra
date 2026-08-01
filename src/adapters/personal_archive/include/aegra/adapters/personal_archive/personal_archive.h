@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <memory>
 #include <string_view>
+#include <vector>
 
 namespace aegra::adapters::personal_archive {
 
@@ -30,6 +31,9 @@ struct ArchiveCreateRequest final {
     std::uint32_t source_index{0};
     std::uint64_t split_size_bytes{0};
     ArchiveKdfParameters kdf_parameters;
+    std::filesystem::path parent_source;
+    // Views are consumed by create(); the session copies only its own password into secure memory.
+    std::string_view parent_password;
 };
 
 struct ArchiveOpenRequest final {
@@ -45,6 +49,20 @@ struct ArchiveSidecar final {
     std::uint32_t block_size{0};
     std::array<std::byte, 16> file_uuid{};
     format::personal_archive::SidecarPayload payload;
+};
+
+struct ArchiveIdentity final {
+    std::array<std::byte, 16> file_uuid{};
+    std::array<std::byte, 16> backup_set_uuid{};
+    std::array<std::byte, 16> parent_uuid{};
+    format::BackupType backup_type{format::BackupType::kFull};
+    std::uint32_t block_size{0};
+};
+
+struct ArchiveChainOpenRequest final {
+    // Layers are base-first. Each password view only needs to remain valid during open().
+    std::vector<ArchiveOpenRequest> layers;
+    std::uint32_t maximum_chain_depth{128};
 };
 
 [[nodiscard]] base::Result<ArchiveSidecar>
@@ -86,6 +104,7 @@ class PersonalArchiveReader final : public ports::IRecoveryPointReader {
     open(const ArchiveOpenRequest& request);
 
     [[nodiscard]] const format::Manifest& manifest() const noexcept;
+    [[nodiscard]] const ArchiveIdentity& identity() const noexcept;
     [[nodiscard]] std::uint64_t logical_size_bytes() const noexcept override;
     [[nodiscard]] std::uint64_t chunk_count() const noexcept override;
     [[nodiscard]] base::Result<ports::ChunkDescriptor>
@@ -96,6 +115,32 @@ class PersonalArchiveReader final : public ports::IRecoveryPointReader {
   private:
     struct Impl;
     explicit PersonalArchiveReader(std::unique_ptr<Impl> implementation) noexcept;
+
+    std::unique_ptr<Impl> implementation_;
+};
+
+class PersonalArchiveChainReader final : public ports::IRecoveryPointReader {
+  public:
+    ~PersonalArchiveChainReader() override;
+    PersonalArchiveChainReader(const PersonalArchiveChainReader&) = delete;
+    PersonalArchiveChainReader& operator=(const PersonalArchiveChainReader&) = delete;
+    PersonalArchiveChainReader(PersonalArchiveChainReader&&) = delete;
+    PersonalArchiveChainReader& operator=(PersonalArchiveChainReader&&) = delete;
+
+    [[nodiscard]] static base::Result<std::unique_ptr<PersonalArchiveChainReader>>
+    open(const ArchiveChainOpenRequest& request);
+
+    [[nodiscard]] const format::Manifest& manifest() const noexcept;
+    [[nodiscard]] std::uint64_t logical_size_bytes() const noexcept override;
+    [[nodiscard]] std::uint64_t chunk_count() const noexcept override;
+    [[nodiscard]] base::Result<ports::ChunkDescriptor>
+    describe_chunk(std::uint64_t chunk_index) const override;
+    [[nodiscard]] base::Result<ports::ChunkData>
+    read_chunk(std::uint64_t chunk_index, base::CancellationToken cancellation) override;
+
+  private:
+    struct Impl;
+    explicit PersonalArchiveChainReader(std::unique_ptr<Impl> implementation) noexcept;
 
     std::unique_ptr<Impl> implementation_;
 };

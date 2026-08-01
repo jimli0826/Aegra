@@ -134,6 +134,29 @@ make_protected_metadata(const archive::MetadataEnvelopeHeader& envelope,
     return format::decode_manifest_cbor(plaintext.value());
 }
 
+[[nodiscard]] std::uint32_t backup_type_flag(const format::BackupType type) noexcept {
+    switch (type) {
+    case format::BackupType::kFull:
+        return archive::kBackupFlagFull;
+    case format::BackupType::kIncremental:
+        return archive::kBackupFlagIncremental;
+    case format::BackupType::kDifferential:
+        return archive::kBackupFlagDifferential;
+    }
+    return 0;
+}
+
+[[nodiscard]] base::Result<void> validate_manifest_binding(const EncodedMetadata& encoded,
+                                                           const format::Manifest& manifest) {
+    constexpr auto type_mask = archive::kBackupFlagFull | archive::kBackupFlagIncremental |
+                               archive::kBackupFlagDifferential;
+    if ((encoded.header.flags & type_mask) != backup_type_flag(manifest.backup_job.backup_type)) {
+        return base::Result<void>::failure(
+            corrupt("archive header and manifest backup types do not match"));
+    }
+    return base::Result<void>::success();
+}
+
 } // namespace
 
 base::Result<ParsedPreamble> read_archive_preamble(std::ifstream& input,
@@ -146,6 +169,10 @@ base::Result<ParsedPreamble> read_archive_preamble(std::ifstream& input,
     auto manifest = decrypt_manifest(encoded.value(), request.password);
     if (!manifest) {
         return base::Result<ParsedPreamble>::failure(manifest.error());
+    }
+    auto binding = validate_manifest_binding(encoded.value(), manifest.value());
+    if (!binding) {
+        return base::Result<ParsedPreamble>::failure(binding.error());
     }
     return base::Result<ParsedPreamble>::success(
         {encoded.value().header, std::move(manifest).value()});

@@ -76,6 +76,20 @@ template <std::size_t Size>
     return result;
 }
 
+[[nodiscard]] bool is_zero_uuid(const std::array<std::byte, 16>& value) noexcept {
+    return std::all_of(value.begin(), value.end(),
+                       [](const std::byte item) { return item == std::byte{0}; });
+}
+
+[[nodiscard]] base::Result<void> validate_parent_uuid(const BackupHeader& header,
+                                                      const std::uint32_t backup_type) {
+    const bool parent_is_zero = is_zero_uuid(header.parent_uuid);
+    if ((backup_type == kBackupFlagFull) != parent_is_zero) {
+        return base::Result<void>::failure(corrupt("backup parent UUID is invalid"));
+    }
+    return base::Result<void>::success();
+}
+
 [[nodiscard]] base::Result<void> validate_header_common(const BackupHeader& header) {
     constexpr auto known_flags = kBackupFlagFull | kBackupFlagIncremental |
                                  kBackupFlagDifferential | kBackupFlagDedup | kBackupFlagEncrypted |
@@ -89,6 +103,10 @@ template <std::size_t Size>
     if (backup_type != kBackupFlagFull && backup_type != kBackupFlagIncremental &&
         backup_type != kBackupFlagDifferential) {
         return base::Result<void>::failure(corrupt("backup type flags are invalid"));
+    }
+    auto parent = validate_parent_uuid(header, backup_type);
+    if (!parent) {
+        return parent;
     }
     if (header.cbor_schema_version != kManifestSchemaVersion) {
         return base::Result<void>::failure(unsupported("manifest schema version is unsupported"));

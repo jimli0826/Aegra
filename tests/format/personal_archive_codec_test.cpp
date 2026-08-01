@@ -78,6 +78,26 @@ bool test_split_backup_headers() {
     return passed;
 }
 
+bool test_backup_parent_rules() {
+    archive::BackupHeader incremental;
+    incremental.flags = archive::kBackupFlagIncremental | archive::kBackupFlagEncrypted;
+    incremental.parent_uuid.front() = std::byte{0x31};
+    incremental.block_size = 4096;
+    incremental.cbor_size = 180;
+    incremental.first_chunk_offset = archive::kBackupHeaderSize + incremental.cbor_size;
+    incremental.default_chunk_size = 8192;
+    bool passed = expect(archive::encode_backup_header(incremental).has_value(),
+                         "incremental header accepts a parent UUID");
+    incremental.parent_uuid.fill(std::byte{0});
+    passed &= expect(!archive::encode_backup_header(incremental).has_value(),
+                     "incremental header requires a parent UUID");
+    incremental.flags = archive::kBackupFlagFull | archive::kBackupFlagEncrypted;
+    incremental.parent_uuid.front() = std::byte{0x31};
+    passed &= expect(!archive::encode_backup_header(incremental).has_value(),
+                     "full header rejects a parent UUID");
+    return passed;
+}
+
 bool test_metadata_envelope() {
     archive::MetadataEnvelopeHeader header;
     header.plaintext_size = 64;
@@ -189,8 +209,8 @@ bool test_sidecar_codec() {
 }
 
 int run_tests() {
-    return test_backup_header() && test_split_backup_headers() && test_metadata_envelope() &&
-                   test_chunk_and_footer() && test_sidecar_codec()
+    return test_backup_header() && test_split_backup_headers() && test_backup_parent_rules() &&
+                   test_metadata_envelope() && test_chunk_and_footer() && test_sidecar_codec()
                ? EXIT_SUCCESS
                : EXIT_FAILURE;
 }

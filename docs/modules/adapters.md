@@ -20,6 +20,8 @@ Memory Adapter 是正式的端口参考实现，只保存进程内临时数据�
 
 个人版 Archive Adapter 组合 `format`、`IBackupSession`、`IRecoveryPointReader`、libsodium 和 Zstandard。当前数据面支持一个 volume，并可在完整 chunk 边界透明分卷。写入期间所有分卷与 Sidecar 使用 partial 路径，完整 Footer 和加密 Sidecar 均写完后，先发布 Sidecar/续卷，最后发布首卷；Abort 和析构清理本次创建的 partial 文件。Reader 在解析 CBOR 前必须完成 Header/Envelope 范围校验和 AEAD 认证，随后发现并验证连续分卷。普通恢复不依赖 `.bhx`；增量比较通过显式 API 加载并认证 Sidecar。
 
+增量 Session 在创建时验证显式父 Archive 及父 Sidecar，继承备份集 UUID，并把输入完整源转换为连续变化区间组成的稀疏层；新 Sidecar 仍保存完整状态。`PersonalArchiveReader` 可以 inspect 单个稀疏层，`PersonalArchiveChainReader` 接受显式 base-first 层列表并验证链关系，对通用 Restore Pipeline 提供连续覆盖视图。链恢复不读取 Sidecar；链发现和逐层凭据选择属于 Application，不由 Adapter 扫描目录猜测。
+
 Archive Reader 分别限制 metadata、chunk stored payload 和展开后的 chunk logical size。ZERO run、压缩块和其它稀疏表示在分配恢复缓冲区前都必须通过 logical size 上限检查。
 
 密码 Adapter 使用 Argon2id v1.3 派生 master key、HKDF-SHA256 分离 metadata/sidecar key，并使用 XChaCha20-Poly1305 detached tag；内容散列使用 SHA-256。KDF 参数、salt 和 nonce 都持久化在对应格式字段中；读取前先执行产品上下限检查。压缩 Adapter 要求调用者提供期望输出大小和硬上限。

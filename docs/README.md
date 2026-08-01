@@ -14,6 +14,7 @@
 - [ADR-0001：个人版格式的加密与编解码依赖](adr/0001-personal-format-crypto-and-codec-dependencies.md)
 - [ADR-0002：个人版 Sidecar 保密性与 ZERO Run](adr/0002-personal-sidecar-confidentiality-and-zero-runs.md)
 - [ADR-0003：个人版分卷事务与多数据源边界](adr/0003-personal-split-archive-and-multi-source-boundary.md)
+- [ADR-0004：个人版稀疏增量层与链式恢复视图](adr/0004-personal-incremental-layers-and-chain-reader.md)
 
 ## 权威格式与需求
 

@@ -61,6 +61,8 @@ Recovery Point Reader -> Manifest Validation -> Chunk Resolver
 
 阶段 3 已完成第一条纵向切片：同一 Pipeline 可把 Memory Block Source 写入一个正式加密 metadata、逐块 Zstandard 压缩、Footer 完成标记的单 volume `.bkf`，再通过 `IRecoveryPointReader` 还原到 Block Sink。Pipeline 没有新增对具体 Adapter 的依赖。后续 Transform 组合接口将用于企业 Repository、payload 加密和去重，不把个人格式判断加入 Pipeline。
 
+阶段 6 的个人增量实现仍复用同一 Backup Pipeline 读取完整源，由 Archive Session 在 Adapter 内形成稀疏变化层；恢复侧由 Chain Reader 先合并为连续视图，再交给原 Restore Pipeline。Pipeline 不知道父 UUID、Sidecar 或个人备份链。
+
 ## 测试
 
 覆盖空源、尾部短块、零块、取消、读写失败、容量不足、Commit/Abort、背压和数据 roundtrip。测试不得访问真实磁盘或网络。

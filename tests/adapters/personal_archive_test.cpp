@@ -377,6 +377,139 @@ bool run_split_abort_cleanup(const TemporaryArchive& archive) {
            !std::filesystem::exists(continuation_partial);
 }
 
+bool write_test_archive(const TemporaryArchive& archive, const std::vector<std::byte>& source_data,
+                        const aegra::format::Manifest& manifest, const std::byte file_id,
+                        const std::filesystem::path& parent = {}) {
+    personal::ArchiveCreateRequest request{archive.path(), manifest, "test-password"};
+    request.file_uuid.front() = file_id;
+    if (manifest.backup_job.backup_type == aegra::format::BackupType::kFull) {
+        request.backup_set_uuid.front() = std::byte{0x51};
+    }
+    request.block_size = 4096;
+    request.chunk_size = 8192;
+    request.kdf_parameters = {2, 64ULL * 1024ULL * 1024ULL};
+    if (!parent.empty()) {
+        request.parent_source = parent;
+        request.parent_password = "test-password";
+    }
+    auto session = personal::PersonalArchiveSession::create(request);
+    if (!session) {
+        return false;
+    }
+    aegra::adapters::memory::MemoryBlockSource source(source_data);
+    aegra::pipeline::BackupPipeline backup(source, *session.value());
+    return backup.run({"incremental-backup", 8192, 16384}, {}).has_value();
+}
+
+bool wrong_parent_password_is_rejected(const TemporaryArchive& archive,
+                                       const aegra::format::Manifest& manifest,
+                                       const std::filesystem::path& parent) {
+    personal::ArchiveCreateRequest request{archive.path(), manifest, "test-password"};
+    request.file_uuid.front() = std::byte{0x42};
+    request.block_size = 4096;
+    request.chunk_size = 8192;
+    request.kdf_parameters = {2, 64ULL * 1024ULL * 1024ULL};
+    request.parent_source = parent;
+    request.parent_password = "wrong-password";
+    return !personal::PersonalArchiveSession::create(request).has_value();
+}
+
+void remove_sidecar(const std::filesystem::path& archive) {
+    auto sidecar = archive;
+    sidecar += ".bhx";
+    std::error_code ignored;
+    std::filesystem::remove(sidecar, ignored);
+}
+
+std::vector<std::byte> make_incremental_data(const std::vector<std::byte>& base) {
+    auto result = base;
+    result.front() ^= std::byte{0x5A};
+    std::fill(result.begin() + static_cast<std::ptrdiff_t>(4ULL * 4096ULL),
+              result.begin() + static_cast<std::ptrdiff_t>(5ULL * 4096ULL), std::byte{0});
+    return result;
+}
+
+bool incremental_layer_is_sparse(const TemporaryArchive& base, const TemporaryArchive& incremental,
+                                 const std::vector<std::byte>& latest) {
+    auto reader = personal::PersonalArchiveReader::open({incremental.path(), "test-password"});
+    if (!reader || reader.value()->chunk_count() != 2) {
+        return false;
+    }
+    const auto& identity = reader.value()->identity();
+    auto first = reader.value()->describe_chunk(0);
+    auto second = reader.value()->describe_chunk(1);
+    const bool identity_matches = identity.backup_type == aegra::format::BackupType::kIncremental &&
+                                  identity.parent_uuid.front() == std::byte{0x41} &&
+                                  identity.backup_set_uuid.front() == std::byte{0x51};
+    const bool sparse = first && second && first.value().logical_offset == 0 &&
+                        second.value().logical_offset == 4ULL * 4096ULL;
+    auto sidecar = personal::load_archive_sidecar(incremental.path(), "test-password");
+    const bool complete_sidecar = sidecar &&
+                                  sidecar.value().payload.volumes.front().records.size() == 7 &&
+                                  sidecar.value().payload.volumes.front().records[4].state ==
+                                      aegra::format::personal_archive::SidecarBlockState::kZero;
+    aegra::adapters::memory::MemoryBlockSink sink(latest.size());
+    aegra::pipeline::RestorePipeline direct_restore(*reader.value(), sink);
+    const bool direct_rejected =
+        !direct_restore.run({"invalid-direct-incremental", 16384}, {}).has_value();
+    return identity_matches && sparse && complete_sidecar && direct_rejected &&
+           std::filesystem::exists(base.path());
+}
+
+bool chain_restores(const std::vector<const TemporaryArchive*>& archives,
+                    const std::vector<std::byte>& expected) {
+    personal::ArchiveChainOpenRequest request;
+    for (const auto* archive : archives) {
+        request.layers.push_back({archive->path(), "test-password"});
+    }
+    auto reader = personal::PersonalArchiveChainReader::open(request);
+    if (!reader) {
+        return false;
+    }
+    aegra::adapters::memory::MemoryBlockSink sink(expected.size());
+    aegra::pipeline::RestorePipeline restore(*reader.value(), sink);
+    return restore.run({"chain-restore", 16384}, {}).has_value() && sink.snapshot() == expected;
+}
+
+bool run_incremental_roundtrip(const TemporaryArchive& base, const TemporaryArchive& incremental,
+                               const TemporaryArchive& unchanged) {
+    const auto base_data = make_source_data();
+    const auto latest = make_incremental_data(base_data);
+    auto full_manifest = make_manifest(base_data.size());
+    if (!write_test_archive(base, base_data, full_manifest, std::byte{0x41})) {
+        return false;
+    }
+    auto incremental_manifest = make_manifest(latest.size());
+    incremental_manifest.backup_job.backup_type = aegra::format::BackupType::kIncremental;
+    if (!wrong_parent_password_is_rejected(incremental, incremental_manifest, base.path())) {
+        return false;
+    }
+    if (!write_test_archive(incremental, latest, incremental_manifest, std::byte{0x42},
+                            base.path())) {
+        return false;
+    }
+    bool passed = incremental_layer_is_sparse(base, incremental, latest);
+    passed &= chain_restores({&base, &incremental}, latest);
+    auto unchanged_manifest = make_manifest(latest.size());
+    unchanged_manifest.backup_job.backup_type = aegra::format::BackupType::kIncremental;
+    passed &= write_test_archive(unchanged, latest, unchanged_manifest, std::byte{0x43},
+                                 incremental.path());
+    auto unchanged_reader =
+        personal::PersonalArchiveReader::open({unchanged.path(), "test-password"});
+    passed &= unchanged_reader && unchanged_reader.value()->chunk_count() == 0;
+    auto unchanged_sidecar = personal::load_archive_sidecar(unchanged.path(), "test-password");
+    passed &=
+        unchanged_sidecar && unchanged_sidecar.value().payload.volumes.front().records.size() == 7;
+    remove_sidecar(base.path());
+    remove_sidecar(incremental.path());
+    remove_sidecar(unchanged.path());
+    passed &= chain_restores({&base, &incremental, &unchanged}, latest);
+    personal::ArchiveChainOpenRequest missing_middle;
+    missing_middle.layers = {{base.path(), "test-password"}, {unchanged.path(), "test-password"}};
+    passed &= !personal::PersonalArchiveChainReader::open(missing_middle).has_value();
+    return passed;
+}
+
 int run_tests() {
     TemporaryArchive archive;
     bool passed = run_roundtrip(archive);
@@ -402,6 +535,12 @@ int run_tests() {
     TemporaryArchive aborted_split_archive;
     passed &= expect(run_split_abort_cleanup(aborted_split_archive),
                      "aborting a split session removes every partial part");
+    TemporaryArchive base_archive;
+    TemporaryArchive incremental_archive;
+    TemporaryArchive unchanged_archive;
+    passed &=
+        expect(run_incremental_roundtrip(base_archive, incremental_archive, unchanged_archive),
+               "incremental layers and chain reader restore the latest complete state");
     return passed ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 

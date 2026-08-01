@@ -1,19 +1,19 @@
 #include "aegra/adapters/personal_archive/personal_archive.h"
 
-#include "aegra/adapters/compression_zstd/zstd_codec.h"
-#include "aegra/adapters/crypto_sodium/content_hash.h"
+#include "personal_archive_chunk_builder.h"
+#include "personal_archive_sidecar_io.h"
+
 #include "aegra/adapters/crypto_sodium/metadata_crypto.h"
 #include "aegra/adapters/crypto_sodium/secure_string.h"
 #include "aegra/base/error.h"
 #include "aegra/format/manifest_codec.h"
 #include "aegra/format/personal_archive.h"
 
-#include "personal_archive_sidecar_io.h"
-
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <system_error>
 #include <utility>
@@ -33,16 +33,14 @@ struct ArchivePreamble final {
     crypto_sodium::ProtectedMetadata metadata;
 };
 
-struct PreparedChunk final {
-    archive::ChunkHeader header;
-    std::vector<archive::BlockEntry> entries;
-    std::vector<std::byte> payload;
-    std::vector<archive::SidecarRecord> sidecar_records;
-};
-
 struct PartArtifact final {
     std::filesystem::path destination;
     std::filesystem::path partial;
+};
+
+struct IncrementalBaseline final {
+    ArchiveIdentity identity;
+    std::vector<archive::SidecarRecord> records;
 };
 
 [[nodiscard]] base::Error error(base::ErrorCode code, std::string message) {
@@ -54,7 +52,14 @@ struct PartArtifact final {
     return reinterpret_cast<const char*>(value);
 }
 
-[[nodiscard]] base::Result<void> validate_create_request(const ArchiveCreateRequest& request) {
+[[nodiscard]] bool has_selected_volume(const ArchiveCreateRequest& request) {
+    return std::any_of(request.manifest.volumes.begin(), request.manifest.volumes.end(),
+                       [&request](const format::Volume& candidate) {
+                           return candidate.volume_index == request.source_index;
+                       });
+}
+
+[[nodiscard]] base::Result<void> validate_create_geometry(const ArchiveCreateRequest& request) {
     if (request.destination.empty() || request.password.empty()) {
         return base::Result<void>::failure(
             error(base::ErrorCode::kInvalidArgument, "archive path and password are required"));
@@ -73,16 +78,94 @@ struct PartArtifact final {
             error(base::ErrorCode::kInvalidArgument,
                   "personal archive MVP requires exactly one source volume"));
     }
-    const auto volume =
-        std::find_if(request.manifest.volumes.begin(), request.manifest.volumes.end(),
-                     [&request](const format::Volume& candidate) {
-                         return candidate.volume_index == request.source_index;
-                     });
-    if (volume == request.manifest.volumes.end()) {
+    if (!has_selected_volume(request)) {
         return base::Result<void>::failure(error(base::ErrorCode::kInvalidArgument,
                                                  "archive source volume is absent from manifest"));
     }
+    return base::Result<void>::success();
+}
+
+[[nodiscard]] base::Result<void> validate_backup_relationship(const ArchiveCreateRequest& request) {
+    const auto backup_type = request.manifest.backup_job.backup_type;
+    if (backup_type == format::BackupType::kDifferential) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kInvalidArgument, "differential archives are not implemented"));
+    }
+    if (backup_type != format::BackupType::kFull &&
+        backup_type != format::BackupType::kIncremental) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kInvalidArgument, "archive backup type is invalid"));
+    }
+    if (backup_type == format::BackupType::kFull) {
+        if (request.parent_source.empty() && request.parent_password.empty()) {
+            return base::Result<void>::success();
+        }
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kInvalidArgument, "full archive must not specify a parent"));
+    }
+    if (request.parent_source.empty() || request.parent_password.empty()) {
+        return base::Result<void>::failure(error(base::ErrorCode::kInvalidArgument,
+                                                 "incremental archive requires a complete parent"));
+    }
+    return base::Result<void>::success();
+}
+
+[[nodiscard]] base::Result<void> validate_create_request(const ArchiveCreateRequest& request) {
+    auto geometry = validate_create_geometry(request);
+    if (!geometry) {
+        return geometry;
+    }
+    auto relationship = validate_backup_relationship(request);
+    if (!relationship) {
+        return relationship;
+    }
     return format::validate_manifest(request.manifest);
+}
+
+[[nodiscard]] std::uint64_t block_count(const std::uint64_t logical_size,
+                                        const std::uint32_t block_size) noexcept {
+    return 1 + (logical_size - 1) / block_size;
+}
+
+[[nodiscard]] bool is_zero_uuid(const std::array<std::byte, 16>& value) noexcept {
+    return std::all_of(value.begin(), value.end(),
+                       [](const std::byte item) { return item == std::byte{0}; });
+}
+
+[[nodiscard]] base::Result<std::optional<IncrementalBaseline>>
+load_incremental_baseline(const ArchiveCreateRequest& request, const format::Volume& volume) {
+    if (request.manifest.backup_job.backup_type == format::BackupType::kFull) {
+        return base::Result<std::optional<IncrementalBaseline>>::success(std::nullopt);
+    }
+    auto parent = PersonalArchiveReader::open({request.parent_source, request.parent_password});
+    if (!parent) {
+        return base::Result<std::optional<IncrementalBaseline>>::failure(parent.error());
+    }
+    auto sidecar = load_archive_sidecar(request.parent_source, request.parent_password);
+    if (!sidecar) {
+        return base::Result<std::optional<IncrementalBaseline>>::failure(sidecar.error());
+    }
+    const auto& parent_manifest = parent.value()->manifest();
+    const auto& identity = parent.value()->identity();
+    const bool volume_matches = parent_manifest.volumes.size() == 1 &&
+                                parent_manifest.volumes.front().volume_id == volume.volume_id &&
+                                parent_manifest.volumes.front().total_size == volume.total_size;
+    const bool sidecar_matches =
+        sidecar.value().block_size == request.block_size &&
+        sidecar.value().payload.volumes.size() == 1 &&
+        sidecar.value().payload.volumes.front().volume_index == request.source_index &&
+        sidecar.value().payload.volumes.front().records.size() ==
+            block_count(volume.total_size, request.block_size);
+    const bool requested_set_matches = is_zero_uuid(request.backup_set_uuid) ||
+                                       request.backup_set_uuid == identity.backup_set_uuid;
+    if (!volume_matches || !sidecar_matches || !requested_set_matches ||
+        identity.block_size != request.block_size || identity.file_uuid == request.file_uuid) {
+        return base::Result<std::optional<IncrementalBaseline>>::failure(
+            error(base::ErrorCode::kConflict, "incremental parent does not match the source"));
+    }
+    IncrementalBaseline baseline{identity,
+                                 std::move(sidecar).value().payload.volumes.front().records};
+    return base::Result<std::optional<IncrementalBaseline>>::success(std::move(baseline));
 }
 
 [[nodiscard]] std::vector<std::byte>
@@ -109,13 +192,17 @@ make_envelope(const crypto_sodium::MetadataProtectionContext& context,
     return envelope;
 }
 
-[[nodiscard]] archive::BackupHeader make_header(const ArchiveCreateRequest& request,
-                                                const std::uint64_t metadata_size) {
+[[nodiscard]] archive::BackupHeader
+make_header(const ArchiveCreateRequest& request, const std::uint64_t metadata_size,
+            const std::optional<IncrementalBaseline>& baseline) {
     archive::BackupHeader header;
     header.file_uuid = request.file_uuid;
-    header.backup_set_uuid = request.backup_set_uuid;
+    header.backup_set_uuid =
+        baseline ? baseline->identity.backup_set_uuid : request.backup_set_uuid;
+    header.parent_uuid = baseline ? baseline->identity.file_uuid : std::array<std::byte, 16>{};
     header.block_size = request.block_size;
-    header.flags = archive::kBackupFlagFull | archive::kBackupFlagEncrypted;
+    header.flags = archive::kBackupFlagEncrypted |
+                   (baseline ? archive::kBackupFlagIncremental : archive::kBackupFlagFull);
     if (request.split_size_bytes != 0) {
         header.flags |= archive::kBackupFlagSplit;
         header.split_size_bytes = request.split_size_bytes;
@@ -128,7 +215,9 @@ make_envelope(const crypto_sodium::MetadataProtectionContext& context,
     return header;
 }
 
-[[nodiscard]] base::Result<ArchivePreamble> prepare_preamble(const ArchiveCreateRequest& request) {
+[[nodiscard]] base::Result<ArchivePreamble>
+prepare_preamble(const ArchiveCreateRequest& request,
+                 const std::optional<IncrementalBaseline>& baseline) {
     auto cbor = format::encode_manifest_cbor(request.manifest);
     if (!cbor) {
         return base::Result<ArchivePreamble>::failure(cbor.error());
@@ -144,7 +233,7 @@ make_envelope(const crypto_sodium::MetadataProtectionContext& context,
     if (!context) {
         return base::Result<ArchivePreamble>::failure(context.error());
     }
-    auto logical_header = make_header(request, cbor.value().size());
+    auto logical_header = make_header(request, cbor.value().size(), baseline);
     auto logical_envelope = make_envelope(context.value(), cbor.value().size());
     auto header = archive::encode_backup_header(logical_header);
     auto envelope = archive::encode_metadata_envelope_header(logical_envelope);
@@ -185,92 +274,8 @@ make_envelope(const crypto_sodium::MetadataProtectionContext& context,
     return base::Result<void>::success();
 }
 
-[[nodiscard]] bool is_zero_block(const std::span<const std::byte> block) {
-    return std::all_of(block.begin(), block.end(),
-                       [](const std::byte value) { return value == std::byte{0}; });
-}
-
-void append_zero_block(PreparedChunk& chunk, const std::uint64_t logical_block_index) {
-    if (!chunk.entries.empty()) {
-        auto& previous = chunk.entries.back();
-        if (previous.flags == archive::kBlockFlagZero &&
-            previous.logical_block_index + previous.logical_size == logical_block_index &&
-            previous.logical_size < (std::numeric_limits<std::uint32_t>::max)()) {
-            ++previous.logical_size;
-            chunk.sidecar_records.push_back({archive::SidecarBlockState::kZero, {}});
-            return;
-        }
-    }
-    archive::BlockEntry entry;
-    entry.logical_block_index = logical_block_index;
-    entry.flags = archive::kBlockFlagZero;
-    entry.logical_size = 1;
-    chunk.entries.push_back(entry);
-    chunk.sidecar_records.push_back({archive::SidecarBlockState::kZero, {}});
-}
-
-[[nodiscard]] base::Result<void> append_data_block(PreparedChunk& chunk,
-                                                   const std::span<const std::byte> block,
-                                                   const std::uint64_t logical_block_index) {
-    auto compressed = compression_zstd::compress(block);
-    if (!compressed) {
-        return base::Result<void>::failure(compressed.error());
-    }
-    const bool use_compressed = compressed.value().size() < block.size();
-    const auto stored = use_compressed ? std::span<const std::byte>(compressed.value()) : block;
-    if (stored.size() > std::numeric_limits<std::uint32_t>::max()) {
-        return base::Result<void>::failure(
-            error(base::ErrorCode::kInvalidArgument, "archive block exceeds format limit"));
-    }
-    archive::BlockEntry entry;
-    entry.logical_block_index = logical_block_index;
-    entry.data_offset_or_reference = chunk.payload.size();
-    entry.stored_size = static_cast<std::uint32_t>(stored.size());
-    entry.logical_size = static_cast<std::uint32_t>(use_compressed ? stored.size() : block.size());
-    entry.flags = use_compressed ? archive::kBlockFlagCompressed : archive::kBlockFlagRaw;
-    chunk.entries.push_back(entry);
-    chunk.payload.insert(chunk.payload.end(), stored.begin(), stored.end());
-    auto digest = crypto_sodium::sha256(block);
-    if (!digest) {
-        return base::Result<void>::failure(digest.error());
-    }
-    chunk.sidecar_records.push_back({archive::SidecarBlockState::kData, digest.value()});
-    return base::Result<void>::success();
-}
-
-[[nodiscard]] base::Result<void> append_block(PreparedChunk& chunk,
-                                              const std::span<const std::byte> block,
-                                              const std::uint64_t logical_block_index) {
-    if (is_zero_block(block)) {
-        append_zero_block(chunk, logical_block_index);
-        return base::Result<void>::success();
-    }
-    return append_data_block(chunk, block, logical_block_index);
-}
-
-[[nodiscard]] base::Result<PreparedChunk> prepare_chunk(const ports::ChunkWriteRequest& request,
-                                                        const std::uint32_t block_size) {
-    PreparedChunk result;
-    result.header.chunk_index = request.descriptor.chunk_index;
-    std::size_t offset = 0;
-    while (offset < request.payload.size()) {
-        const auto remaining = request.payload.size() - offset;
-        const auto current_size = (std::min)(remaining, static_cast<std::size_t>(block_size));
-        const auto logical_offset = request.descriptor.logical_offset + offset;
-        auto appended = append_block(result, request.payload.subspan(offset, current_size),
-                                     logical_offset / block_size);
-        if (!appended) {
-            return base::Result<PreparedChunk>::failure(appended.error());
-        }
-        offset += current_size;
-    }
-    result.header.block_entry_count = static_cast<std::uint32_t>(result.entries.size());
-    result.header.payload_size = result.payload.size();
-    return base::Result<PreparedChunk>::success(std::move(result));
-}
-
 [[nodiscard]] base::Result<void> write_prepared_chunk(std::ofstream& output,
-                                                      const PreparedChunk& chunk) {
+                                                      const detail::PreparedArchiveChunk& chunk) {
     auto header = archive::encode_chunk_header(chunk.header);
     if (!header) {
         return base::Result<void>::failure(header.error());
@@ -316,7 +321,7 @@ void append_zero_block(PreparedChunk& chunk, const std::uint64_t logical_block_i
     return {part_destination, partial_path(part_destination)};
 }
 
-[[nodiscard]] std::uint64_t chunk_wire_size(const PreparedChunk& chunk) noexcept {
+[[nodiscard]] std::uint64_t chunk_wire_size(const detail::PreparedArchiveChunk& chunk) noexcept {
     return archive::kChunkHeaderSize +
            static_cast<std::uint64_t>(chunk.entries.size()) * archive::kBlockEntrySize +
            chunk.payload.size();
@@ -374,11 +379,14 @@ struct PersonalArchiveSession::Impl final {
     std::uint64_t split_size_bytes{0};
     std::uint64_t logical_size{0};
     std::uint64_t next_logical_offset{0};
-    std::uint64_t next_chunk_index{0};
+    std::uint64_t next_input_chunk_index{0};
+    std::uint64_t next_archive_chunk_index{0};
     std::uint64_t total_block_count{0};
     std::uint64_t total_payload_size{0};
     std::uint64_t current_part_chunk_count{0};
     std::vector<archive::SidecarRecord> sidecar_records;
+    std::vector<archive::SidecarRecord> baseline_records;
+    bool incremental{false};
     bool complete{false};
 
     [[nodiscard]] base::Result<void> open_next_part() {
@@ -414,7 +422,7 @@ struct PersonalArchiveSession::Impl final {
         return base::Result<void>::success();
     }
 
-    [[nodiscard]] base::Result<void> rotate_if_needed(const PreparedChunk& chunk) {
+    [[nodiscard]] base::Result<void> rotate_if_needed(const detail::PreparedArchiveChunk& chunk) {
         if (split_size_bytes == 0 || current_part_chunk_count == 0) {
             return base::Result<void>::success();
         }
@@ -430,6 +438,23 @@ struct PersonalArchiveSession::Impl final {
             return base::Result<void>::success();
         }
         return open_next_part();
+    }
+
+    [[nodiscard]] base::Result<void> persist_chunks(detail::PreparedArchiveInput& prepared) {
+        for (auto& chunk : prepared.chunks) {
+            auto rotated = rotate_if_needed(chunk);
+            if (!rotated) {
+                return rotated;
+            }
+            auto written = write_prepared_chunk(output, chunk);
+            if (!written) {
+                return written;
+            }
+            ++next_archive_chunk_index;
+            ++current_part_chunk_count;
+            total_payload_size += chunk.payload.size();
+        }
+        return base::Result<void>::success();
     }
 };
 
@@ -455,7 +480,17 @@ PersonalArchiveSession::create(const ArchiveCreateRequest& request) {
         return base::Result<std::unique_ptr<PersonalArchiveSession>>::failure(
             error(base::ErrorCode::kConflict, "archive destination already exists"));
     }
-    auto preamble = prepare_preamble(request);
+    const auto volume =
+        std::find_if(request.manifest.volumes.begin(), request.manifest.volumes.end(),
+                     [&request](const format::Volume& candidate) {
+                         return candidate.volume_index == request.source_index;
+                     });
+    auto baseline = load_incremental_baseline(request, *volume);
+    if (!baseline) {
+        return base::Result<std::unique_ptr<PersonalArchiveSession>>::failure(baseline.error());
+    }
+    auto baseline_value = std::move(baseline).value();
+    auto preamble = prepare_preamble(request, baseline_value);
     if (!preamble) {
         return base::Result<std::unique_ptr<PersonalArchiveSession>>::failure(preamble.error());
     }
@@ -470,12 +505,11 @@ PersonalArchiveSession::create(const ArchiveCreateRequest& request) {
     implementation->block_size = request.block_size;
     implementation->source_index = request.source_index;
     implementation->split_size_bytes = request.split_size_bytes;
+    implementation->incremental = baseline_value.has_value();
+    if (baseline_value.has_value()) {
+        implementation->baseline_records = std::move(baseline_value).value().records;
+    }
     implementation->parts.push_back({request.destination, partial});
-    const auto volume =
-        std::find_if(request.manifest.volumes.begin(), request.manifest.volumes.end(),
-                     [&request](const format::Volume& candidate) {
-                         return candidate.volume_index == request.source_index;
-                     });
     implementation->logical_size = volume->total_size;
     implementation->output.open(partial, std::ios::binary | std::ios::trunc);
     if (!implementation->output || !write_preamble(implementation->output, preamble.value())) {
@@ -495,7 +529,7 @@ base::Result<void> PersonalArchiveSession::write_chunk(const ports::ChunkWriteRe
         return base::Result<void>::failure(error(base::ErrorCode::kCancelled, "backup cancelled"));
     }
     if (!implementation_ || implementation_->complete ||
-        request.descriptor.chunk_index != implementation_->next_chunk_index ||
+        request.descriptor.chunk_index != implementation_->next_input_chunk_index ||
         request.descriptor.logical_offset != implementation_->next_logical_offset ||
         request.descriptor.logical_offset % implementation_->block_size != 0 ||
         request.descriptor.logical_size != request.payload.size() ||
@@ -505,24 +539,25 @@ base::Result<void> PersonalArchiveSession::write_chunk(const ports::ChunkWriteRe
         return base::Result<void>::failure(
             error(base::ErrorCode::kInvalidArgument, "archive chunk descriptor is invalid"));
     }
-    auto prepared = prepare_chunk(request, implementation_->block_size);
+    const detail::ChunkPreparationRequest preparation{
+        request,
+        implementation_->baseline_records,
+        implementation_->block_size,
+        implementation_->source_index,
+        implementation_->next_archive_chunk_index,
+        implementation_->incremental,
+    };
+    auto prepared = detail::prepare_archive_chunks(preparation);
     if (!prepared) {
         return base::Result<void>::failure(prepared.error());
     }
-    prepared.value().header.source_index = implementation_->source_index;
-    auto rotated = implementation_->rotate_if_needed(prepared.value());
-    if (!rotated) {
-        return rotated;
+    auto persisted = implementation_->persist_chunks(prepared.value());
+    if (!persisted) {
+        return persisted;
     }
-    auto written = write_prepared_chunk(implementation_->output, prepared.value());
-    if (!written) {
-        return written;
-    }
-    ++implementation_->next_chunk_index;
-    ++implementation_->current_part_chunk_count;
+    ++implementation_->next_input_chunk_index;
     implementation_->next_logical_offset += request.descriptor.logical_size;
     implementation_->total_block_count += prepared.value().sidecar_records.size();
-    implementation_->total_payload_size += prepared.value().payload.size();
     implementation_->sidecar_records.insert(implementation_->sidecar_records.end(),
                                             prepared.value().sidecar_records.begin(),
                                             prepared.value().sidecar_records.end());
@@ -533,7 +568,8 @@ base::Result<void> PersonalArchiveSession::commit(const base::CancellationToken 
     if (cancellation.stop_requested()) {
         return base::Result<void>::failure(error(base::ErrorCode::kCancelled, "backup cancelled"));
     }
-    if (!implementation_ || implementation_->complete || implementation_->next_chunk_index == 0 ||
+    if (!implementation_ || implementation_->complete ||
+        implementation_->next_input_chunk_index == 0 ||
         implementation_->next_logical_offset != implementation_->logical_size) {
         return base::Result<void>::failure(
             error(base::ErrorCode::kConflict, "archive session cannot be committed"));
@@ -544,7 +580,7 @@ base::Result<void> PersonalArchiveSession::commit(const base::CancellationToken 
             error(base::ErrorCode::kIoFailure, "failed to determine archive size"));
     }
     archive::BackupFooter footer;
-    footer.chunk_count = implementation_->next_chunk_index;
+    footer.chunk_count = implementation_->next_archive_chunk_index;
     footer.total_block_count = implementation_->total_block_count;
     footer.total_payload_size = implementation_->total_payload_size;
     footer.file_size = static_cast<std::uint64_t>(footer_offset) + archive::kBackupFooterSize;

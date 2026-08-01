@@ -13,8 +13,9 @@ Before changing production code:
 
 1. Read `../../../docs/development/CPP_ENGINEERING_STANDARD.md` completely.
 2. Read `../../../docs/architecture/MODULAR_ARCHITECTURE.md` completely when changing modules, dependencies, public interfaces, persistence, processes, backup pipelines, or repository behavior.
-3. Read the nearest `AGENTS.md` and any ADR or format document referenced by the affected module.
-4. Treat these documents as merge requirements, not suggestions.
+3. Read `../../../docs/modules/README.md` and every affected module document completely.
+4. Read the nearest `AGENTS.md` and any ADR or format document referenced by the affected module.
+5. Treat these documents as merge requirements, not suggestions.
 
 ## Workflow
 

@@ -6,6 +6,7 @@ Before modifying production code, read:
 
 1. `docs/development/CPP_ENGINEERING_STANDARD.md`
 2. `docs/architecture/MODULAR_ARCHITECTURE.md` when the change affects modules, dependencies, contracts, persistence, processes, or data flow
+3. `docs/modules/README.md` and the documents for every affected module
 
 This product has not been released. Do not add compatibility paths, migration logic, aliases, or format fallbacks for code and artifacts from the previous repository unless an approved ADR explicitly requires them.
 

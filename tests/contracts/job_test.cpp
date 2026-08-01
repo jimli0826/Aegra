@@ -1,7 +1,8 @@
 #include "aegra/contracts/job.h"
+#include "aegra/contracts/progress.h"
 
-#include <cstdlib>
 #include <cstdio>
+#include <cstdlib>
 
 namespace {
 
@@ -31,14 +32,30 @@ int run_tests() {
     request.schema_version = 99;
     const auto unsupported = aegra::contracts::validate_job_request(request);
     passed &= expect(!unsupported.has_value(), "unsupported schema is rejected");
-    passed &= expect(
-        unsupported.error().code == aegra::base::ErrorCode::kUnsupportedVersion,
-        "unsupported schema has stable error code");
+    passed &= expect(unsupported.error().code == aegra::base::ErrorCode::kUnsupportedVersion,
+                     "unsupported schema has stable error code");
 
     request = valid_request();
     request.job_id.clear();
     passed &= expect(!aegra::contracts::validate_job_request(request).has_value(),
                      "missing job id is rejected");
+
+    aegra::contracts::TaskProgress progress;
+    progress.job_id = "job-1";
+    progress.logical_bytes = 100;
+    progress.processed_bytes = 40;
+    passed &= expect(aegra::contracts::validate_task_progress(progress).has_value(),
+                     "valid progress is accepted");
+    progress.processed_bytes = 101;
+    passed &= expect(!aegra::contracts::validate_task_progress(progress).has_value(),
+                     "progress beyond logical size is rejected");
+    progress.processed_bytes = 99;
+    progress.phase = aegra::contracts::TaskPhase::kCompleted;
+    passed &= expect(!aegra::contracts::validate_task_progress(progress).has_value(),
+                     "incomplete completed progress is rejected");
+    progress.phase = aegra::contracts::TaskPhase::kUnspecified;
+    passed &= expect(!aegra::contracts::validate_task_progress(progress).has_value(),
+                     "unknown task phase is rejected");
     return passed ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 

@@ -12,3 +12,12 @@ target_link_libraries(aegra_contracts_tests PRIVATE Aegra::Contracts)
 
 aegra_add_test(aegra_ports_compile_test ports/ports_compile_test.cpp)
 target_link_libraries(aegra_ports_compile_test PRIVATE Aegra::Ports)
+
+aegra_add_test(aegra_memory_adapter_tests adapters/memory_adapter_test.cpp)
+target_link_libraries(aegra_memory_adapter_tests PRIVATE Aegra::AdapterMemory)
+
+aegra_add_test(aegra_pipeline_tests pipeline/pipeline_roundtrip_test.cpp)
+target_link_libraries(
+    aegra_pipeline_tests
+    PRIVATE Aegra::Pipeline Aegra::AdapterMemory
+)

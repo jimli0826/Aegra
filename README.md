@@ -4,8 +4,11 @@ Aegra 是面向物理机与虚拟机的模块化备份、恢复和企业级全�
 
 开发前必须阅读：
 
+- [文档中心](docs/README.md)
 - [C++ 工程开发规范](docs/development/CPP_ENGINEERING_STANDARD.md)
 - [模块化目标架构](docs/architecture/MODULAR_ARCHITECTURE.md)
+- [模块开发文档](docs/modules/README.md)
+- [个人版 `.bkf` V6 格式](docs/format/PERSONAL_BACKUP_FORMAT_V6.md)
 
 ## 构建
 

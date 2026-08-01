@@ -1,0 +1,47 @@
+# `adapters` 模块开发文档
+
+## 目标
+
+实现 `ports` 定义的外部能力。每个 Adapter 独立 Target，只依赖所实现的 Port、必要 Contracts 和自己的第三方库。
+
+## Adapter 分类
+
+- Storage：Local、SMB、S3、Azure。
+- Windows：Disk、Volume、VSS、Partition、BCD/WinRE。
+- 控制面：PostgreSQL、个人版 SQLite 查询缓存。
+- 虚拟化：VMware、Hyper-V。
+- 挂载：Dokan 与虚拟磁盘格式呈现。
+- 传输：HTTP/gRPC/Named Pipe。
+- 测试与本地验证：Memory Block Source/Sink、Memory Backup Session/Reader。
+
+Memory Adapter 是正式的端口参考实现，只保存进程内临时数据，不定义持久化格式。它必须支持短读、容量限制、取消、Commit/Abort 和确定性故障注入，供 Port Contract Test 与 Pipeline 测试复用。
+
+## 通用规则
+
+- 第三方错误在边界转换为稳定 `ErrorCode`，异常不向核心传播。
+- 凭据通过 `ICredentialResolver` 获取，不保存和打印明文。
+- 资源使用 RAII；长操作响应取消。
+- Adapter 之间不 include 实现文件，不使用共享全局 SDK Session。
+- 每个 Adapter 运行对应 Port 的 Contract Test Suite。
+
+## Dokan/虚拟磁盘约束
+
+从旧项目保留以下经过验证的设计知识：
+
+- Mount Host 独立进程隔离 Dokan 回调和故障。
+- 原始 backing 永远只读；写入进入独立 COW overlay 与持久化位图。
+- 读操作按 COW block 选择 overlay 或 backing，部分写执行 read-modify-write。
+- 格式层只负责 VHDX/VMDK/QCOW2 元数据与偏移翻译，数据平面通过 `IRandomAccessReader`。
+- 锁顺序固定为布局锁，再到 backing/overlay 锁；禁止持锁调用未知回调。
+- Dokan C 回调使用静态跳板进入实例，不使用全局实例。
+- 对原始备份视图的任何写入都不得修改 Recovery Point。
+
+旧文档中的具体类名、64KB 固定值、`/MT` 和旧 vcxproj 不是新实现约束；这些需要基准、格式和部署测试重新决定。
+
+## PostgreSQL 约束
+
+只有 Management Service 侧 Adapter 访问 PostgreSQL。使用参数化 SQL、显式事务、tenant scope、RLS 第二层防护和 Transactional Outbox。Recovery Point 投影必须支持全量重建与 generation 对账。
+
+## 测试
+
+除真实集成套件外，单元测试不得依赖云账户、生产数据库、物理磁盘或安装的 Dokan 驱动。故障注入覆盖短读、超时、限流、断线、重复请求和清理失败。

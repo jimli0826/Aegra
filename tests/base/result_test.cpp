@@ -1,8 +1,8 @@
 #include "aegra/base/error.h"
 #include "aegra/base/result.h"
 
-#include <cstdlib>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 
 namespace {
@@ -28,6 +28,9 @@ int run_tests() {
     passed &= expect(empty.has_value(), "void result stores success");
     passed &= expect(aegra::base::error_code_name(failure.error().code) == "invalid_argument",
                      "error code has stable name");
+    passed &= expect(aegra::base::error_code_name(aegra::base::ErrorCode::kInsufficientSpace) ==
+                         "insufficient_space",
+                     "insufficient space error code has stable name");
     return passed ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 

@@ -2,9 +2,7 @@
 
 namespace aegra::base {
 
-bool Error::is_error() const noexcept {
-    return code != ErrorCode::kNone;
-}
+bool Error::is_error() const noexcept { return code != ErrorCode::kNone; }
 
 std::string_view error_code_name(const ErrorCode code) noexcept {
     switch (code) {
@@ -28,6 +26,8 @@ std::string_view error_code_name(const ErrorCode code) noexcept {
         return "unauthorized";
     case ErrorCode::kInternal:
         return "internal";
+    case ErrorCode::kInsufficientSpace:
+        return "insufficient_space";
     }
     return "unknown";
 }

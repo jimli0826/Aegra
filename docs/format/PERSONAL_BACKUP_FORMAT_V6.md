@@ -317,7 +317,11 @@ struct CborMetadataEnvelopeHeader {
 
     uint8_t  salt[32];              // KDF salt；不需要 KDF 时全 0
     uint8_t  nonce[24];             // AEAD nonce；按 nonce_size 使用前 N 字节
-    uint8_t  reserved[28];          // 预留，必须初始化为 0
+
+    uint64_t kdf_opslimit;          // KDF 计算量；不需要 KDF 时为 0
+    uint64_t kdf_memlimit_bytes;    // KDF 内存量；不需要 KDF 时为 0
+    uint32_t kdf_parameters_version;// Argon2id v1.3 参数语义当前为 1
+    uint8_t  reserved[8];           // 预留，必须初始化为 0
 };
 static_assert(sizeof(CborMetadataEnvelopeHeader) == 124);
 #pragma pack(pop)
@@ -328,9 +332,9 @@ static_assert(sizeof(CborMetadataEnvelopeHeader) == 124);
 ```cpp
 constexpr uint32_t CBOR_META_FLAG_ENCRYPTED = 0x00000001;
 
-constexpr uint8_t META_ENC_NONE            = 0; // 仅允许测试文件使用
-constexpr uint8_t META_ENC_AES_256_GCM     = 1;
-constexpr uint8_t META_ENC_CHACHA20_POLY1305 = 2;
+constexpr uint8_t META_ENC_NONE                 = 0; // 仅允许测试文件使用
+constexpr uint8_t META_ENC_AES_256_GCM          = 1;
+constexpr uint8_t META_ENC_XCHACHA20_POLY1305   = 2;
 
 constexpr uint8_t META_KDF_NONE            = 0;
 constexpr uint8_t META_KDF_HKDF_SHA256     = 1;
@@ -338,6 +342,11 @@ constexpr uint8_t META_KDF_ARGON2ID        = 2;
 ```
 
 正式备份文件必须设置 `CBOR_META_FLAG_ENCRYPTED`，且 `encryption_method != META_ENC_NONE`。`META_ENC_NONE` 只允许内存测试或不进入产品读取路径的格式测试样本使用；普通读取器必须拒绝未加密的 CBOR metadata。
+
+个人版正式文件当前必须使用 `META_ENC_XCHACHA20_POLY1305`，`nonce_size == 24` 且
+`tag_size == 16`。使用 `META_KDF_ARGON2ID` 时，salt 必须随机生成，`kdf_opslimit` 和
+`kdf_memlimit_bytes` 必须记录写入时采用的实际值，`kdf_parameters_version` 必须为 1。读取器必须在
+执行 KDF 前检查这两个资源参数是否位于产品支持范围内，防止恶意文件触发无界 CPU 或内存消耗。
 
 #### 密钥层次
 
@@ -745,7 +754,7 @@ V6 通过备份链（backup chain）支持增量和差异备份。一条链由�
 
 ```text
 SidecarFileHeader（固定 96 字节）
-zstd 压缩 payload，解压后为：
+XChaCha20-Poly1305 ciphertext，解密并 zstd 解压后为：
   重复 volume_count 次：
     SidecarVolumeHeader { volume_index, total_blocks }
     total_blocks 条记录，每条 { uint8 state; uint8 hash[hash_size] }
@@ -756,10 +765,10 @@ zstd 压缩 payload，解压后为：
 constexpr char     MAGIC_SIDECAR[8] = {'M','Y','B','K','H','I','D','X'}; // "MYBKHIDX"
 constexpr uint16_t SIDECAR_VERSION  = 1;
 
-// 散列算法
-constexpr uint8_t SIDECAR_HASH_MD5    = 1;
 constexpr uint8_t SIDECAR_HASH_SHA256 = 2;
-constexpr uint8_t SIDECAR_HASH_BLAKE3 = 3;
+constexpr uint8_t SIDECAR_COMPRESSION_ZSTD = 1;
+constexpr uint8_t SIDECAR_ENCRYPTION_XCHACHA20_POLY1305 = 2;
+constexpr uint16_t SIDECAR_FLAG_ENCRYPTED = 0x0001;
 
 // 每块状态
 constexpr uint8_t SIDECAR_STATE_DATA = 0; // 真实数据，hash[] 有效
@@ -770,17 +779,18 @@ constexpr uint8_t SIDECAR_STATE_SKIP = 2; // 空闲/未使用块，hash[] 为 0
 struct SidecarFileHeader {
     char     magic[8];                  // "MYBKHIDX"
     uint16_t version;                   // SIDECAR_VERSION
-    uint16_t reserved0;
+    uint16_t flags;                     // SIDECAR_FLAG_ENCRYPTED
     uint32_t block_size;                // 逻辑块大小（字节）
     uint8_t  file_uuid[16];             // 所描述备份的 file_uuid
-    uint8_t  backup_set_uuid[16];       // 所属链的 backup_set_uuid
-    uint8_t  hash_algo;                 // SIDECAR_HASH_*
+    uint8_t  hash_algo;                 // SIDECAR_HASH_SHA256
     uint8_t  hash_size;                 // 每个散列字节数
-    uint16_t reserved1;
+    uint8_t  compression;               // SIDECAR_COMPRESSION_ZSTD
+    uint8_t  encryption;                // XChaCha20-Poly1305
     uint32_t volume_count;              // payload 中卷表数量
     uint64_t payload_uncompressed_size; // 解压后 payload 字节数
-    uint64_t payload_compressed_size;   // zstd 压缩后字节数
-    uint8_t  reserved2[24];
+    uint64_t payload_stored_size;       // 压缩后 ciphertext 字节数
+    uint8_t  nonce[24];                 // Sidecar 独立随机 nonce
+    uint8_t  authentication_tag[16];    // detached AEAD tag
 };
 static_assert(sizeof(SidecarFileHeader) == 96, "SidecarFileHeader must be 96 bytes");
 
@@ -792,14 +802,14 @@ static_assert(sizeof(SidecarVolumeHeader) == 12, "SidecarVolumeHeader must be 12
 #pragma pack(pop)
 ```
 
-当前实现使用 MD5（`hash_size = 16`）。`hash_algo` 字段预留了升级到 SHA-256 / BLAKE3 的空间。Sidecar 使用 zstd（level 3）压缩，并通过“临时文件 + rename”方式原子写入。
+V1 固定使用 SHA-256（`hash_size = 32`）。DATA record 保存内容散列；ZERO/SKIP record 的 hash 必须全零。payload 使用 zstd（level 3）压缩后整体加密，头部将 `authentication_tag` 清零后的 96 字节作为 AAD。Sidecar 密钥复用对应 `.bkf` envelope 的 Argon2id 参数和 salt，但通过 `MYBACKUP-V6-SIDECAR` HKDF context 派生独立 key；Sidecar 使用独立随机 nonce。文件通过“临时文件 + rename”发布。
 
 ### 差异/增量备份写入语义
 
 执行 `backup-diff` 时：
 
 1. 加载基准备份的 sidecar（`<base>.bkf.bhx`），校验 `block_size` 与 `hash_size` 与当前一致。
-2. 对每个逻辑块照常计算 MD5（全量备份也始终计算 MD5 以生成 sidecar）。
+2. 对每个 DATA 逻辑块计算 SHA-256（全量备份也始终计算以生成 sidecar）。
 3. 与基线比较，判定该块是否变化：
    - DATA 块：散列不同或基线中不存在 → 视为变化。
    - ZERO/SKIP 块：仅当基线对应块为 DATA 时才视为变化（数据被清除）。
@@ -915,6 +925,7 @@ static_assert(sizeof(SidecarVolumeHeader) == 12, "SidecarVolumeHeader must be 12
 - `CborMetadataEnvelopeHeader.magic != "MYBKCBR"`。
 - 正式备份文件未设置 `CBOR_META_FLAG_ENCRYPTED`，或 `encryption_method == META_ENC_NONE`。
 - `nonce_size` 或 `tag_size` 与 `encryption_method` 不匹配。
+- KDF 参数版本不支持、Argon2id 参数为零，或参数超出产品允许的资源上限。
 - `plaintext_size`、`ciphertext_size`、`key_slot_count` 推导出的 envelope 总大小与 `BackupHeader.cbor_size` 不一致。
 - metadata AEAD tag 校验失败。
 - 解密后的 CBOR plaintext 长度不等于 `plaintext_size`。

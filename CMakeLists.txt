@@ -12,8 +12,12 @@ enable_testing()
 add_subdirectory(src/base)
 add_subdirectory(src/contracts)
 add_subdirectory(src/ports)
+add_subdirectory(src/format)
 add_subdirectory(src/pipeline)
+add_subdirectory(src/adapters/compression_zstd)
+add_subdirectory(src/adapters/crypto_sodium)
 add_subdirectory(src/adapters/memory)
+add_subdirectory(src/adapters/personal_archive)
 add_subdirectory(tests)
 
 add_test(

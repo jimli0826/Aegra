@@ -13,8 +13,16 @@
 - 挂载：Dokan 与虚拟磁盘格式呈现。
 - 传输：HTTP/gRPC/Named Pipe。
 - 测试与本地验证：Memory Block Source/Sink、Memory Backup Session/Reader。
+- 格式组合：个人版 `.bkf` Session/Reader。
+- 数据转换：libsodium metadata crypto、Zstandard block compression。
 
 Memory Adapter 是正式的端口参考实现，只保存进程内临时数据，不定义持久化格式。它必须支持短读、容量限制、取消、Commit/Abort 和确定性故障注入，供 Port Contract Test 与 Pipeline 测试复用。
+
+个人版 Archive Adapter 组合 `format`、`IBackupSession`、`IRecoveryPointReader`、libsodium 和 Zstandard。当前 MVP 支持一个 volume：写入期间创建 `<destination>.partial` 与 `<destination>.bhx.partial`，完整 Footer 和加密 Sidecar 均写完后才发布；Abort 和析构清理本次创建的 partial 文件。Reader 在解析 CBOR 前必须完成 Header/Envelope 范围校验和 AEAD 认证。普通恢复不依赖 `.bhx`；增量比较通过显式 API 加载并认证 Sidecar。
+
+Archive Reader 分别限制 metadata、chunk stored payload 和展开后的 chunk logical size。ZERO run、压缩块和其它稀疏表示在分配恢复缓冲区前都必须通过 logical size 上限检查。
+
+密码 Adapter 使用 Argon2id v1.3 派生 master key、HKDF-SHA256 分离 metadata/sidecar key，并使用 XChaCha20-Poly1305 detached tag；内容散列使用 SHA-256。KDF 参数、salt 和 nonce 都持久化在对应格式字段中；读取前先执行产品上下限检查。压缩 Adapter 要求调用者提供期望输出大小和硬上限。
 
 ## 通用规则
 
@@ -22,6 +30,7 @@ Memory Adapter 是正式的端口参考实现，只保存进程内临时数据�
 - 凭据通过 `ICredentialResolver` 获取，不保存和打印明文。
 - 资源使用 RAII；长操作响应取消。
 - Adapter 之间不 include 实现文件，不使用共享全局 SDK Session。
+- [ADR-0001](../adr/0001-personal-format-crypto-and-codec-dependencies.md) 仅允许 Personal Archive 通过 PRIVATE target dependency 组合两个无状态算法 Adapter；不得据此放宽有状态 Adapter 的依赖规则。
 - 每个 Adapter 运行对应 Port 的 Contract Test Suite。
 
 ## Dokan/虚拟磁盘约束

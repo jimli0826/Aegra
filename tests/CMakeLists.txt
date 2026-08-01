@@ -13,8 +13,26 @@ target_link_libraries(aegra_contracts_tests PRIVATE Aegra::Contracts)
 aegra_add_test(aegra_ports_compile_test ports/ports_compile_test.cpp)
 target_link_libraries(aegra_ports_compile_test PRIVATE Aegra::Ports)
 
+aegra_add_test(aegra_format_tests format/manifest_codec_test.cpp)
+target_link_libraries(aegra_format_tests PRIVATE Aegra::Format)
+
+aegra_add_test(aegra_personal_archive_codec_tests format/personal_archive_codec_test.cpp)
+target_link_libraries(aegra_personal_archive_codec_tests PRIVATE Aegra::Format)
+
 aegra_add_test(aegra_memory_adapter_tests adapters/memory_adapter_test.cpp)
 target_link_libraries(aegra_memory_adapter_tests PRIVATE Aegra::AdapterMemory)
+
+aegra_add_test(aegra_crypto_sodium_tests adapters/crypto_sodium_test.cpp)
+target_link_libraries(aegra_crypto_sodium_tests PRIVATE Aegra::AdapterCryptoSodium)
+
+aegra_add_test(aegra_compression_zstd_tests adapters/compression_zstd_test.cpp)
+target_link_libraries(aegra_compression_zstd_tests PRIVATE Aegra::AdapterCompressionZstd)
+
+aegra_add_test(aegra_personal_archive_tests adapters/personal_archive_test.cpp)
+target_link_libraries(
+    aegra_personal_archive_tests
+    PRIVATE Aegra::AdapterPersonalArchive Aegra::AdapterMemory Aegra::Pipeline
+)
 
 aegra_add_test(aegra_pipeline_tests pipeline/pipeline_roundtrip_test.cpp)
 target_link_libraries(

@@ -8,7 +8,7 @@
 
 ### `manifest`
 
-定义平台无关的 `BackupManifest`、Protected Object、Stream、Extent、Consistency、Integrity 和 provider metadata envelope。物理机、虚拟机、个人 Archive 与企业 Repository 共享逻辑模型。
+定义可扩展的 `Manifest`、Disk、Partition、Volume、Extent、SystemInfo、BackupJob 和 provider extension envelope。物理机、虚拟机、个人 Archive 与企业 Repository 共享逻辑模型；虚拟化专有字段进入命名 extension，不进入个人格式的固定二进制头。
 
 ### `personal_archive`
 
@@ -38,7 +38,17 @@
 - 截断、越界、重叠、重复 ID、非法 key 和损坏校验值。
 - 缺卷、乱序、重复卷、卷间 UUID 不一致和末卷 Footer 缺失。
 - Fuzz 入口覆盖每个外部解析器。
-- 结构 size、offset、endianness 静态断言。
+- 固定结构大小常量、字段 offset 和 endianness 的 golden-byte 测试。
+
+## 当前状态
+
+阶段 3 已实现：
+
+- `Manifest` 的字符串键 CBOR 编解码和引用/唯一性校验；
+- `BackupHeader`、`CborMetadataEnvelopeHeader`、`ChunkHeader`、`BlockEntry`、`BackupFooter` 的显式小端编解码；
+- 整数 CBOR Map key、非法 magic/版本/尺寸、未加密 metadata envelope 和非法 BlockEntry 的拒绝路径。
+
+当前实现不使用 packed C++ struct 直接映射外部字节。`.bhx` Sidecar 采用固定 96 字节头和显式小端 payload codec；DATA 使用 SHA-256，ZERO/SKIP hash 全零。分卷、DEDUP 写入、增量链和多 volume Archive 仍是后续工作。
 
 ## 完成标准
 

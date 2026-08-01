@@ -9,6 +9,11 @@
 3. [模块开发文档索引](modules/README.md)
 4. [架构决策记录规则](adr/README.md)
 
+现行核心决策：
+
+- [ADR-0001：个人版格式的加密与编解码依赖](adr/0001-personal-format-crypto-and-codec-dependencies.md)
+- [ADR-0002：个人版 Sidecar 保密性与 ZERO Run](adr/0002-personal-sidecar-confidentiality-and-zero-runs.md)
+
 ## 权威格式与需求
 
 - [个人版 `.bkf` V6 格式](format/PERSONAL_BACKUP_FORMAT_V6.md)

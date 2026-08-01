@@ -30,4 +30,4 @@
 
 ## 当前阶段
 
-阶段 1 已建立 `base`、`contracts` 和 `ports` 骨架。阶段 2 已建立 Memory Block Adapter、Backup Session、Recovery Reader、fixed-size Chunker，以及带有界背压和取消的 Backup/Restore Pipeline。下一阶段是通用 Manifest、Transform 和个人版 `.bkf` Adapter。
+阶段 1 已建立 `base`、`contracts` 和 `ports` 骨架。阶段 2 已建立 Memory Block Adapter、Backup Session、Recovery Reader、fixed-size Chunker，以及带有界背压和取消的 Backup/Restore Pipeline。阶段 3 已完成通用 Manifest、字符串键 CBOR、Zstandard/metadata crypto Adapter，以及单 volume 个人版 `.bkf` 的端到端纵向切片。阶段 4 已完成 ZERO run 和加密 `.bhx` Sidecar；下一步设计多 volume/分卷事务接口，再实现增量链。

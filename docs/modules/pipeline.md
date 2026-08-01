@@ -57,7 +57,9 @@ Recovery Point Reader -> Manifest Validation -> Chunk Resolver
 
 ## 当前状态
 
-阶段 2 已实现 fixed-size raw Chunk、Memory Adapter、Backup/Restore Pipeline、按字节预算的有界队列、取消、Commit/Abort、Restore 预检和内存 roundtrip。阶段 3 将在不改变 Pipeline 依赖方向的前提下接入 Transform 与格式 Session。
+阶段 2 已实现 fixed-size raw Chunk、Memory Adapter、Backup/Restore Pipeline、按字节预算的有界队列、取消、Commit/Abort、Restore 预检和内存 roundtrip。
+
+阶段 3 已完成第一条纵向切片：同一 Pipeline 可把 Memory Block Source 写入一个正式加密 metadata、逐块 Zstandard 压缩、Footer 完成标记的单 volume `.bkf`，再通过 `IRecoveryPointReader` 还原到 Block Sink。Pipeline 没有新增对具体 Adapter 的依赖。后续 Transform 组合接口将用于企业 Repository、payload 加密和去重，不把个人格式判断加入 Pipeline。
 
 ## 测试
 

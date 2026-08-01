@@ -76,18 +76,64 @@ template <std::size_t Size>
     return result;
 }
 
-[[nodiscard]] base::Result<void> validate_header(const BackupHeader& header) {
-    if (header.block_size == 0 || header.default_chunk_size == 0 || header.cbor_size == 0) {
-        return base::Result<void>::failure(corrupt("backup header contains zero-sized fields"));
+[[nodiscard]] base::Result<void> validate_header_common(const BackupHeader& header) {
+    constexpr auto known_flags = kBackupFlagFull | kBackupFlagIncremental |
+                                 kBackupFlagDifferential | kBackupFlagDedup | kBackupFlagEncrypted |
+                                 kBackupFlagSplit;
+    const auto backup_type =
+        header.flags & (kBackupFlagFull | kBackupFlagIncremental | kBackupFlagDifferential);
+    if (header.block_size == 0 || header.default_chunk_size == 0 ||
+        (header.flags & kBackupFlagEncrypted) == 0 || (header.flags & ~known_flags) != 0) {
+        return base::Result<void>::failure(corrupt("backup header fields are invalid"));
     }
-    if (header.cbor_offset != kBackupHeaderSize ||
-        header.first_chunk_offset != header.cbor_offset + header.cbor_size) {
-        return base::Result<void>::failure(corrupt("backup header offsets are inconsistent"));
+    if (backup_type != kBackupFlagFull && backup_type != kBackupFlagIncremental &&
+        backup_type != kBackupFlagDifferential) {
+        return base::Result<void>::failure(corrupt("backup type flags are invalid"));
     }
     if (header.cbor_schema_version != kManifestSchemaVersion) {
         return base::Result<void>::failure(unsupported("manifest schema version is unsupported"));
     }
     return base::Result<void>::success();
+}
+
+[[nodiscard]] base::Result<void> validate_primary_header(const BackupHeader& header) {
+    if (header.cbor_size == 0 || header.cbor_offset != kBackupHeaderSize ||
+        header.first_chunk_offset != header.cbor_offset + header.cbor_size) {
+        return base::Result<void>::failure(corrupt("primary header offsets are inconsistent"));
+    }
+    return base::Result<void>::success();
+}
+
+[[nodiscard]] base::Result<void> validate_single_file_header(const BackupHeader& header) {
+    if (header.split_part_index != 0 || header.split_part_count != 0 ||
+        header.split_size_bytes != 0) {
+        return base::Result<void>::failure(corrupt("single-file header has split fields"));
+    }
+    return validate_primary_header(header);
+}
+
+[[nodiscard]] base::Result<void> validate_split_header(const BackupHeader& header) {
+    if (header.split_size_bytes == 0 ||
+        (header.split_part_count != 0 && header.split_part_count <= header.split_part_index)) {
+        return base::Result<void>::failure(corrupt("split header fields are invalid"));
+    }
+    if (header.split_part_index == 0) {
+        return validate_primary_header(header);
+    }
+    if (header.cbor_offset != kBackupHeaderSize || header.cbor_size != 0 ||
+        header.first_chunk_offset != kBackupHeaderSize) {
+        return base::Result<void>::failure(corrupt("continuation header offsets are invalid"));
+    }
+    return base::Result<void>::success();
+}
+
+[[nodiscard]] base::Result<void> validate_header(const BackupHeader& header) {
+    auto common = validate_header_common(header);
+    if (!common) {
+        return common;
+    }
+    return (header.flags & kBackupFlagSplit) != 0 ? validate_split_header(header)
+                                                  : validate_single_file_header(header);
 }
 
 [[nodiscard]] base::Result<void> validate_envelope(const MetadataEnvelopeHeader& header) {

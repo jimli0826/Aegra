@@ -1,14 +1,17 @@
 #include "aegra/adapters/personal_archive/personal_archive.h"
 
+#include "personal_archive_preamble.h"
+
 #include "aegra/adapters/compression_zstd/zstd_codec.h"
-#include "aegra/adapters/crypto_sodium/metadata_crypto.h"
 #include "aegra/base/error.h"
-#include "aegra/format/manifest_codec.h"
 #include "aegra/format/personal_archive.h"
 
 #include <algorithm>
 #include <fstream>
+#include <iomanip>
 #include <limits>
+#include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -18,6 +21,7 @@ namespace aegra::adapters::personal_archive {
 namespace {
 
 namespace archive = format::personal_archive;
+using detail::ParsedPreamble;
 
 struct ChunkRecord final {
     ports::ChunkDescriptor descriptor;
@@ -25,19 +29,7 @@ struct ChunkRecord final {
     std::uint64_t stored_payload_size{0};
     std::uint32_t source_index{0};
     std::vector<archive::BlockEntry> entries;
-};
-
-struct ParsedPreamble final {
-    archive::BackupHeader header;
-    format::Manifest manifest;
-};
-
-struct EncodedMetadata final {
-    archive::BackupHeader header;
-    std::vector<std::byte> header_bytes;
-    archive::MetadataEnvelopeHeader envelope;
-    std::vector<std::byte> envelope_bytes;
-    std::vector<std::byte> payload;
+    std::filesystem::path part_path;
 };
 
 struct ScanResult final {
@@ -58,6 +50,23 @@ struct EntryLogicalRange final {
 struct ScanStatistics final {
     std::uint64_t block_count{0};
     std::uint64_t payload_size{0};
+};
+
+struct PartReadRange final {
+    std::filesystem::path path;
+    std::uint64_t end_offset{0};
+};
+
+struct ArchiveScanState final {
+    const ParsedPreamble& preamble;
+    const ArchiveReadLimits& limits;
+    ScanResult result;
+    ScanStatistics statistics;
+};
+
+struct ScannedPart final {
+    bool has_footer{false};
+    archive::BackupFooter footer;
 };
 
 [[nodiscard]] base::Error error(base::ErrorCode code, std::string message) {
@@ -98,126 +107,58 @@ read_exact(std::ifstream& input, const std::uint64_t offset, const std::size_t s
         static_cast<std::uint64_t>(static_cast<std::streamoff>(position)));
 }
 
-[[nodiscard]] std::vector<std::byte> make_authenticated_data(std::span<const std::byte> header,
-                                                             std::span<const std::byte> envelope) {
-    std::vector<std::byte> result;
-    result.reserve(header.size() + envelope.size());
-    result.insert(result.end(), header.begin(), header.end());
-    result.insert(result.end(), envelope.begin(), envelope.end());
-    return result;
-}
-
-[[nodiscard]] crypto_sodium::ProtectedMetadata
-make_protected_metadata(const archive::MetadataEnvelopeHeader& envelope,
-                        std::span<const std::byte> ciphertext, std::span<const std::byte> tag) {
-    crypto_sodium::ProtectedMetadata result;
-    result.kdf = {envelope.kdf_opslimit, envelope.kdf_memlimit_bytes,
-                  envelope.kdf_parameters_version};
-    result.salt = envelope.salt;
-    result.nonce = envelope.nonce;
-    result.ciphertext.assign(ciphertext.begin(), ciphertext.end());
-    std::copy(tag.begin(), tag.end(), result.tag.begin());
-    return result;
-}
-
-[[nodiscard]] base::Result<EncodedMetadata> read_encoded_metadata(std::ifstream& input,
-                                                                  const ArchiveOpenRequest& request,
-                                                                  const std::uint64_t file_size) {
-    auto header_bytes = read_exact(input, 0, archive::kBackupHeaderSize);
-    if (!header_bytes) {
-        return base::Result<EncodedMetadata>::failure(header_bytes.error());
-    }
-    auto header = archive::decode_backup_header(header_bytes.value());
-    if (!header) {
-        return base::Result<EncodedMetadata>::failure(header.error());
-    }
-    if (header.value().cbor_size > request.maximum_metadata_size +
-                                       archive::kMetadataEnvelopeHeaderSize +
-                                       crypto_sodium::kMetadataTagSize ||
-        header.value().first_chunk_offset > file_size - archive::kBackupFooterSize) {
-        return base::Result<EncodedMetadata>::failure(
-            error(base::ErrorCode::kCorruptData, "archive metadata range exceeds limits"));
-    }
-    auto envelope_bytes =
-        read_exact(input, header.value().cbor_offset, archive::kMetadataEnvelopeHeaderSize);
-    if (!envelope_bytes) {
-        return base::Result<EncodedMetadata>::failure(envelope_bytes.error());
-    }
-    auto envelope = archive::decode_metadata_envelope_header(envelope_bytes.value());
-    if (!envelope) {
-        return base::Result<EncodedMetadata>::failure(envelope.error());
-    }
-    if (envelope.value().ciphertext_size > request.maximum_metadata_size) {
-        return base::Result<EncodedMetadata>::failure(
-            error(base::ErrorCode::kCorruptData, "archive metadata exceeds configured limit"));
-    }
-    const auto expected_size = archive::kMetadataEnvelopeHeaderSize +
-                               envelope.value().ciphertext_size + envelope.value().tag_size;
-    if (expected_size != header.value().cbor_size) {
-        return base::Result<EncodedMetadata>::failure(
-            error(base::ErrorCode::kCorruptData, "archive metadata envelope size is invalid"));
-    }
-    auto payload = read_exact(
-        input, header.value().cbor_offset + archive::kMetadataEnvelopeHeaderSize,
-        static_cast<std::size_t>(envelope.value().ciphertext_size + envelope.value().tag_size));
-    if (!payload) {
-        return base::Result<EncodedMetadata>::failure(payload.error());
-    }
-    return base::Result<EncodedMetadata>::success(
-        {header.value(), std::move(header_bytes).value(), envelope.value(),
-         std::move(envelope_bytes).value(), std::move(payload).value()});
-}
-
-[[nodiscard]] base::Result<format::Manifest> decrypt_manifest(const EncodedMetadata& encoded,
-                                                              const std::string_view password) {
-    const auto ciphertext = std::span<const std::byte>(encoded.payload)
-                                .first(static_cast<std::size_t>(encoded.envelope.ciphertext_size));
-    const auto tag = std::span<const std::byte>(encoded.payload).last(encoded.envelope.tag_size);
-    auto protected_metadata = make_protected_metadata(encoded.envelope, ciphertext, tag);
-    const auto aad = make_authenticated_data(encoded.header_bytes, encoded.envelope_bytes);
-    auto plaintext = crypto_sodium::unprotect_metadata(protected_metadata, password, aad);
-    if (!plaintext) {
-        return base::Result<format::Manifest>::failure(plaintext.error());
-    }
-    return format::decode_manifest_cbor(plaintext.value());
-}
-
-[[nodiscard]] base::Result<ParsedPreamble> read_preamble(std::ifstream& input,
-                                                         const ArchiveOpenRequest& request,
-                                                         const std::uint64_t file_size) {
-    auto encoded = read_encoded_metadata(input, request, file_size);
-    if (!encoded) {
-        return base::Result<ParsedPreamble>::failure(encoded.error());
-    }
-    auto manifest = decrypt_manifest(encoded.value(), request.password);
-    if (!manifest) {
-        return base::Result<ParsedPreamble>::failure(manifest.error());
-    }
-    return base::Result<ParsedPreamble>::success(
-        {encoded.value().header, std::move(manifest).value()});
-}
-
-[[nodiscard]] base::Result<archive::BackupFooter> read_footer(std::ifstream& input,
-                                                              const std::uint64_t file_size) {
-    if (file_size < archive::kBackupHeaderSize + archive::kMetadataEnvelopeHeaderSize +
-                        archive::kBackupFooterSize) {
-        return base::Result<archive::BackupFooter>::failure(
-            error(base::ErrorCode::kCorruptData, "personal archive is too small"));
+[[nodiscard]] base::Result<std::optional<archive::BackupFooter>>
+try_read_footer(std::ifstream& input, const std::uint64_t file_size) {
+    if (file_size < archive::kBackupFooterSize) {
+        return base::Result<std::optional<archive::BackupFooter>>::success(std::nullopt);
     }
     auto footer_bytes =
         read_exact(input, file_size - archive::kBackupFooterSize, archive::kBackupFooterSize);
     if (!footer_bytes) {
-        return base::Result<archive::BackupFooter>::failure(footer_bytes.error());
+        return base::Result<std::optional<archive::BackupFooter>>::failure(footer_bytes.error());
     }
     auto footer = archive::decode_backup_footer(footer_bytes.value());
     if (!footer) {
-        return footer;
+        return base::Result<std::optional<archive::BackupFooter>>::success(std::nullopt);
     }
     if (footer.value().file_size != file_size) {
-        return base::Result<archive::BackupFooter>::failure(
+        return base::Result<std::optional<archive::BackupFooter>>::failure(
             error(base::ErrorCode::kCorruptData, "archive footer file size does not match"));
     }
-    return footer;
+    return base::Result<std::optional<archive::BackupFooter>>::success(footer.value());
+}
+
+[[nodiscard]] std::filesystem::path archive_part_path(const std::filesystem::path& primary_path,
+                                                      const std::uint32_t part_index) {
+    if (part_index == 0) {
+        return primary_path;
+    }
+    std::ostringstream suffix;
+    suffix << '.' << std::setw(3) << std::setfill('0') << part_index;
+    auto result = primary_path;
+    result += suffix.str();
+    return result;
+}
+
+[[nodiscard]] base::Result<void> validate_part_header(const archive::BackupHeader& primary,
+                                                      const archive::BackupHeader& part,
+                                                      const std::uint32_t expected_index) {
+    if (part.split_part_index != expected_index || part.file_uuid != primary.file_uuid ||
+        part.backup_set_uuid != primary.backup_set_uuid ||
+        part.parent_uuid != primary.parent_uuid) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kCorruptData, "archive split part identity is invalid"));
+    }
+    if (part.flags != primary.flags || part.block_size != primary.block_size ||
+        part.default_chunk_size != primary.default_chunk_size ||
+        part.compression_method != primary.compression_method ||
+        part.encryption_method != primary.encryption_method ||
+        part.split_size_bytes != primary.split_size_bytes ||
+        part.split_part_count != primary.split_part_count) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kCorruptData, "archive split part settings do not match"));
+    }
+    return base::Result<void>::success();
 }
 
 [[nodiscard]] const format::Volume* find_volume(const format::Manifest& manifest,
@@ -378,10 +319,8 @@ validate_stored_entry_size(const archive::BlockEntry& entry, const std::uint64_t
 
 [[nodiscard]] base::Result<void> validate_scan_footer(const ScanResult& scan,
                                                       const ScanStatistics& statistics,
-                                                      const archive::BackupFooter& footer,
-                                                      const std::uint64_t final_offset,
-                                                      const std::uint64_t footer_offset) {
-    if (final_offset != footer_offset || scan.records.size() != footer.chunk_count) {
+                                                      const archive::BackupFooter& footer) {
+    if (scan.records.size() != footer.chunk_count) {
         return base::Result<void>::failure(
             error(base::ErrorCode::kCorruptData, "archive chunk count does not match footer"));
     }
@@ -426,7 +365,7 @@ validate_entries(const std::vector<archive::BlockEntry>& entries, const archive:
 
 [[nodiscard]] base::Result<ChunkRecord>
 read_chunk_record(std::ifstream& input, const std::uint64_t offset, const ParsedPreamble& preamble,
-                  const std::uint64_t footer_offset, const ArchiveReadLimits& limits) {
+                  const PartReadRange& part, const ArchiveReadLimits& limits) {
     auto header_bytes = read_exact(input, offset, archive::kChunkHeaderSize);
     if (!header_bytes) {
         return base::Result<ChunkRecord>::failure(header_bytes.error());
@@ -452,8 +391,8 @@ read_chunk_record(std::ifstream& input, const std::uint64_t offset, const Parsed
     const auto payload_offset =
         entries_offset +
         static_cast<std::uint64_t>(chunk.value().block_entry_count) * archive::kBlockEntrySize;
-    if (payload_offset > footer_offset ||
-        chunk.value().payload_size > footer_offset - payload_offset) {
+    if (payload_offset > part.end_offset ||
+        chunk.value().payload_size > part.end_offset - payload_offset) {
         return base::Result<ChunkRecord>::failure(
             error(base::ErrorCode::kCorruptData, "archive chunk extends beyond footer"));
     }
@@ -468,38 +407,157 @@ read_chunk_record(std::ifstream& input, const std::uint64_t offset, const Parsed
     }
     return base::Result<ChunkRecord>::success(
         {descriptor.value(), payload_offset, chunk.value().payload_size, chunk.value().source_index,
-         std::move(entries).value()});
+         std::move(entries).value(), part.path});
 }
 
-[[nodiscard]] base::Result<ScanResult> scan_chunks(std::ifstream& input,
-                                                   const ParsedPreamble& preamble,
-                                                   const archive::BackupFooter& footer,
-                                                   const std::uint64_t file_size,
-                                                   const ArchiveReadLimits& limits) {
-    ScanResult result;
-    const auto footer_offset = file_size - archive::kBackupFooterSize;
-    std::uint64_t offset = preamble.header.first_chunk_offset;
-    ScanStatistics statistics;
-    while (offset < footer_offset) {
-        auto record = read_chunk_record(input, offset, preamble, footer_offset, limits);
-        if (!record) {
-            return base::Result<ScanResult>::failure(record.error());
-        }
-        auto sequence = validate_chunk_sequence(record.value(), result);
-        auto accumulated = accumulate_statistics(record.value(), statistics);
-        if (!sequence || !accumulated) {
-            return base::Result<ScanResult>::failure(!sequence ? sequence.error()
-                                                               : accumulated.error());
-        }
-        offset = record.value().payload_offset + record.value().stored_payload_size;
-        result.records.push_back(std::move(record).value());
+[[nodiscard]] base::Result<std::uint64_t> append_chunk(std::ifstream& input,
+                                                       const std::uint64_t offset,
+                                                       const PartReadRange& part,
+                                                       ArchiveScanState& state) {
+    auto record = read_chunk_record(input, offset, state.preamble, part, state.limits);
+    if (!record) {
+        return base::Result<std::uint64_t>::failure(record.error());
     }
-    auto footer_validation =
-        validate_scan_footer(result, statistics, footer, offset, footer_offset);
-    if (!footer_validation) {
-        return base::Result<ScanResult>::failure(footer_validation.error());
+    auto sequence = validate_chunk_sequence(record.value(), state.result);
+    if (!sequence) {
+        return base::Result<std::uint64_t>::failure(sequence.error());
     }
-    return base::Result<ScanResult>::success(std::move(result));
+    auto accumulated = accumulate_statistics(record.value(), state.statistics);
+    if (!accumulated) {
+        return base::Result<std::uint64_t>::failure(accumulated.error());
+    }
+    const auto next_offset = record.value().payload_offset + record.value().stored_payload_size;
+    state.result.records.push_back(std::move(record).value());
+    return base::Result<std::uint64_t>::success(next_offset);
+}
+
+[[nodiscard]] base::Result<void> scan_part(std::ifstream& input,
+                                           const archive::BackupHeader& header,
+                                           const PartReadRange& part, ArchiveScanState& state) {
+    const auto initial_chunk_count = state.result.records.size();
+    auto offset = header.first_chunk_offset;
+    while (offset < part.end_offset) {
+        auto next_offset = append_chunk(input, offset, part, state);
+        if (!next_offset) {
+            return base::Result<void>::failure(next_offset.error());
+        }
+        offset = next_offset.value();
+    }
+    const bool empty_part = state.result.records.size() == initial_chunk_count;
+    if (offset != part.end_offset || empty_part) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kCorruptData, "archive split part has no complete chunks"));
+    }
+    return base::Result<void>::success();
+}
+
+[[nodiscard]] base::Result<archive::BackupHeader> read_part_header(std::ifstream& input) {
+    auto bytes = read_exact(input, 0, archive::kBackupHeaderSize);
+    if (!bytes) {
+        return base::Result<archive::BackupHeader>::failure(bytes.error());
+    }
+    return archive::decode_backup_header(bytes.value());
+}
+
+[[nodiscard]] base::Result<ScannedPart> read_and_scan_part(const std::filesystem::path& path,
+                                                           const std::uint32_t part_index,
+                                                           ArchiveScanState& state) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        const auto code =
+            part_index == 0 ? base::ErrorCode::kIoFailure : base::ErrorCode::kCorruptData;
+        return base::Result<ScannedPart>::failure(error(code, "archive split part is missing"));
+    }
+    auto file_size = read_stream_size(input);
+    if (!file_size) {
+        return base::Result<ScannedPart>::failure(file_size.error());
+    }
+    auto header = read_part_header(input);
+    if (!header) {
+        return base::Result<ScannedPart>::failure(header.error());
+    }
+    auto identity = validate_part_header(state.preamble.header, header.value(), part_index);
+    if (!identity) {
+        return base::Result<ScannedPart>::failure(identity.error());
+    }
+    auto footer = try_read_footer(input, file_size.value());
+    if (!footer) {
+        return base::Result<ScannedPart>::failure(footer.error());
+    }
+    const auto end_offset = footer.value().has_value()
+                                ? file_size.value() - archive::kBackupFooterSize
+                                : file_size.value();
+    auto scanned = scan_part(input, header.value(), {path, end_offset}, state);
+    if (!scanned) {
+        return base::Result<ScannedPart>::failure(scanned.error());
+    }
+    return base::Result<ScannedPart>::success(
+        {footer.value().has_value(), footer.value().value_or(archive::BackupFooter{})});
+}
+
+[[nodiscard]] base::Result<void> validate_non_final_part(const archive::BackupHeader& primary,
+                                                         const std::uint32_t part_index) {
+    if ((primary.flags & archive::kBackupFlagSplit) == 0) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kCorruptData, "single-file archive has no footer"));
+    }
+    if (primary.split_part_count != 0 && part_index + 1 >= primary.split_part_count) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kCorruptData, "declared final archive part has no footer"));
+    }
+    return base::Result<void>::success();
+}
+
+[[nodiscard]] base::Result<void> validate_final_part(const std::filesystem::path& primary_path,
+                                                     const std::uint32_t part_index,
+                                                     const ScannedPart& part,
+                                                     const ArchiveScanState& state) {
+    const auto& primary = state.preamble.header;
+    if (primary.split_part_count != 0 && part_index + 1 != primary.split_part_count) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kCorruptData, "archive split part count does not match"));
+    }
+    std::error_code filesystem_error;
+    const auto next_path = archive_part_path(primary_path, part_index + 1);
+    const bool has_next = std::filesystem::exists(next_path, filesystem_error);
+    if (filesystem_error) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kIoFailure, "failed to inspect the next archive split part"));
+    }
+    if ((primary.flags & archive::kBackupFlagSplit) != 0 && has_next) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kCorruptData, "archive has data after the final part"));
+    }
+    return validate_scan_footer(state.result, state.statistics, part.footer);
+}
+
+[[nodiscard]] base::Result<ScanResult> scan_archive_parts(const std::filesystem::path& primary_path,
+                                                          const ParsedPreamble& preamble,
+                                                          const ArchiveOpenRequest& request) {
+    const ArchiveReadLimits limits{request.maximum_chunk_payload_size,
+                                   request.maximum_chunk_logical_size};
+    ArchiveScanState state{preamble, limits, {}, {}};
+    for (std::uint32_t part_index = 0; part_index < request.maximum_split_parts; ++part_index) {
+        const auto path = archive_part_path(primary_path, part_index);
+        auto part = read_and_scan_part(path, part_index, state);
+        if (!part) {
+            return base::Result<ScanResult>::failure(part.error());
+        }
+        if (!part.value().has_footer) {
+            auto valid = validate_non_final_part(preamble.header, part_index);
+            if (!valid) {
+                return base::Result<ScanResult>::failure(valid.error());
+            }
+            continue;
+        }
+        auto final_part = validate_final_part(primary_path, part_index, part.value(), state);
+        if (!final_part) {
+            return base::Result<ScanResult>::failure(final_part.error());
+        }
+        return base::Result<ScanResult>::success(std::move(state.result));
+    }
+    return base::Result<ScanResult>::failure(
+        error(base::ErrorCode::kCorruptData, "archive exceeds the split part limit"));
 }
 
 [[nodiscard]] base::Result<std::vector<std::byte>>
@@ -527,10 +585,9 @@ read_entry_payload(std::ifstream& input, const ChunkRecord& record,
 }
 
 [[nodiscard]] base::Result<std::vector<std::byte>>
-read_record_payload(const std::filesystem::path& path, const ChunkRecord& record,
-                    const std::uint32_t block_size, const std::uint64_t logical_size,
-                    const base::CancellationToken& cancellation) {
-    std::ifstream input(path, std::ios::binary);
+read_record_payload(const ChunkRecord& record, const std::uint32_t block_size,
+                    const std::uint64_t logical_size, const base::CancellationToken& cancellation) {
+    std::ifstream input(record.part_path, std::ios::binary);
     if (!input) {
         return base::Result<std::vector<std::byte>>::failure(
             error(base::ErrorCode::kIoFailure, "failed to reopen personal archive"));
@@ -554,7 +611,6 @@ read_record_payload(const std::filesystem::path& path, const ChunkRecord& record
 } // namespace
 
 struct PersonalArchiveReader::Impl final {
-    std::filesystem::path source;
     format::Manifest manifest;
     std::uint32_t block_size{0};
     std::uint64_t logical_size{0};
@@ -568,8 +624,11 @@ PersonalArchiveReader::~PersonalArchiveReader() = default;
 
 base::Result<std::unique_ptr<PersonalArchiveReader>>
 PersonalArchiveReader::open(const ArchiveOpenRequest& request) {
+    constexpr std::uint32_t maximum_supported_split_parts = 100'000;
     if (request.source.empty() || request.password.empty() || request.maximum_metadata_size == 0 ||
-        request.maximum_chunk_payload_size == 0 || request.maximum_chunk_logical_size == 0) {
+        request.maximum_chunk_payload_size == 0 || request.maximum_chunk_logical_size == 0 ||
+        request.maximum_split_parts == 0 ||
+        request.maximum_split_parts > maximum_supported_split_parts) {
         return base::Result<std::unique_ptr<PersonalArchiveReader>>::failure(
             error(base::ErrorCode::kInvalidArgument, "archive open request is invalid"));
     }
@@ -582,17 +641,11 @@ PersonalArchiveReader::open(const ArchiveOpenRequest& request) {
     if (!file_size) {
         return base::Result<std::unique_ptr<PersonalArchiveReader>>::failure(file_size.error());
     }
-    auto footer = read_footer(input, file_size.value());
-    if (!footer) {
-        return base::Result<std::unique_ptr<PersonalArchiveReader>>::failure(footer.error());
-    }
-    auto preamble = read_preamble(input, request, file_size.value());
+    auto preamble = detail::read_archive_preamble(input, request, file_size.value());
     if (!preamble) {
         return base::Result<std::unique_ptr<PersonalArchiveReader>>::failure(preamble.error());
     }
-    const ArchiveReadLimits limits{request.maximum_chunk_payload_size,
-                                   request.maximum_chunk_logical_size};
-    auto scan = scan_chunks(input, preamble.value(), footer.value(), file_size.value(), limits);
+    auto scan = scan_archive_parts(request.source, preamble.value(), request);
     if (!scan) {
         return base::Result<std::unique_ptr<PersonalArchiveReader>>::failure(scan.error());
     }
@@ -608,7 +661,6 @@ PersonalArchiveReader::open(const ArchiveOpenRequest& request) {
     auto parsed = std::move(preamble).value();
     auto scanned = std::move(scan).value();
     auto implementation = std::make_unique<Impl>();
-    implementation->source = request.source;
     implementation->manifest = std::move(parsed.manifest);
     implementation->block_size = parsed.header.block_size;
     implementation->logical_size = implementation->manifest.volumes.front().total_size;
@@ -648,7 +700,7 @@ PersonalArchiveReader::read_chunk(const std::uint64_t chunk_index,
         return base::Result<ports::ChunkData>::failure(descriptor.error());
     }
     const auto& record = implementation_->records[static_cast<std::size_t>(chunk_index)];
-    auto payload = read_record_payload(implementation_->source, record, implementation_->block_size,
+    auto payload = read_record_payload(record, implementation_->block_size,
                                        implementation_->logical_size, cancellation);
     if (!payload) {
         return base::Result<ports::ChunkData>::failure(payload.error());

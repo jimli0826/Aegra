@@ -28,6 +28,7 @@ struct ArchiveCreateRequest final {
     std::uint32_t block_size{0};
     std::uint32_t chunk_size{0};
     std::uint32_t source_index{0};
+    std::uint64_t split_size_bytes{0};
     ArchiveKdfParameters kdf_parameters;
 };
 
@@ -37,6 +38,7 @@ struct ArchiveOpenRequest final {
     std::uint64_t maximum_metadata_size{64ULL * 1024ULL * 1024ULL};
     std::uint64_t maximum_chunk_payload_size{1024ULL * 1024ULL * 1024ULL};
     std::uint64_t maximum_chunk_logical_size{1024ULL * 1024ULL * 1024ULL};
+    std::uint32_t maximum_split_parts{10'000};
 };
 
 struct ArchiveSidecar final {

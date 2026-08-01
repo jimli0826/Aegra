@@ -20,6 +20,7 @@ bool expect(const bool condition, const char* message) {
 bool test_backup_header() {
     archive::BackupHeader header;
     header.file_uuid.front() = std::byte{0xAB};
+    header.flags = archive::kBackupFlagFull | archive::kBackupFlagEncrypted;
     header.block_size = 4096;
     header.cbor_size = 180;
     header.first_chunk_offset = archive::kBackupHeaderSize + header.cbor_size;
@@ -43,6 +44,37 @@ bool test_backup_header() {
     passed &= expect(decoded.has_value(), "backup header decodes");
     passed &= expect(decoded.has_value() && decoded.value().cbor_size == 180,
                      "backup header offsets survive roundtrip");
+    return passed;
+}
+
+bool test_split_backup_headers() {
+    archive::BackupHeader primary;
+    primary.flags =
+        archive::kBackupFlagFull | archive::kBackupFlagEncrypted | archive::kBackupFlagSplit;
+    primary.block_size = 4096;
+    primary.cbor_size = 180;
+    primary.first_chunk_offset = archive::kBackupHeaderSize + primary.cbor_size;
+    primary.default_chunk_size = 8192;
+    primary.split_size_bytes = 16ULL * 1024ULL;
+    bool passed =
+        expect(archive::encode_backup_header(primary).has_value(), "split primary header encodes");
+
+    auto continuation = primary;
+    continuation.split_part_index = 1;
+    continuation.cbor_size = 0;
+    continuation.first_chunk_offset = archive::kBackupHeaderSize;
+    const auto encoded = archive::encode_backup_header(continuation);
+    passed &= expect(encoded.has_value(), "split continuation header encodes");
+    passed &=
+        expect(encoded.has_value() && archive::decode_backup_header(encoded.value()).has_value(),
+               "split continuation header decodes");
+
+    continuation.cbor_size = 1;
+    passed &= expect(!archive::encode_backup_header(continuation).has_value(),
+                     "continuation header rejects metadata");
+    primary.flags &= ~archive::kBackupFlagSplit;
+    passed &= expect(!archive::encode_backup_header(primary).has_value(),
+                     "single-file header rejects split fields");
     return passed;
 }
 
@@ -157,8 +189,8 @@ bool test_sidecar_codec() {
 }
 
 int run_tests() {
-    return test_backup_header() && test_metadata_envelope() && test_chunk_and_footer() &&
-                   test_sidecar_codec()
+    return test_backup_header() && test_split_backup_headers() && test_metadata_envelope() &&
+                   test_chunk_and_footer() && test_sidecar_codec()
                ? EXIT_SUCCESS
                : EXIT_FAILURE;
 }

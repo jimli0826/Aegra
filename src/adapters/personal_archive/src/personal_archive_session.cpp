@@ -12,7 +12,9 @@
 
 #include <algorithm>
 #include <fstream>
+#include <iomanip>
 #include <limits>
+#include <sstream>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -25,6 +27,7 @@ namespace archive = format::personal_archive;
 inline constexpr std::uint64_t kMaximumMetadataSize = 64ULL * 1024ULL * 1024ULL;
 
 struct ArchivePreamble final {
+    archive::BackupHeader logical_header;
     archive::EncodedBackupHeader header;
     archive::EncodedMetadataEnvelopeHeader envelope;
     crypto_sodium::ProtectedMetadata metadata;
@@ -35,6 +38,11 @@ struct PreparedChunk final {
     std::vector<archive::BlockEntry> entries;
     std::vector<std::byte> payload;
     std::vector<archive::SidecarRecord> sidecar_records;
+};
+
+struct PartArtifact final {
+    std::filesystem::path destination;
+    std::filesystem::path partial;
 };
 
 [[nodiscard]] base::Error error(base::ErrorCode code, std::string message) {
@@ -54,6 +62,11 @@ struct PreparedChunk final {
     if (request.block_size == 0 || request.chunk_size < request.block_size) {
         return base::Result<void>::failure(
             error(base::ErrorCode::kInvalidArgument, "archive block and chunk sizes are invalid"));
+    }
+    if (request.split_size_bytes != 0 &&
+        request.split_size_bytes < archive::kBackupHeaderSize + archive::kBackupFooterSize) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kInvalidArgument, "archive split size is too small"));
     }
     if (request.manifest.volumes.size() != 1) {
         return base::Result<void>::failure(
@@ -102,6 +115,11 @@ make_envelope(const crypto_sodium::MetadataProtectionContext& context,
     header.file_uuid = request.file_uuid;
     header.backup_set_uuid = request.backup_set_uuid;
     header.block_size = request.block_size;
+    header.flags = archive::kBackupFlagFull | archive::kBackupFlagEncrypted;
+    if (request.split_size_bytes != 0) {
+        header.flags |= archive::kBackupFlagSplit;
+        header.split_size_bytes = request.split_size_bytes;
+    }
     header.cbor_size =
         archive::kMetadataEnvelopeHeaderSize + metadata_size + crypto_sodium::kMetadataTagSize;
     header.first_chunk_offset = header.cbor_offset + header.cbor_size;
@@ -140,7 +158,7 @@ make_envelope(const crypto_sodium::MetadataProtectionContext& context,
         return base::Result<ArchivePreamble>::failure(metadata.error());
     }
     return base::Result<ArchivePreamble>::success(
-        {header.value(), envelope.value(), std::move(metadata).value()});
+        {logical_header, header.value(), envelope.value(), std::move(metadata).value()});
 }
 
 [[nodiscard]] base::Result<void> write_bytes(std::ofstream& output,
@@ -280,31 +298,60 @@ void append_zero_block(PreparedChunk& chunk, const std::uint64_t logical_block_i
     return result;
 }
 
+[[nodiscard]] std::filesystem::path archive_part_path(const std::filesystem::path& destination,
+                                                      const std::uint32_t part_index) {
+    if (part_index == 0) {
+        return destination;
+    }
+    std::ostringstream suffix;
+    suffix << '.' << std::setw(3) << std::setfill('0') << part_index;
+    auto result = destination;
+    result += suffix.str();
+    return result;
+}
+
+[[nodiscard]] PartArtifact make_part_artifact(const std::filesystem::path& destination,
+                                              const std::uint32_t part_index) {
+    auto part_destination = archive_part_path(destination, part_index);
+    return {part_destination, partial_path(part_destination)};
+}
+
+[[nodiscard]] std::uint64_t chunk_wire_size(const PreparedChunk& chunk) noexcept {
+    return archive::kChunkHeaderSize +
+           static_cast<std::uint64_t>(chunk.entries.size()) * archive::kBlockEntrySize +
+           chunk.payload.size();
+}
+
 [[nodiscard]] std::filesystem::path sidecar_path(const std::filesystem::path& destination) {
     auto result = destination;
     result += ".bhx";
     return result;
 }
 
-[[nodiscard]] base::Result<void> publish_outputs(const std::filesystem::path& archive_partial,
-                                                 const std::filesystem::path& archive_destination,
+[[nodiscard]] base::Result<void> publish_outputs(const std::vector<PartArtifact>& parts,
                                                  const std::filesystem::path& sidecar_partial,
                                                  const std::filesystem::path& sidecar_destination) {
+    std::vector<std::filesystem::path> published;
     std::error_code filesystem_error;
-    std::filesystem::rename(archive_partial, archive_destination, filesystem_error);
+    std::filesystem::rename(sidecar_partial, sidecar_destination, filesystem_error);
     if (filesystem_error) {
         return base::Result<void>::failure(
-            error(base::ErrorCode::kIoFailure, "failed to publish personal archive"));
+            error(base::ErrorCode::kIoFailure, "failed to publish archive sidecar"));
     }
-    std::filesystem::rename(sidecar_partial, sidecar_destination, filesystem_error);
-    if (!filesystem_error) {
-        return base::Result<void>::success();
+    published.push_back(sidecar_destination);
+    for (auto part = parts.rbegin(); part != parts.rend(); ++part) {
+        std::filesystem::rename(part->partial, part->destination, filesystem_error);
+        if (filesystem_error) {
+            for (const auto& path : published) {
+                std::error_code ignored;
+                std::filesystem::remove(path, ignored);
+            }
+            return base::Result<void>::failure(
+                error(base::ErrorCode::kIoFailure, "failed to publish archive part"));
+        }
+        published.push_back(part->destination);
     }
-    std::error_code ignored;
-    std::filesystem::remove(archive_destination, ignored);
-    std::filesystem::remove(sidecar_partial, ignored);
-    return base::Result<void>::failure(
-        error(base::ErrorCode::kIoFailure, "failed to publish archive sidecar"));
+    return base::Result<void>::success();
 }
 
 } // namespace
@@ -312,10 +359,11 @@ void append_zero_block(PreparedChunk& chunk, const std::uint64_t logical_block_i
 struct PersonalArchiveSession::Impl final {
     explicit Impl(const std::string_view archive_password) : password(archive_password) {}
 
+    archive::BackupHeader primary_header;
     std::filesystem::path destination;
-    std::filesystem::path partial;
     std::filesystem::path sidecar_destination;
     std::filesystem::path sidecar_partial;
+    std::vector<PartArtifact> parts;
     std::ofstream output;
     crypto_sodium::SecureString password;
     std::array<std::byte, 16> file_uuid{};
@@ -323,13 +371,66 @@ struct PersonalArchiveSession::Impl final {
     std::array<std::byte, crypto_sodium::kMetadataSaltSize> salt{};
     std::uint32_t block_size{0};
     std::uint32_t source_index{0};
+    std::uint64_t split_size_bytes{0};
     std::uint64_t logical_size{0};
     std::uint64_t next_logical_offset{0};
     std::uint64_t next_chunk_index{0};
     std::uint64_t total_block_count{0};
     std::uint64_t total_payload_size{0};
+    std::uint64_t current_part_chunk_count{0};
     std::vector<archive::SidecarRecord> sidecar_records;
     bool complete{false};
+
+    [[nodiscard]] base::Result<void> open_next_part() {
+        if (parts.size() >= (std::numeric_limits<std::uint32_t>::max)()) {
+            return base::Result<void>::failure(
+                error(base::ErrorCode::kInsufficientSpace, "archive has too many split parts"));
+        }
+        const auto part_index = static_cast<std::uint32_t>(parts.size());
+        auto artifact = make_part_artifact(destination, part_index);
+        std::error_code filesystem_error;
+        if (std::filesystem::exists(artifact.destination, filesystem_error) ||
+            std::filesystem::exists(artifact.partial, filesystem_error)) {
+            return base::Result<void>::failure(
+                error(base::ErrorCode::kConflict, "archive split part already exists"));
+        }
+        auto continuation = primary_header;
+        continuation.split_part_index = part_index;
+        continuation.cbor_size = 0;
+        continuation.first_chunk_offset = archive::kBackupHeaderSize;
+        auto encoded = archive::encode_backup_header(continuation);
+        if (!encoded) {
+            return base::Result<void>::failure(encoded.error());
+        }
+        output.close();
+        parts.push_back(std::move(artifact));
+        output.open(parts.back().partial, std::ios::binary | std::ios::trunc);
+        auto written = write_bytes(output, encoded.value());
+        if (!output || !written) {
+            return base::Result<void>::failure(
+                error(base::ErrorCode::kIoFailure, "failed to create archive split part"));
+        }
+        current_part_chunk_count = 0;
+        return base::Result<void>::success();
+    }
+
+    [[nodiscard]] base::Result<void> rotate_if_needed(const PreparedChunk& chunk) {
+        if (split_size_bytes == 0 || current_part_chunk_count == 0) {
+            return base::Result<void>::success();
+        }
+        const auto position = output.tellp();
+        if (position < 0) {
+            return base::Result<void>::failure(
+                error(base::ErrorCode::kIoFailure, "failed to determine archive part size"));
+        }
+        const auto current_size = static_cast<std::uint64_t>(position);
+        const auto wire_size = chunk_wire_size(chunk);
+        const auto reserve = wire_size + archive::kBackupFooterSize;
+        if (current_size <= split_size_bytes && reserve <= split_size_bytes - current_size) {
+            return base::Result<void>::success();
+        }
+        return open_next_part();
+    }
 };
 
 PersonalArchiveSession::PersonalArchiveSession(std::unique_ptr<Impl> implementation) noexcept
@@ -359,8 +460,8 @@ PersonalArchiveSession::create(const ArchiveCreateRequest& request) {
         return base::Result<std::unique_ptr<PersonalArchiveSession>>::failure(preamble.error());
     }
     auto implementation = std::make_unique<Impl>(request.password);
+    implementation->primary_header = preamble.value().logical_header;
     implementation->destination = request.destination;
-    implementation->partial = partial;
     implementation->sidecar_destination = sidecar_destination;
     implementation->sidecar_partial = sidecar_partial;
     implementation->file_uuid = request.file_uuid;
@@ -368,6 +469,8 @@ PersonalArchiveSession::create(const ArchiveCreateRequest& request) {
     implementation->salt = preamble.value().metadata.salt;
     implementation->block_size = request.block_size;
     implementation->source_index = request.source_index;
+    implementation->split_size_bytes = request.split_size_bytes;
+    implementation->parts.push_back({request.destination, partial});
     const auto volume =
         std::find_if(request.manifest.volumes.begin(), request.manifest.volumes.end(),
                      [&request](const format::Volume& candidate) {
@@ -407,11 +510,16 @@ base::Result<void> PersonalArchiveSession::write_chunk(const ports::ChunkWriteRe
         return base::Result<void>::failure(prepared.error());
     }
     prepared.value().header.source_index = implementation_->source_index;
+    auto rotated = implementation_->rotate_if_needed(prepared.value());
+    if (!rotated) {
+        return rotated;
+    }
     auto written = write_prepared_chunk(implementation_->output, prepared.value());
     if (!written) {
         return written;
     }
     ++implementation_->next_chunk_index;
+    ++implementation_->current_part_chunk_count;
     implementation_->next_logical_offset += request.descriptor.logical_size;
     implementation_->total_block_count += prepared.value().sidecar_records.size();
     implementation_->total_payload_size += prepared.value().payload.size();
@@ -468,9 +576,8 @@ base::Result<void> PersonalArchiveSession::commit(const base::CancellationToken 
         return base::Result<void>::failure(failure);
     }
     implementation_->output.close();
-    auto published =
-        publish_outputs(implementation_->partial, implementation_->destination,
-                        implementation_->sidecar_partial, implementation_->sidecar_destination);
+    auto published = publish_outputs(implementation_->parts, implementation_->sidecar_partial,
+                                     implementation_->sidecar_destination);
     if (!published) {
         const auto& failure = published.error();
         abort();
@@ -492,7 +599,9 @@ void PersonalArchiveSession::abort() noexcept {
         static_cast<void>(0);
     }
     std::error_code ignored;
-    std::filesystem::remove(implementation_->partial, ignored);
+    for (const auto& part : implementation_->parts) {
+        std::filesystem::remove(part.partial, ignored);
+    }
     std::filesystem::remove(implementation_->sidecar_partial, ignored);
     implementation_->password.clear();
     implementation_->complete = true;

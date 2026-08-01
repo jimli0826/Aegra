@@ -18,7 +18,7 @@
 
 Memory Adapter 是正式的端口参考实现，只保存进程内临时数据，不定义持久化格式。它必须支持短读、容量限制、取消、Commit/Abort 和确定性故障注入，供 Port Contract Test 与 Pipeline 测试复用。
 
-个人版 Archive Adapter 组合 `format`、`IBackupSession`、`IRecoveryPointReader`、libsodium 和 Zstandard。当前 MVP 支持一个 volume：写入期间创建 `<destination>.partial` 与 `<destination>.bhx.partial`，完整 Footer 和加密 Sidecar 均写完后才发布；Abort 和析构清理本次创建的 partial 文件。Reader 在解析 CBOR 前必须完成 Header/Envelope 范围校验和 AEAD 认证。普通恢复不依赖 `.bhx`；增量比较通过显式 API 加载并认证 Sidecar。
+个人版 Archive Adapter 组合 `format`、`IBackupSession`、`IRecoveryPointReader`、libsodium 和 Zstandard。当前数据面支持一个 volume，并可在完整 chunk 边界透明分卷。写入期间所有分卷与 Sidecar 使用 partial 路径，完整 Footer 和加密 Sidecar 均写完后，先发布 Sidecar/续卷，最后发布首卷；Abort 和析构清理本次创建的 partial 文件。Reader 在解析 CBOR 前必须完成 Header/Envelope 范围校验和 AEAD 认证，随后发现并验证连续分卷。普通恢复不依赖 `.bhx`；增量比较通过显式 API 加载并认证 Sidecar。
 
 Archive Reader 分别限制 metadata、chunk stored payload 和展开后的 chunk logical size。ZERO run、压缩块和其它稀疏表示在分配恢复缓冲区前都必须通过 logical size 上限检查。
 

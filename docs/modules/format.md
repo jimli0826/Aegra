@@ -48,7 +48,7 @@
 - `BackupHeader`、`CborMetadataEnvelopeHeader`、`ChunkHeader`、`BlockEntry`、`BackupFooter` 的显式小端编解码；
 - 整数 CBOR Map key、非法 magic/版本/尺寸、未加密 metadata envelope 和非法 BlockEntry 的拒绝路径。
 
-当前实现不使用 packed C++ struct 直接映射外部字节。`.bhx` Sidecar 采用固定 96 字节头和显式小端 payload codec；DATA 使用 SHA-256，ZERO/SKIP hash 全零。分卷、DEDUP 写入、增量链和多 volume Archive 仍是后续工作。
+当前实现不使用 packed C++ struct 直接映射外部字节。`.bhx` Sidecar 采用固定 96 字节头和显式小端 payload codec；DATA 使用 SHA-256，ZERO/SKIP hash 全零。V6 Header codec 区分非分卷、首卷和续卷规则，Adapter 已实现完整 chunk 边界分卷、末卷 Footer 和跨卷连续扫描。DEDUP 写入、增量链和多 volume Archive 仍是后续工作。
 
 ## 完成标准
 

@@ -46,6 +46,14 @@
 - `ChunkDescriptor`、调用期 `ChunkWriteRequest` 和拥有数据的 `ChunkData`。
 - 引用 `contracts::TaskProgress` 的 `IProgressSink`。
 
+## 多数据源演进方向
+
+现有 `IBackupSession` 和 `IRecoveryPointReader` 表达一个连续逻辑 source，不把多个 volume 拼接成一个
+全局 offset 空间。按 [ADR-0003](../adr/0003-personal-split-archive-and-multi-source-boundary.md)，
+后续真实多 volume use case 使用 Backup Set/Source 两级生命周期：Set Session 统一提交，Source Writer
+保持现有连续 chunk 语义；读取侧由 Recovery Point Set Reader 枚举并打开 source-scoped Reader。
+在第二个真实 source 消费者出现前不加入空接口。
+
 ## 测试
 
 每个 Port 提供可复用 Contract Test Suite。所有 Adapter 必须运行同一组边界、短读、取消、并发、错误注入和资源释放测试。

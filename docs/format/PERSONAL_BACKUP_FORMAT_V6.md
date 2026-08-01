@@ -142,7 +142,7 @@ part 2: <name>.bkf.002
 
 `split_size_bytes` 是写入器的目标上限，不是每卷必须达到的精确大小。单个完整 chunk 加头部所需空间可能使实际大小接近或超过该目标，因此写入器必须根据目标上限调整 `default_chunk_size`，并为末卷 Footer 保留空间。
 
-`split_part_count` 为 0 表示未在 header 中声明总数；读取器此时从 `.001` 开始按连续序号发现续卷，直到遇到末卷 Footer。若该字段非 0，则所有分卷声明的总数必须一致，且实际文件数必须相等。序号不连续、UUID 不一致、非末卷出现 Footer、末卷缺少 Footer均表示备份不完整或损坏。
+V6 写入器固定将 `split_part_count` 写为 0：首卷 Header 同时是 metadata AEAD 的 AAD，提交时不能回写总卷数。读取器从 `.001` 开始按连续序号发现续卷，直到遇到末卷 Footer，并受产品配置的最大分卷数限制。格式解析器仍校验非零声明的一致性，以保持字段本身的自描述约束。序号不连续、UUID 不一致、Footer 后仍有续卷或末卷缺少 Footer均表示备份不完整或损坏。
 
 ### ChunkHeader
 
@@ -247,7 +247,7 @@ logical_size = min(block_size,
 
 ### BackupFooter
 
-`BackupFooter` 最后写入，固定 512 字节，作为完成标记和全局统计信息。顺序恢复不依赖 Footer 中的索引目录；如果 Footer 缺失，可通过顺序扫描完整 chunk 恢复到最后一个完整 chunk。
+`BackupFooter` 最后写入，固定 512 字节，作为完成标记和全局统计信息。顺序恢复不依赖 Footer 中的索引目录，但正式恢复必须验证 Footer；Footer 缺失时只能由独立的诊断/抢救工具扫描完整 chunk，不能把该 Archive 视为已完成备份。
 
 ```cpp
 #pragma pack(push, 1)
@@ -868,7 +868,7 @@ V1 固定使用 SHA-256（`hash_size = 32`）。DATA record 保存内容散列�
 
 `currentOffset` 应在每次成功写入后递增。`BlockEntry.ptr.payload_offset` 保存的是相对于当前 chunk payload 起始位置的偏移，不是文件绝对偏移。
 
-启用分卷时，步骤 10 之前先判断完整 chunk 是否能放入当前卷；不能则关闭当前卷，创建下一个连续编号的续卷，写入续卷 Header 后再写整个 chunk。步骤 15 的 Footer 只写入最后一个分卷。任何步骤失败时，本次新建的所有分卷和 sidecar 临时文件必须作为同一组不完整产物清理。
+启用分卷时，步骤 10 之前先判断完整 chunk 是否能放入当前卷；不能则关闭当前卷，创建下一个连续编号的续卷，写入续卷 Header 后再写整个 chunk。步骤 15 的 Footer 只写入最后一个分卷。所有输出先写入 partial 路径；发布顺序固定为 Sidecar、从后向前的续卷、首卷，首卷是整个 Archive 的可见性标记。任何步骤失败时，本次新建的所有分卷、Sidecar partial 和已经发布的组内文件必须清理。
 
 写入 `BackupHeader` 时，`cbor_size` 必须使用加密 envelope 的总大小，而不是 CBOR plaintext 大小。`first_chunk_offset` 应在写入 CBOR envelope 后计算并回填，或由预先完成的 metadata 加密结果确定。
 

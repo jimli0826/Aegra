@@ -3,6 +3,8 @@ find_package(nlohmann_json CONFIG REQUIRED)
 add_library(aegra_app_worker_personal STATIC
     src/worker_host.cpp
     src/worker_protocol.cpp
+    src/worker_session.cpp
+    src/worker_session_protocol.cpp
     src/windows_personal_backup.cpp
     src/windows_personal_backup_runtime.cpp
     src/windows_personal_backup_task.cpp
@@ -39,6 +41,9 @@ target_compile_definitions(
 )
 target_link_libraries(
     aegra_personal_worker
-    PRIVATE Aegra::AppWorkerPersonal Aegra::AdapterWindowsSystem
+    PRIVATE
+        Aegra::AppWorkerPersonal
+        Aegra::AdapterWindowsIpc
+        Aegra::AdapterWindowsSystem
 )
 aegra_configure_target(aegra_personal_worker)

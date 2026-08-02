@@ -4,6 +4,7 @@
 #include "aegra/base/result.h"
 #include "aegra/contracts/job.h"
 #include "aegra/contracts/worker_response.h"
+#include "aegra/contracts/worker_session.h"
 
 #include <string>
 #include <string_view>
@@ -17,6 +18,11 @@ decode_worker_job_request(std::string_view encoded);
 
 [[nodiscard]] base::Result<std::string>
 encode_worker_response(const contracts::WorkerResponse& response);
+
+[[nodiscard]] base::Result<contracts::WorkerCommand>
+decode_worker_command(std::string_view encoded);
+
+[[nodiscard]] base::Result<std::string> encode_worker_event(const contracts::WorkerEvent& event);
 
 struct EncodedWorkerResult final {
     WorkerExitCode exit_code{WorkerExitCode::kHostFailure};

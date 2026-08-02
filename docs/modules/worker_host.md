@@ -6,10 +6,11 @@
 外部停止与 deadline 合并、任务调用、异常收口、稳定退出码和响应编码，不负责备份算法、凭据持久化、
 任务调度或控制面数据库访问。
 
-当前协议使用 UTF-8 JSON。JSON 依赖只存在于 `apps/worker`，`contracts` 保持与传输技术无关。后续改用
-命名管道、HTTPS 或 Protobuf 时，`JobRequest`、`TaskResult` 和 `WorkerResponse` 的语义保持不变。
-首个 `aegra_personal_worker.exe` 从 stdin 读取一个最大 1 MiB 的 Job，stdout 只写一个最终响应；运行时
-系统能力与凭据部署见 [ADR-0007](../adr/0007-windows-worker-system-capabilities.md)。
+当前消息使用 UTF-8 JSON。JSON 依赖只存在于 `apps/worker`，`contracts` 保持与传输技术无关。
+`aegra_personal_worker.exe` 无参数时从 stdin 读取一个最大 1 MiB 的 Job，stdout 只写最终响应；正式父进程
+监督使用 `--pipe <logical-name>` 双向会话。运行时系统能力与凭据部署见
+[ADR-0007](../adr/0007-windows-worker-system-capabilities.md)，会话与 framing 见
+[ADR-0008](../adr/0008-worker-session-named-pipe-protocol.md)。
 
 ## 请求协议
 
@@ -61,6 +62,17 @@ Host 在编码前验证响应，并确保响应及内部 `TaskResult` 的 job/tr
 
 退出码只用于进程监督和快速分类；Management Service 必须以结构化 `WorkerResponse` 为详细事实，不能
 解析 stderr 或日志文本充当协议。
+
+## 双向会话协议
+
+父进程先发送一个 `JobRequest` frame。请求未通过解析或校验时，Worker 发送一个 kind=result 的
+`WorkerEvent`，其 payload 是 RequestRejected `WorkerResponse`，随后以 20 退出。任务被接受后，Worker
+可以发送零到多个 Progress event；父进程可以发送一次 job/trace 完全匹配的 Cancel command。未知、损坏
+或关联不匹配的 command 会停止任务并形成 `worker.command_failed` Host failure。
+
+任务结束后 Command Listener 先通过局部 cancellation 停止并 join，再发送唯一最终 Result，因此 Progress
+与 Result 不并发写。Progress 发送失败会停止任务并映射为 `worker.progress_failed`。父进程断开时传输可能
+无法承载最终 Result，此时进程退出码用于标识 Host failure。
 
 ## 取消与生命周期
 

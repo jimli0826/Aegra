@@ -41,6 +41,10 @@ if(WIN32)
     aegra_add_test(aegra_windows_system_tests adapters/windows_system_test.cpp)
     target_link_libraries(aegra_windows_system_tests PRIVATE Aegra::AdapterWindowsSystem)
 
+    aegra_add_test(aegra_windows_ipc_tests adapters/windows_ipc_test.cpp)
+    target_compile_definitions(aegra_windows_ipc_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(aegra_windows_ipc_tests PRIVATE Aegra::AdapterWindowsIpc)
+
     aegra_add_test(aegra_windows_vss_tests adapters/windows_vss_test.cpp)
     target_include_directories(
         aegra_windows_vss_tests
@@ -87,6 +91,16 @@ if(WIN32)
         PRIVATE Aegra::AppWorkerPersonal
     )
 
+    aegra_add_test(aegra_worker_session_tests apps/worker_session_test.cpp)
+    target_include_directories(
+        aegra_worker_session_tests
+        PRIVATE "${PROJECT_SOURCE_DIR}/src/apps/worker/src"
+    )
+    target_link_libraries(
+        aegra_worker_session_tests
+        PRIVATE Aegra::AppWorkerPersonal
+    )
+
     add_test(
         NAME aegra_personal_worker_rejection
         COMMAND
@@ -94,6 +108,21 @@ if(WIN32)
             "-DAEGRA_WORKER=$<TARGET_FILE:aegra_personal_worker>"
             "-DAEGRA_REQUEST=${CMAKE_CURRENT_SOURCE_DIR}/apps/invalid_worker_job.json"
             -P "${PROJECT_SOURCE_DIR}/cmake/RunWorkerRejection.cmake"
+    )
+
+    add_executable(aegra_personal_worker_pipe_tests apps/personal_worker_pipe_test.cpp)
+    aegra_configure_target(aegra_personal_worker_pipe_tests)
+    target_compile_definitions(aegra_personal_worker_pipe_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(
+        aegra_personal_worker_pipe_tests
+        PRIVATE Aegra::Contracts
+    )
+    add_dependencies(aegra_personal_worker_pipe_tests aegra_personal_worker)
+    add_test(
+        NAME aegra_personal_worker_pipe_tests
+        COMMAND
+            $<TARGET_FILE:aegra_personal_worker_pipe_tests>
+            $<TARGET_FILE:aegra_personal_worker>
     )
 endif()
 

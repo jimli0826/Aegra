@@ -36,6 +36,11 @@
 `WorkerResponse` 是 Worker 的版本化根响应，互斥表达已接受任务的 `TaskResult`、请求拒绝和 Host 故障。
 响应与内部结果必须保持 job/trace 关联一致。传输编码和进程退出码属于 `apps/worker`，不进入契约实现。
 
+`WorkerCommand` 与 `WorkerEvent` 定义双向会话契约。首阶段 Command 只支持关联当前 job/trace 的 Cancel；
+Event 互斥表达 `TaskProgress` 或最终 `WorkerResponse`。协议要求零到多个 Progress，随后至多一个 Result；
+具体 framing、JSON 和 Named Pipe 不进入 Contracts。长期决策见
+[ADR-0008](../adr/0008-worker-session-named-pipe-protocol.md)。
+
 ## 测试
 
 - 每个消息的必填字段、版本和枚举验证。

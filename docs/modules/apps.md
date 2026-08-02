@@ -35,6 +35,11 @@ Worker Host 与 JSON wire schema、退出码、deadline 和异常边界见
 [Worker Host 与进程协议](worker_host.md)。JSON 编解码属于 `apps/worker`，不得反向进入 `contracts`；
 运行参数来自受信任配置，任务消息不能覆盖 KDF、内存预算或应用身份配置。
 
+正式父子进程监督使用双向 Worker Session：父进程发送一个 Job，运行中可发送关联当前任务的 Cancel；
+Worker 发送 Progress 事件并最终发送一个 Result。Windows Composition Root 通过 `--pipe` 注入
+`WindowsNamedPipeChannel`，状态机只依赖 `IMessageChannel`。传输与 ACL 决策见
+[ADR-0008](../adr/0008-worker-session-named-pipe-protocol.md)。
+
 ## WinPE 离线恢复
 
 从旧 WinPE 设计保留以下安全需求：

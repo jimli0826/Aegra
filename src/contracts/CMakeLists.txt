@@ -3,6 +3,7 @@ add_library(aegra_contracts STATIC
     src/progress.cpp
     src/task_result.cpp
     src/worker_response.cpp
+    src/worker_session.cpp
 )
 
 add_library(Aegra::Contracts ALIAS aegra_contracts)

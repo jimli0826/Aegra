@@ -42,6 +42,11 @@ Snapshot Device Object，Block Source 本身不创建快照。
 Worker 的 Windows 时钟、CNG 随机源和 Credential Manager Resolver 也由独立 Windows System Adapter
 实现；Secret 必须复制到锁页内存并在析构前清零，不允许锁页失败时降级。
 
+`Aegra::AdapterWindowsIpc` 实现本地 Worker Named Pipe Client。它只接受受限逻辑名称，使用 4 字节
+little-endian 长度前缀和默认 1 MiB 帧上限，支持一个 Reader/Writer 并发及 `CancelIoEx` 取消；它不
+解析 JSON，不创建 Server 或决定 ACL。协议决策见
+[ADR-0008](../adr/0008-worker-session-named-pipe-protocol.md)。
+
 ## Dokan/虚拟磁盘约束
 
 从旧项目保留以下经过验证的设计知识：

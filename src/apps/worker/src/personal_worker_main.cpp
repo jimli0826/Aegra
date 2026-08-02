@@ -1,5 +1,7 @@
 #include "aegra/apps/worker/worker_protocol.h"
+#include "aegra/apps/worker/worker_session.h"
 
+#include "aegra/adapters/windows_ipc/windows_named_pipe_channel.h"
 #include "aegra/adapters/windows_system/windows_system.h"
 #include "aegra/apps/worker/windows_personal_backup_task.h"
 #include "aegra/base/cancellation.h"
@@ -11,6 +13,7 @@
 #include <cstdint>
 #include <iostream>
 #include <limits>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -69,19 +72,21 @@ std::string read_request() {
     return request;
 }
 
-int run_worker() {
+struct Runtime final {
     aegra::adapters::windows_system::WindowsCredentialResolver credentials;
     aegra::adapters::windows_system::WindowsCryptographicRandom random;
     aegra::adapters::windows_system::WindowsSystemClock clock;
-    auto options = trusted_options();
-    const aegra::apps::worker::WindowsPersonalBackupTaskContext context{
-        credentials,
-        random,
-        clock,
-        nullptr,
-    };
+    aegra::apps::worker::WindowsPersonalBackupTaskOptions options{trusted_options()};
+
+    [[nodiscard]] aegra::apps::worker::WindowsPersonalBackupTaskContext context() {
+        return {credentials, random, clock, nullptr};
+    }
+};
+
+int run_stdin_worker(Runtime& runtime) {
+    auto context = runtime.context();
     auto result = aegra::apps::worker::run_windows_personal_backup_worker_request(
-        read_request(), options, context, {});
+        read_request(), runtime.options, context, {});
     if (!result) {
         return static_cast<int>(aegra::apps::worker::WorkerExitCode::kHostFailure);
     }
@@ -89,11 +94,34 @@ int run_worker() {
     return static_cast<int>(result.value().exit_code);
 }
 
+int run_pipe_worker(Runtime& runtime, const std::string_view pipe_name) {
+    auto channel = aegra::adapters::windows_ipc::WindowsNamedPipeChannel::connect(
+        {std::string(pipe_name)}, {});
+    if (!channel) {
+        return static_cast<int>(aegra::apps::worker::WorkerExitCode::kHostFailure);
+    }
+    auto context = runtime.context();
+    const auto exit = aegra::apps::worker::run_windows_personal_backup_worker_session(
+        *channel.value(), runtime.options, context, {});
+    return static_cast<int>(exit);
+}
+
+int run_worker(const std::span<const char* const> arguments) {
+    Runtime runtime;
+    if (arguments.size() == 3 && std::string_view(arguments[1]) == "--pipe") {
+        return run_pipe_worker(runtime, arguments[2]);
+    }
+    if (arguments.size() == 1) {
+        return run_stdin_worker(runtime);
+    }
+    return static_cast<int>(aegra::apps::worker::WorkerExitCode::kRequestRejected);
+}
+
 } // namespace
 
-int main() noexcept {
+int main(const int argument_count, const char* const* arguments) noexcept {
     try {
-        return run_worker();
+        return run_worker({arguments, static_cast<std::size_t>(argument_count)});
     } catch (...) {
         const auto output = GetStdHandle(STD_OUTPUT_HANDLE);
         DWORD written = 0;

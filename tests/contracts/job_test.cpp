@@ -2,6 +2,7 @@
 #include "aegra/contracts/progress.h"
 #include "aegra/contracts/task_result.h"
 #include "aegra/contracts/worker_response.h"
+#include "aegra/contracts/worker_session.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -123,10 +124,40 @@ bool test_worker_response_validation() {
     return passed;
 }
 
+bool test_worker_session_validation() {
+    aegra::contracts::WorkerCommand command;
+    command.job_id = "job-1";
+    command.trace_id = "trace-1";
+    bool passed = expect(aegra::contracts::validate_worker_command(command).has_value(),
+                         "valid cancel command is accepted");
+    command.trace_id.clear();
+    passed &= expect(!aegra::contracts::validate_worker_command(command).has_value(),
+                     "cancel command requires correlation");
+
+    aegra::contracts::TaskProgress progress;
+    progress.job_id = "job-1";
+    progress.trace_id = "trace-1";
+    aegra::contracts::WorkerEvent event;
+    event.job_id = "job-1";
+    event.trace_id = "trace-1";
+    event.kind = aegra::contracts::WorkerEventKind::kProgress;
+    event.progress = progress;
+    passed &= expect(aegra::contracts::validate_worker_event(event).has_value(),
+                     "valid progress event is accepted");
+    event.response = aegra::contracts::WorkerResponse{};
+    passed &= expect(!aegra::contracts::validate_worker_event(event).has_value(),
+                     "worker event payloads are mutually exclusive");
+    event.response.reset();
+    event.trace_id = "wrong-trace";
+    passed &= expect(!aegra::contracts::validate_worker_event(event).has_value(),
+                     "worker event correlation must match its payload");
+    return passed;
+}
+
 int run_tests() {
     const bool passed = test_job_request_validation() && test_progress_validation() &&
                         test_task_result_validation() && test_worker_response_validation();
-    return passed ? EXIT_SUCCESS : EXIT_FAILURE;
+    return passed && test_worker_session_validation() ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 } // namespace

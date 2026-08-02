@@ -4,7 +4,8 @@
 
 本模块把 Windows Volume Inventory、稳定块读取、VSS Snapshot 和后续 Disk/Partition 操作适配到
 Aegra 的平台无关核心。阶段 8A 实现 Volume Inventory 与稳定 Block Source；阶段 8B 实现多 Volume
-VSS Snapshot Set Session；阶段 8F 实现 Worker 使用的系统时钟、密码学随机与凭据解析。
+VSS Snapshot Set Session；阶段 8F 实现 Worker 使用的系统时钟、密码学随机与凭据解析；阶段 8G
+实现 Worker 本地 Named Pipe Client。
 
 本模块不直接读取在线 Volume、不备份 `PhysicalDrive`、不修改磁盘或分区，也不执行 BCD/WinRE 修复。
 
@@ -15,6 +16,8 @@ VSS Snapshot Set Session；阶段 8F 实现 Worker 使用的系统时钟、密�
   `windows_disk` 的实现。
 - `aegra_adapter_windows_system` 只依赖 `Aegra::Ports`、BCrypt、Credential Manager 和虚拟内存 API；
   不依赖 Disk、VSS 或 Archive Adapter。
+- `aegra_adapter_windows_ipc` 只依赖 `Aegra::Ports` 与 Windows Named Pipe API；不解析 JSON，也不依赖
+  Worker Host 实现。
 - 公共头不得 include `Windows.h`、`winioctl.h`、COM 或 VSS 头文件。
 - Windows Handle、`OVERLAPPED`、Event 和 Volume Enumeration Handle 必须由 Adapter 内 RAII 对象管理。
 - Pipeline、Format、Ports 和 Contracts 不得依赖该 Target。
@@ -67,6 +70,16 @@ Set，成功后幂等；未显式关闭或关闭失败时，析构路径执行 `
   析构前清零。具体安全与部署决策见
   [ADR-0007](../adr/0007-windows-worker-system-capabilities.md)。
 
+### `WindowsNamedPipeChannel`
+
+实现 `IMessageChannel`，作为 Client 连接父进程预创建的本地 Pipe。公开输入是最长 128 字节且只含
+`[A-Za-z0-9_.-]` 的逻辑名称，Adapter 内部映射到 `\\.\pipe\aegra-worker-<name>`。传输使用 byte mode、
+4 字节 little-endian 长度前缀和 UTF-8 body；零长度或超过配置上限的帧直接拒绝。
+
+同一实例允许一个接收和一个发送并发，不保证多 Reader 或多 Writer 安全。连接轮询响应取消，挂起
+Overlapped I/O 通过 `CancelIoEx` 中止。父进程负责 Server 生命周期、ACL 与 Worker SID 授权，具体协议见
+[ADR-0008](../adr/0008-worker-session-named-pipe-protocol.md)。
+
 ## 核心不变量
 
 - 在线 Volume 和 `PhysicalDrive` 不能通过公开 Block Source 请求打开。
@@ -108,6 +121,9 @@ Target：`aegra_adapter_windows_vss` / `Aegra::AdapterWindowsVss`，仅在 Windo
 `aegra_adapter_windows_system` / `Aegra::AdapterWindowsSystem` 同样仅在 Windows 构建，公开头不暴露
 `Windows.h`、Credential 或 BCrypt 类型。
 
+`aegra_adapter_windows_ipc` / `Aegra::AdapterWindowsIpc` 仅在 Windows 构建，公开头使用 PImpl 隔离
+`HANDLE` 与 `OVERLAPPED`。
+
 ## 测试
 
 - 普通单元测试只使用临时文件，不依赖管理员权限、真实 Volume 或 VSS Service。
@@ -118,6 +134,8 @@ Target：`aegra_adapter_windows_vss` / `Aegra::AdapterWindowsVss`，仅在 Windo
 - 真实 Volume、跨盘 Volume、无介质设备、访问拒绝和 VSS 生命周期进入单独集成测试。
 - System Adapter 普通测试不创建或修改真实 Credential；成功解析、锁页清零和账户隔离进入临时
   Credential 集成套件。
+- IPC 测试创建进程内临时本地 Pipe，覆盖双向 frame、并发 Reader/Writer、无效长度、预取消、挂起接收
+  取消和 Server 断线；真实 Worker 子进程测试验证 `--pipe` 拒绝路径。
 
 ## 安全与可观测性
 

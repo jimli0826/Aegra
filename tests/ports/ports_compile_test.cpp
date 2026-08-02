@@ -2,6 +2,7 @@
 #include "aegra/ports/block_io.h"
 #include "aegra/ports/clock.h"
 #include "aegra/ports/credential.h"
+#include "aegra/ports/message_channel.h"
 #include "aegra/ports/progress.h"
 #include "aegra/ports/random.h"
 
@@ -18,5 +19,6 @@ int main() {
     static_assert(std::has_virtual_destructor_v<aegra::ports::IResolvedSecret>);
     static_assert(std::has_virtual_destructor_v<aegra::ports::IProgressSink>);
     static_assert(std::has_virtual_destructor_v<aegra::ports::IRandomSource>);
+    static_assert(std::has_virtual_destructor_v<aegra::ports::IMessageChannel>);
     return EXIT_SUCCESS;
 }

@@ -10,6 +10,7 @@
 - 对象存储：`IObjectReader`、`IObjectWriter`、`IListableObjectStore`、`IMutableObjectStore`。
 - 生命周期：`ISnapshotSession`、`IBackupSession`、`IRecoveryPointReader`。
 - 系统能力：`IClock`、`IProgressSink`、`ICredentialResolver`、`IRandomSource`。
+- 进程传输：`IMessageChannel`。
 
 ## 依赖
 
@@ -53,6 +54,8 @@
 - `IRandomSource::fill()` 填充调用方提供的缓冲区并支持取消，不暴露随机库或操作系统类型。
 - `IClock::now_utc_ms()` 提供 UTC 毫秒时间；测试必须注入确定性时钟。
 - `IProgressSink::publish()` 不得抛出异常；事件拥有 job/trace 关联字段且不得包含 Secret 或客户数据。
+- `IMessageChannel` 传递拥有所有权的 UTF-8 消息；一个 Reader 和一个 Writer可以并发，挂起 I/O 必须
+  响应取消，Adapter 必须执行帧大小限制。消息 schema 与状态机不属于 Port。
 
 ## 多数据源演进方向
 

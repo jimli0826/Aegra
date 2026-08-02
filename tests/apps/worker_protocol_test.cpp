@@ -200,8 +200,37 @@ bool test_encoded_request_rejection() {
     return passed;
 }
 
+bool test_session_protocol() {
+    auto command = app::decode_worker_command(
+        R"({"schema_version":1,"job_id":"job-1","trace_id":"trace-1","kind":1})");
+    bool passed = expect(command && command.value().kind == contracts::WorkerCommandKind::kCancel,
+                         "valid cancel command JSON decodes");
+    passed &= expect(!app::decode_worker_command(
+                         R"({"schema_version":1,"job_id":"job-2","trace_id":"","kind":1})"),
+                     "invalid cancel command correlation is rejected");
+
+    contracts::TaskProgress progress;
+    progress.job_id = "job-1";
+    progress.trace_id = "trace-1";
+    progress.message_code = "backup.preparing";
+    contracts::WorkerEvent event;
+    event.job_id = "job-1";
+    event.trace_id = "trace-1";
+    event.kind = contracts::WorkerEventKind::kProgress;
+    event.progress = progress;
+    auto encoded = app::encode_worker_event(event);
+    passed &= expect(encoded && encoded.value().find("\"kind\":1") != std::string::npos &&
+                         encoded.value().find("backup.preparing") != std::string::npos,
+                     "progress event encodes with stable kind and message code");
+    event.trace_id = "wrong-trace";
+    passed &= expect(!app::encode_worker_event(event),
+                     "mismatched progress event cannot cross the session boundary");
+    return passed;
+}
+
 int run_tests() {
-    return test_decode_job() && test_encode_response() && test_encoded_request_rejection()
+    return test_decode_job() && test_encode_response() && test_encoded_request_rejection() &&
+                   test_session_protocol()
                ? EXIT_SUCCESS
                : EXIT_FAILURE;
 }

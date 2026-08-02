@@ -3,6 +3,7 @@ add_library(aegra_pipeline STATIC
     src/bounded_chunk_queue.cpp
     src/fixed_size_chunker.cpp
     src/restore_pipeline.cpp
+    src/verify_pipeline.cpp
 )
 
 add_library(Aegra::Pipeline ALIAS aegra_pipeline)

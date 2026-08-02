@@ -22,7 +22,8 @@
 - 密码、Token 和密钥只以 `SecretRef` 表示。
 - 错误码和枚举显式定值；未知关键版本直接拒绝。
 - JSON/CBOR/Protobuf 属于 Adapter 编码选择，DTO 本身不依赖序列化库。
-- Job 至少包含 job、tenant、operation、source、target、credential refs、trace 和 deadline。
+- Job 至少包含 job、tenant、operation、source、credential refs、trace 和 deadline；
+  Backup/Restore/Export 还需要 target，Verify 明确不需要 target。
 
 ## 当前状态
 

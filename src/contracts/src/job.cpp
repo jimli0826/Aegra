@@ -22,6 +22,10 @@ bool is_known_operation(const JobOperation operation) noexcept {
     return false;
 }
 
+bool requires_target(const JobOperation operation) noexcept {
+    return operation != JobOperation::kVerify;
+}
+
 } // namespace
 
 base::Result<void> validate_job_request(const JobRequest& request) {
@@ -45,7 +49,7 @@ base::Result<void> validate_job_request(const JobRequest& request) {
                             [](const std::string& ref) { return ref.empty(); })) {
         return invalid("at least one source_ref is required");
     }
-    if (request.target_ref.empty()) {
+    if (requires_target(request.operation) && request.target_ref.empty()) {
         return invalid("target_ref is required");
     }
     if (request.trace_id.empty()) {

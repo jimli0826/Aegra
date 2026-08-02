@@ -1,6 +1,8 @@
 find_package(nlohmann_json CONFIG REQUIRED)
 
 add_library(aegra_app_worker_personal STATIC
+    src/personal_archive_verify_task.cpp
+    src/personal_archive_verify_task_backend.cpp
     src/worker_host.cpp
     src/worker_protocol.cpp
     src/worker_session.cpp

@@ -98,6 +98,13 @@ bool test_decode_job() {
     passed &= expect(!overflow && overflow.error().code == base::ErrorCode::kInvalidArgument,
                      "out-of-range numeric fields cannot narrow into valid enums");
 
+    const auto verify_json =
+        R"({"schema_version":1,"job_id":"verify-1","tenant_id":"tenant-1","operation":3,"source_refs":["archive.bkf"],"credential_refs":["secret://verify"],"trace_id":"trace-verify"})";
+    auto verify = app::decode_worker_job_request(verify_json);
+    passed &= expect(verify && verify.value().target_ref.empty() &&
+                         verify.value().operation == contracts::JobOperation::kVerify,
+                     "verify JSON may omit target_ref");
+
     auto fractional_json = valid_job_json();
     const auto deadline = fractional_json.find(R"("deadline_utc_ms": 2000)");
     fractional_json.replace(deadline, std::string(R"("deadline_utc_ms": 2000)").size(),

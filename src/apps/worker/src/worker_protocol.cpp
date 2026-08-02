@@ -68,7 +68,13 @@ contracts::JobRequest parse_job(const Json& root) {
     job.tenant_id = required<std::string>(root, "tenant_id");
     job.operation = static_cast<contracts::JobOperation>(operation);
     job.source_refs = required<std::vector<std::string>>(root, "source_refs");
-    job.target_ref = required<std::string>(root, "target_ref");
+    const auto target = root.find("target_ref");
+    if (target != root.end()) {
+        if (!target->is_string()) {
+            throw std::invalid_argument("worker request target_ref must be a string");
+        }
+        job.target_ref = target->get<std::string>();
+    }
     job.trace_id = required<std::string>(root, "trace_id");
     job.deadline_utc_ms = optional_deadline(root);
     for (const auto& value : required<std::vector<std::string>>(root, "credential_refs")) {

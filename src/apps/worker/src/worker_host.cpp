@@ -2,6 +2,7 @@
 
 #include "worker_host_internal.h"
 
+#include "aegra/apps/worker/personal_archive_verify_task.h"
 #include "aegra/base/error.h"
 #include "aegra/contracts/task_result.h"
 #include "aegra/contracts/worker_response.h"
@@ -143,6 +144,9 @@ class PersonalBackupExecutor final : public IWorkerTaskExecutor {
 
     [[nodiscard]] base::Result<contracts::TaskResult>
     execute(const base::CancellationToken& cancellation) override {
+        if (job_.operation == contracts::JobOperation::kVerify) {
+            return execute_personal_archive_verify_task(job_, options_, context_, cancellation);
+        }
         return execute_windows_personal_backup_task(job_, options_, context_, cancellation);
     }
 

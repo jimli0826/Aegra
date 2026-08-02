@@ -46,6 +46,14 @@ bool test_job_request_validation() {
     request.credential_refs = {aegra::contracts::SecretRef{}};
     passed &= expect(!aegra::contracts::validate_job_request(request).has_value(),
                      "empty credential reference is rejected");
+    request = valid_request();
+    request.operation = aegra::contracts::JobOperation::kVerify;
+    request.target_ref.clear();
+    passed &= expect(aegra::contracts::validate_job_request(request).has_value(),
+                     "verify job does not require a target");
+    request.operation = aegra::contracts::JobOperation::kRestore;
+    passed &= expect(!aegra::contracts::validate_job_request(request).has_value(),
+                     "restore job still requires a target");
     return passed;
 }
 

@@ -100,4 +100,8 @@ Validate JobRequest and trusted options
 - 测试断言 Pipeline 失败会 Abort Archive，已 Commit Archive 的清理失败作为独立告警返回；
 - 普通测试不访问真实 Volume、VSS 或文件系统 Archive；
 - 管理员环境集成测试后续覆盖真实 NTFS/ReFS Volume、VSS Service、空间不足和 Writer failure；
+- 真实 NTFS 单卷成功路径可通过
+  [`scripts/test_windows_personal_backup_e2e.ps1`](../../scripts/test_windows_personal_backup_e2e.ps1)
+  执行；脚本创建隔离 VHDX、临时 Credential，运行真实 Worker，并检查 Archive 提交与 VSS 清理。详细说明见
+  [Windows 个人版真实单卷备份 E2E 测试](../testing/WINDOWS_PERSONAL_BACKUP_E2E.md)。
 - Debug/Release、clang-tidy、源码规模与依赖检查必须通过。

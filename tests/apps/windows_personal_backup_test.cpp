@@ -178,6 +178,7 @@ class TestRuntime final : public detail::IWindowsPersonalBackupRuntime {
 app::WindowsPersonalVolumeBackupRequest request() {
     app::WindowsPersonalVolumeBackupRequest result;
     result.job_id = "windows-volume-backup";
+    result.trace_id = "trace-windows-volume-backup";
     result.volume_guid_path = LR"(\\?\Volume{01234567-89ab-cdef-0123-456789abcdef}\)";
     result.destination = "backup.bkf";
     result.password = "test-password";

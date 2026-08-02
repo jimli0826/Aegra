@@ -54,6 +54,19 @@ if(WIN32)
         aegra_windows_personal_backup_tests
         PRIVATE Aegra::AppWorkerPersonal Aegra::Format
     )
+
+    aegra_add_test(
+        aegra_windows_personal_backup_task_tests
+        apps/windows_personal_backup_task_test.cpp
+    )
+    target_include_directories(
+        aegra_windows_personal_backup_task_tests
+        PRIVATE "${PROJECT_SOURCE_DIR}/src/apps/worker/src"
+    )
+    target_link_libraries(
+        aegra_windows_personal_backup_task_tests
+        PRIVATE Aegra::AppWorkerPersonal Aegra::Contracts
+    )
 endif()
 
 aegra_add_test(aegra_pipeline_tests pipeline/pipeline_roundtrip_test.cpp)

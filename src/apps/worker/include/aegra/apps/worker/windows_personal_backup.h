@@ -18,6 +18,7 @@ namespace aegra::apps::worker {
 
 struct WindowsPersonalVolumeBackupRequest final {
     std::string job_id;
+    std::string trace_id;
     std::filesystem::path volume_guid_path;
     std::filesystem::path destination;
     std::string_view password;

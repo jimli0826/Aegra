@@ -42,7 +42,7 @@ Volume 未找到、逻辑大小不可靠、VSS 创建失败或 Snapshot Device �
 
 `WindowsPersonalVolumeBackupRequest` 要求调用方提供：
 
-- job id、canonical Volume GUID Path 和 `.bkf` destination；
+- job id、trace id、canonical Volume GUID Path 和 `.bkf` destination；
 - 调用期间有效的 password view；
 - 密码学随机且非零、互不相同的 file UUID 与 backup-set UUID；
 - block/chunk/memory geometry、KDF 参数和可选分卷大小；
@@ -51,6 +51,28 @@ Volume 未找到、逻辑大小不可靠、VSS 创建失败或 Snapshot Device �
 成功表示 Archive 已经 Commit。此后 Snapshot 删除失败不能把已发布 Archive 伪装成未提交，因此
 `WindowsPersonalVolumeBackupResult::snapshot_cleanup_error` 单独报告清理告警。调用方必须记录并告警，
 但不能重复执行同一个非幂等备份请求来“修复”清理错误。
+
+## Worker 任务入口
+
+`execute_windows_personal_backup_task()` 是进程协议 Adapter 后面的同步任务入口：
+
+```text
+Validate JobRequest and trusted options
+-> Publish correlated Preparing progress
+-> Reject pre-cancellation or expired deadline
+-> Generate distinct RFC 4122 v4 file/backup-set UUIDs
+-> Resolve exactly one SecretRef
+-> Convert UTF-8 source and target refs to Windows paths
+-> Execute Windows personal volume backup
+-> Return validated and sanitized TaskResult
+```
+
+- 通用 Job 必须是 Backup operation，并且恰好包含一个 source 和一个 credential ref；
+- schema 或 operation-specific 校验失败表示请求未被接受，返回 `Result` failure 且不获取凭据；
+- 请求一旦被接受，取消、凭据、随机源、VSS、I/O 和 Archive 失败均转换为 `TaskResult`；
+- TaskResult 不复制底层 Error message，只使用稳定 message/warning code；
+- Snapshot 清理失败映射为 `kSucceededWithWarning`，容量与 chunk 指标仍来自已提交 Archive；
+- deadline 和 UUID 生成在获取凭据前完成；任务运行中的 deadline 由后续 Worker Host 转换为 CancellationToken。
 
 ## Manifest 语义
 
@@ -73,6 +95,7 @@ Volume 未找到、逻辑大小不可靠、VSS 创建失败或 Snapshot Device �
 ## 测试与完成标准
 
 - 私有 Runtime seam 覆盖成功装配、请求前置校验、源读取失败、Archive 创建失败和 Snapshot 清理失败；
+- 私有 Task Backend seam 覆盖 DTO 映射、Secret 生命周期、UUID、deadline、取消和错误脱敏；
 - 测试断言 Block Source 在 Snapshot 删除前析构；
 - 测试断言 Pipeline 失败会 Abort Archive，已 Commit Archive 的清理失败作为独立告警返回；
 - 普通测试不访问真实 Volume、VSS 或文件系统 Archive；

@@ -14,6 +14,7 @@ namespace aegra::pipeline {
 
 struct RestorePlan final {
     std::string job_id;
+    std::string trace_id;
     std::size_t memory_budget_bytes{0};
 };
 

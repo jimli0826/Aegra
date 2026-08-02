@@ -14,6 +14,7 @@ namespace aegra::pipeline {
 
 struct BackupPlan final {
     std::string job_id;
+    std::string trace_id;
     std::uint64_t chunk_size_bytes{0};
     std::size_t memory_budget_bytes{0};
 };

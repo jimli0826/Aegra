@@ -17,6 +17,12 @@ enum class JobOperation : std::uint8_t {
     kExport = 4,
 };
 
+struct SecretRef final {
+    std::string value;
+
+    [[nodiscard]] friend bool operator==(const SecretRef&, const SecretRef&) = default;
+};
+
 struct JobRequest final {
     std::uint32_t schema_version{kJobSchemaVersion};
     std::string job_id;
@@ -24,7 +30,7 @@ struct JobRequest final {
     JobOperation operation{JobOperation::kBackup};
     std::vector<std::string> source_refs;
     std::string target_ref;
-    std::vector<std::string> credential_refs;
+    std::vector<SecretRef> credential_refs;
     std::string trace_id;
     std::int64_t deadline_utc_ms{0};
 };

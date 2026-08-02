@@ -26,11 +26,17 @@
 
 ## 当前状态
 
-阶段 2 已将跨进程 `TaskProgress` DTO 放入本模块，`IProgressSink` 只引用该 DTO。`JobRequest` 仍是最小骨架；进入进程协议实现前需要引入强类型 ID。
+`JobRequest` 是当前 Worker 的版本化任务信封，拥有 job、tenant、operation、source/target、
+`SecretRef`、trace 和 deadline。`SecretRef` 只保存凭据定位符，禁止保存明文 Secret。
+
+`TaskProgress` 同时携带 `job_id` 与 `trace_id`，用于跨线程和跨进程关联。`TaskResult` 使用稳定的
+`TaskOutcome`、`ErrorCode`、message code、warning code 和容量指标；不得复制 Adapter 的原始错误文本。
+请求校验失败表示任务没有被接受，已接受任务的运行失败则形成合法 `TaskResult`。
 
 ## 测试
 
 - 每个消息的必填字段、版本和枚举验证。
+- Outcome、ErrorCode 与 warning 集合的组合不变量。
 - 编码 roundtrip、未知可选字段和损坏输入。
 - Secret 不出现在日志/调试输出。
 - Golden message 固定字段名和数值。

@@ -1,6 +1,8 @@
 add_library(aegra_app_worker_personal STATIC
     src/windows_personal_backup.cpp
     src/windows_personal_backup_runtime.cpp
+    src/windows_personal_backup_task.cpp
+    src/windows_personal_backup_task_backend.cpp
 )
 
 add_library(Aegra::AppWorkerPersonal ALIAS aegra_app_worker_personal)

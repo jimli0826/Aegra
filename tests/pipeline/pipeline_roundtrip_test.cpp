@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -44,17 +45,25 @@ std::vector<std::byte> make_data(const std::size_t size) {
 
 class CollectingProgressSink final : public aegra::ports::IProgressSink {
   public:
+    explicit CollectingProgressSink(const std::string_view expected_trace)
+        : expected_trace_(expected_trace) {}
+
     void publish(const aegra::contracts::TaskProgress& progress) noexcept override {
         ++event_count;
         last_phase = progress.phase;
         last_logical_bytes = progress.logical_bytes;
         last_processed_bytes = progress.processed_bytes;
+        trace_matches = progress.trace_id == expected_trace_;
     }
 
     std::size_t event_count{0};
     aegra::contracts::TaskPhase last_phase{aegra::contracts::TaskPhase::kUnspecified};
     std::uint64_t last_logical_bytes{0};
     std::uint64_t last_processed_bytes{0};
+    bool trace_matches{false};
+
+  private:
+    std::string_view expected_trace_;
 };
 
 class CorruptReader final : public aegra::ports::IRecoveryPointReader {
@@ -109,9 +118,10 @@ bool roundtrip_with_backpressure() {
         return false;
     }
 
-    CollectingProgressSink backup_progress;
+    CollectingProgressSink backup_progress("trace-backup-roundtrip");
     BackupPipeline backup(source, *session.value(), &backup_progress);
-    auto backup_result = backup.run(BackupPlan{"backup-roundtrip", 1024, 1024}, {});
+    auto backup_result =
+        backup.run(BackupPlan{"backup-roundtrip", "trace-backup-roundtrip", 1024, 1024}, {});
     bool passed = expect(backup_result.has_value(), "backup pipeline completes");
     if (!backup_result) {
         return false;
@@ -121,7 +131,7 @@ bool roundtrip_with_backpressure() {
     passed &= expect(backup_result.value().peak_buffered_bytes <= 1024,
                      "backup queue stays within its byte budget");
     passed &= expect(store.is_committed(), "backup publishes the memory recovery point");
-    passed &= expect(backup_progress.event_count > 0 &&
+    passed &= expect(backup_progress.event_count > 0 && backup_progress.trace_matches &&
                          backup_progress.last_phase == aegra::contracts::TaskPhase::kCompleted,
                      "backup publishes completed progress");
 
@@ -130,15 +140,16 @@ bool roundtrip_with_backpressure() {
         return false;
     }
     MemoryBlockSink sink(input.size());
-    CollectingProgressSink restore_progress;
+    CollectingProgressSink restore_progress("trace-restore-roundtrip");
     RestorePipeline restore(*reader.value(), sink, &restore_progress);
-    auto restore_result = restore.run(RestorePlan{"restore-roundtrip", 1024}, {});
+    auto restore_result =
+        restore.run(RestorePlan{"restore-roundtrip", "trace-restore-roundtrip", 1024}, {});
     passed &= expect(restore_result.has_value(), "restore pipeline completes");
     passed &= expect(restore_result && restore_result.value().peak_buffered_bytes <= 1024,
                      "restore queue stays within its byte budget");
     passed &= expect(sink.snapshot() == input, "restored bytes equal the source exactly");
     passed &= expect(sink.flush_count() == 1, "successful restore flushes once");
-    passed &= expect(restore_progress.event_count > 0 &&
+    passed &= expect(restore_progress.event_count > 0 && restore_progress.trace_matches &&
                          restore_progress.last_phase == aegra::contracts::TaskPhase::kCompleted &&
                          restore_progress.last_logical_bytes == input.size() &&
                          restore_progress.last_processed_bytes == input.size(),
@@ -151,14 +162,14 @@ bool empty_roundtrip() {
     MemoryBackupStore store;
     auto session = store.create_session(0);
     BackupPipeline backup(source, *session.value());
-    auto backup_result = backup.run(BackupPlan{"empty-backup", 16, 16}, {});
+    auto backup_result = backup.run(BackupPlan{"empty-backup", "trace-empty-backup", 16, 16}, {});
     bool passed = expect(backup_result && backup_result.value().chunk_count == 0,
                          "empty backup commits without chunks");
 
     auto reader = store.open_reader();
     MemoryBlockSink sink(0);
     RestorePipeline restore(*reader.value(), sink);
-    auto restore_result = restore.run(RestorePlan{"empty-restore", 16}, {});
+    auto restore_result = restore.run(RestorePlan{"empty-restore", "trace-empty-restore", 16}, {});
     passed &= expect(restore_result && restore_result.value().restored_bytes == 0,
                      "empty recovery point restores successfully");
     return passed;
@@ -170,7 +181,8 @@ bool backup_failure_paths() {
     MemoryBackupStore failed_store;
     auto failed_session = failed_store.create_session(input.size());
     BackupPipeline failing_backup(failing_source, *failed_session.value());
-    auto read_failure = failing_backup.run(BackupPlan{"read-failure", 1024, 1024}, {});
+    auto read_failure =
+        failing_backup.run(BackupPlan{"read-failure", "trace-read-failure", 1024, 1024}, {});
     bool passed = expect(!read_failure && failed_store.is_aborted(),
                          "read failure aborts and hides the recovery point");
 
@@ -178,7 +190,8 @@ bool backup_failure_paths() {
     MemoryBackupStore commit_store(MemoryBackupStoreOptions{std::nullopt, true});
     auto commit_session = commit_store.create_session(input.size());
     BackupPipeline commit_failure(source, *commit_session.value());
-    auto commit_result = commit_failure.run(BackupPlan{"commit-failure", 1024, 2048}, {});
+    auto commit_result =
+        commit_failure.run(BackupPlan{"commit-failure", "trace-commit-failure", 1024, 2048}, {});
     passed &= expect(!commit_result && commit_store.is_aborted(),
                      "commit failure aborts the backup session");
 
@@ -188,7 +201,8 @@ bool backup_failure_paths() {
     aegra::base::CancellationSource cancellation;
     cancellation.request_stop();
     auto cancelled =
-        cancelled_backup.run(BackupPlan{"cancelled-backup", 1024, 1024}, cancellation.get_token());
+        cancelled_backup.run(BackupPlan{"cancelled-backup", "trace-cancelled-backup", 1024, 1024},
+                             cancellation.get_token());
     passed &= expect(!cancelled && cancelled.error().code == aegra::base::ErrorCode::kCancelled &&
                          cancelled_store.is_aborted(),
                      "cancelled backup responds and aborts");
@@ -201,14 +215,14 @@ bool restore_preflight_and_failure_paths() {
     MemoryBackupStore store;
     auto session = store.create_session(input.size());
     BackupPipeline backup(source, *session.value());
-    if (!backup.run(BackupPlan{"preflight-source", 1024, 1024}, {})) {
+    if (!backup.run(BackupPlan{"preflight-source", "trace-preflight-source", 1024, 1024}, {})) {
         return false;
     }
     auto reader = store.open_reader();
 
     MemoryBlockSink too_small(input.size() - 1);
     RestorePipeline capacity_restore(*reader.value(), too_small);
-    auto capacity = capacity_restore.run(RestorePlan{"capacity", 1024}, {});
+    auto capacity = capacity_restore.run(RestorePlan{"capacity", "trace-capacity", 1024}, {});
     bool passed =
         expect(!capacity && capacity.error().code == aegra::base::ErrorCode::kInsufficientSpace &&
                    too_small.flush_count() == 0,
@@ -218,7 +232,8 @@ bool restore_preflight_and_failure_paths() {
     failure_options.fail_at_offset = 1024;
     MemoryBlockSink failing_sink(input.size(), failure_options);
     RestorePipeline failing_restore(*reader.value(), failing_sink);
-    auto write_failure = failing_restore.run(RestorePlan{"write-failure", 1024}, {});
+    auto write_failure =
+        failing_restore.run(RestorePlan{"write-failure", "trace-write-failure", 1024}, {});
     passed &=
         expect(!write_failure && write_failure.error().code == aegra::base::ErrorCode::kIoFailure &&
                    failing_sink.flush_count() == 0,
@@ -227,7 +242,7 @@ bool restore_preflight_and_failure_paths() {
     CorruptReader corrupt_reader;
     MemoryBlockSink untouched_sink(4);
     RestorePipeline corrupt_restore(corrupt_reader, untouched_sink);
-    auto corrupt = corrupt_restore.run(RestorePlan{"corrupt", 4}, {});
+    auto corrupt = corrupt_restore.run(RestorePlan{"corrupt", "trace-corrupt", 4}, {});
     passed &= expect(!corrupt && corrupt.error().code == aegra::base::ErrorCode::kCorruptData &&
                          untouched_sink.flush_count() == 0,
                      "corrupt mapping is rejected before destructive writes");

@@ -1,5 +1,6 @@
 #include "aegra/contracts/job.h"
 #include "aegra/contracts/progress.h"
+#include "aegra/contracts/task_result.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -24,7 +25,7 @@ bool expect(const bool condition, const char* message) {
     return false;
 }
 
-int run_tests() {
+bool test_job_request_validation() {
     auto request = valid_request();
     bool passed = expect(aegra::contracts::validate_job_request(request).has_value(),
                          "valid job is accepted");
@@ -39,13 +40,21 @@ int run_tests() {
     request.job_id.clear();
     passed &= expect(!aegra::contracts::validate_job_request(request).has_value(),
                      "missing job id is rejected");
+    request = valid_request();
+    request.credential_refs = {aegra::contracts::SecretRef{}};
+    passed &= expect(!aegra::contracts::validate_job_request(request).has_value(),
+                     "empty credential reference is rejected");
+    return passed;
+}
 
+bool test_progress_validation() {
     aegra::contracts::TaskProgress progress;
     progress.job_id = "job-1";
+    progress.trace_id = "trace-1";
     progress.logical_bytes = 100;
     progress.processed_bytes = 40;
-    passed &= expect(aegra::contracts::validate_task_progress(progress).has_value(),
-                     "valid progress is accepted");
+    bool passed = expect(aegra::contracts::validate_task_progress(progress).has_value(),
+                         "valid progress is accepted");
     progress.processed_bytes = 101;
     passed &= expect(!aegra::contracts::validate_task_progress(progress).has_value(),
                      "progress beyond logical size is rejected");
@@ -56,6 +65,33 @@ int run_tests() {
     progress.phase = aegra::contracts::TaskPhase::kUnspecified;
     passed &= expect(!aegra::contracts::validate_task_progress(progress).has_value(),
                      "unknown task phase is rejected");
+    return passed;
+}
+
+bool test_task_result_validation() {
+    aegra::contracts::TaskResult task_result;
+    task_result.job_id = "job-1";
+    task_result.trace_id = "trace-1";
+    task_result.outcome = aegra::contracts::TaskOutcome::kSucceeded;
+    task_result.error_code = aegra::base::ErrorCode::kNone;
+    task_result.message_code = "backup.completed";
+    bool passed = expect(aegra::contracts::validate_task_result(task_result).has_value(),
+                         "valid task result is accepted");
+    task_result.outcome = aegra::contracts::TaskOutcome::kSucceededWithWarning;
+    passed &= expect(!aegra::contracts::validate_task_result(task_result).has_value(),
+                     "warning result requires warning code");
+    task_result.warning_codes = {"backup.snapshot_cleanup_failed"};
+    passed &= expect(aegra::contracts::validate_task_result(task_result).has_value(),
+                     "well-formed warning result is accepted");
+    task_result.outcome = aegra::contracts::TaskOutcome::kCancelled;
+    passed &= expect(!aegra::contracts::validate_task_result(task_result).has_value(),
+                     "cancelled result requires cancelled error code");
+    return passed;
+}
+
+int run_tests() {
+    const bool passed = test_job_request_validation() && test_progress_validation() &&
+                        test_task_result_validation();
     return passed ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 

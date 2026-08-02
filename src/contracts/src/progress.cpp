@@ -25,9 +25,9 @@ base::Result<void> validate_task_progress(const TaskProgress& progress) {
             "unsupported task progress schema version",
         });
     }
-    if (progress.job_id.empty()) {
-        return base::Result<void>::failure(
-            base::Error{base::ErrorCode::kInvalidArgument, "job_id is required"});
+    if (progress.job_id.empty() || progress.trace_id.empty()) {
+        return base::Result<void>::failure(base::Error{base::ErrorCode::kInvalidArgument,
+                                                       "progress correlation fields are required"});
     }
     if (!is_known_phase(progress.phase)) {
         return base::Result<void>::failure(

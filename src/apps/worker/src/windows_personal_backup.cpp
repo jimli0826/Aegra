@@ -17,8 +17,8 @@ bool is_zero_uuid(const std::array<std::byte, 16>& value) noexcept {
 }
 
 base::Result<void> validate_request(const WindowsPersonalVolumeBackupRequest& request) {
-    if (request.job_id.empty() || request.volume_guid_path.empty() || request.destination.empty() ||
-        request.password.empty() || request.created_utc.empty()) {
+    if (request.job_id.empty() || request.trace_id.empty() || request.volume_guid_path.empty() ||
+        request.destination.empty() || request.password.empty() || request.created_utc.empty()) {
         return base::Result<void>::failure(base::Error{
             base::ErrorCode::kInvalidArgument,
             "Windows personal volume backup request is incomplete",
@@ -109,7 +109,7 @@ base::Result<WindowsPersonalVolumeBackupResult> backup_windows_personal_volume_w
     }
 
     pipeline::BackupPipeline pipeline(*prepared.value().source, *session.value(), progress);
-    const pipeline::BackupPlan plan{request.job_id, request.chunk_size_bytes,
+    const pipeline::BackupPlan plan{request.job_id, request.trace_id, request.chunk_size_bytes,
                                     request.memory_budget_bytes};
     auto backup = pipeline.run(plan, cancellation);
     auto cleanup_error = release_snapshot(prepared.value());

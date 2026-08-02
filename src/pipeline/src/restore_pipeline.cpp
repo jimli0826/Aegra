@@ -25,7 +25,7 @@ struct RestoreConsumerContext final {
 };
 
 base::Result<void> validate_plan(const RestorePlan& plan) {
-    if (plan.job_id.empty() || plan.memory_budget_bytes == 0) {
+    if (plan.job_id.empty() || plan.trace_id.empty() || plan.memory_budget_bytes == 0) {
         return base::Result<void>::failure(
             base::Error{base::ErrorCode::kInvalidArgument, "restore plan is incomplete"});
     }
@@ -142,6 +142,7 @@ void publish_progress(ports::IProgressSink* sink, const RestorePlan& plan,
     sink->publish(contracts::TaskProgress{
         contracts::kTaskProgressSchemaVersion,
         plan.job_id,
+        plan.trace_id,
         phase,
         logical_size,
         summary.restored_bytes,

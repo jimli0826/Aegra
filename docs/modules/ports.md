@@ -46,6 +46,14 @@
 - `ChunkDescriptor`、调用期 `ChunkWriteRequest` 和拥有数据的 `ChunkData`。
 - 引用 `contracts::TaskProgress` 的 `IProgressSink`。
 
+## Worker 系统能力
+
+- `ICredentialResolver::resolve()` 接受 `SecretRef` 和取消令牌，返回独占的 `IResolvedSecret`；Secret
+  view 只在对象生命周期内有效，Resolver 实现负责受控内存与析构清零。
+- `IRandomSource::fill()` 填充调用方提供的缓冲区并支持取消，不暴露随机库或操作系统类型。
+- `IClock::now_utc_ms()` 提供 UTC 毫秒时间；测试必须注入确定性时钟。
+- `IProgressSink::publish()` 不得抛出异常；事件拥有 job/trace 关联字段且不得包含 Secret 或客户数据。
+
 ## 多数据源演进方向
 
 现有 `IBackupSession` 和 `IRecoveryPointReader` 表达一个连续逻辑 source，不把多个 volume 拼接成一个

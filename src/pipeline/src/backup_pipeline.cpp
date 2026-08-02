@@ -51,7 +51,8 @@ struct BackupConsumerContext final {
 };
 
 base::Result<void> validate_plan(const BackupPlan& plan) {
-    if (plan.job_id.empty() || plan.chunk_size_bytes == 0 || plan.memory_budget_bytes == 0) {
+    if (plan.job_id.empty() || plan.trace_id.empty() || plan.chunk_size_bytes == 0 ||
+        plan.memory_budget_bytes == 0) {
         return base::Result<void>::failure(
             base::Error{base::ErrorCode::kInvalidArgument, "backup plan is incomplete"});
     }
@@ -154,6 +155,7 @@ void publish_progress(ports::IProgressSink* sink, const BackupPlan& plan,
     sink->publish(contracts::TaskProgress{
         contracts::kTaskProgressSchemaVersion,
         plan.job_id,
+        plan.trace_id,
         phase,
         summary.logical_bytes,
         summary.stored_bytes,

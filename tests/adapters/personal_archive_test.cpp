@@ -216,7 +216,8 @@ bool run_roundtrip(const TemporaryArchive& archive) {
 
     aegra::adapters::memory::MemoryBlockSource source(source_data);
     aegra::pipeline::BackupPipeline backup(source, *session.value());
-    const auto backup_result = backup.run({"archive-backup", 8192, 16384}, {});
+    const auto backup_result =
+        backup.run({"archive-backup", "trace-archive-backup", 8192, 16384}, {});
     passed &= expect(backup_result.has_value(), "pipeline writes and commits personal archive");
     passed &= expect(std::filesystem::exists(archive.path()), "committed archive is published");
     auto sidecar_path = archive.path();
@@ -248,7 +249,8 @@ bool run_roundtrip(const TemporaryArchive& archive) {
     }
     aegra::adapters::memory::MemoryBlockSink sink(source_data.size());
     aegra::pipeline::RestorePipeline restore(*reader.value(), sink);
-    const auto restore_result = restore.run({"archive-restore", 16384}, {});
+    const auto restore_result =
+        restore.run({"archive-restore", "trace-archive-restore", 16384}, {});
     passed &= expect(restore_result.has_value(), "pipeline restores personal archive");
     passed &= expect(sink.snapshot() == source_data, "restored bytes equal source bytes");
     return passed;
@@ -261,7 +263,7 @@ bool restore_matches(const std::filesystem::path& path, const std::vector<std::b
     }
     aegra::adapters::memory::MemoryBlockSink sink(source_data.size());
     aegra::pipeline::RestorePipeline restore(*reader.value(), sink);
-    const auto restored = restore.run({"split-restore", 16384}, {});
+    const auto restored = restore.run({"split-restore", "trace-split-restore", 16384}, {});
     return restored.has_value() && sink.snapshot() == source_data;
 }
 
@@ -359,7 +361,7 @@ bool run_split_roundtrip(const TemporaryArchive& archive) {
     }
     aegra::adapters::memory::MemoryBlockSource source(source_data);
     aegra::pipeline::BackupPipeline backup(source, *session.value());
-    const auto result = backup.run({"split-backup", 8192, 16384}, {});
+    const auto result = backup.run({"split-backup", "trace-split-backup", 8192, 16384}, {});
     passed &= expect(result.has_value(), "split archive commits through the pipeline");
     passed &= expect(std::filesystem::exists(split_part_path(archive.path(), 1)),
                      "split archive publishes continuation parts");
@@ -430,7 +432,8 @@ bool write_test_archive(const TemporaryArchive& archive, const std::vector<std::
     }
     aegra::adapters::memory::MemoryBlockSource source(source_data);
     aegra::pipeline::BackupPipeline backup(source, *session.value());
-    return backup.run({"incremental-backup", 8192, 16384}, {}).has_value();
+    return backup.run({"incremental-backup", "trace-incremental-backup", 8192, 16384}, {})
+        .has_value();
 }
 
 bool wrong_parent_password_is_rejected(const TemporaryArchive& archive,
@@ -483,7 +486,9 @@ bool incremental_layer_is_sparse(const TemporaryArchive& base, const TemporaryAr
     aegra::adapters::memory::MemoryBlockSink sink(latest.size());
     aegra::pipeline::RestorePipeline direct_restore(*reader.value(), sink);
     const bool direct_rejected =
-        !direct_restore.run({"invalid-direct-incremental", 16384}, {}).has_value();
+        !direct_restore
+             .run({"invalid-direct-incremental", "trace-invalid-direct-incremental", 16384}, {})
+             .has_value();
     return identity_matches && sparse && complete_sidecar && direct_rejected &&
            std::filesystem::exists(base.path());
 }
@@ -500,7 +505,8 @@ bool chain_restores(const std::vector<const TemporaryArchive*>& archives,
     }
     aegra::adapters::memory::MemoryBlockSink sink(expected.size());
     aegra::pipeline::RestorePipeline restore(*reader.value(), sink);
-    return restore.run({"chain-restore", 16384}, {}).has_value() && sink.snapshot() == expected;
+    return restore.run({"chain-restore", "trace-chain-restore", 16384}, {}).has_value() &&
+           sink.snapshot() == expected;
 }
 
 bool run_incremental_roundtrip(const TemporaryArchive& base, const TemporaryArchive& incremental,

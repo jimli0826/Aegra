@@ -22,6 +22,7 @@ enum class TaskPhase : std::uint8_t {
 struct TaskProgress final {
     std::uint32_t schema_version{kTaskProgressSchemaVersion};
     std::string job_id;
+    std::string trace_id;
     TaskPhase phase{TaskPhase::kPreparing};
     std::uint64_t logical_bytes{0};
     std::uint64_t processed_bytes{0};

@@ -1,4 +1,8 @@
+find_package(nlohmann_json CONFIG REQUIRED)
+
 add_library(aegra_app_worker_personal STATIC
+    src/worker_host.cpp
+    src/worker_protocol.cpp
     src/windows_personal_backup.cpp
     src/windows_personal_backup_runtime.cpp
     src/windows_personal_backup_task.cpp
@@ -20,6 +24,7 @@ target_link_libraries(
         Aegra::AdapterWindowsDisk
         Aegra::AdapterWindowsVss
         Aegra::Format
+        nlohmann_json::nlohmann_json
 )
 
 aegra_configure_target(aegra_app_worker_personal)

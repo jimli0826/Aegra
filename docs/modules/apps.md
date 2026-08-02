@@ -31,6 +31,10 @@ Windows 个人卷备份的首个 Worker Composition Root 见
 `IRandomSource`、`IClock` 与 `IProgressSink` 注入运行期能力。Job 只携带 SecretRef；解析出的 Secret
 只覆盖同步备份调用周期。输入拒绝与已接受任务的失败必须区分，TaskResult 只能包含稳定、脱敏的代码。
 
+Worker Host 与 JSON wire schema、退出码、deadline 和异常边界见
+[Worker Host 与进程协议](worker_host.md)。JSON 编解码属于 `apps/worker`，不得反向进入 `contracts`；
+运行参数来自受信任配置，任务消息不能覆盖 KDF、内存预算或应用身份配置。
+
 ## WinPE 离线恢复
 
 从旧 WinPE 设计保留以下安全需求：

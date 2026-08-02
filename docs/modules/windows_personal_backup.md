@@ -72,7 +72,7 @@ Validate JobRequest and trusted options
 - 请求一旦被接受，取消、凭据、随机源、VSS、I/O 和 Archive 失败均转换为 `TaskResult`；
 - TaskResult 不复制底层 Error message，只使用稳定 message/warning code；
 - Snapshot 清理失败映射为 `kSucceededWithWarning`，容量与 chunk 指标仍来自已提交 Archive；
-- deadline 和 UUID 生成在获取凭据前完成；任务运行中的 deadline 由后续 Worker Host 转换为 CancellationToken。
+- deadline 和 UUID 生成在获取凭据前完成；任务运行中的 deadline 由 Worker Host 转换为 CancellationToken。
 
 ## Manifest 语义
 

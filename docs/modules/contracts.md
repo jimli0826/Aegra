@@ -33,6 +33,9 @@
 `TaskOutcome`、`ErrorCode`、message code、warning code 和容量指标；不得复制 Adapter 的原始错误文本。
 请求校验失败表示任务没有被接受，已接受任务的运行失败则形成合法 `TaskResult`。
 
+`WorkerResponse` 是 Worker 的版本化根响应，互斥表达已接受任务的 `TaskResult`、请求拒绝和 Host 故障。
+响应与内部结果必须保持 job/trace 关联一致。传输编码和进程退出码属于 `apps/worker`，不进入契约实现。
+
 ## 测试
 
 - 每个消息的必填字段、版本和枚举验证。

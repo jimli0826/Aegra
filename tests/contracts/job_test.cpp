@@ -1,6 +1,7 @@
 #include "aegra/contracts/job.h"
 #include "aegra/contracts/progress.h"
 #include "aegra/contracts/task_result.h"
+#include "aegra/contracts/worker_response.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -89,9 +90,42 @@ bool test_task_result_validation() {
     return passed;
 }
 
+bool test_worker_response_validation() {
+    aegra::contracts::TaskResult task_result;
+    task_result.job_id = "job-1";
+    task_result.trace_id = "trace-1";
+    task_result.outcome = aegra::contracts::TaskOutcome::kSucceeded;
+    task_result.error_code = aegra::base::ErrorCode::kNone;
+    task_result.message_code = "backup.completed";
+
+    aegra::contracts::WorkerResponse response;
+    response.job_id = "job-1";
+    response.trace_id = "trace-1";
+    response.kind = aegra::contracts::WorkerResponseKind::kTaskResult;
+    response.boundary_error_code = aegra::base::ErrorCode::kNone;
+    response.message_code = "worker.task_finished";
+    response.task_result = task_result;
+    bool passed = expect(aegra::contracts::validate_worker_response(response).has_value(),
+                         "valid task response is accepted");
+
+    response.trace_id = "wrong-trace";
+    passed &= expect(!aegra::contracts::validate_worker_response(response).has_value(),
+                     "task response correlation must match its result");
+    response = {};
+    response.kind = aegra::contracts::WorkerResponseKind::kRequestRejected;
+    response.boundary_error_code = aegra::base::ErrorCode::kInvalidArgument;
+    response.message_code = "worker.request_rejected";
+    passed &= expect(aegra::contracts::validate_worker_response(response).has_value(),
+                     "request rejection is valid without a task result");
+    response.boundary_error_code = aegra::base::ErrorCode::kIoFailure;
+    passed &= expect(!aegra::contracts::validate_worker_response(response).has_value(),
+                     "request rejection only accepts validation errors");
+    return passed;
+}
+
 int run_tests() {
     const bool passed = test_job_request_validation() && test_progress_validation() &&
-                        test_task_result_validation();
+                        test_task_result_validation() && test_worker_response_validation();
     return passed ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 

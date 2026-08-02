@@ -18,6 +18,9 @@ add_subdirectory(src/adapters/compression_zstd)
 add_subdirectory(src/adapters/crypto_sodium)
 add_subdirectory(src/adapters/memory)
 add_subdirectory(src/adapters/personal_archive)
+if(WIN32)
+    add_subdirectory(src/adapters/windows_disk)
+endif()
 add_subdirectory(tests)
 
 add_test(

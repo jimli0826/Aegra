@@ -35,6 +35,10 @@ Archive Reader 分别限制 metadata、chunk stored payload 和展开后的 chun
 - [ADR-0001](../adr/0001-personal-format-crypto-and-codec-dependencies.md) 仅允许 Personal Archive 通过 PRIVATE target dependency 组合两个无状态算法 Adapter；不得据此放宽有状态 Adapter 的依赖规则。
 - 每个 Adapter 运行对应 Port 的 Contract Test Suite。
 
+Windows Disk、Volume 和 VSS 的具体边界、公开接口与测试要求见
+[Windows Adapter 开发文档](windows_adapters.md)。在线 Volume 必须先由独立 VSS Session 变成稳定
+Snapshot Device Object，Block Source 本身不创建快照。
+
 ## Dokan/虚拟磁盘约束
 
 从旧项目保留以下经过验证的设计知识：

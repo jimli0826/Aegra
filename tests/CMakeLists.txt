@@ -34,6 +34,11 @@ target_link_libraries(
     PRIVATE Aegra::AdapterPersonalArchive Aegra::AdapterMemory Aegra::Pipeline
 )
 
+if(WIN32)
+    aegra_add_test(aegra_windows_disk_tests adapters/windows_disk_test.cpp)
+    target_link_libraries(aegra_windows_disk_tests PRIVATE Aegra::AdapterWindowsDisk)
+endif()
+
 aegra_add_test(aegra_pipeline_tests pipeline/pipeline_roundtrip_test.cpp)
 target_link_libraries(
     aegra_pipeline_tests

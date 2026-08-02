@@ -39,9 +39,10 @@
 Verify Job 的 `operation` 为 `3`，`source_refs` 恰好一个 `.bkf`，`target_ref` 为空；Worker 会完整读取并
 认证每个 Chunk，不创建目标文件。成功结果使用 `verify.completed`，错误使用脱敏的 `verify.*` code。
 
-Restore Job 的 `operation` 为 `2`，`source_refs` 恰好一个完整 `.bkf`，`target_ref` 必须是 canonical
-Windows Volume GUID Path。Worker 在 Archive 认证成功后才锁定、卸载并写入非系统目标卷；安全边界见
-[ADR-0009](../adr/0009-windows-volume-restore-safety.md)。
+Restore Job 的 `operation` 为 `2`，`source_refs` 按 base-first 顺序包含完整 `.bkf` 链，
+`credential_refs` 必须同长度且逐层对应，`target_ref` 必须是 canonical Windows Volume GUID Path。
+Worker 在所有层完成认证和链关系验证后才锁定、卸载并写入非系统目标卷；链深度由受信任运行配置限制，
+安全边界见 [ADR-0009](../adr/0009-windows-volume-restore-safety.md)。
 
 ## 响应协议
 
@@ -89,7 +90,8 @@ Host 创建局部 `CancellationSource`，通过 `stop_callback` 合并外部进�
 
 Host 核心收口任务执行抛出的异常；未来真正的 `main` 仍必须作为进程级最后异常边界，因为构造拥有字符串
 的响应本身可能因资源耗尽失败。Host 是同步、单任务对象，不持有任务完成后的权威状态。凭据仍只在任务
-入口同步调用期间以 `IResolvedSecret` 存活，协议响应不会返回凭据引用。
+入口同步调用期间以 `IResolvedSecret` 存活；恢复链的全部 Secret 会共同存活到 Chain Reader 打开完成，
+协议响应不会返回凭据引用。
 
 ## 测试与完成标准
 

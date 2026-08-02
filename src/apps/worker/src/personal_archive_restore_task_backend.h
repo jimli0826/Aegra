@@ -8,15 +8,21 @@
 #include <filesystem>
 #include <memory>
 #include <string_view>
+#include <vector>
 
 namespace aegra::apps::worker::detail {
 
-struct PersonalArchiveRestoreBackendRequest final {
+struct PersonalArchiveRestoreLayer final {
     std::filesystem::path source;
-    std::filesystem::path target;
     std::string_view password;
+};
+
+struct PersonalArchiveRestoreBackendRequest final {
+    std::vector<PersonalArchiveRestoreLayer> layers;
+    std::filesystem::path target;
     pipeline::RestorePlan plan;
     std::uint64_t maximum_chunk_size{0};
+    std::uint32_t maximum_chain_depth{0};
     ports::IProgressSink* progress{nullptr};
 };
 

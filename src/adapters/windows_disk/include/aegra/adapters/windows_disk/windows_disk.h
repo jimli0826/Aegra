@@ -57,7 +57,7 @@ struct WindowsBlockSinkOpenRequest final {
     std::filesystem::path path;
     WindowsBlockSinkKind kind{WindowsBlockSinkKind::kStableFile};
     std::optional<std::uint64_t> expected_capacity_bytes;
-    std::filesystem::path protected_source;
+    std::vector<std::filesystem::path> protected_sources;
 };
 
 class WindowsBlockSink final : public ports::IBlockSink {

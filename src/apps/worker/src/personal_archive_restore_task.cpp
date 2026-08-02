@@ -6,8 +6,10 @@
 #include "aegra/contracts/progress.h"
 
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace aegra::apps::worker {
 namespace detail {
@@ -23,12 +25,14 @@ base::Result<void> validate_task(const contracts::JobRequest& job,
     if (!valid_job) {
         return valid_job;
     }
-    if (job.operation != contracts::JobOperation::kRestore || job.source_refs.size() != 1 ||
-        job.target_ref.empty() || job.credential_refs.size() != 1) {
-        return invalid("personal restore task requires one source, target and credential");
+    if (job.operation != contracts::JobOperation::kRestore || job.source_refs.empty() ||
+        job.target_ref.empty() || job.credential_refs.size() != job.source_refs.size()) {
+        return invalid("personal restore task requires matching sources and credentials");
     }
     if (options.memory_budget_bytes == 0 || options.chunk_size_bytes == 0 ||
-        options.memory_budget_bytes < options.chunk_size_bytes) {
+        options.memory_budget_bytes < options.chunk_size_bytes ||
+        options.maximum_restore_chain_depth == 0 ||
+        job.source_refs.size() > options.maximum_restore_chain_depth) {
         return invalid("personal restore task geometry is invalid");
     }
     return base::Result<void>::success();
@@ -102,6 +106,45 @@ void publish_preparing(const contracts::JobRequest& job, ports::IProgressSink* p
     }
 }
 
+using ResolvedSecrets = std::vector<std::unique_ptr<ports::IResolvedSecret>>;
+
+base::Result<ResolvedSecrets>
+resolve_secrets(const contracts::JobRequest& job, ports::ICredentialResolver& credentials,
+                const base::CancellationToken& cancellation) {
+    ResolvedSecrets result;
+    result.reserve(job.credential_refs.size());
+    for (const auto& reference : job.credential_refs) {
+        auto secret = credentials.resolve(reference, cancellation);
+        if (!secret) {
+            return base::Result<ResolvedSecrets>::failure(secret.error());
+        }
+        if (secret.value() == nullptr || secret.value()->view().empty()) {
+            return base::Result<ResolvedSecrets>::failure(
+                {base::ErrorCode::kUnauthorized, "archive credential is unavailable"});
+        }
+        result.push_back(std::move(secret).value());
+    }
+    return base::Result<ResolvedSecrets>::success(std::move(result));
+}
+
+PersonalArchiveRestoreBackendRequest
+make_backend_request(const contracts::JobRequest& job,
+                     const WindowsPersonalBackupTaskOptions& options,
+                     const WindowsPersonalBackupTaskContext& context,
+                     const ResolvedSecrets& secrets) {
+    PersonalArchiveRestoreBackendRequest request;
+    request.layers.reserve(job.source_refs.size());
+    for (std::size_t index = 0; index < job.source_refs.size(); ++index) {
+        request.layers.push_back({path_from_utf8(job.source_refs[index]), secrets[index]->view()});
+    }
+    request.target = path_from_utf8(job.target_ref);
+    request.plan = {job.job_id, job.trace_id, options.memory_budget_bytes};
+    request.maximum_chunk_size = options.memory_budget_bytes;
+    request.maximum_chain_depth = options.maximum_restore_chain_depth;
+    request.progress = context.progress;
+    return request;
+}
+
 base::Result<contracts::TaskResult>
 run_accepted_task(const contracts::JobRequest& job,
                   const WindowsPersonalBackupTaskOptions& options,
@@ -113,20 +156,14 @@ run_accepted_task(const contracts::JobRequest& job,
         (job.deadline_utc_ms > 0 && context.clock.now_utc_ms() >= job.deadline_utc_ms)) {
         return validated_result(failed_result(job, base::ErrorCode::kCancelled));
     }
-    auto secret = context.credentials.resolve(job.credential_refs.front(), cancellation);
-    if (!secret || secret.value() == nullptr || secret.value()->view().empty()) {
-        const auto code = !secret && secret.error().code == base::ErrorCode::kCancelled
+    auto secrets = resolve_secrets(job, context.credentials, cancellation);
+    if (!secrets) {
+        const auto code = secrets.error().code == base::ErrorCode::kCancelled
                               ? base::ErrorCode::kCancelled
                               : base::ErrorCode::kUnauthorized;
         return validated_result(failed_result(job, code));
     }
-    PersonalArchiveRestoreBackendRequest request;
-    request.source = path_from_utf8(job.source_refs.front());
-    request.target = path_from_utf8(job.target_ref);
-    request.password = secret.value()->view();
-    request.plan = {job.job_id, job.trace_id, options.memory_budget_bytes};
-    request.maximum_chunk_size = options.memory_budget_bytes;
-    request.progress = context.progress;
+    auto request = make_backend_request(job, options, context, secrets.value());
     auto restored = backend.run(request, cancellation);
     if (!restored) {
         return validated_result(failed_result(job, restored.error().code));

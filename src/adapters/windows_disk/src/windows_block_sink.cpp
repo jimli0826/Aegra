@@ -99,18 +99,24 @@ path_volume(const std::filesystem::path& source) {
     return base::Result<std::filesystem::path>::success(volume_name.data());
 }
 
-base::Result<void> validate_protected_source(const WindowsBlockSinkOpenRequest& request) {
-    if (request.protected_source.empty()) {
+base::Result<void> validate_protected_sources(const WindowsBlockSinkOpenRequest& request) {
+    if (request.protected_sources.empty()) {
         return base::Result<void>::failure(
-            {base::ErrorCode::kInvalidArgument, "volume sink requires its protected source"});
+            {base::ErrorCode::kInvalidArgument, "volume sink requires protected sources"});
     }
-    auto source_volume = path_volume(request.protected_source);
-    if (!source_volume) {
-        return base::Result<void>::failure(source_volume.error());
-    }
-    if (equal_case_insensitive(request.path.native(), source_volume.value().native())) {
-        return base::Result<void>::failure(
-            {base::ErrorCode::kConflict, "restore source is located on the target volume"});
+    for (const auto& source : request.protected_sources) {
+        if (source.empty()) {
+            return base::Result<void>::failure(
+                {base::ErrorCode::kInvalidArgument, "protected source path is empty"});
+        }
+        auto source_volume = path_volume(source);
+        if (!source_volume) {
+            return base::Result<void>::failure(source_volume.error());
+        }
+        if (equal_case_insensitive(request.path.native(), source_volume.value().native())) {
+            return base::Result<void>::failure(
+                {base::ErrorCode::kConflict, "restore source is located on the target volume"});
+        }
     }
     return base::Result<void>::success();
 }
@@ -133,9 +139,9 @@ base::Result<void> validate_request(const WindowsBlockSinkOpenRequest& request) 
             return base::Result<void>::failure(
                 {base::ErrorCode::kConflict, "online system volume restore is forbidden"});
         }
-        auto protected_source = validate_protected_source(request);
-        if (!protected_source) {
-            return protected_source;
+        auto protected_sources = validate_protected_sources(request);
+        if (!protected_sources) {
+            return protected_sources;
         }
     } else if (is_device_path(request.path.native())) {
         return base::Result<void>::failure(

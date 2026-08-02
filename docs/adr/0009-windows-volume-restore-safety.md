@@ -19,14 +19,14 @@
 2. 打开目标后必须成功执行 `FSCTL_LOCK_VOLUME` 和 `FSCTL_DISMOUNT_VOLUME`，否则不允许任何写入。
 3. Adapter 通过 Windows 目录所在 Volume GUID 识别当前系统卷，并在打开写句柄前拒绝。系统卷恢复只
    能由后续 WinPE 离线恢复程序执行。
-4. Adapter 在打开目标写句柄前解析 Archive 所在 Volume；Archive 位于目标 Volume 或无法安全解析其
-   所属 Volume 时拒绝，防止卸载目标后失去恢复源或覆盖唯一副本。
+4. Adapter 在打开目标写句柄前解析恢复链中每个 Archive 所在 Volume；任一 Archive 位于目标 Volume
+   或无法安全解析其所属 Volume 时拒绝，防止卸载目标后失去恢复源或覆盖唯一副本。
 5. 容量来自 `IOCTL_DISK_GET_LENGTH_INFO`。Restore Pipeline 在首个写入前完成 Archive 结构、目标容量
    和内存预算预检。
 6. 写入使用显式 offset、重叠 I/O 和取消；范围必须完全位于目标容量内。成功结束调用
    `FlushFileBuffers`，析构时 best-effort 解锁并关闭句柄。
-7. 首阶段只恢复单个全量 Archive。稀疏增量/差异层不能直接恢复，必须先由 Application 解析并验证完整
-   base-first Chain Reader。
+7. Application 必须显式提供完整 base-first Archive 链，并在打开目标前解析全部凭据、认证所有层及验证
+   UUID、备份集与卷几何关系。单个全量 Archive 是长度为 1 的合法链；稀疏增量层不能单独恢复。
 8. Adapter 的普通文件 Sink 模式只用于确定性 Port 测试和未来离线镜像目标，拒绝所有 Windows Device
    Namespace 路径。
 

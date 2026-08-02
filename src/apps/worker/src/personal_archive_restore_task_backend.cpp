@@ -2,11 +2,12 @@
 
 #include "aegra/adapters/personal_archive/personal_archive.h"
 #include "aegra/adapters/windows_disk/windows_disk.h"
-#include "aegra/format/manifest.h"
 #include "aegra/pipeline/restore_pipeline.h"
 
 #include <memory>
 #include <optional>
+#include <utility>
+#include <vector>
 
 namespace aegra::apps::worker::detail {
 namespace {
@@ -16,22 +17,27 @@ class PersonalArchiveRestoreTaskBackend final : public IPersonalArchiveRestoreTa
     base::Result<pipeline::RestoreSummary>
     run(const PersonalArchiveRestoreBackendRequest& request,
         const base::CancellationToken& cancellation) override {
-        adapters::personal_archive::ArchiveOpenRequest open_request;
-        open_request.source = request.source;
-        open_request.password = request.password;
-        open_request.maximum_chunk_payload_size = request.maximum_chunk_size;
-        open_request.maximum_chunk_logical_size = request.maximum_chunk_size;
-        auto reader = adapters::personal_archive::PersonalArchiveReader::open(open_request);
+        adapters::personal_archive::ArchiveChainOpenRequest open_request;
+        open_request.maximum_chain_depth = request.maximum_chain_depth;
+        std::vector<std::filesystem::path> protected_sources;
+        open_request.layers.reserve(request.layers.size());
+        protected_sources.reserve(request.layers.size());
+        for (const auto& layer : request.layers) {
+            adapters::personal_archive::ArchiveOpenRequest layer_request;
+            layer_request.source = layer.source;
+            layer_request.password = layer.password;
+            layer_request.maximum_chunk_payload_size = request.maximum_chunk_size;
+            layer_request.maximum_chunk_logical_size = request.maximum_chunk_size;
+            open_request.layers.push_back(std::move(layer_request));
+            protected_sources.push_back(layer.source);
+        }
+        auto reader = adapters::personal_archive::PersonalArchiveChainReader::open(open_request);
         if (!reader) {
             return base::Result<pipeline::RestoreSummary>::failure(reader.error());
         }
-        if (reader.value()->identity().backup_type != format::BackupType::kFull) {
-            return base::Result<pipeline::RestoreSummary>::failure(
-                {base::ErrorCode::kConflict, "single archive restore requires a full backup"});
-        }
         auto sink = adapters::windows_disk::WindowsBlockSink::open(
             {request.target, adapters::windows_disk::WindowsBlockSinkKind::kVolume, std::nullopt,
-             request.source});
+             std::move(protected_sources)});
         if (!sink) {
             return base::Result<pipeline::RestoreSummary>::failure(sink.error());
         }

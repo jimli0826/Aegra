@@ -39,6 +39,9 @@ Windows Disk、Volume 和 VSS 的具体边界、公开接口与测试要求见
 [Windows Adapter 开发文档](windows_adapters.md)。在线 Volume 必须先由独立 VSS Session 变成稳定
 Snapshot Device Object，Block Source 本身不创建快照。
 
+Worker 的 Windows 时钟、CNG 随机源和 Credential Manager Resolver 也由独立 Windows System Adapter
+实现；Secret 必须复制到锁页内存并在析构前清零，不允许锁页失败时降级。
+
 ## Dokan/虚拟磁盘约束
 
 从旧项目保留以下经过验证的设计知识：

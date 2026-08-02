@@ -8,6 +8,8 @@
 
 当前协议使用 UTF-8 JSON。JSON 依赖只存在于 `apps/worker`，`contracts` 保持与传输技术无关。后续改用
 命名管道、HTTPS 或 Protobuf 时，`JobRequest`、`TaskResult` 和 `WorkerResponse` 的语义保持不变。
+首个 `aegra_personal_worker.exe` 从 stdin 读取一个最大 1 MiB 的 Job，stdout 只写一个最终响应；运行时
+系统能力与凭据部署见 [ADR-0007](../adr/0007-windows-worker-system-capabilities.md)。
 
 ## 请求协议
 
@@ -28,6 +30,10 @@
 顶层 `password` 和 `secret` 字段一律拒绝。解析器检查 JSON 类型和整数范围，未知 schema、无效枚举、
 字段缺失或格式错误都表示请求未被接受。业务运行参数，例如 block/chunk 大小、KDF 参数、应用版本和
 主机名，来自 Worker 的受信任配置，不从 Job 消息接收。
+
+个人版 Windows Worker 当前只接受 `wincred://<target>` Credential Ref。Credential Blob 是非空、长度
+明确的密码字节，位于 Worker 运行账户的 Generic Credential Store；Job 和响应都不携带 target 对应的
+明文值。
 
 ## 响应协议
 
@@ -73,3 +79,4 @@ Host 核心收口任务执行抛出的异常；未来真正的 `main` 仍必须�
 - 所有响应通过契约校验，job/trace 不得串任务；
 - Host 与协议代码只位于 `apps/worker`，核心模块不依赖 JSON、线程 Host 或 Windows API；
 - Debug/Release、源码限制、静态分析、依赖检查和秘密扫描通过。
+- 真实 exe 对无效输入输出合法拒绝 JSON，并以 `20` 退出。

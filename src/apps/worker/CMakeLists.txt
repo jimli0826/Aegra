@@ -28,3 +28,17 @@ target_link_libraries(
 )
 
 aegra_configure_target(aegra_app_worker_personal)
+
+add_executable(aegra_personal_worker src/personal_worker_main.cpp)
+target_compile_definitions(
+    aegra_personal_worker
+    PRIVATE
+        AEGRA_APPLICATION_VERSION="${PROJECT_VERSION}"
+        NOMINMAX
+        WIN32_LEAN_AND_MEAN
+)
+target_link_libraries(
+    aegra_personal_worker
+    PRIVATE Aegra::AppWorkerPersonal Aegra::AdapterWindowsSystem
+)
+aegra_configure_target(aegra_personal_worker)

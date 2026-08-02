@@ -7,6 +7,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <limits>
@@ -20,6 +21,7 @@ namespace aegra::apps::worker {
 namespace {
 
 using Json = nlohmann::json;
+constexpr std::size_t kMaximumWorkerRequestBytes = std::size_t{1024} * 1024U;
 
 base::Result<contracts::JobRequest> invalid_job(const base::ErrorCode code, const char* message) {
     return base::Result<contracts::JobRequest>::failure(base::Error{code, message});
@@ -107,11 +109,22 @@ Json encode_response_object(const contracts::WorkerResponse& response) {
     return root;
 }
 
+contracts::WorkerResponse rejection_response(const base::ErrorCode code) {
+    contracts::WorkerResponse response;
+    response.kind = contracts::WorkerResponseKind::kRequestRejected;
+    response.boundary_error_code = code;
+    response.message_code = "worker.request_rejected";
+    return response;
+}
+
 } // namespace
 
 base::Result<contracts::JobRequest> decode_worker_job_request(const std::string_view encoded) {
     if (encoded.empty()) {
         return invalid_job(base::ErrorCode::kInvalidArgument, "worker request is empty");
+    }
+    if (encoded.size() > kMaximumWorkerRequestBytes) {
+        return invalid_job(base::ErrorCode::kInvalidArgument, "worker request is too large");
     }
     try {
         const auto root = Json::parse(encoded);
@@ -147,6 +160,28 @@ base::Result<std::string> encode_worker_response(const contracts::WorkerResponse
             "worker response encoding failed",
         });
     }
+}
+
+base::Result<EncodedWorkerResult> run_windows_personal_backup_worker_request(
+    const std::string_view encoded_request, const WindowsPersonalBackupTaskOptions& options,
+    const WindowsPersonalBackupTaskContext& context, const base::CancellationToken& cancellation) {
+    auto job = decode_worker_job_request(encoded_request);
+    if (!job) {
+        auto response = encode_worker_response(rejection_response(job.error().code));
+        if (!response) {
+            return base::Result<EncodedWorkerResult>::failure(response.error());
+        }
+        return base::Result<EncodedWorkerResult>::success(
+            EncodedWorkerResult{WorkerExitCode::kRequestRejected, std::move(response).value()});
+    }
+    auto result =
+        run_windows_personal_backup_worker_host(job.value(), options, context, cancellation);
+    auto encoded_response = encode_worker_response(result.response);
+    if (!encoded_response) {
+        return base::Result<EncodedWorkerResult>::failure(encoded_response.error());
+    }
+    return base::Result<EncodedWorkerResult>::success(
+        EncodedWorkerResult{result.exit_code, std::move(encoded_response).value()});
 }
 
 } // namespace aegra::apps::worker

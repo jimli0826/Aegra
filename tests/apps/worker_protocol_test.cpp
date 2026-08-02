@@ -1,12 +1,19 @@
 #include "aegra/apps/worker/worker_protocol.h"
 
 #include "aegra/base/error.h"
+#include "aegra/base/result.h"
 #include "aegra/contracts/task_result.h"
 #include "aegra/contracts/worker_response.h"
+#include "aegra/ports/clock.h"
+#include "aegra/ports/credential.h"
+#include "aegra/ports/random.h"
 
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
+#include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace {
@@ -14,6 +21,35 @@ namespace {
 namespace app = aegra::apps::worker;
 namespace base = aegra::base;
 namespace contracts = aegra::contracts;
+
+class UnusedCredentials final : public aegra::ports::ICredentialResolver {
+  public:
+    [[nodiscard]] base::Result<std::unique_ptr<aegra::ports::IResolvedSecret>>
+    resolve(const contracts::SecretRef&, const base::CancellationToken&) override {
+        ++call_count;
+        return base::Result<std::unique_ptr<aegra::ports::IResolvedSecret>>::failure(
+            {base::ErrorCode::kInternal, "unexpected credential access"});
+    }
+
+    std::size_t call_count{0};
+};
+
+class UnusedRandom final : public aegra::ports::IRandomSource {
+  public:
+    [[nodiscard]] base::Result<void> fill(std::span<std::byte>,
+                                          const base::CancellationToken&) override {
+        ++call_count;
+        return base::Result<void>::failure(
+            {base::ErrorCode::kInternal, "unexpected random access"});
+    }
+
+    std::size_t call_count{0};
+};
+
+class FixedClock final : public aegra::ports::IClock {
+  public:
+    [[nodiscard]] std::int64_t now_utc_ms() const noexcept override { return 1'000; }
+};
 
 bool expect(const bool condition, const char* message) {
     if (condition) {
@@ -137,8 +173,37 @@ bool test_encode_response() {
     return passed;
 }
 
+bool test_encoded_request_rejection() {
+    UnusedCredentials credentials;
+    UnusedRandom random;
+    FixedClock clock;
+    aegra::apps::worker::WindowsPersonalBackupTaskOptions options;
+    const aegra::apps::worker::WindowsPersonalBackupTaskContext context{
+        credentials,
+        random,
+        clock,
+        nullptr,
+    };
+    auto rejected = app::run_windows_personal_backup_worker_request("{}", options, context, {});
+    bool passed = expect(
+        rejected && rejected.value().exit_code == app::WorkerExitCode::kRequestRejected &&
+            rejected.value().response_json.find("worker.request_rejected") != std::string::npos,
+        "decode failure returns a structured rejection response");
+    passed &= expect(credentials.call_count == 0 && random.call_count == 0,
+                     "rejected encoded request acquires no system capabilities");
+
+    const std::string oversized(1024U * 1024U + 1U, 'x');
+    rejected = app::run_windows_personal_backup_worker_request(oversized, options, context, {});
+    passed &=
+        expect(rejected && rejected.value().exit_code == app::WorkerExitCode::kRequestRejected,
+               "oversized encoded request is rejected before JSON parsing");
+    return passed;
+}
+
 int run_tests() {
-    return test_decode_job() && test_encode_response() ? EXIT_SUCCESS : EXIT_FAILURE;
+    return test_decode_job() && test_encode_response() && test_encoded_request_rejection()
+               ? EXIT_SUCCESS
+               : EXIT_FAILURE;
 }
 
 } // namespace

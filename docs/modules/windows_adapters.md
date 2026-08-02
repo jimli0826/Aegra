@@ -4,7 +4,7 @@
 
 本模块把 Windows Volume Inventory、稳定块读取、VSS Snapshot 和后续 Disk/Partition 操作适配到
 Aegra 的平台无关核心。阶段 8A 实现 Volume Inventory 与稳定 Block Source；阶段 8B 实现多 Volume
-VSS Snapshot Set Session。
+VSS Snapshot Set Session；阶段 8F 实现 Worker 使用的系统时钟、密码学随机与凭据解析。
 
 本模块不直接读取在线 Volume、不备份 `PhysicalDrive`、不修改磁盘或分区，也不执行 BCD/WinRE 修复。
 
@@ -13,6 +13,8 @@ VSS Snapshot Set Session。
 - `aegra_adapter_windows_disk` 只依赖 `Aegra::Ports` 和 Windows SDK。
 - `aegra_adapter_windows_vss` 只依赖 `Aegra::Base`、VSS API、COM 和 Windows SDK；不得依赖
   `windows_disk` 的实现。
+- `aegra_adapter_windows_system` 只依赖 `Aegra::Ports`、BCrypt、Credential Manager 和虚拟内存 API；
+  不依赖 Disk、VSS 或 Archive Adapter。
 - 公共头不得 include `Windows.h`、`winioctl.h`、COM 或 VSS 头文件。
 - Windows Handle、`OVERLAPPED`、Event 和 Volume Enumeration Handle 必须由 Adapter 内 RAII 对象管理。
 - Pipeline、Format、Ports 和 Contracts 不得依赖该 Target。
@@ -57,6 +59,14 @@ Set，成功后幂等；未显式关闭或关闭失败时，析构路径执行 `
 取消只终止创建，不能跳过已经开始的 Snapshot Set 清理。`close()` 故意不接受取消令牌，因为资源删除
 必须完成或明确返回失败。
 
+### Windows Worker 系统能力
+
+- `WindowsSystemClock` 返回 Unix UTC 毫秒；转换前的 Windows epoch 不得伪装成有效时间。
+- `WindowsCryptographicRandom` 使用系统首选 CNG RNG，预取消时不调用系统 RNG。
+- `WindowsCredentialResolver` 只解析 `wincred://<target>` Generic Credential；Blob 复制到锁页内存，
+  析构前清零。具体安全与部署决策见
+  [ADR-0007](../adr/0007-windows-worker-system-capabilities.md)。
+
 ## 核心不变量
 
 - 在线 Volume 和 `PhysicalDrive` 不能通过公开 Block Source 请求打开。
@@ -95,6 +105,9 @@ src/adapters/windows_vss/
 
 Target：`aegra_adapter_windows_vss` / `Aegra::AdapterWindowsVss`，仅在 Windows 构建。
 
+`aegra_adapter_windows_system` / `Aegra::AdapterWindowsSystem` 同样仅在 Windows 构建，公开头不暴露
+`Windows.h`、Credential 或 BCrypt 类型。
+
 ## 测试
 
 - 普通单元测试只使用临时文件，不依赖管理员权限、真实 Volume 或 VSS Service。
@@ -103,6 +116,8 @@ Target：`aegra_adapter_windows_vss` / `Aegra::AdapterWindowsVss`，仅在 Windo
 - VSS 单元测试通过 Adapter 私有 Backend seam 覆盖空/重复/非法请求、预取消、映射校验、幂等关闭、
   关闭失败和析构清理，不创建真实系统快照。
 - 真实 Volume、跨盘 Volume、无介质设备、访问拒绝和 VSS 生命周期进入单独集成测试。
+- System Adapter 普通测试不创建或修改真实 Credential；成功解析、锁页清零和账户隔离进入临时
+  Credential 集成套件。
 
 ## 安全与可观测性
 

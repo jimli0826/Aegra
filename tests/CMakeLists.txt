@@ -38,6 +38,9 @@ if(WIN32)
     aegra_add_test(aegra_windows_disk_tests adapters/windows_disk_test.cpp)
     target_link_libraries(aegra_windows_disk_tests PRIVATE Aegra::AdapterWindowsDisk)
 
+    aegra_add_test(aegra_windows_system_tests adapters/windows_system_test.cpp)
+    target_link_libraries(aegra_windows_system_tests PRIVATE Aegra::AdapterWindowsSystem)
+
     aegra_add_test(aegra_windows_vss_tests adapters/windows_vss_test.cpp)
     target_include_directories(
         aegra_windows_vss_tests
@@ -82,6 +85,15 @@ if(WIN32)
     target_link_libraries(
         aegra_worker_protocol_tests
         PRIVATE Aegra::AppWorkerPersonal
+    )
+
+    add_test(
+        NAME aegra_personal_worker_rejection
+        COMMAND
+            "${CMAKE_COMMAND}"
+            "-DAEGRA_WORKER=$<TARGET_FILE:aegra_personal_worker>"
+            "-DAEGRA_REQUEST=${CMAKE_CURRENT_SOURCE_DIR}/apps/invalid_worker_job.json"
+            -P "${PROJECT_SOURCE_DIR}/cmake/RunWorkerRejection.cmake"
     )
 endif()
 

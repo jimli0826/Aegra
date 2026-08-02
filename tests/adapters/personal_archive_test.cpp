@@ -449,6 +449,18 @@ bool wrong_parent_password_is_rejected(const TemporaryArchive& archive,
     return !personal::PersonalArchiveSession::create(request).has_value();
 }
 
+bool parent_overwrite_is_rejected(const TemporaryArchive& base,
+                                  const aegra::format::Manifest& manifest) {
+    personal::ArchiveCreateRequest request{base.path(), manifest, "test-password"};
+    request.file_uuid.front() = std::byte{0x44};
+    request.block_size = 4096;
+    request.chunk_size = 8192;
+    request.kdf_parameters = {2, 64ULL * 1024ULL * 1024ULL};
+    request.parent_source = base.path();
+    request.parent_password = "test-password";
+    return !personal::PersonalArchiveSession::create(request).has_value();
+}
+
 void remove_sidecar(const std::filesystem::path& archive) {
     auto sidecar = archive;
     sidecar += ".bhx";
@@ -519,6 +531,9 @@ bool run_incremental_roundtrip(const TemporaryArchive& base, const TemporaryArch
     }
     auto incremental_manifest = make_manifest(latest.size());
     incremental_manifest.backup_job.backup_type = aegra::format::BackupType::kIncremental;
+    if (!parent_overwrite_is_rejected(base, incremental_manifest)) {
+        return false;
+    }
     if (!wrong_parent_password_is_rejected(incremental, incremental_manifest, base.path())) {
         return false;
     }

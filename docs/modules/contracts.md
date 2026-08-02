@@ -27,8 +27,9 @@
 
 ## 当前状态
 
-`JobRequest` 是当前 Worker 的版本化任务信封，拥有 job、tenant、operation、source/target、
-`SecretRef`、trace 和 deadline。`SecretRef` 只保存凭据定位符，禁止保存明文 Secret。
+`JobRequest` schema 2 是当前 Worker 的版本化任务信封，拥有 job、tenant、operation、source/target、
+`SecretRef`、trace 和 deadline。Backup Job 还必须拥有 `BackupOptions`：显式 `type`，增量时同时拥有
+`parent_source_ref` 与 `parent_credential_ref`。`SecretRef` 只保存凭据定位符，禁止保存明文 Secret。
 
 `TaskProgress` 同时携带 `job_id` 与 `trace_id`，用于跨线程和跨进程关联。`TaskResult` 使用稳定的
 `TaskOutcome`、`ErrorCode`、message code、warning code 和容量指标；不得复制 Adapter 的原始错误文本。

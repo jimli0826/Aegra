@@ -193,6 +193,16 @@ app::WindowsPersonalVolumeBackupRequest request() {
     return result;
 }
 
+app::WindowsPersonalVolumeBackupRequest incremental_request() {
+    auto result = request();
+    result.destination = "incremental.bkf";
+    result.backup_type = app::WindowsPersonalBackupType::kIncremental;
+    result.parent_source = "base.bkf";
+    result.parent_password = "parent-password";
+    result.backup_set_uuid = {};
+    return result;
+}
+
 bool test_successful_composition() {
     auto state = std::make_shared<RuntimeState>();
     TestRuntime runtime(state);
@@ -215,6 +225,18 @@ bool test_successful_composition() {
         passed &= expect(false, "composition supplies archive manifest");
     }
     return passed;
+}
+
+bool test_incremental_manifest_composition() {
+    auto state = std::make_shared<RuntimeState>();
+    TestRuntime runtime(state);
+    auto result = detail::backup_windows_personal_volume_with_runtime(
+        incremental_request(), {}, nullptr, runtime);
+    return expect(result && state->manifest &&
+                      state->manifest->backup_job.backup_type ==
+                          aegra::format::BackupType::kIncremental &&
+                      state->commit_count == 1,
+                  "composition records incremental type and commits through the same pipeline");
 }
 
 bool test_cleanup_warning_after_commit() {
@@ -258,14 +280,27 @@ bool test_validation_precedes_runtime() {
     invalid.password = {};
     auto result =
         detail::backup_windows_personal_volume_with_runtime(invalid, {}, nullptr, runtime);
-    return expect(!result && result.error().code == aegra::base::ErrorCode::kInvalidArgument,
-                  "invalid request is rejected") &&
-           expect(state->prepare_count == 0, "invalid request does not acquire a snapshot");
+    bool passed = expect(!result && result.error().code == aegra::base::ErrorCode::kInvalidArgument,
+                         "invalid request is rejected") &&
+                  expect(state->prepare_count == 0,
+                         "invalid request does not acquire a snapshot");
+    invalid = request();
+    invalid.parent_source = "unexpected-parent.bkf";
+    result = detail::backup_windows_personal_volume_with_runtime(invalid, {}, nullptr, runtime);
+    passed &= expect(!result && state->prepare_count == 0,
+                     "full request rejects even a partial parent relationship");
+    invalid = incremental_request();
+    invalid.parent_password = {};
+    result = detail::backup_windows_personal_volume_with_runtime(invalid, {}, nullptr, runtime);
+    passed &= expect(!result && state->prepare_count == 0,
+                     "incremental request requires complete parent credentials");
+    return passed;
 }
 
 int run_tests() {
-    const bool passed = test_successful_composition() && test_cleanup_warning_after_commit() &&
-                        test_failure_cleanup() && test_validation_precedes_runtime();
+    const bool passed = test_successful_composition() && test_incremental_manifest_composition() &&
+                        test_cleanup_warning_after_commit() && test_failure_cleanup() &&
+                        test_validation_precedes_runtime();
     return passed ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 

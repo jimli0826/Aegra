@@ -15,6 +15,7 @@ aegra::contracts::JobRequest valid_request() {
     request.tenant_id = "tenant-1";
     request.source_refs = {"disk-0"};
     request.target_ref = "repository-1";
+    request.backup = aegra::contracts::BackupOptions{};
     request.trace_id = "trace-1";
     return request;
 }
@@ -49,11 +50,24 @@ bool test_job_request_validation() {
     request = valid_request();
     request.operation = aegra::contracts::JobOperation::kVerify;
     request.target_ref.clear();
+    request.backup.reset();
     passed &= expect(aegra::contracts::validate_job_request(request).has_value(),
                      "verify job does not require a target");
     request.operation = aegra::contracts::JobOperation::kRestore;
     passed &= expect(!aegra::contracts::validate_job_request(request).has_value(),
                      "restore job still requires a target");
+
+    request = valid_request();
+    request.backup->type = aegra::contracts::BackupType::kIncremental;
+    passed &= expect(!aegra::contracts::validate_job_request(request).has_value(),
+                     "incremental backup requires both parent references");
+    request.backup->parent_source_ref = "base.bkf";
+    request.backup->parent_credential_ref = {"secret://base"};
+    passed &= expect(aegra::contracts::validate_job_request(request).has_value(),
+                     "incremental backup accepts explicit parent references");
+    request.backup->type = aegra::contracts::BackupType::kFull;
+    passed &= expect(!aegra::contracts::validate_job_request(request).has_value(),
+                     "full backup rejects parent references");
     return passed;
 }
 

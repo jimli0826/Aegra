@@ -18,23 +18,26 @@
 
 | 字段 | JSON 类型 | 规则 |
 | --- | --- | --- |
-| `schema_version` | unsigned integer | 当前固定为 `1` |
+| `schema_version` | unsigned integer | 当前固定为 `2` |
 | `job_id` | string | 必填、非空 |
 | `tenant_id` | string | 必填、非空 |
 | `operation` | unsigned integer | 使用 `JobOperation` 的显式数值 |
 | `source_refs` | string array | 至少一个非空值 |
 | `target_ref` | string | Backup/Restore/Export 必填；Verify 为空 |
 | `credential_refs` | string array | 只允许 `SecretRef` 定位符 |
+| `backup` | object | Backup 必填；含 `type`，增量还含两个父引用 |
 | `trace_id` | string | 必填、非空 |
 | `deadline_utc_ms` | signed integer | 可选；`0` 表示无 deadline |
 
-顶层 `password` 和 `secret` 字段一律拒绝。解析器检查 JSON 类型和整数范围，未知 schema、无效枚举、
+任何字段名包含 `password` 或 `secret` 的明文凭据字段一律拒绝。解析器检查 JSON 类型和整数范围，未知 schema、无效枚举、
 字段缺失或格式错误都表示请求未被接受。业务运行参数，例如 block/chunk 大小、KDF 参数、应用版本和
 主机名，来自 Worker 的受信任配置，不从 Job 消息接收。
 
-个人版 Windows Worker 的 Backup 和 Verify 当前只接受 `wincred://<target>` Credential Ref。Credential Blob 是非空、长度
-明确的密码字节，位于 Worker 运行账户的 Generic Credential Store；Job 和响应都不携带 target 对应的
-明文值。
+个人版 Windows Worker 的 Backup 和 Verify 当前只接受 `wincred://<target>` Credential Ref。Credential
+Blob 是非空、长度明确的密码字节，位于 Worker 运行账户的 Generic Credential Store；Job 和响应都不携带
+target 对应的明文值。Backup 的 `backup.type` 数值为 `1=full`、`2=incremental`、`3=differential`；当前
+Worker 明确拒绝 differential。Incremental 必须提供 `parent_source_ref` 与 `parent_credential_ref`，并在
+Backend 调用期间同时保持新 Archive 和父 Archive 的 Secret 存活。
 
 Verify Job 的 `operation` 为 `3`，`source_refs` 恰好一个 `.bkf`，`target_ref` 为空；Worker 会完整读取并
 认证每个 Chunk，不创建目标文件。成功结果使用 `verify.completed`，错误使用脱敏的 `verify.*` code。
@@ -43,6 +46,16 @@ Restore Job 的 `operation` 为 `2`，`source_refs` 按 base-first 顺序包含�
 `credential_refs` 必须同长度且逐层对应，`target_ref` 必须是 canonical Windows Volume GUID Path。
 Worker 在所有层完成认证和链关系验证后才锁定、卸载并写入非系统目标卷；链深度由受信任运行配置限制，
 安全边界见 [ADR-0009](../adr/0009-windows-volume-restore-safety.md)。
+
+全量和增量 Backup 的 schema 2 片段分别为：
+
+```json
+{"backup":{"type":1}}
+{"backup":{"type":2,"parent_source_ref":"D:\\Backups\\base.bkf","parent_credential_ref":"wincred://aegra/base"}}
+```
+
+父 Archive 路径是显式输入，不由 Worker 扫描目录猜测；当前 Archive 口令仍由顶层
+`credential_refs[0]` 指定。
 
 ## 响应协议
 

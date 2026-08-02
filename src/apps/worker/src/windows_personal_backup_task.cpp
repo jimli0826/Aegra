@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <ctime>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -20,6 +21,11 @@ namespace detail {
 namespace {
 
 using BackupIds = std::pair<std::array<std::byte, 16>, std::array<std::byte, 16>>;
+
+struct ResolvedBackupSecrets final {
+    std::unique_ptr<ports::IResolvedSecret> archive;
+    std::unique_ptr<ports::IResolvedSecret> parent;
+};
 
 base::Result<void> invalid(const char* message) {
     return base::Result<void>::failure(base::Error{base::ErrorCode::kInvalidArgument, message});
@@ -34,6 +40,9 @@ base::Result<void> validate_task(const contracts::JobRequest& job,
     if (job.operation != contracts::JobOperation::kBackup || job.source_refs.size() != 1 ||
         job.credential_refs.size() != 1) {
         return invalid("personal backup task requires one source and one credential");
+    }
+    if (!job.backup || job.backup->type == contracts::BackupType::kDifferential) {
+        return invalid("personal backup task supports full and incremental backup types");
     }
     if (options.block_size_bytes == 0 || options.chunk_size_bytes < options.block_size_bytes ||
         options.memory_budget_bytes < options.chunk_size_bytes) {
@@ -184,6 +193,30 @@ base::Result<BackupIds> make_backup_ids(ports::IRandomSource& random,
     });
 }
 
+base::Result<std::array<std::byte, 16>>
+make_file_id(ports::IRandomSource& random, const base::CancellationToken& cancellation) {
+    std::array<std::byte, 16> result{};
+    auto filled = random.fill(result, cancellation);
+    if (!filled) {
+        return base::Result<std::array<std::byte, 16>>::failure(filled.error());
+    }
+    normalize_uuid(result);
+    return base::Result<std::array<std::byte, 16>>::success(result);
+}
+
+base::Result<BackupIds> make_requested_ids(const contracts::BackupType type,
+                                           ports::IRandomSource& random,
+                                           const base::CancellationToken& cancellation) {
+    if (type == contracts::BackupType::kFull) {
+        return make_backup_ids(random, cancellation);
+    }
+    auto file_id = make_file_id(random, cancellation);
+    if (!file_id) {
+        return base::Result<BackupIds>::failure(file_id.error());
+    }
+    return base::Result<BackupIds>::success({file_id.value(), {}});
+}
+
 std::filesystem::path path_from_utf8(const std::string& value) {
     std::u8string encoded;
     encoded.reserve(value.size());
@@ -195,13 +228,20 @@ std::filesystem::path path_from_utf8(const std::string& value) {
 
 WindowsPersonalVolumeBackupRequest make_backup_request(
     const contracts::JobRequest& job, const WindowsPersonalBackupTaskOptions& options,
-    const std::string_view password, const BackupIds& ids, std::string created_utc) {
+    const ResolvedBackupSecrets& secrets, const BackupIds& ids, std::string created_utc) {
     WindowsPersonalVolumeBackupRequest request;
     request.job_id = job.job_id;
     request.trace_id = job.trace_id;
     request.volume_guid_path = path_from_utf8(job.source_refs.front());
     request.destination = path_from_utf8(job.target_ref);
-    request.password = password;
+    request.password = secrets.archive->view();
+    request.backup_type = job.backup->type == contracts::BackupType::kFull
+                              ? WindowsPersonalBackupType::kFull
+                              : WindowsPersonalBackupType::kIncremental;
+    if (secrets.parent) {
+        request.parent_source = path_from_utf8(job.backup->parent_source_ref);
+        request.parent_password = secrets.parent->view();
+    }
     request.file_uuid = ids.first;
     request.backup_set_uuid = ids.second;
     request.block_size_bytes = options.block_size_bytes;
@@ -214,6 +254,28 @@ WindowsPersonalVolumeBackupRequest make_backup_request(
     request.application_version = options.application_version;
     request.hostname = options.hostname;
     return request;
+}
+
+base::Result<ResolvedBackupSecrets>
+resolve_backup_secrets(const contracts::JobRequest& job, ports::ICredentialResolver& credentials,
+                       const base::CancellationToken& cancellation) {
+    auto archive = credentials.resolve(job.credential_refs.front(), cancellation);
+    if (!archive || archive.value() == nullptr || archive.value()->view().empty()) {
+        const auto code = !archive ? archive.error().code : base::ErrorCode::kUnauthorized;
+        return base::Result<ResolvedBackupSecrets>::failure({code, "archive credential failed"});
+    }
+    ResolvedBackupSecrets result;
+    result.archive = std::move(archive).value();
+    if (job.backup->type == contracts::BackupType::kFull) {
+        return base::Result<ResolvedBackupSecrets>::success(std::move(result));
+    }
+    auto parent = credentials.resolve(job.backup->parent_credential_ref, cancellation);
+    if (!parent || parent.value() == nullptr || parent.value()->view().empty()) {
+        const auto code = !parent ? parent.error().code : base::ErrorCode::kUnauthorized;
+        return base::Result<ResolvedBackupSecrets>::failure({code, "parent credential failed"});
+    }
+    result.parent = std::move(parent).value();
+    return base::Result<ResolvedBackupSecrets>::success(std::move(result));
 }
 
 base::Result<contracts::TaskResult>
@@ -233,19 +295,16 @@ run_accepted_task(const contracts::JobRequest& job, const WindowsPersonalBackupT
     if (!created_utc) {
         return validated_task_result(failed_result(job, created_utc.error().code));
     }
-    auto ids = make_backup_ids(context.random, cancellation);
+    auto ids = make_requested_ids(job.backup->type, context.random, cancellation);
     if (!ids) {
         return validated_task_result(failed_result(job, ids.error().code));
     }
-    auto secret = context.credentials.resolve(job.credential_refs.front(), cancellation);
-    if (!secret) {
+    auto secrets = resolve_backup_secrets(job, context.credentials, cancellation);
+    if (!secrets) {
         return validated_task_result(
-            failed_result(job, credential_error_code(secret.error().code)));
+            failed_result(job, credential_error_code(secrets.error().code)));
     }
-    if (secret.value() == nullptr || secret.value()->view().empty()) {
-        return validated_task_result(failed_result(job, base::ErrorCode::kUnauthorized));
-    }
-    const auto request = make_backup_request(job, options, secret.value()->view(), ids.value(),
+    const auto request = make_backup_request(job, options, secrets.value(), ids.value(),
                                              std::move(created_utc).value());
     auto backup = backend.run(request, cancellation, context.progress);
     if (!backup) {

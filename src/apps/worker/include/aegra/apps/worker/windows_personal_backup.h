@@ -16,12 +16,20 @@
 
 namespace aegra::apps::worker {
 
+enum class WindowsPersonalBackupType : std::uint8_t {
+    kFull = 1,
+    kIncremental = 2,
+};
+
 struct WindowsPersonalVolumeBackupRequest final {
     std::string job_id;
     std::string trace_id;
     std::filesystem::path volume_guid_path;
     std::filesystem::path destination;
     std::string_view password;
+    WindowsPersonalBackupType backup_type{WindowsPersonalBackupType::kFull};
+    std::filesystem::path parent_source;
+    std::string_view parent_password;
     std::array<std::byte, 16> file_uuid{};
     std::array<std::byte, 16> backup_set_uuid{};
     std::uint32_t block_size_bytes{0};

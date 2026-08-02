@@ -519,13 +519,14 @@ try {
     $jobId = "e2e-$([Guid]::NewGuid())"
     $traceId = "trace-$([Guid]::NewGuid())"
     $job = [ordered]@{
-        schema_version = 1
+        schema_version = 2
         job_id = $jobId
         tenant_id = 'personal-e2e'
         operation = 1
         source_refs = @($volumePath)
         target_ref = $archivePath
         credential_refs = @("wincred://$credentialTarget")
+        backup = [ordered]@{ type = 1 }
         trace_id = $traceId
         deadline_utc_ms = 0
     }

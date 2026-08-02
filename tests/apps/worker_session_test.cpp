@@ -39,7 +39,7 @@ bool expect(const bool condition, const char* message) {
 }
 
 std::string valid_job_json() {
-    return R"({"schema_version":1,"job_id":"job-1","tenant_id":"tenant-1","operation":1,"source_refs":["source-1"],"target_ref":"target-1","credential_refs":["wincred://test"],"trace_id":"trace-1"})";
+    return R"({"schema_version":2,"job_id":"job-1","tenant_id":"tenant-1","operation":1,"source_refs":["source-1"],"target_ref":"target-1","credential_refs":["wincred://test"],"backup":{"type":1},"trace_id":"trace-1"})";
 }
 
 std::string cancel_json(const std::string_view job_id = "job-1") {

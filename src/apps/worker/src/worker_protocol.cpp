@@ -55,6 +55,26 @@ std::int64_t optional_deadline(const Json& object) {
     throw std::out_of_range("worker request deadline is out of range");
 }
 
+std::optional<contracts::BackupOptions> optional_backup(const Json& root) {
+    const auto iterator = root.find("backup");
+    if (iterator == root.end()) {
+        return std::nullopt;
+    }
+    if (!iterator->is_object()) {
+        throw std::invalid_argument("worker request backup must be an object");
+    }
+    const auto type = required_unsigned(*iterator, "type");
+    if (type > std::numeric_limits<std::uint8_t>::max()) {
+        throw std::out_of_range("worker request backup type is out of range");
+    }
+    contracts::BackupOptions result;
+    result.type = static_cast<contracts::BackupType>(type);
+    result.parent_source_ref = iterator->value("parent_source_ref", std::string{});
+    result.parent_credential_ref.value =
+        iterator->value("parent_credential_ref", std::string{});
+    return result;
+}
+
 contracts::JobRequest parse_job(const Json& root) {
     const auto schema_version = required_unsigned(root, "schema_version");
     const auto operation = required_unsigned(root, "operation");
@@ -80,7 +100,21 @@ contracts::JobRequest parse_job(const Json& root) {
     for (const auto& value : required<std::vector<std::string>>(root, "credential_refs")) {
         job.credential_refs.push_back(contracts::SecretRef{value});
     }
+    job.backup = optional_backup(root);
     return job;
+}
+
+bool contains_plaintext_credential_field(const Json& object) {
+    if (!object.is_object()) {
+        return false;
+    }
+    for (auto iterator = object.begin(); iterator != object.end(); ++iterator) {
+        if (iterator.key().find("password") != std::string::npos ||
+            iterator.key().find("secret") != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
 }
 
 Json encode_task_result(const contracts::TaskResult& result) {
@@ -138,9 +172,14 @@ base::Result<contracts::JobRequest> decode_worker_job_request(const std::string_
             return invalid_job(base::ErrorCode::kInvalidArgument,
                                "worker request root must be an object");
         }
-        if (root.contains("password") || root.contains("secret")) {
+        if (contains_plaintext_credential_field(root)) {
             return invalid_job(base::ErrorCode::kInvalidArgument,
                                "plaintext credential fields are forbidden");
+        }
+        const auto backup = root.find("backup");
+        if (backup != root.end() && contains_plaintext_credential_field(*backup)) {
+            return invalid_job(base::ErrorCode::kInvalidArgument,
+                               "plaintext backup credential fields are forbidden");
         }
         auto job = parse_job(root);
         auto validation = contracts::validate_job_request(job);

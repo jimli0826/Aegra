@@ -835,16 +835,18 @@ V1 固定使用 SHA-256（`hash_size = 32`）。DATA record 保存内容散列�
 
 ### 差异/增量备份写入语义
 
-执行 `backup-diff` 时：
+创建增量层时：
 
-1. 加载基准备份的 sidecar（`<base>.bkf.bhx`），校验 `block_size` 与 `hash_size` 与当前一致。
-2. 对每个 DATA 逻辑块计算 SHA-256（全量备份也始终计算以生成 sidecar）。
-3. 与基线比较，判定该块是否变化：
+1. 调用方显式提供直接父 Archive 及其凭据；目标路径不得与父 Archive 相同。
+2. 打开并认证父 Archive 与其 sidecar（`<parent>.bkf.bhx`），校验 UUID、volume、逻辑大小、
+   `block_size` 与记录数量。
+3. 对每个 DATA 逻辑块计算 SHA-256（全量备份也始终计算以生成 sidecar）。
+4. 与基线比较，判定该块是否变化：
    - DATA 块：散列不同或基线中不存在 → 视为变化。
    - ZERO/SKIP 块：仅当基线对应块为 DATA 时才视为变化（数据被清除）。
-4. 只有变化块写入 chunk 流；未变化块不写入。
-5. 关键规则：从 DATA 变为 zero/free 的块**必须显式写为 `BLOCK_FLAG_ZERO` 块**，不能省略。否则恢复时该位置会残留基准的旧数据。
-6. 写完 `.bkf` 后生成一份**完整状态**的新 sidecar（包含所有块的最新状态，而不仅是变化块），作为后续备份的基线。
+5. 只有变化块写入 chunk 流；未变化块不写入。
+6. 关键规则：从 DATA 变为 zero/free 的块**必须显式写为 `BLOCK_FLAG_ZERO` 块**，不能省略。否则恢复时该位置会残留基准的旧数据。
+7. 写完 `.bkf` 后生成一份**完整状态**的新 sidecar（包含所有块的最新状态，而不仅是变化块），作为后续备份的基线。
 
 差异/增量备份的 `BackupHeader` 设置：`backup_set_uuid` 继承自基准，`parent_uuid =` 基准/父的 `file_uuid`，`flags` 设置对应的 DIFFERENTIAL/INCREMENTAL 位，CBOR `backup_job.backup_type` 设为 3/2。
 
@@ -856,18 +858,13 @@ Adapter 不扫描目录猜测父文件，也不对无关文件批量执行 KDF�
 后续层的 `parent_uuid` 精确指向前一层、`backup_set_uuid` 一致、UUID 不重复，并且 block size、volume
 identity 与逻辑大小保持一致。
 
-恢复采用**多遍叠加（multi-pass overlay）**：按 base-first 顺序逐个文件恢复到同一目标，后写覆盖先写。由于差异/增量只含变化块、且“变为零”的块以显式 ZERO 写入，按时间顺序应用即可得到正确的最终状态。
+恢复不把稀疏层逐个直接写入目标。`PersonalArchiveChainReader` 以基准全量层的连续 chunk 边界为
+输出范围，在读取每个范围时按 base-first 顺序应用所有相交覆盖，形成完整连续
+`IRecoveryPointReader` 视图。通用 Restore Pipeline 对该合并视图只执行一次，因此不会在中间层重复
+准备目标、重建布局或提前上线。单个全量 Archive 是长度为 1 的合法链；单个增量层不得作为标准恢复源。
 
-为避免中间遍重复重建分区表或提前挂载，恢复用 `ChainPass` 控制每一遍的行为：
-
-| ChainPass | 重建分区表 | 恢复后上线 |
-| --- | --- | --- |
-| Single（非链/单文件） | 是 | 是 |
-| First（基准遍） | 是 | 否 |
-| Middle（中间遍） | 否 | 否 |
-| Last（最后一遍） | 否 | 是 |
-
-卷级恢复本就不重建分区表，所有遍均为纯数据叠加。`restore` / `restore-disk` 命令会自动检测差异/增量文件并解析链，无需额外命令。
+Adapter 不扫描目录，也不自动对候选文件执行 KDF。链发现、凭据选择和用户交互由 Application 或本地
+Recovery Point 目录负责，最终必须提交显式、受深度限制的 base-first 层列表。
 
 ### 链挂载与随机读取
 
@@ -936,7 +933,8 @@ identity 与逻辑大小保持一致。
 
 由于 chunk 的分区定位依赖解密后的 CBOR metadata，恢复器必须先成功解密 metadata，才能创建目标分区、校验 chunk 引用关系或执行整盘裸机恢复。如果只需要扫描文件完整性，可以在没有 metadata key 的情况下顺序校验 chunk 结构，但不能证明 chunk 引用的 disk/partition 合法。
 
-对差异/增量备份，恢复前需先解析备份链（见“增量与差异备份”），再按 base-first 顺序对每个文件执行上述顺序恢复流程，后写覆盖先写。挂载/随机读取由 `BackupReader` 分层合并整条链实现。
+对差异/增量备份，恢复前需先解析并认证完整备份链（见“增量与差异备份”），再由 Chain Reader 合并为
+连续视图并执行一次上述恢复流程。挂载/随机读取复用同一个分层合并视图。
 
 ## 校验规则
 

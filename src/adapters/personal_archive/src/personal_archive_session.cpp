@@ -12,6 +12,7 @@
 #include "aegra/format/personal_archive.h"
 
 #include <algorithm>
+#include <cwctype>
 #include <fstream>
 #include <iomanip>
 #include <limits>
@@ -110,6 +111,23 @@ struct IncrementalBaseline final {
     if (request.parent_source.empty() || request.parent_password.empty()) {
         return base::Result<void>::failure(error(base::ErrorCode::kInvalidArgument,
                                                  "incremental archive requires a complete parent"));
+    }
+    std::error_code destination_error;
+    std::error_code parent_error;
+    auto destination = std::filesystem::absolute(request.destination, destination_error)
+                           .lexically_normal()
+                           .native();
+    auto parent =
+        std::filesystem::absolute(request.parent_source, parent_error).lexically_normal().native();
+#ifdef _WIN32
+    std::ranges::transform(destination, destination.begin(),
+                           [](wchar_t value) { return std::towlower(value); });
+    std::ranges::transform(parent, parent.begin(),
+                           [](wchar_t value) { return std::towlower(value); });
+#endif
+    if (destination_error || parent_error || destination == parent) {
+        return base::Result<void>::failure(error(
+            base::ErrorCode::kConflict, "incremental destination must differ from its parent"));
     }
     return base::Result<void>::success();
 }

@@ -61,13 +61,14 @@ bool expect(const bool condition, const char* message) {
 
 std::string valid_job_json() {
     return R"({
-        "schema_version": 1,
+        "schema_version": 2,
         "job_id": "job-1",
         "tenant_id": "tenant-1",
         "operation": 1,
         "source_refs": ["source-1"],
         "target_ref": "target-1",
         "credential_refs": ["secret://personal/password"],
+        "backup": {"type": 1},
         "trace_id": "trace-1",
         "deadline_utc_ms": 2000
     })";
@@ -89,6 +90,11 @@ bool test_decode_job() {
     auto plaintext = app::decode_worker_job_request(plaintext_json);
     passed &= expect(!plaintext && plaintext.error().code == base::ErrorCode::kInvalidArgument,
                      "plaintext password fields are rejected");
+    auto nested_plaintext_json = valid_job_json();
+    const auto backup_end = nested_plaintext_json.find('}', nested_plaintext_json.find("backup"));
+    nested_plaintext_json.insert(backup_end, R"(,"parent_password":"forbidden")");
+    passed &= expect(!app::decode_worker_job_request(nested_plaintext_json),
+                     "plaintext backup password fields are rejected");
 
     auto overflow_json = valid_job_json();
     const auto operation = overflow_json.find(R"("operation": 1)");
@@ -99,7 +105,7 @@ bool test_decode_job() {
                      "out-of-range numeric fields cannot narrow into valid enums");
 
     const auto verify_json =
-        R"({"schema_version":1,"job_id":"verify-1","tenant_id":"tenant-1","operation":3,"source_refs":["archive.bkf"],"credential_refs":["secret://verify"],"trace_id":"trace-verify"})";
+        R"({"schema_version":2,"job_id":"verify-1","tenant_id":"tenant-1","operation":3,"source_refs":["archive.bkf"],"credential_refs":["secret://verify"],"trace_id":"trace-verify"})";
     auto verify = app::decode_worker_job_request(verify_json);
     passed &= expect(verify && verify.value().target_ref.empty() &&
                          verify.value().operation == contracts::JobOperation::kVerify,
@@ -120,7 +126,7 @@ bool test_decode_job() {
                      "negative operation values cannot wrap into valid enums");
 
     auto unsupported = app::decode_worker_job_request(R"({
-        "schema_version": 2,
+        "schema_version": 1,
         "job_id": "job-1",
         "tenant_id": "tenant-1",
         "operation": 1,
@@ -132,6 +138,19 @@ bool test_decode_job() {
     passed &=
         expect(!unsupported && unsupported.error().code == base::ErrorCode::kUnsupportedVersion,
                "unsupported request schema preserves its stable error code");
+
+    const auto incremental_json =
+        R"({"schema_version":2,"job_id":"incremental-1","tenant_id":"tenant-1","operation":1,"source_refs":["volume-1"],"target_ref":"incremental.bkf","credential_refs":["secret://archive"],"backup":{"type":2,"parent_source_ref":"base.bkf","parent_credential_ref":"secret://base"},"trace_id":"trace-incremental"})";
+    auto incremental = app::decode_worker_job_request(incremental_json);
+    passed &= expect(incremental && incremental.value().backup &&
+                         incremental.value().backup->type == contracts::BackupType::kIncremental &&
+                         incremental.value().backup->parent_source_ref == "base.bkf",
+                     "incremental JSON decodes explicit parent references");
+    auto missing_parent = std::string(incremental_json);
+    const auto parent = missing_parent.find(R"(,"parent_credential_ref":"secret://base")");
+    missing_parent.erase(parent, std::string(R"(,"parent_credential_ref":"secret://base")").size());
+    passed &= expect(!app::decode_worker_job_request(missing_parent),
+                     "incremental JSON rejects incomplete parent references");
     return passed;
 }
 

@@ -31,8 +31,21 @@ base::Result<void> validate_request(const WindowsPersonalVolumeBackupRequest& re
             "Windows personal volume backup geometry is invalid",
         });
     }
-    if (is_zero_uuid(request.file_uuid) || is_zero_uuid(request.backup_set_uuid) ||
-        request.file_uuid == request.backup_set_uuid) {
+    const bool full = request.backup_type == WindowsPersonalBackupType::kFull;
+    const bool incremental = request.backup_type == WindowsPersonalBackupType::kIncremental;
+    const bool parent_empty = request.parent_source.empty() && request.parent_password.empty();
+    const bool parent_complete = !request.parent_source.empty() && !request.parent_password.empty();
+    if ((!full && !incremental) || (full && !parent_empty) ||
+        (incremental && !parent_complete)) {
+        return base::Result<void>::failure(base::Error{
+            base::ErrorCode::kInvalidArgument,
+            "Windows personal volume backup relationship is invalid",
+        });
+    }
+    if (is_zero_uuid(request.file_uuid) ||
+        (full && (is_zero_uuid(request.backup_set_uuid) ||
+                  request.file_uuid == request.backup_set_uuid)) ||
+        (incremental && !is_zero_uuid(request.backup_set_uuid))) {
         return base::Result<void>::failure(base::Error{
             base::ErrorCode::kInvalidArgument,
             "Windows personal volume backup identifiers are invalid",
@@ -56,7 +69,10 @@ format::Manifest make_manifest(const WindowsPersonalVolumeBackupRequest& request
     format::Manifest manifest;
     manifest.system.hostname = request.hostname;
     manifest.system.collection_time_utc = request.created_utc;
-    manifest.backup_job.backup_type = format::BackupType::kFull;
+    manifest.backup_job.backup_type =
+        request.backup_type == WindowsPersonalBackupType::kFull
+            ? format::BackupType::kFull
+            : format::BackupType::kIncremental;
     manifest.backup_job.created_utc = request.created_utc;
     manifest.backup_job.application_version = request.application_version;
 

@@ -3,12 +3,13 @@
 #include "aegra/base/result.h"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace aegra::contracts {
 
-inline constexpr std::uint32_t kJobSchemaVersion = 1;
+inline constexpr std::uint32_t kJobSchemaVersion = 2;
 
 enum class JobOperation : std::uint8_t {
     kBackup = 1,
@@ -23,6 +24,18 @@ struct SecretRef final {
     [[nodiscard]] friend bool operator==(const SecretRef&, const SecretRef&) = default;
 };
 
+enum class BackupType : std::uint8_t {
+    kFull = 1,
+    kIncremental = 2,
+    kDifferential = 3,
+};
+
+struct BackupOptions final {
+    BackupType type{BackupType::kFull};
+    std::string parent_source_ref;
+    SecretRef parent_credential_ref;
+};
+
 struct JobRequest final {
     std::uint32_t schema_version{kJobSchemaVersion};
     std::string job_id;
@@ -31,6 +44,7 @@ struct JobRequest final {
     std::vector<std::string> source_refs;
     std::string target_ref;
     std::vector<SecretRef> credential_refs;
+    std::optional<BackupOptions> backup;
     std::string trace_id;
     std::int64_t deadline_utc_ms{0};
 };

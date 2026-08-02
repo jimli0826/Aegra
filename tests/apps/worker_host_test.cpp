@@ -49,6 +49,7 @@ contracts::JobRequest valid_job() {
     job.tenant_id = "tenant-1";
     job.source_refs = {"source-1"};
     job.target_ref = "target-1";
+    job.backup = contracts::BackupOptions{};
     job.trace_id = "trace-host-1";
     return job;
 }

@@ -134,6 +134,8 @@ class WindowsPersonalBackupRuntime final : public IWindowsPersonalBackupRuntime 
         archive_request.source_index = 0;
         archive_request.split_size_bytes = request.split_size_bytes;
         archive_request.kdf_parameters = {request.kdf_opslimit, request.kdf_memlimit_bytes};
+        archive_request.parent_source = request.parent_source;
+        archive_request.parent_password = request.parent_password;
         auto session = personal_archive::PersonalArchiveSession::create(archive_request);
         if (!session) {
             return base::Result<std::unique_ptr<ports::IBackupSession>>::failure(session.error());

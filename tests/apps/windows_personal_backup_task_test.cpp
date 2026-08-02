@@ -37,18 +37,24 @@ struct TestState final {
     std::size_t random_count{0};
     std::size_t backend_count{0};
     bool secret_destroyed{false};
+    std::size_t active_secrets{0};
     bool fail_resolve{false};
+    std::size_t fail_resolve_call{0};
     bool fail_random{false};
     bool cleanup_warning{false};
     bool progress_capture_failed{false};
     std::optional<aegra::base::Error> backend_error;
-    std::string resolved_ref;
+    std::vector<std::string> resolved_refs;
     std::string received_password;
+    std::string received_parent_password;
     std::string received_job_id;
     std::string received_trace_id;
     std::string received_created_utc;
     std::filesystem::path received_source;
     std::filesystem::path received_destination;
+    std::filesystem::path received_parent_source;
+    app::WindowsPersonalBackupType received_backup_type{app::WindowsPersonalBackupType::kFull};
+    bool secrets_alive_in_backend{false};
     std::array<std::byte, 16> file_uuid{};
     std::array<std::byte, 16> backup_set_uuid{};
     aegra::ports::IProgressSink* received_progress{nullptr};
@@ -58,9 +64,12 @@ struct TestState final {
 class TestSecret final : public aegra::ports::IResolvedSecret {
   public:
     TestSecret(std::shared_ptr<TestState> state, std::string value)
-        : state_(std::move(state)), value_(std::move(value)) {}
+        : state_(std::move(state)), value_(std::move(value)) {
+        ++state_->active_secrets;
+    }
     ~TestSecret() override {
         std::ranges::fill(value_, '\0');
+        --state_->active_secrets;
         state_->secret_destroyed = true;
     }
 
@@ -84,17 +93,19 @@ class TestCredentialResolver final : public aegra::ports::ICredentialResolver {
     resolve(const contracts::SecretRef& secret_ref,
             const aegra::base::CancellationToken& cancellation) override {
         ++state_->resolve_count;
-        state_->resolved_ref = secret_ref.value;
+        state_->resolved_refs.push_back(secret_ref.value);
         if (cancellation.stop_requested()) {
             return aegra::base::Result<std::unique_ptr<aegra::ports::IResolvedSecret>>::failure(
                 {aegra::base::ErrorCode::kCancelled, "test credential resolution cancelled"});
         }
-        if (state_->fail_resolve) {
+        if (state_->fail_resolve || state_->resolve_count == state_->fail_resolve_call) {
             return aegra::base::Result<std::unique_ptr<aegra::ports::IResolvedSecret>>::failure(
                 {aegra::base::ErrorCode::kUnauthorized, "secret backend detail"});
         }
         std::unique_ptr<aegra::ports::IResolvedSecret> secret =
-            std::make_unique<TestSecret>(state_, "test-password");
+            std::make_unique<TestSecret>(
+                state_, secret_ref.value.find("parent") == std::string::npos ? "test-password"
+                                                                            : "parent-password");
         return aegra::base::Result<std::unique_ptr<aegra::ports::IResolvedSecret>>::success(
             std::move(secret));
     }
@@ -162,11 +173,17 @@ class TestBackend final : public detail::IWindowsPersonalBackupTaskBackend {
         const aegra::base::CancellationToken&, aegra::ports::IProgressSink* progress) override {
         ++state_->backend_count;
         state_->received_password = request.password;
+        state_->received_parent_password = request.parent_password;
         state_->received_job_id = request.job_id;
         state_->received_trace_id = request.trace_id;
         state_->received_created_utc = request.created_utc;
         state_->received_source = request.volume_guid_path;
         state_->received_destination = request.destination;
+        state_->received_parent_source = request.parent_source;
+        state_->received_backup_type = request.backup_type;
+        state_->secrets_alive_in_backend =
+            state_->active_secrets ==
+            (request.backup_type == app::WindowsPersonalBackupType::kFull ? 1U : 2U);
         state_->file_uuid = request.file_uuid;
         state_->backup_set_uuid = request.backup_set_uuid;
         state_->received_progress = progress;
@@ -196,6 +213,7 @@ contracts::JobRequest valid_job() {
     job.source_refs = {R"(\\?\Volume{01234567-89ab-cdef-0123-456789abcdef}\)"};
     job.target_ref = R"(D:\Backups\personal.bkf)";
     job.credential_refs = {contracts::SecretRef{"secret://personal/password"}};
+    job.backup = contracts::BackupOptions{};
     job.trace_id = "trace-personal-1";
     return job;
 }
@@ -238,7 +256,8 @@ bool test_successful_mapping() {
     passed &= expect(fixture.state->resolve_count == 1 && fixture.state->random_count == 2 &&
                          fixture.state->backend_count == 1 && fixture.state->secret_destroyed,
                      "executor resolves and releases one credential around one backend call");
-    passed &= expect(fixture.state->resolved_ref == "secret://personal/password" &&
+    passed &= expect(fixture.state->resolved_refs ==
+                             std::vector<std::string>{"secret://personal/password"} &&
                          fixture.state->received_password == "test-password",
                      "executor resolves the requested secret without placing it in the job");
     passed &= expect(fixture.state->received_job_id == "job-personal-1" &&
@@ -255,6 +274,33 @@ bool test_successful_mapping() {
                          fixture.state->progress.front().message_code == "backup.preparing",
                      "executor publishes correlated preparation progress");
     return passed;
+}
+
+bool test_incremental_mapping_and_secret_lifetime() {
+    TestFixture fixture;
+    auto job = valid_job();
+    job.target_ref = R"(D:\Backups\incremental.bkf)";
+    job.backup->type = contracts::BackupType::kIncremental;
+    job.backup->parent_source_ref = R"(D:\Backups\base.bkf)";
+    job.backup->parent_credential_ref = {"secret://parent/password"};
+    auto context = fixture.context();
+    auto result = detail::execute_windows_personal_backup_task_with_backend(
+        job, valid_options(), context, {}, fixture.backend);
+    return expect(result && fixture.state->backend_count == 1 &&
+                      fixture.state->random_count == 1 && fixture.state->resolve_count == 2 &&
+                      fixture.state->resolved_refs ==
+                          std::vector<std::string>{"secret://personal/password",
+                                                   "secret://parent/password"} &&
+                      fixture.state->received_backup_type ==
+                          app::WindowsPersonalBackupType::kIncremental &&
+                      fixture.state->received_parent_source.filename() == L"base.bkf" &&
+                      fixture.state->received_parent_password == "parent-password" &&
+                      std::ranges::all_of(fixture.state->backup_set_uuid, [](std::byte value) {
+                          return value == std::byte{0};
+                      }) &&
+                      fixture.state->secrets_alive_in_backend &&
+                      fixture.state->active_secrets == 0,
+                  "incremental task maps parent and retains both secrets through backend call");
 }
 
 bool test_warning_and_failure_mapping() {
@@ -335,11 +381,43 @@ bool test_rejection_cancellation_and_dependency_failures() {
         expect(credential && credential.value().message_code == "backup.credential_unavailable" &&
                    credential_fixture.state->backend_count == 0,
                "credential failure is sanitized and prevents backup start");
+
+    TestFixture differential_fixture;
+    auto differential_job = valid_job();
+    differential_job.backup->type = contracts::BackupType::kDifferential;
+    differential_job.backup->parent_source_ref = "base.bkf";
+    differential_job.backup->parent_credential_ref = {"secret://parent"};
+    auto differential_context = differential_fixture.context();
+    auto differential = detail::execute_windows_personal_backup_task_with_backend(
+        differential_job, valid_options(), differential_context, {}, differential_fixture.backend);
+    passed &= expect(!differential && differential_fixture.state->resolve_count == 0 &&
+                         differential_fixture.state->random_count == 0,
+                     "unsupported differential backup is rejected before dependencies");
+
+    TestFixture parent_credential_fixture;
+    parent_credential_fixture.state->fail_resolve_call = 2;
+    auto incremental_job = valid_job();
+    incremental_job.backup->type = contracts::BackupType::kIncremental;
+    incremental_job.backup->parent_source_ref = "base.bkf";
+    incremental_job.backup->parent_credential_ref = {"secret://parent/password"};
+    auto parent_credential_context = parent_credential_fixture.context();
+    auto parent_credential = detail::execute_windows_personal_backup_task_with_backend(
+        incremental_job, valid_options(), parent_credential_context, {},
+        parent_credential_fixture.backend);
+    passed &= expect(parent_credential &&
+                         parent_credential.value().message_code ==
+                             "backup.credential_unavailable" &&
+                         parent_credential_fixture.state->resolve_count == 2 &&
+                         parent_credential_fixture.state->active_secrets == 0 &&
+                         parent_credential_fixture.state->backend_count == 0,
+                     "parent credential failure releases current secret before backend access");
     return passed;
 }
 
 int run_tests() {
-    const bool passed = test_successful_mapping() && test_warning_and_failure_mapping() &&
+    const bool passed = test_successful_mapping() &&
+                        test_incremental_mapping_and_secret_lifetime() &&
+                        test_warning_and_failure_mapping() &&
                         test_rejection_cancellation_and_dependency_failures();
     return passed ? EXIT_SUCCESS : EXIT_FAILURE;
 }

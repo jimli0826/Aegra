@@ -43,8 +43,8 @@ VSS 语义冲突。另一方面，块读取、Volume Inventory 和 VSS Snapshot 
 
 ## 影响
 
-- 阶段 8A 可以独立交付 Inventory 与稳定 Block Source；VSS 创建能力在阶段 8B 接入，而不修改
-  `IBlockSource`。
+- 阶段 8A 独立交付 Inventory 与稳定 Block Source；阶段 8B 以独立 Target 接入 VSS Session，未修改
+  `IBlockSource`。VSS COM 对象在 Adapter 专用 MTA 线程中完成创建、使用和释放。
 - 普通稳定文件模式可用于确定性契约测试和未来离线镜像输入，但不能打开 Win32 Device Namespace。
 - Disk layout、partition table 和系统盘恢复元数据仍需后续 Disk/Partition Inspector 补齐。
 

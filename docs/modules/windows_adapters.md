@@ -3,14 +3,16 @@
 ## 目标与非目标
 
 本模块把 Windows Volume Inventory、稳定块读取、VSS Snapshot 和后续 Disk/Partition 操作适配到
-Aegra 的平台无关核心。本阶段 8A 实现 Volume Inventory 与稳定 Block Source。
+Aegra 的平台无关核心。阶段 8A 实现 Volume Inventory 与稳定 Block Source；阶段 8B 实现多 Volume
+VSS Snapshot Set Session。
 
-本阶段不创建 VSS Snapshot、不读取在线 Volume、不备份 `PhysicalDrive`、不修改磁盘或分区，也不
-执行 BCD/WinRE 修复。
+本模块不直接读取在线 Volume、不备份 `PhysicalDrive`、不修改磁盘或分区，也不执行 BCD/WinRE 修复。
 
 ## 依赖
 
 - `aegra_adapter_windows_disk` 只依赖 `Aegra::Ports` 和 Windows SDK。
+- `aegra_adapter_windows_vss` 只依赖 `Aegra::Base`、VSS API、COM 和 Windows SDK；不得依赖
+  `windows_disk` 的实现。
 - 公共头不得 include `Windows.h`、`winioctl.h`、COM 或 VSS 头文件。
 - Windows Handle、`OVERLAPPED`、Event 和 Volume Enumeration Handle 必须由 Adapter 内 RAII 对象管理。
 - Pipeline、Format、Ports 和 Contracts 不得依赖该 Target。
@@ -40,6 +42,21 @@ false。只有 Volume 枚举本身无法启动或异常终止时，整个调用�
 Source 独占 Handle，可以并发调用 `read()`。每次读取使用独立重叠 I/O 状态；取消会中止本次 I/O，
 不会关闭 Source Handle。`size_bytes()` 在对象生命周期内稳定。
 
+### `WindowsVssSnapshotSession`
+
+`create()` 接受一个或多个 canonical Volume GUID Path 及其 Inventory 阶段获得的非零逻辑大小。全部
+Volume 通过一次 `StartSnapshotSet`/`DoSnapshotSet` 建立同一一致性边界。成功后，每个请求按原顺序
+对应一个包含 Snapshot Device Object 的只读映射。
+
+Session 由单一调用方拥有，但可以跨线程转移；公开方法不能并发调用。所有 COM/VSS 接口只在 Adapter
+内部专用 MTA 工作线程创建、使用和释放。`close()` 执行 `BackupComplete` 并强制删除整个 Snapshot
+Set，成功后幂等；未显式关闭或关闭失败时，析构路径执行 `AbortBackup` 和再次删除。
+
+创建期间的 `GatherWriterMetadata`、`PrepareForBackup` 和 `DoSnapshotSet` 轮询 VSS Async 状态并响应取消。
+在 Prepare 和 Snapshot 完成后必须收集 Writer Status，任何 Writer failure 都使创建失败并触发清理。
+取消只终止创建，不能跳过已经开始的 Snapshot Set 清理。`close()` 故意不接受取消令牌，因为资源删除
+必须完成或明确返回失败。
+
 ## 核心不变量
 
 - 在线 Volume 和 `PhysicalDrive` 不能通过公开 Block Source 请求打开。
@@ -48,6 +65,8 @@ Source 独占 Handle，可以并发调用 `read()`。每次读取使用独立重
 - 单次 Win32 读取不超过 `DWORD`，大 buffer 通过 Port 的短读语义由 Pipeline 继续读取。
 - 所有 Win32 错误在边界转换为稳定 `ErrorCode`，消息不包含客户路径或数据。
 - Volume Enumerator 不把“无权限读取 extents”误报成“不存在该 Volume”。
+- 同一 Session 不接受空列表、零逻辑大小或重复 Volume；Snapshot 映射数量、identity 与大小必须和请求一致。
+- VSS 生命周期、COM apartment 和 Snapshot Set 删除都封装在同一个 RAII Backend 内。
 
 ## 目录与 Target
 
@@ -63,22 +82,39 @@ src/adapters/windows_disk/
 
 Target：`aegra_adapter_windows_disk` / `Aegra::AdapterWindowsDisk`，仅在 Windows 构建。
 
+```text
+src/adapters/windows_vss/
+├── CMakeLists.txt
+├── include/aegra/adapters/windows_vss/windows_vss.h
+└── src/
+    ├── com_ptr.h
+    ├── vss_snapshot_core.h/.cpp
+    ├── windows_vss_backend.cpp
+    └── windows_vss_session.cpp
+```
+
+Target：`aegra_adapter_windows_vss` / `Aegra::AdapterWindowsVss`，仅在 Windows 构建。
+
 ## 测试
 
 - 普通单元测试只使用临时文件，不依赖管理员权限、真实 Volume 或 VSS Service。
 - 覆盖正确读取、非零 offset、EOF、越界、取消、缺失文件和 Device Path 拒绝。
 - Shadow Copy 路径验证使用纯字符串样本。
+- VSS 单元测试通过 Adapter 私有 Backend seam 覆盖空/重复/非法请求、预取消、映射校验、幂等关闭、
+  关闭失败和析构清理，不创建真实系统快照。
 - 真实 Volume、跨盘 Volume、无介质设备、访问拒绝和 VSS 生命周期进入单独集成测试。
 
 ## 安全与可观测性
 
 - 错误不得输出完整源路径。
 - 不请求写权限，不使用 `FILE_FLAG_NO_BUFFERING`，不要求调用方提供对齐缓冲区。
-- 后续 VSS Session 记录 Snapshot Set ID、Snapshot ID、阶段耗时和清理结果，但不记录客户数据。
+- Application 后续接入可记录 Snapshot Set ID、Snapshot ID、阶段耗时和清理结果，但不记录客户数据。
 
 ## Definition of Done
 
 - Windows SDK 类型未泄漏到公共头或核心模块。
 - Block Source 通过 `IBlockSource` 关键契约测试。
 - 普通文件模式无法打开 Device Namespace，Snapshot 模式无法伪装任意设备。
+- 多 Volume 只通过一个 Snapshot Set 创建，COM/VSS 对象始终在专用 MTA 线程释放。
+- 显式关闭成功后不重复删除；失败和析构路径仍承担清理责任。
 - Debug/Release 构建、测试、clang-tidy 与源码规模检查通过。

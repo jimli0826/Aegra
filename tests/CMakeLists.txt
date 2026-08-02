@@ -37,6 +37,13 @@ target_link_libraries(
 if(WIN32)
     aegra_add_test(aegra_windows_disk_tests adapters/windows_disk_test.cpp)
     target_link_libraries(aegra_windows_disk_tests PRIVATE Aegra::AdapterWindowsDisk)
+
+    aegra_add_test(aegra_windows_vss_tests adapters/windows_vss_test.cpp)
+    target_include_directories(
+        aegra_windows_vss_tests
+        PRIVATE "${PROJECT_SOURCE_DIR}/src/adapters/windows_vss/src"
+    )
+    target_link_libraries(aegra_windows_vss_tests PRIVATE Aegra::AdapterWindowsVss)
 endif()
 
 aegra_add_test(aegra_pipeline_tests pipeline/pipeline_roundtrip_test.cpp)

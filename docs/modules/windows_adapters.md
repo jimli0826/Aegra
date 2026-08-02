@@ -109,6 +109,8 @@ Target：`aegra_adapter_windows_vss` / `Aegra::AdapterWindowsVss`，仅在 Windo
 - 错误不得输出完整源路径。
 - 不请求写权限，不使用 `FILE_FLAG_NO_BUFFERING`，不要求调用方提供对齐缓冲区。
 - Application 后续接入可记录 Snapshot Set ID、Snapshot ID、阶段耗时和清理结果，但不记录客户数据。
+- `apps/worker` 的个人卷备份装配见
+  [Windows 个人卷备份 Composition Root](windows_personal_backup.md)。
 
 ## Definition of Done
 

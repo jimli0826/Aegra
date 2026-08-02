@@ -44,6 +44,16 @@ if(WIN32)
         PRIVATE "${PROJECT_SOURCE_DIR}/src/adapters/windows_vss/src"
     )
     target_link_libraries(aegra_windows_vss_tests PRIVATE Aegra::AdapterWindowsVss)
+
+    aegra_add_test(aegra_windows_personal_backup_tests apps/windows_personal_backup_test.cpp)
+    target_include_directories(
+        aegra_windows_personal_backup_tests
+        PRIVATE "${PROJECT_SOURCE_DIR}/src/apps/worker/src"
+    )
+    target_link_libraries(
+        aegra_windows_personal_backup_tests
+        PRIVATE Aegra::AppWorkerPersonal Aegra::Format
+    )
 endif()
 
 aegra_add_test(aegra_pipeline_tests pipeline/pipeline_roundtrip_test.cpp)

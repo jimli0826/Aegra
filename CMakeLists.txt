@@ -21,6 +21,7 @@ add_subdirectory(src/adapters/personal_archive)
 if(WIN32)
     add_subdirectory(src/adapters/windows_disk)
     add_subdirectory(src/adapters/windows_vss)
+    add_subdirectory(src/apps/worker)
 endif()
 add_subdirectory(tests)
 

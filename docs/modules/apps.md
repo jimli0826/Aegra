@@ -23,6 +23,10 @@
 - 处理停止信号、取消、线程 join 和临时资源清理。
 - 入口不实现块处理、SQL 查询或格式解析算法。
 
+Windows 个人卷备份的首个 Worker Composition Root 见
+[Windows 个人卷备份 Composition Root](windows_personal_backup.md)。它只负责具体 Adapter 装配、Manifest
+输入映射和 Snapshot/Source/Archive 生命周期顺序；块处理仍由通用 Pipeline 执行。
+
 ## WinPE 离线恢复
 
 从旧 WinPE 设计保留以下安全需求：

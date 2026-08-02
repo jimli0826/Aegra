@@ -1,5 +1,6 @@
 add_library(aegra_adapter_windows_disk STATIC
     src/windows_block_source.cpp
+    src/windows_block_sink.cpp
     src/windows_volume_enumerator.cpp
 )
 

@@ -48,6 +48,45 @@ class WindowsBlockSource final : public ports::IBlockSource {
     std::unique_ptr<Impl> impl_;
 };
 
+enum class WindowsBlockSinkKind {
+    kStableFile,
+    kVolume,
+};
+
+struct WindowsBlockSinkOpenRequest final {
+    std::filesystem::path path;
+    WindowsBlockSinkKind kind{WindowsBlockSinkKind::kStableFile};
+    std::optional<std::uint64_t> expected_capacity_bytes;
+    std::filesystem::path protected_source;
+};
+
+class WindowsBlockSink final : public ports::IBlockSink {
+  public:
+    ~WindowsBlockSink() override;
+    WindowsBlockSink(const WindowsBlockSink&) = delete;
+    WindowsBlockSink& operator=(const WindowsBlockSink&) = delete;
+    WindowsBlockSink(WindowsBlockSink&&) = delete;
+    WindowsBlockSink& operator=(WindowsBlockSink&&) = delete;
+
+    [[nodiscard]] static base::Result<std::unique_ptr<WindowsBlockSink>>
+    open(const WindowsBlockSinkOpenRequest& request);
+    [[nodiscard]] static bool
+    is_canonical_volume_guid_path(const std::filesystem::path& path) noexcept;
+
+    [[nodiscard]] std::uint64_t capacity_bytes() const noexcept override;
+    [[nodiscard]] base::Result<void> write(std::uint64_t offset,
+                                           std::span<const std::byte> source,
+                                           base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<void> flush(base::CancellationToken cancellation) override;
+
+  private:
+    struct Impl;
+
+    explicit WindowsBlockSink(std::unique_ptr<Impl> impl);
+
+    std::unique_ptr<Impl> impl_;
+};
+
 struct WindowsVolumeExtent final {
     std::uint32_t disk_number{0};
     std::uint64_t disk_offset_bytes{0};

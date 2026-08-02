@@ -39,6 +39,10 @@
 Verify Job 的 `operation` 为 `3`，`source_refs` 恰好一个 `.bkf`，`target_ref` 为空；Worker 会完整读取并
 认证每个 Chunk，不创建目标文件。成功结果使用 `verify.completed`，错误使用脱敏的 `verify.*` code。
 
+Restore Job 的 `operation` 为 `2`，`source_refs` 恰好一个完整 `.bkf`，`target_ref` 必须是 canonical
+Windows Volume GUID Path。Worker 在 Archive 认证成功后才锁定、卸载并写入非系统目标卷；安全边界见
+[ADR-0009](../adr/0009-windows-volume-restore-safety.md)。
+
 ## 响应协议
 
 `WorkerResponse` 的 `schema_version` 当前固定为 `1`，包含 `job_id`、`trace_id`、`kind`、

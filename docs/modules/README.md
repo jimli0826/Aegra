@@ -16,6 +16,7 @@
 | `apps` | [apps.md](apps.md) | 进程入口、依赖注入和运行时边界 |
 | `apps/worker` | [worker_host.md](worker_host.md) | 单任务 Host、进程协议、deadline 与退出码 |
 | 个人版 Verify | [personal_archive_verify.md](personal_archive_verify.md) | `.bkf` 完整只读认证与解压校验 |
+| Windows 个人版恢复 | [windows_personal_restore.md](windows_personal_restore.md) | 全量 `.bkf` 到非系统 Volume 的安全恢复 |
 
 ## 通用模块模板
 
@@ -32,4 +33,4 @@
 
 ## 当前阶段
 
-阶段 1 已建立 `base`、`contracts` 和 `ports` 骨架。阶段 2 已建立 Memory Block Adapter、Backup Session、Recovery Reader、fixed-size Chunker，以及带有界背压和取消的 Backup/Restore Pipeline。阶段 3 已完成通用 Manifest、字符串键 CBOR、Zstandard/metadata crypto Adapter，以及单 volume 个人版 `.bkf` 的端到端纵向切片。阶段 4 已完成 ZERO run 和加密 `.bhx` Sidecar。阶段 5 已完成 chunk 边界透明分卷、分卷组发布/中止清理、连续发现与跨卷恢复。阶段 6 已完成基于父 Sidecar 的稀疏增量层、零变化增量和显式 base-first Chain Reader。阶段 7 已完成 Chunk Payload XChaCha20-Poly1305 认证加密，并把 ChunkHeader 与 BlockEntry 绑定为 AAD。阶段 8A 已完成 Windows Volume 枚举和稳定对象重叠 I/O Block Source。阶段 8B 已完成独立的多 Volume VSS Snapshot Session、专用 MTA 工作线程和确定性生命周期测试。阶段 8C 已完成 Inventory、VSS、Block Source、个人 Archive 与 Backup Pipeline 的单 Volume Worker Composition Root。阶段 8D 已完成 SecretRef、TaskResult、凭据/随机源 Port，以及带 trace、deadline、取消和脱敏结果的个人版 Worker 任务入口。阶段 8E 已完成版本化 JSON 进程协议、WorkerResponse、稳定退出码、异常收口，以及外部停止与运行中 deadline 的合并取消。阶段 8F 已完成 Windows 系统时钟、CNG 随机源、Credential Manager Resolver 和 stdin/stdout 单任务 Worker 可执行入口。阶段 8G 已完成双向 Job/Cancel 与 Progress/Result 会话契约、可取消本地 Named Pipe framing、Worker `--pipe` 入口和真实拒绝进程测试。阶段 9 已完成个人版 Archive Verify Pipeline、Verify Worker Task 和只读认证校验测试；管理员真实卷 E2E 仍按环境条件单独执行。
+阶段 1 已建立 `base`、`contracts` 和 `ports` 骨架。阶段 2 已建立 Memory Block Adapter、Backup Session、Recovery Reader、fixed-size Chunker，以及带有界背压和取消的 Backup/Restore Pipeline。阶段 3 已完成通用 Manifest、字符串键 CBOR、Zstandard/metadata crypto Adapter，以及单 volume 个人版 `.bkf` 的端到端纵向切片。阶段 4 已完成 ZERO run 和加密 `.bhx` Sidecar。阶段 5 已完成 chunk 边界透明分卷、分卷组发布/中止清理、连续发现与跨卷恢复。阶段 6 已完成基于父 Sidecar 的稀疏增量层、零变化增量和显式 base-first Chain Reader。阶段 7 已完成 Chunk Payload XChaCha20-Poly1305 认证加密，并把 ChunkHeader 与 BlockEntry 绑定为 AAD。阶段 8A 已完成 Windows Volume 枚举和稳定对象重叠 I/O Block Source。阶段 8B 已完成独立的多 Volume VSS Snapshot Session、专用 MTA 工作线程和确定性生命周期测试。阶段 8C 已完成 Inventory、VSS、Block Source、个人 Archive 与 Backup Pipeline 的单 Volume Worker Composition Root。阶段 8D 已完成 SecretRef、TaskResult、凭据/随机源 Port，以及带 trace、deadline、取消和脱敏结果的个人版 Worker 任务入口。阶段 8E 已完成版本化 JSON 进程协议、WorkerResponse、稳定退出码、异常收口，以及外部停止与运行中 deadline 的合并取消。阶段 8F 已完成 Windows 系统时钟、CNG 随机源、Credential Manager Resolver 和 stdin/stdout 单任务 Worker 可执行入口。阶段 8G 已完成双向 Job/Cancel 与 Progress/Result 会话契约、可取消本地 Named Pipe framing、Worker `--pipe` 入口和真实拒绝进程测试。阶段 9 已完成个人版 Archive Verify Pipeline、Verify Worker Task 和只读认证校验测试。阶段 10 已完成单个全量 Archive 到非系统 Windows Volume 的 Block Sink、Restore Worker Task 与安全边界测试；管理员真实卷 E2E 仍按环境条件单独执行。

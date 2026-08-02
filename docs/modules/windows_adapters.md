@@ -7,7 +7,12 @@ Aegra 的平台无关核心。阶段 8A 实现 Volume Inventory 与稳定 Block 
 VSS Snapshot Set Session；阶段 8F 实现 Worker 使用的系统时钟、密码学随机与凭据解析；阶段 8G
 实现 Worker 本地 Named Pipe Client。
 
-本模块不直接读取在线 Volume、不备份 `PhysicalDrive`、不修改磁盘或分区，也不执行 BCD/WinRE 修复。
+个人版卷恢复新增 `WindowsVolumeBlockSink`：生产模式只接受 canonical Volume GUID，拒绝系统卷，成功
+锁卷并卸载后才允许按 offset 写入，完成时 flush，析构时 best-effort 解锁。普通文件模式仅用于确定性
+契约测试。不可逆写入决策见 [ADR-0009](../adr/0009-windows-volume-restore-safety.md)。
+
+本模块不直接读取在线 Volume、不备份 `PhysicalDrive`、不修改分区表，也不执行 BCD/WinRE 修复。
+只有显式恢复用的 Block Sink 可以在完成安全检查后写入非系统目标 Volume。
 
 ## 依赖
 

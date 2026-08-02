@@ -88,6 +88,19 @@ if(WIN32)
         PRIVATE Aegra::AppWorkerPersonal Aegra::Contracts
     )
 
+    aegra_add_test(
+        aegra_personal_archive_restore_task_tests
+        apps/personal_archive_restore_task_test.cpp
+    )
+    target_include_directories(
+        aegra_personal_archive_restore_task_tests
+        PRIVATE "${PROJECT_SOURCE_DIR}/src/apps/worker/src"
+    )
+    target_link_libraries(
+        aegra_personal_archive_restore_task_tests
+        PRIVATE Aegra::AppWorkerPersonal Aegra::Contracts
+    )
+
     aegra_add_test(aegra_worker_host_tests apps/worker_host_test.cpp)
     target_include_directories(
         aegra_worker_host_tests

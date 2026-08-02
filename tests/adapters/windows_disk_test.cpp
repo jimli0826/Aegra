@@ -70,6 +70,14 @@ bool test_path_policy() {
     passed &= expect(!WindowsBlockSource::is_vss_snapshot_device_path(
                          LR"(\\?\GLOBALROOT\Device\HarddiskVolume1)"),
                      "ordinary volume device is not a VSS snapshot");
+    passed &= expect(windows_disk::WindowsBlockSink::is_canonical_volume_guid_path(
+                         LR"(\\?\Volume{01234567-89ab-cdef-0123-456789abcdef}\)"),
+                     "canonical Volume GUID sink path is accepted");
+    passed &= expect(!windows_disk::WindowsBlockSink::is_canonical_volume_guid_path(LR"(C:\)"),
+                     "drive letter sink path is rejected");
+    passed &= expect(!windows_disk::WindowsBlockSink::is_canonical_volume_guid_path(
+                         LR"(\\?\Volume{01234567-89ab-cdef-0123-456789abcdef})"),
+                     "Volume GUID sink requires a trailing slash");
     return passed;
 }
 
@@ -157,10 +165,41 @@ bool test_cancellation_and_concurrency(const TemporaryFile& file) {
     return passed;
 }
 
+bool test_sink_contract(const TemporaryFile& file) {
+    auto opened = windows_disk::WindowsBlockSink::open({file.path()});
+    bool passed = expect(opened && opened.value()->capacity_bytes() ==
+                                      TemporaryFile::kContents.size(),
+                         "stable file sink opens with its fixed capacity");
+    if (!opened) {
+        return false;
+    }
+    const std::array<std::byte, 4> replacement{std::byte{'A'}, std::byte{'E'}, std::byte{'G'},
+                                                std::byte{'R'}};
+    auto written = opened.value()->write(4, replacement, {});
+    passed &= expect(written.has_value() && opened.value()->flush({}).has_value(),
+                     "stable file sink writes and flushes by offset");
+    std::ifstream input(file.path(), std::ios::binary);
+    std::array<char, 4> actual{};
+    input.seekg(4);
+    input.read(actual.data(), static_cast<std::streamsize>(actual.size()));
+    passed &= expect(std::string_view(actual.data(), actual.size()) == "AEGR",
+                     "stable file sink writes the expected bytes");
+    auto overflow = opened.value()->write(opened.value()->capacity_bytes() - 1, replacement, {});
+    passed &= expect(!overflow && overflow.error().code == aegra::base::ErrorCode::kInvalidArgument,
+                     "stable file sink rejects writes beyond capacity");
+    aegra::base::CancellationSource cancellation;
+    cancellation.request_stop();
+    auto cancelled = opened.value()->write(0, replacement, cancellation.get_token());
+    passed &= expect(!cancelled && cancelled.error().code == aegra::base::ErrorCode::kCancelled,
+                     "stable file sink observes pre-cancellation");
+    return passed;
+}
+
 int run_tests() {
     const TemporaryFile file;
     const bool passed = test_path_policy() && test_open_validation(file) &&
-                        test_read_contract(file) && test_cancellation_and_concurrency(file);
+                        test_read_contract(file) && test_cancellation_and_concurrency(file) &&
+                        test_sink_contract(file);
     return passed ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 

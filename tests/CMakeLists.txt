@@ -19,6 +19,12 @@ target_link_libraries(aegra_format_tests PRIVATE Aegra::Format)
 aegra_add_test(aegra_personal_archive_codec_tests format/personal_archive_codec_test.cpp)
 target_link_libraries(aegra_personal_archive_codec_tests PRIVATE Aegra::Format)
 
+aegra_add_test(
+    aegra_personal_repository_tests
+    personal_repository/personal_repository_test.cpp
+)
+target_link_libraries(aegra_personal_repository_tests PRIVATE Aegra::PersonalRepository)
+
 aegra_add_test(aegra_memory_adapter_tests adapters/memory_adapter_test.cpp)
 target_link_libraries(aegra_memory_adapter_tests PRIVATE Aegra::AdapterMemory)
 

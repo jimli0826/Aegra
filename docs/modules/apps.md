@@ -6,7 +6,7 @@
 
 ## 进程
 
-- `service`：控制面 API、鉴权、任务与 PostgreSQL。
+- `service`：控制面 API、鉴权和任务；个人版组合 SQLite，企业版组合 PostgreSQL。
 - `worker`：每任务执行 Backup/Restore Pipeline。
 - `repository_gateway`：企业 Repository 在线入口。
 - `vmware_connector`、`hyperv_connector`：厂商 SDK 隔离。

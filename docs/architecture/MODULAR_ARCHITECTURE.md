@@ -34,6 +34,7 @@ src/
 │   ├── chunking/
 │   └── transforms/
 ├── application/
+├── personal_repository/
 ├── repository/
 │   ├── client/
 │   ├── gateway/
@@ -72,9 +73,10 @@ src/
 ## 3. 依赖方向
 
 ```text
-apps --------------------> application, adapters, repository gateway
-application -------------> pipeline, repository client, contracts
+apps --------------------> application, adapters, personal repository, repository gateway
+application -------------> pipeline, personal repository, repository client, contracts
 pipeline ----------------> format, ports, contracts
+personal repository -----> format, ports, contracts
 repository client -------> ports, contracts
 repository gateway ------> repository modules, adapters
 adapters ----------------> ports, contracts
@@ -121,8 +123,11 @@ class IBlockSource;
 class IBlockSink;
 class ISequentialWriter;
 class IRandomAccessReader;
-class IListableObjectStore;
-class IMutableObjectStore;
+class IObjectReader;
+class IStagedObjectWriter;
+class IPrefixEnumerator;
+class IObjectPublisher;
+class IObjectDeleter;
 class ISnapshotSession;
 class IProgressSink;
 class ICredentialResolver;
@@ -151,6 +156,17 @@ Pipeline 负责并发、背压、块映射、转换、校验、进度、取消�
 - Archive Reader/Writer 通过通用 Manifest 和 Pipeline 接入。
 - `.bkf` 是个人版物理格式，不作为企业 Repository 的 Pack 格式。
 - 个人版可以使用 SQLite 保存 UI 状态和可重建查询缓存，不需要 PostgreSQL 或全局 Chunk Index。
+
+个人版可以把一个 Storage Root 初始化为受管理 Archive Store，但它不等同于企业 CAS Repository：
+
+- `.bkf` Archive Group 是 Recovery Point 的恢复权威；首卷最后发布并作为数据可见性标记。
+- 根 Descriptor 和每 Recovery Point Catalog Entry 提供可携带、可重建的发现目录。
+- `personal_repository` 负责扫描、链图、显式链解析和链感知删除计划，不解析 Chunk Payload。
+- 本机 SQLite 只保存 Repository 连接、SecretRef、任务、计划、策略、验证历史和查询投影。
+- SQLite 或 Catalog 丢失后可从 `.bkf` Header、分卷和 Footer 重建；恢复前仍须认证 Archive。
+
+具体决策与格式见 [ADR-0010](../adr/0010-personal-repository-authority-and-catalog.md)和
+[个人版 Repository V1](../format/PERSONAL_REPOSITORY_FORMAT_V1.md)。
 
 ## 8. 企业 CAS Repository
 

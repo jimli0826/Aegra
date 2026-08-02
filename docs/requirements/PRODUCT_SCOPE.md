@@ -20,6 +20,9 @@ Aegra Image 为 Windows 物理机和主流虚拟化平台提供映像级备份�
 - 单文件 `.bkf` V6，格式见[个人版格式规范](../format/PERSONAL_BACKUP_FORMAT_V6.md)。
 
 个人版不使用企业 CAS Repository，不要求 PostgreSQL，也不维护 Repository 级全局 Chunk Index。
+个人版可以使用受管理 Archive Store：`.bkf` Archive Group 是恢复权威，Storage Root 中的 Catalog 和
+本机 SQLite 都是可重建投影。具体见
+[个人版 Repository ADR](../adr/0010-personal-repository-authority-and-catalog.md)。
 
 ## 企业版范围
 

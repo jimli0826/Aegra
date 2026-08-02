@@ -22,6 +22,11 @@ Memory Adapter 是正式的端口参考实现，只保存进程内临时数据�
 
 增量 Session 在创建时验证显式父 Archive 及父 Sidecar，继承备份集 UUID，并把输入完整源转换为连续变化区间组成的稀疏层；新 Sidecar 仍保存完整状态。`PersonalArchiveReader` 可以 inspect 单个稀疏层，`PersonalArchiveChainReader` 接受显式 base-first 层列表并验证链关系，对通用 Restore Pipeline 提供连续覆盖视图。链恢复不读取 Sidecar；链发现和逐层凭据选择属于 Application，不由 Adapter 扫描目录猜测。
 
+Local、SMB、S3 和 Azure Storage Adapter 还必须实现个人版 Repository 所需的细粒度对象 Port。Adapter
+负责 Repository 相对 key 到本地路径或对象 key 的安全映射，并显式报告原子 rename、条件创建和列举
+一致性 capability；不得把 URI 判断、临时发布或删除重试逻辑泄漏到 Application。具体契约见
+[个人版 Repository 模块](personal_repository.md)。
+
 Archive Reader 分别限制 metadata、chunk stored payload 和展开后的 chunk logical size。ZERO run、压缩块和其它稀疏表示在分配恢复缓冲区前都必须通过 logical size 上限检查。
 
 密码 Adapter 使用 Argon2id v1.3 派生 master key、HKDF-SHA256 分离 metadata、Chunk Payload 和 Sidecar key，并使用 XChaCha20-Poly1305 detached tag；内容散列使用 SHA-256。每个 Chunk 使用独立随机 nonce，Header 和 BlockEntry 作为 AAD，Reader 认证完整 ciphertext 后才解压。KDF 参数、salt 和 nonce 都持久化在对应格式字段中；读取前先执行产品上下限检查。压缩 Adapter 要求调用者提供期望输出大小和硬上限。

@@ -7,7 +7,8 @@
 ## 端口集合
 
 - 数据面：`IBlockSource`、`IBlockSink`、`ISequentialWriter`、`IRandomAccessReader`。
-- 对象存储：`IObjectReader`、`IObjectWriter`、`IListableObjectStore`、`IMutableObjectStore`。
+- Repository Storage：`IObjectReader`、`IStagedObjectWriter`、`IPrefixEnumerator`、
+  `IObjectPublisher`、`IObjectDeleter`。
 - 生命周期：`ISnapshotSession`、`IBackupSession`、`IRecoveryPointReader`。
 - 系统能力：`IClock`、`IProgressSink`、`ICredentialResolver`、`IRandomSource`。
 - 进程传输：`IMessageChannel`。
@@ -64,6 +65,14 @@
 后续真实多 volume use case 使用 Backup Set/Source 两级生命周期：Set Session 统一提交，Source Writer
 保持现有连续 chunk 语义；读取侧由 Recovery Point Set Reader 枚举并打开 source-scoped Reader。
 在第二个真实 source 消费者出现前不加入空接口。
+
+## 个人版 Repository Storage 能力
+
+个人版受管理 Archive Store 需要范围读取、暂存写、受限前缀分页列举、条件发布和幂等删除。实现时按
+真实用例拆分 `IObjectReader`、`IStagedObjectWriter`、`IPrefixEnumerator`、`IObjectPublisher` 和
+`IObjectDeleter`，不扩展成万能 Storage Backend。对象名始终是 Repository 相对 key；Port 必须暴露
+generation 和原子 rename、条件创建、list consistency 等 capability，并支持取消与 unknown outcome
+对账。详细语义见 [个人版 Repository 模块](personal_repository.md)。
 
 ## 测试
 

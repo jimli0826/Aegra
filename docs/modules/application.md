@@ -23,6 +23,8 @@
 ## 个人版与企业版
 
 - 个人版可以由本地 Service 组合 SQLite 查询缓存和 `.bkf` Session。
+- 个人版 Recovery Point 发现、显式链解析和删除计划通过 `personal_repository`；Application 负责解析
+  每层 CredentialRef、用户确认、保留策略和任务编排。
 - 企业版由 Management Service 维护 PostgreSQL 控制面，并通过 Repository Client 调用 Gateway。
 - Application 不通过数据库行判断 Recovery Point 是否已提交。
 

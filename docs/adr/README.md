@@ -2,7 +2,8 @@
 
 ADR 用于记录会长期约束多个模块、持久化格式、外部协议或运维方式的决策。已经接受的 ADR 不直接修改历史；后续决策通过新 ADR 替代旧 ADR。
 
-当前 Windows 卷恢复写入安全边界见 [ADR-0009](0009-windows-volume-restore-safety.md)。
+当前个人版 Repository 权威与 Catalog 边界见
+[ADR-0010](0010-personal-repository-authority-and-catalog.md)。
 
 ## 状态
 

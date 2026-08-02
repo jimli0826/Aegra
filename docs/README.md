@@ -15,10 +15,12 @@
 - [ADR-0002：个人版 Sidecar 保密性与 ZERO Run](adr/0002-personal-sidecar-confidentiality-and-zero-runs.md)
 - [ADR-0003：个人版分卷事务与多数据源边界](adr/0003-personal-split-archive-and-multi-source-boundary.md)
 - [ADR-0004：个人版稀疏增量层与链式恢复视图](adr/0004-personal-incremental-layers-and-chain-reader.md)
+- [ADR-0010：个人版 Repository 权威边界与可重建目录](adr/0010-personal-repository-authority-and-catalog.md)
 
 ## 权威格式与需求
 
 - [个人版 `.bkf` V6 格式](format/PERSONAL_BACKUP_FORMAT_V6.md)
+- [个人版 Repository Descriptor 与 Catalog V1](format/PERSONAL_REPOSITORY_FORMAT_V1.md)
 - [产品范围](requirements/PRODUCT_SCOPE.md)
 - [品牌与命名](branding/BRAND.md)
 

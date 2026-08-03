@@ -18,6 +18,7 @@ enum class ErrorCode : std::uint32_t {
     kUnauthorized = 8,
     kInternal = 9,
     kInsufficientSpace = 10,
+    kOutcomeUnknown = 11,
 };
 
 struct Error final {

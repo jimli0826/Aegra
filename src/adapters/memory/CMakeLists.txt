@@ -1,6 +1,7 @@
 add_library(aegra_adapter_memory STATIC
     src/memory_backup_store.cpp
     src/memory_block_io.cpp
+    src/memory_object_storage.cpp
 )
 
 add_library(Aegra::AdapterMemory ALIAS aegra_adapter_memory)

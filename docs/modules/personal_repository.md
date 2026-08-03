@@ -188,5 +188,9 @@ Manifest。删除 SQLite 不得删除 Repository 数据；重新连接后必须�
 - `RecoveryPointGraph` 的重复 UUID、跨 Repository/Backup Set、差异父层、环和深度检查；
 - 缺父节点的可发现状态，以及可恢复节点的 base-first 显式链解析。
 
-Storage Port、Memory/Local Adapter、Repository Scanner、Catalog Reconcile、Delete Plan 生成和 Tombstone 执行
-尚未实现，属于阶段 12B 及后续工作。
+阶段 12B 已实现细粒度 Repository Object Storage Port、稳定 `kOutcomeUnknown` 错误语义、线程安全 Memory
+Object Storage 参考实现和可复用 Contract Test。Memory 实现支持范围短读、流式 staging、分页列举、
+generation 条件发布、幂等删除、取消和确定性故障注入。
+
+Local Storage Adapter、Repository Scanner、Catalog Reconcile、Delete Plan 生成和 Tombstone 执行尚未实现，
+属于后续阶段。

@@ -28,6 +28,8 @@ std::string_view error_code_name(const ErrorCode code) noexcept {
         return "internal";
     case ErrorCode::kInsufficientSpace:
         return "insufficient_space";
+    case ErrorCode::kOutcomeUnknown:
+        return "outcome_unknown";
     }
     return "unknown";
 }

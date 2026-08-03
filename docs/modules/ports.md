@@ -68,12 +68,28 @@
 
 ## 个人版 Repository Storage 能力
 
-个人版受管理 Archive Store 需要范围读取、暂存写、受限前缀分页列举、条件发布和幂等删除。实现时按
-真实用例拆分 `IObjectReader`、`IStagedObjectWriter`、`IPrefixEnumerator`、`IObjectPublisher` 和
-`IObjectDeleter`，不扩展成万能 Storage Backend。对象名始终是 Repository 相对 key；Port 必须暴露
-generation 和原子 rename、条件创建、list consistency 等 capability，并支持取消与 unknown outcome
-对账。详细语义见 [个人版 Repository 模块](personal_repository.md)。
+个人版受管理 Archive Store 的对象能力定义在 `object_storage.h`，按真实用例拆分为 `IObjectReader`、
+`IStagedObjectWriter`、`IPrefixEnumerator`、`IObjectPublisher`、`IObjectDeleter` 和独立 capability Port，
+不提供万能 Storage Backend。
+
+- `IObjectReader` 返回 key、对象大小和 opaque generation；范围读取允许短读，到达对象末尾返回 `0`。
+- `IStagedObjectWriter` 返回单调用方 RAII Session；`write()` 在返回前消费或复制输入，未成功 `complete()`
+  的 Session 析构时中止。
+- `IPrefixEnumerator` 使用 opaque continuation token 分页；token 只可与产生它的 prefix 一起使用。
+- `IObjectPublisher` 只发布已经完成的 staging 对象，支持 create-only 或 generation 匹配替换。成功返回新的
+  generation；`kOutcomeUnknown` 表示 mutation 可能已完成，必须先通过 Reader 对账。
+- `IObjectDeleter` 以 operation ID 和 key 形成幂等重试身份；对象不存在视为成功，同一身份改变 expected
+  generation 返回冲突。
+- capability 明确报告原子 rename publish、条件创建、强 read-after-write 和强 list consistency，消费者
+  不得从 URI 或 Adapter 名称推断。
+
+所有 key 都是 Repository 相对 key。Capability 对象允许并发调用；单个 Staged Write Session 不是线程
+安全对象。所有操作支持取消，已进入外部单对象 mutation 后不能伪报取消，必须成功或返回
+`kOutcomeUnknown`。详细语义见 [个人版 Repository 模块](personal_repository.md)。
 
 ## 测试
 
 每个 Port 提供可复用 Contract Test Suite。所有 Adapter 必须运行同一组边界、短读、取消、并发、错误注入和资源释放测试。
+
+阶段 12B 已提供 `tests/ports/object_storage_contract.h`，覆盖 staging 可见性、条件发布、generation、分页、
+取消和幂等删除。新增 Storage Adapter 必须复用该套件。

@@ -31,6 +31,9 @@ int run_tests() {
     passed &= expect(aegra::base::error_code_name(aegra::base::ErrorCode::kInsufficientSpace) ==
                          "insufficient_space",
                      "insufficient space error code has stable name");
+    passed &= expect(aegra::base::error_code_name(aegra::base::ErrorCode::kOutcomeUnknown) ==
+                         "outcome_unknown",
+                     "unknown outcome error code has stable name");
     return passed ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 

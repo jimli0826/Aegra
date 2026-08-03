@@ -28,6 +28,16 @@ target_link_libraries(aegra_personal_repository_tests PRIVATE Aegra::PersonalRep
 aegra_add_test(aegra_memory_adapter_tests adapters/memory_adapter_test.cpp)
 target_link_libraries(aegra_memory_adapter_tests PRIVATE Aegra::AdapterMemory)
 
+aegra_add_test(
+    aegra_memory_object_storage_tests
+    adapters/memory_object_storage_test.cpp
+)
+target_include_directories(
+    aegra_memory_object_storage_tests
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_link_libraries(aegra_memory_object_storage_tests PRIVATE Aegra::AdapterMemory)
+
 aegra_add_test(aegra_crypto_sodium_tests adapters/crypto_sodium_test.cpp)
 target_link_libraries(aegra_crypto_sodium_tests PRIVATE Aegra::AdapterCryptoSodium)
 

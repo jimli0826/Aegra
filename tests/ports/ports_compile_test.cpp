@@ -3,6 +3,7 @@
 #include "aegra/ports/clock.h"
 #include "aegra/ports/credential.h"
 #include "aegra/ports/message_channel.h"
+#include "aegra/ports/object_storage.h"
 #include "aegra/ports/progress.h"
 #include "aegra/ports/random.h"
 
@@ -20,5 +21,12 @@ int main() {
     static_assert(std::has_virtual_destructor_v<aegra::ports::IProgressSink>);
     static_assert(std::has_virtual_destructor_v<aegra::ports::IRandomSource>);
     static_assert(std::has_virtual_destructor_v<aegra::ports::IMessageChannel>);
+    static_assert(std::has_virtual_destructor_v<aegra::ports::IObjectReader>);
+    static_assert(std::has_virtual_destructor_v<aegra::ports::IStagedObjectWriteSession>);
+    static_assert(std::has_virtual_destructor_v<aegra::ports::IStagedObjectWriter>);
+    static_assert(std::has_virtual_destructor_v<aegra::ports::IPrefixEnumerator>);
+    static_assert(std::has_virtual_destructor_v<aegra::ports::IObjectPublisher>);
+    static_assert(std::has_virtual_destructor_v<aegra::ports::IObjectDeleter>);
+    static_assert(std::has_virtual_destructor_v<aegra::ports::IObjectStorageCapabilities>);
     return EXIT_SUCCESS;
 }

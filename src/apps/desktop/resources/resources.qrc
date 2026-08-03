@@ -7,5 +7,11 @@
         <file alias="qml/Main.qml">../qml/Main.qml</file>
         <file alias="qml/Theme.qml">../qml/Theme.qml</file>
         <file alias="qml/qmldir">../qml/qmldir</file>
+        <file alias="qml/components/AppButton.qml">../qml/components/AppButton.qml</file>
+        <file alias="qml/components/ResizeHandle.qml">../qml/components/ResizeHandle.qml</file>
+        <file alias="qml/components/SidebarCommand.qml">../qml/components/SidebarCommand.qml</file>
+        <file alias="qml/components/SidebarMenu.qml">../qml/components/SidebarMenu.qml</file>
+        <file alias="qml/components/WindowButton.qml">../qml/components/WindowButton.qml</file>
+        <file alias="qml/pages/RepositoryPage.qml">../qml/pages/RepositoryPage.qml</file>
     </qresource>
 </RCC>

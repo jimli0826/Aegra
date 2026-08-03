@@ -45,6 +45,7 @@ class ServiceClient final : public QObject {
     [[nodiscard]] QVariantList recoveryPoints() const;
 
     Q_INVOKABLE void reconnect();
+    Q_INVOKABLE void refreshRepository();
 
   signals:
     void stateChanged();

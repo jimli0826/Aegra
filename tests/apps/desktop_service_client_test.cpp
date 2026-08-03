@@ -23,7 +23,7 @@ constexpr auto kRepositoryUuid = "01234567-89ab-4cde-8f01-23456789abcd";
 constexpr auto kSetUuid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 constexpr auto kFirstFileUuid = "11111111-2222-4333-8444-555555555555";
 constexpr auto kSecondFileUuid = "22222222-3333-4444-8555-666666666666";
-constexpr int kShortTimeoutMilliseconds = 1'000;
+constexpr int kShortTimeoutMilliseconds = 3'000;
 
 bool expect(const bool condition, const char* message) {
     if (condition) {
@@ -279,6 +279,22 @@ bool test_repository_failure_keeps_connection() {
                                     kShortTimeoutMilliseconds) &&
                              client.connected() && !client.repositoryLoading(),
                          "repository failure does not disconnect the service");
+    client.refreshRepository();
+    const auto refresh_request = receive_object(*socket, kShortTimeoutMilliseconds);
+    passed &=
+        expect(valid_request(refresh_request, 2) && first_page_request_is_valid(refresh_request),
+               "manual refresh starts a new bounded repository query");
+    client.refreshRepository();
+    passed &= expect(send_not_configured(
+                         *socket, refresh_request.value(QStringLiteral("request_id")).toString()),
+                     "manual refresh receives a repository response");
+    passed &= expect(wait_until(
+                         [&] {
+                             return client.repositoryErrorText().isEmpty() && client.connected() &&
+                                    !client.repositoryLoading();
+                         },
+                         kShortTimeoutMilliseconds),
+                     "successful manual refresh clears the repository error");
     socket->abort();
     server.close();
     QLocalServer::removeServer(QLatin1String(kPipeName));

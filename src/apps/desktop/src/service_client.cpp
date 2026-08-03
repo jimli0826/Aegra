@@ -107,6 +107,14 @@ void ServiceClient::reconnect() {
     socket_->connectToServer(QLatin1String(kServicePipeName), QIODevice::ReadWrite);
 }
 
+void ServiceClient::refreshRepository() {
+    if (state_ != State::kReady || pending_request_ != PendingRequest::kNone ||
+        repository_loading_) {
+        return;
+    }
+    start_repository_query();
+}
+
 void ServiceClient::on_connected() {
     input_.clear();
     expected_frame_bytes_ = 0;

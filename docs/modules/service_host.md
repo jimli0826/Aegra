@@ -19,7 +19,9 @@ src/apps/service/
 └── src/
     ├── service_host.cpp
     ├── service_main.cpp
-    └── service_protocol.cpp
+    ├── service_protocol.cpp
+    ├── service_protocol_request_json.cpp
+    └── service_protocol_response_json.cpp
 ```
 
 - `aegra_app_service` / `Aegra::AppService`：依赖 Application、Base、Contracts、Ports 和 PRIVATE
@@ -43,8 +45,11 @@ Accept -> Receive Frame -> Decode/Validate -> Dispatch -> Encode -> Send -> Rece
 
 ## 协议与安全
 
-- schema 2 支持 `GetServiceInfo` 和分页 `ListRecoveryPoints`，不兼容未发布的 schema 1。
-- `request_id` 用于请求响应对账，不作为权限或幂等凭据。
+- schema 3 使用 Request/Response/Event envelope，不兼容未发布的 schema 1/2；详见
+  [ADR-0013](../adr/0013-service-control-protocol-v3.md)。
+- `request_id` 用于请求响应对账，不作为权限或幂等凭据；查询不携带幂等键，命令必须携带幂等键。
+- V3 已定义全部规划内 request kind 和 payload codec。当前只声明并执行 `service.info` 与 `repository.list`；
+  其他合法请求返回 `service.capability_unavailable`，不产生副作用。
 - Repository 响应只包含 Repository UUID 和不含客户 Metadata 的 Catalog 摘要，不包含根路径、Archive key、
   主机名、SID、SecretRef 或原始 Adapter 错误。
 - frame 最大 64 KiB，JSON 根必须是 object，整数必须先检查范围。
@@ -59,9 +64,21 @@ Accept -> Receive Frame -> Decode/Validate -> Dispatch -> Encode -> Send -> Rece
 - 未知版本、损坏请求、断线和取消不会终止整个常驻 Host。
 - Debug/Release、源码规模、格式和秘密扫描通过。
 
+## 后续控制面工作
+
+Service 剩余工作按 [Desktop 迁移与个人版 Service 完成计划](../migration/DESKTOP_SERVICE_COMPLETION_PLAN.md)
+中的 `S1` 至 `S8` 工作包推进：下一步建立正式 Windows Service 安全边界、
+SQLite 控制面、Worker Supervisor、Repository/Inventory API、Restore/Verify/Mount 编排和计划/事件查询。
+现有 Worker 数据面继续复用，Service 不重复实现 Backup、Verify 或 Restore Pipeline。
+
+Service 协议只返回稳定枚举、错误码和 message code，不返回本地化文本。个人版 SQLite 不保存 Recovery Point、
+Chunk Index、Manifest 或 Archive metadata 的权威副本；Repository 仍是可重建 Recovery Point 事实来源。
+
 ## 当前状态
 
-阶段 13B 已完成 schema 2 查询链。`aegra_service` 支持 `--repository-root <absolute-path>`；Composition Root
+S0 已完成 Service V3：Contracts、严格 JSON codec、API 版本协商、命令 acknowledgement、分页 DTO 和带确认
+窗口的 task event 契约均已落地；当前 Desktop 已使用 V3 完成握手和 Repository 分页。`aegra_service` 支持
+`--repository-root <absolute-path>`；Composition Root
 创建 Local Storage 与 `PersonalRepositoryQuery`，未配置时返回 `repository.not_configured`。Repository 查询
 错误形成结构化 `RequestFailed`，不会终止会话；取消贯穿 Host、Application 和 Scanner。真实子进程测试已从
 临时本地 Repository 读取 Catalog。当前仍以交互用户运行，正式 Windows Service 安装、显式 ACL 和连接方

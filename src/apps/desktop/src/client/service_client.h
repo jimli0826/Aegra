@@ -1,18 +1,25 @@
 #pragma once
 
-#include <QByteArray>
+#include "client/models/recovery_point_model.h"
+#include "client/service_request_coordinator.h"
+#include "locale/locale_format.h"
+
 #include <QObject>
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 
-class QJsonObject;
-class QLocalSocket;
-class QTimer;
+namespace aegra::desktop {
 
+class IpcFrameTransport;
+class LocaleController;
+
+// Desktop composition facade over transport, protocol codec, request coordinator, and domain
+// models. QML observes owned properties only and never parses JSON or Service message codes.
 class ServiceClient final : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool connected READ connected NOTIFY stateChanged)
@@ -26,10 +33,14 @@ class ServiceClient final : public QObject {
     Q_PROPERTY(QString repositoryUuid READ repositoryUuid NOTIFY repositoryChanged)
     Q_PROPERTY(QString repositoryStatusText READ repositoryStatusText NOTIFY repositoryChanged)
     Q_PROPERTY(QString repositoryErrorText READ repositoryErrorText NOTIFY repositoryChanged)
-    Q_PROPERTY(QVariantList recoveryPoints READ recoveryPoints NOTIFY repositoryChanged)
+    Q_PROPERTY(aegra::desktop::RecoveryPointModel* recoveryPoints READ recoveryPoints CONSTANT)
+    Q_PROPERTY(int recoveryPointCount READ recoveryPointCount NOTIFY repositoryChanged)
 
   public:
     explicit ServiceClient(QObject* parent = nullptr);
+    ~ServiceClient() override;
+
+    void set_locale_controller(LocaleController* locale_controller);
 
     [[nodiscard]] bool connected() const noexcept;
     [[nodiscard]] QString statusText() const;
@@ -42,7 +53,8 @@ class ServiceClient final : public QObject {
     [[nodiscard]] QString repositoryUuid() const;
     [[nodiscard]] QString repositoryStatusText() const;
     [[nodiscard]] QString repositoryErrorText() const;
-    [[nodiscard]] QVariantList recoveryPoints() const;
+    [[nodiscard]] RecoveryPointModel* recoveryPoints() noexcept;
+    [[nodiscard]] int recoveryPointCount() const;
 
     Q_INVOKABLE void reconnect();
     Q_INVOKABLE void refreshRepository();
@@ -58,46 +70,38 @@ class ServiceClient final : public QObject {
         kReady,
     };
 
-    enum class PendingRequest : std::uint8_t {
-        kNone,
-        kServiceInfo,
-        kRecoveryPoints,
-    };
-
-    void on_connected();
-    void on_disconnected();
-    void on_ready_read();
-    void on_socket_error();
+    void on_transport_connected();
+    void on_transport_disconnected();
+    void on_transport_error(const QString& message_code);
+    void on_request_failed(const QString& message_code);
+    void on_locale_changed();
     void send_service_info_request();
     void start_repository_query();
-    void send_recovery_point_request(const std::optional<QString>& token);
-    void consume_frames();
-    [[nodiscard]] bool apply_response(const QByteArray& frame);
-    [[nodiscard]] bool apply_service_info(const QJsonObject& root);
-    [[nodiscard]] bool apply_recovery_point_page(const QJsonObject& root);
-    void finish_repository_failure();
+    [[nodiscard]] RequestDisposition handle_service_info_frame(const QByteArray& body);
+    [[nodiscard]] RequestDisposition handle_recovery_point_frame(const QByteArray& body);
+    void finish_repository_failure(const QString& message_code);
     void reset_repository();
-    void fail_protocol();
-    void schedule_reconnect();
-    void set_state(State state, QString error = {});
+    void set_state(State state, QString error_code = {});
+    void update_format_locale();
 
-    QLocalSocket* socket_{nullptr};
-    QTimer* reconnect_timer_{nullptr};
-    QByteArray input_;
-    quint32 expected_frame_bytes_{0};
-    QString request_id_;
+    LocaleController* locale_controller_{nullptr};
+    LocaleFormat format_;
+    RecoveryPointModel recovery_points_;
+    std::unique_ptr<IpcFrameTransport> transport_;
+    std::unique_ptr<ServiceRequestCoordinator> coordinator_;
     QString service_version_;
     QStringList capabilities_;
-    QString error_text_;
+    QString error_code_;
     QString repository_uuid_;
-    QString repository_error_text_;
-    QVariantList recovery_points_;
+    QString repository_error_code_;
     QVariantList pending_recovery_points_;
     std::optional<QString> requested_token_;
     QString last_file_uuid_;
     quint32 api_version_{0};
     State state_{State::kDisconnected};
-    PendingRequest pending_request_{PendingRequest::kNone};
     bool repository_configured_{false};
     bool repository_loading_{false};
+    bool handshake_complete_{false};
 };
+
+} // namespace aegra::desktop

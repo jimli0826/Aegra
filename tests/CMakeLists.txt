@@ -109,14 +109,29 @@ if(WIN32)
     )
 
     if(AEGRA_BUILD_DESKTOP)
-        find_package(Qt6 6.8 REQUIRED COMPONENTS Core Network)
+        find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Network Qml)
+        set(AEGRA_DESKTOP_CLIENT_SOURCES
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/ipc_frame_transport.cpp"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/ipc_frame_transport.h"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/service_client.cpp"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/service_client.h"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/service_protocol.cpp"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/service_protocol.h"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/service_request_coordinator.cpp"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/service_request_coordinator.h"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/models/recovery_point_model.cpp"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/models/recovery_point_model.h"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/locale/locale_controller.cpp"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/locale/locale_controller.h"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/locale/locale_format.cpp"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/locale/locale_format.h"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/locale/message_code_map.cpp"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/locale/message_code_map.h"
+        )
         add_executable(
             aegra_desktop_service_client_tests
             apps/desktop_service_client_test.cpp
-            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/service_client.cpp"
-            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/service_client.h"
-            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/service_protocol.cpp"
-            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/service_protocol.h"
+            ${AEGRA_DESKTOP_CLIENT_SOURCES}
         )
         set_target_properties(aegra_desktop_service_client_tests PROPERTIES AUTOMOC ON)
         target_include_directories(
@@ -125,12 +140,44 @@ if(WIN32)
         )
         target_link_libraries(
             aegra_desktop_service_client_tests
-            PRIVATE Qt6::Core Qt6::Network
+            PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml
         )
         aegra_configure_target(aegra_desktop_service_client_tests)
         add_test(NAME aegra_desktop_service_client_tests COMMAND aegra_desktop_service_client_tests)
         set_tests_properties(
             aegra_desktop_service_client_tests
+            PROPERTIES ENVIRONMENT_MODIFICATION
+                       "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+        )
+
+        add_executable(
+            aegra_desktop_locale_tests
+            apps/desktop_locale_test.cpp
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/locale/locale_controller.cpp"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/locale/locale_controller.h"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/locale/locale_format.cpp"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/locale/locale_format.h"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/locale/message_code_map.cpp"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/locale/message_code_map.h"
+        )
+        set_target_properties(aegra_desktop_locale_tests PROPERTIES AUTOMOC ON)
+        target_include_directories(
+            aegra_desktop_locale_tests
+            PRIVATE "${PROJECT_SOURCE_DIR}/src/apps/desktop/src"
+        )
+        target_compile_definitions(
+            aegra_desktop_locale_tests
+            PRIVATE
+                "AEGRA_DESKTOP_I18N_DIR=\"${PROJECT_SOURCE_DIR}/src/apps/desktop/translations\""
+        )
+        target_link_libraries(
+            aegra_desktop_locale_tests
+            PRIVATE Qt6::Core Qt6::Gui Qt6::Qml
+        )
+        aegra_configure_target(aegra_desktop_locale_tests)
+        add_test(NAME aegra_desktop_locale_tests COMMAND aegra_desktop_locale_tests)
+        set_tests_properties(
+            aegra_desktop_locale_tests
             PROPERTIES ENVIRONMENT_MODIFICATION
                        "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
         )

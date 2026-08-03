@@ -1,4 +1,4 @@
-#include "service_protocol.h"
+#include "client/service_protocol.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -48,6 +48,35 @@ constexpr qsizetype kMaximumContinuationTokenCharacters = 1'024;
         return (code >= 'a' && code <= 'z') || (code >= '0' && code <= '9') || code == '.' ||
                code == '_' || code == '-';
     });
+}
+
+[[nodiscard]] bool valid_message_arguments(const QJsonValue& value) {
+    if (!value.isArray() || value.toArray().size() > 16) {
+        return false;
+    }
+    QString previous;
+    for (const auto& item : value.toArray()) {
+        if (!item.isObject()) {
+            return false;
+        }
+        const auto argument = item.toObject();
+        if (!has_exact_keys(argument, {"name", "value"}) ||
+            !argument.value(QStringLiteral("name")).isString() ||
+            !stable_code(argument.value(QStringLiteral("name")).toString(), 64) ||
+            !argument.value(QStringLiteral("value")).isString()) {
+            return false;
+        }
+        const auto name = argument.value(QStringLiteral("name")).toString();
+        const auto text = argument.value(QStringLiteral("value")).toString();
+        if ((!previous.isEmpty() && name <= previous) || text.isEmpty() || text.size() > 256 ||
+            std::any_of(text.cbegin(), text.cend(), [](const QChar character) {
+                return character.unicode() < 0x20U || character.unicode() == 0x7FU;
+            })) {
+            return false;
+        }
+        previous = name;
+    }
+    return true;
 }
 
 [[nodiscard]] bool canonical_uuid(const QString& value) {
@@ -182,24 +211,37 @@ constexpr qsizetype kMaximumContinuationTokenCharacters = 1'024;
 } // namespace
 
 QByteArray encode_service_info_request(const QString& request_id) {
-    return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
-                                      static_cast<qint64>(kServiceSchemaVersion)},
-                                     {QStringLiteral("request_id"), request_id},
-                                     {QStringLiteral("kind"), 1}})
+    const QJsonObject payload{
+        {QStringLiteral("minimum_api_version"), static_cast<qint64>(kServiceApiVersion)},
+        {QStringLiteral("maximum_api_version"), static_cast<qint64>(kServiceApiVersion)}};
+    return QJsonDocument(
+               QJsonObject{
+                   {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
+                   {QStringLiteral("message_type"), 1},
+                   {QStringLiteral("request_id"), request_id},
+                   {QStringLiteral("kind"), 1},
+                   {QStringLiteral("idempotency_key"), QJsonValue(QJsonValue::Null)},
+                   {QStringLiteral("payload"), payload}})
         .toJson(QJsonDocument::Compact);
 }
 
 QByteArray encode_recovery_point_request(const QString& request_id,
                                          const std::optional<QString>& continuation_token) {
-    const QJsonObject list{
+    const QJsonObject page{
         {QStringLiteral("maximum_results"), static_cast<qint64>(kRecoveryPointPageSize)},
         {QStringLiteral("continuation_token"),
          continuation_token ? QJsonValue(*continuation_token) : QJsonValue(QJsonValue::Null)}};
-    return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
-                                      static_cast<qint64>(kServiceSchemaVersion)},
-                                     {QStringLiteral("request_id"), request_id},
-                                     {QStringLiteral("kind"), 2},
-                                     {QStringLiteral("repository_list"), list}})
+    const QJsonObject payload{
+        {QStringLiteral("repository_connection_id"), QJsonValue(QJsonValue::Null)},
+        {QStringLiteral("page"), page}};
+    return QJsonDocument(
+               QJsonObject{
+                   {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
+                   {QStringLiteral("message_type"), 1},
+                   {QStringLiteral("request_id"), request_id},
+                   {QStringLiteral("kind"), 2},
+                   {QStringLiteral("idempotency_key"), QJsonValue(QJsonValue::Null)},
+                   {QStringLiteral("payload"), payload}})
         .toJson(QJsonDocument::Compact);
 }
 
@@ -211,35 +253,44 @@ bool parse_response_root(const QByteArray& body, const QString& request_id, QJso
     }
     root = document.object();
     qint64 schema_version = 0;
-    return has_exact_keys(root, {"schema_version", "request_id", "kind", "boundary_error_code",
-                                 "message_code", "service", "recovery_points"}) &&
+    qint64 message_type = 0;
+    return has_exact_keys(root, {"schema_version", "message_type", "request_id", "kind",
+                                 "request_kind", "boundary_error_code", "message_code",
+                                 "message_arguments", "payload"}) &&
            integer_in_range(root.value(QStringLiteral("schema_version")), kServiceSchemaVersion,
                             kServiceSchemaVersion, schema_version) &&
+           integer_in_range(root.value(QStringLiteral("message_type")), 2, 2, message_type) &&
            root.value(QStringLiteral("request_id")).isString() &&
            root.value(QStringLiteral("request_id")).toString() == request_id &&
            root.value(QStringLiteral("message_code")).isString() &&
+           valid_message_arguments(root.value(QStringLiteral("message_arguments"))) &&
            stable_code(root.value(QStringLiteral("message_code")).toString(), 128);
 }
 
 bool parse_service_info_response(const QJsonObject& root, ServiceInfo& result) {
     qint64 kind = 0;
+    qint64 request_kind = 0;
     qint64 error = 0;
     if (!integer_in_range(root.value(QStringLiteral("kind")), 1, 1, kind) ||
+        !integer_in_range(root.value(QStringLiteral("request_kind")), 1, 1, request_kind) ||
         !integer_in_range(root.value(QStringLiteral("boundary_error_code")), 0, 0, error) ||
         root.value(QStringLiteral("message_code")).toString() != QStringLiteral("service.ready") ||
-        !root.value(QStringLiteral("service")).isObject() ||
-        !root.value(QStringLiteral("recovery_points")).isNull()) {
+        !root.value(QStringLiteral("payload")).isObject()) {
         return false;
     }
-    const auto service = root.value(QStringLiteral("service")).toObject();
-    if (!has_exact_keys(service, {"api_version", "state", "service_version", "capabilities"}) ||
+    const auto service = root.value(QStringLiteral("payload")).toObject();
+    if (!has_exact_keys(service, {"minimum_api_version", "api_version", "state", "service_version",
+                                  "capabilities"}) ||
         !service.value(QStringLiteral("service_version")).isString() ||
         !service.value(QStringLiteral("capabilities")).isArray()) {
         return false;
     }
+    qint64 minimum_api_version = 0;
     qint64 api_version = 0;
     qint64 state = 0;
-    if (!integer_in_range(service.value(QStringLiteral("api_version")), kServiceApiVersion,
+    if (!integer_in_range(service.value(QStringLiteral("minimum_api_version")), kServiceApiVersion,
+                          kServiceApiVersion, minimum_api_version) ||
+        !integer_in_range(service.value(QStringLiteral("api_version")), kServiceApiVersion,
                           kServiceApiVersion, api_version) ||
         !integer_in_range(service.value(QStringLiteral("state")), 2, 2, state)) {
         return false;
@@ -268,14 +319,21 @@ bool parse_service_info_response(const QJsonObject& root, ServiceInfo& result) {
 
 bool parse_recovery_point_response(const QJsonObject& root, RecoveryPointPage& result) {
     qint64 kind = 0;
+    qint64 request_kind = 0;
     qint64 error = 0;
-    if (!integer_in_range(root.value(QStringLiteral("kind")), 3, 3, kind) ||
+    if (!integer_in_range(root.value(QStringLiteral("kind")), 1, 1, kind) ||
+        !integer_in_range(root.value(QStringLiteral("request_kind")), 2, 2, request_kind) ||
         !integer_in_range(root.value(QStringLiteral("boundary_error_code")), 0, 0, error) ||
-        !root.value(QStringLiteral("service")).isNull() ||
-        !root.value(QStringLiteral("recovery_points")).isObject()) {
+        !root.value(QStringLiteral("payload")).isObject()) {
         return false;
     }
-    const auto page = root.value(QStringLiteral("recovery_points")).toObject();
+    const auto payload = root.value(QStringLiteral("payload")).toObject();
+    if (!has_exact_keys(payload, {"repository_connection_id", "catalog"}) ||
+        !payload.value(QStringLiteral("repository_connection_id")).isNull() ||
+        !payload.value(QStringLiteral("catalog")).isObject()) {
+        return false;
+    }
+    const auto page = payload.value(QStringLiteral("catalog")).toObject();
     if (!has_exact_keys(page, {"state", "repository_uuid", "items", "continuation_token"}) ||
         !page.value(QStringLiteral("repository_uuid")).isString()) {
         return false;
@@ -300,13 +358,14 @@ bool parse_recovery_point_response(const QJsonObject& root, RecoveryPointPage& r
 
 bool is_repository_failure_response(const QJsonObject& root) {
     qint64 kind = 0;
+    qint64 request_kind = 0;
     qint64 error = 0;
-    return integer_in_range(root.value(QStringLiteral("kind")), 2, 2, kind) &&
+    return integer_in_range(root.value(QStringLiteral("kind")), 3, 3, kind) &&
+           integer_in_range(root.value(QStringLiteral("request_kind")), 2, 2, request_kind) &&
            integer_in_range(root.value(QStringLiteral("boundary_error_code")), 1, 11, error) &&
            root.value(QStringLiteral("message_code")).toString() ==
                QStringLiteral("repository.query_failed") &&
-           root.value(QStringLiteral("service")).isNull() &&
-           root.value(QStringLiteral("recovery_points")).isNull();
+           root.value(QStringLiteral("payload")).isNull();
 }
 
 } // namespace aegra::desktop

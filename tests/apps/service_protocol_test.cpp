@@ -5,12 +5,14 @@
 #include "aegra/contracts/service.h"
 #include "aegra/ports/message_channel.h"
 
+#include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace {
@@ -32,26 +34,27 @@ app::ServiceRuntimeInfo runtime_info() {
 }
 
 contracts::ServiceRequest service_request() {
-    return {.schema_version = contracts::kServiceRequestSchemaVersion,
-            .request_id = "request-1",
-            .kind = contracts::ServiceRequestKind::kGetServiceInfo};
+    contracts::ServiceRequest request;
+    request.request_id = "request-1";
+    return request;
 }
 
 bool test_request_codec() {
     auto encoded = app::encode_service_request(service_request());
-    bool passed = expect(encoded && encoded.value() ==
-                                        R"({"kind":1,"request_id":"request-1","schema_version":2})",
-                         "service request encoding has a stable schema");
+    const std::string golden =
+        R"({"idempotency_key":null,"kind":1,"message_type":1,"payload":{"maximum_api_version":3,"minimum_api_version":3},"request_id":"request-1","schema_version":3})";
+    bool passed = expect(encoded && encoded.value() == golden,
+                         "service request encoding has a stable V3 envelope");
     auto decoded =
         encoded ? app::decode_service_request(encoded.value()) : app::decode_service_request({});
     passed &=
-        expect(decoded && decoded.value().request_id == "request-1", "service request roundtrips");
-    passed &= expect(!app::decode_service_request(
-                         R"({"schema_version":2,"request_id":"request-1","kind":1,"extra":0})"),
-                     "unknown request fields are rejected");
+        expect(decoded && decoded.value().request_id == "request-1" &&
+                   std::holds_alternative<contracts::ServiceVersionRange>(decoded.value().payload),
+               "service request roundtrips");
     passed &= expect(
-        !app::decode_service_request(R"({"schema_version":2,"request_id":"request-1","kind":"1"})"),
-        "wrong request field types are rejected");
+        !app::decode_service_request(
+            R"({"schema_version":3,"message_type":1,"request_id":"request-1","kind":1,"idempotency_key":null,"payload":{"minimum_api_version":3,"maximum_api_version":3},"extra":0})"),
+        "unknown request fields are rejected");
     passed &= expect(!app::decode_service_request("{"), "malformed request JSON is rejected");
     const std::string oversized(app::kMaximumServiceFrameBytes + 1, 'x');
     passed &= expect(!app::decode_service_request(oversized),
@@ -61,22 +64,29 @@ bool test_request_codec() {
 
 bool test_response_codec_and_dispatch() {
     auto dispatched = app::dispatch_service_request(service_request(), runtime_info());
-    bool passed = expect(dispatched && dispatched.value().service &&
-                             dispatched.value().service->service_version == "0.1.0",
+    const auto* service =
+        dispatched ? std::get_if<contracts::ServiceInfo>(&dispatched.value().payload) : nullptr;
+    bool passed = expect(service != nullptr && service->service_version == "0.1.0",
                          "GetServiceInfo dispatches to owned runtime data");
     auto encoded = dispatched ? app::encode_service_response(dispatched.value())
                               : app::encode_service_response({});
     auto decoded =
         encoded ? app::decode_service_response(encoded.value()) : app::decode_service_response({});
-    passed &=
-        expect(decoded && decoded.value().request_id == "request-1" && decoded.value().service &&
-                   decoded.value().service->capabilities ==
-                       std::vector<std::string>{"repository.list", "service.info"},
-               "service response roundtrips with stable capability data");
-    auto invalid_runtime = runtime_info();
-    invalid_runtime.capabilities = {"service.info", "repository.list"};
-    passed &= expect(!app::dispatch_service_request(service_request(), invalid_runtime),
-                     "invalid runtime capabilities cannot cross the boundary");
+    const auto* decoded_service =
+        decoded ? std::get_if<contracts::ServiceInfo>(&decoded.value().payload) : nullptr;
+    passed &= expect(decoded_service != nullptr && decoded.value().request_id == "request-1" &&
+                         decoded_service->capabilities ==
+                             std::vector<std::string>{"repository.list", "service.info"},
+                     "service response roundtrips with stable capability data");
+
+    auto incompatible = service_request();
+    incompatible.payload = contracts::ServiceVersionRange{4, 5};
+    auto rejected = app::dispatch_service_request(incompatible, runtime_info());
+    passed &= expect(
+        rejected && rejected.value().kind == contracts::ServiceResponseKind::kRequestFailed &&
+            rejected.value().boundary_error_code == base::ErrorCode::kUnsupportedVersion &&
+            rejected.value().message_code == "service.api_version_unsupported",
+        "API negotiation returns a structured unsupported response");
     return passed;
 }
 
@@ -84,30 +94,257 @@ bool test_repository_list_codec_and_dispatch() {
     contracts::ServiceRequest request;
     request.request_id = "repository-request-1";
     request.kind = contracts::ServiceRequestKind::kListRecoveryPoints;
-    request.repository_list = contracts::RecoveryPointListRequest{25, std::nullopt};
+    request.payload = contracts::ServiceRecoveryPointListRequest{std::nullopt, {25, std::nullopt}};
     auto encoded = app::encode_service_request(request);
     bool passed =
-        expect(encoded && encoded.value().find("\"repository_list\"") != std::string::npos &&
-                   encoded.value().find("\"maximum_results\":25") != std::string::npos,
-               "repository list request encodes its bounded page payload");
+        expect(encoded && encoded.value().find("\"maximum_results\":25") != std::string::npos,
+               "repository query encodes its bounded page payload");
     auto decoded =
         encoded ? app::decode_service_request(encoded.value()) : app::decode_service_request({});
-    passed &= expect(decoded && decoded.value().repository_list &&
-                         decoded.value().repository_list->maximum_results == 25,
+    const auto* list =
+        decoded ? std::get_if<contracts::ServiceRecoveryPointListRequest>(&decoded.value().payload)
+                : nullptr;
+    passed &= expect(list != nullptr && list->page.maximum_results == 25,
                      "repository list request roundtrips");
     auto response = decoded ? app::dispatch_service_request(decoded.value(), runtime_info())
                             : app::dispatch_service_request({}, runtime_info());
-    passed &= expect(response && response.value().recovery_points &&
-                         response.value().recovery_points->state ==
-                             contracts::RepositoryCatalogState::kNotConfigured,
+    const auto* page =
+        response ? std::get_if<contracts::ServiceRecoveryPointPage>(&response.value().payload)
+                 : nullptr;
+    passed &= expect(page != nullptr &&
+                         page->catalog.state == contracts::RepositoryCatalogState::kNotConfigured,
                      "unconfigured Service returns a valid empty repository page");
     auto response_json = response ? app::encode_service_response(response.value())
                                   : app::encode_service_response({});
     auto roundtrip = response_json ? app::decode_service_response(response_json.value())
                                    : app::decode_service_response({});
-    passed &= expect(roundtrip && roundtrip.value().recovery_points &&
+    passed &= expect(roundtrip &&
+                         std::holds_alternative<contracts::ServiceRecoveryPointPage>(
+                             roundtrip.value().payload) &&
                          roundtrip.value().request_id == "repository-request-1",
                      "repository page response roundtrips with request correlation");
+    return passed;
+}
+
+bool test_command_codec_and_unavailable_dispatch() {
+    contracts::ServiceRequest request;
+    request.request_id = "command-request-1";
+    request.kind = contracts::ServiceRequestKind::kStartBackup;
+    request.idempotency_key = "backup-command-1";
+    request.payload =
+        contracts::StartBackupCommand{.source_id = "source:volume-1",
+                                      .repository_connection_id = "repository:primary",
+                                      .backup_type = contracts::BackupType::kFull};
+    auto encoded = app::encode_service_request(request);
+    auto decoded =
+        encoded ? app::decode_service_request(encoded.value()) : app::decode_service_request({});
+    auto response = decoded ? app::dispatch_service_request(decoded.value(), runtime_info())
+                            : app::dispatch_service_request({}, runtime_info());
+    return expect(decoded && std::holds_alternative<contracts::StartBackupCommand>(
+                                 decoded.value().payload),
+                  "known command roundtrips") &&
+           expect(response &&
+                      response.value().kind == contracts::ServiceResponseKind::kRequestFailed &&
+                      response.value().boundary_error_code == base::ErrorCode::kConflict &&
+                      response.value().message_code == "service.capability_unavailable",
+                  "known but unavailable command is rejected without side effects");
+}
+
+bool request_roundtrips(const contracts::ServiceRequestKind kind,
+                        contracts::ServiceRequestPayload payload, const bool command) {
+    contracts::ServiceRequest request;
+    request.request_id = "matrix-request-1";
+    request.kind = kind;
+    request.payload = std::move(payload);
+    if (command) {
+        request.idempotency_key = "matrix-command-1";
+    }
+    auto encoded = app::encode_service_request(request);
+    auto decoded =
+        encoded ? app::decode_service_request(encoded.value()) : app::decode_service_request({});
+    return decoded && decoded.value().kind == kind &&
+           decoded.value().payload.index() == request.payload.index();
+}
+
+bool test_planned_request_payload_codecs() {
+    bool passed = true;
+    const contracts::ServicePageRequest page{25, std::nullopt};
+    passed &=
+        request_roundtrips(contracts::ServiceRequestKind::kListRepositoryConnections,
+                           contracts::RepositoryConnectionListRequest{page, std::nullopt}, false);
+    passed &= request_roundtrips(contracts::ServiceRequestKind::kListSourceInventory,
+                                 contracts::SourceInventoryListRequest{page, true}, false);
+    passed &= request_roundtrips(contracts::ServiceRequestKind::kListJobs,
+                                 contracts::JobListRequest{page, contracts::JobOperation::kBackup,
+                                                           contracts::ServiceJobState::kRunning},
+                                 false);
+    passed &= request_roundtrips(contracts::ServiceRequestKind::kListSchedules,
+                                 contracts::ScheduleListRequest{page, true}, false);
+    passed &= request_roundtrips(
+        contracts::ServiceRequestKind::kListEvents,
+        contracts::AuditEventListRequest{page, contracts::AuditSeverity::kWarning, 1, 2, "trace:1"},
+        false);
+    passed &= request_roundtrips(
+        contracts::ServiceRequestKind::kListMountSessions,
+        contracts::MountSessionListRequest{page, contracts::MountSessionState::kMounted}, false);
+    passed &= request_roundtrips(
+        contracts::ServiceRequestKind::kPrepareRestore,
+        contracts::RestorePreflightRequest{"recovery:1", "source:target-1"}, false);
+
+    const contracts::RepositoryConnectionInput repository_input{.display_name = "Local Repository",
+                                                                .locator = "repository:local",
+                                                                .credential_ref = std::nullopt};
+    passed &= request_roundtrips(contracts::ServiceRequestKind::kAddRepositoryConnection,
+                                 repository_input, true);
+    passed &= request_roundtrips(contracts::ServiceRequestKind::kImportRepositoryConnection,
+                                 repository_input, true);
+
+    constexpr std::array reference_commands{
+        contracts::ServiceRequestKind::kTestRepositoryConnection,
+        contracts::ServiceRequestKind::kSetDefaultRepository,
+        contracts::ServiceRequestKind::kRemoveRepositoryConnection,
+        contracts::ServiceRequestKind::kCancelJob,
+        contracts::ServiceRequestKind::kStartVerify,
+        contracts::ServiceRequestKind::kUnmountSession,
+        contracts::ServiceRequestKind::kDeleteSchedule,
+    };
+    for (const auto kind : reference_commands) {
+        passed &= request_roundtrips(kind, contracts::ResourceRef{"resource:1"}, true);
+    }
+    passed &= request_roundtrips(contracts::ServiceRequestKind::kStartRestore,
+                                 contracts::StartRestoreCommand{"preflight-token"}, true);
+    passed &= request_roundtrips(
+        contracts::ServiceRequestKind::kMountRecoveryPoint,
+        contracts::MountRecoveryPointCommand{"recovery:1", std::string("M")}, true);
+    passed &= request_roundtrips(
+        contracts::ServiceRequestKind::kUpsertSchedule,
+        contracts::UpsertScheduleCommand{
+            .display_name = "Daily backup",
+            .enabled = true,
+            .source_id = "source:1",
+            .repository_connection_id = "repository:1",
+            .backup_type = contracts::BackupType::kFull,
+            .trigger = {contracts::ScheduleTriggerKind::kDaily, 120, 0, "Asia/Shanghai"}},
+        true);
+    passed &= request_roundtrips(contracts::ServiceRequestKind::kSubscribeTaskEvents,
+                                 contracts::EventSubscriptionRequest{std::nullopt, 0, 64}, true);
+    passed &= request_roundtrips(contracts::ServiceRequestKind::kAcknowledgeEvents,
+                                 contracts::EventAcknowledgement{"subscription:1", 7}, true);
+    return expect(passed, "all planned request payload variants roundtrip");
+}
+
+bool query_response_roundtrips(const contracts::ServiceRequestKind kind,
+                               contracts::ServiceResponsePayload payload) {
+    contracts::ServiceResponse response;
+    response.request_id = "matrix-response-1";
+    response.kind = contracts::ServiceResponseKind::kQueryResult;
+    response.request_kind = kind;
+    response.boundary_error_code = base::ErrorCode::kNone;
+    response.message_code = "service.query_ready";
+    response.payload = std::move(payload);
+    auto encoded = app::encode_service_response(response);
+    auto decoded =
+        encoded ? app::decode_service_response(encoded.value()) : app::decode_service_response({});
+    return decoded && decoded.value().request_kind == kind &&
+           decoded.value().payload.index() == response.payload.index();
+}
+
+bool test_planned_response_payload_codecs() {
+    bool passed = query_response_roundtrips(
+        contracts::ServiceRequestKind::kListRecoveryPoints,
+        contracts::ServiceRecoveryPointPage{std::nullopt, contracts::RecoveryPointPage{}});
+    passed &= query_response_roundtrips(contracts::ServiceRequestKind::kListRepositoryConnections,
+                                        contracts::RepositoryConnectionPage{});
+    passed &= query_response_roundtrips(contracts::ServiceRequestKind::kListSourceInventory,
+                                        contracts::SourceInventoryPage{});
+    passed &=
+        query_response_roundtrips(contracts::ServiceRequestKind::kListJobs, contracts::JobPage{});
+    passed &= query_response_roundtrips(contracts::ServiceRequestKind::kListSchedules,
+                                        contracts::SchedulePage{});
+    passed &= query_response_roundtrips(contracts::ServiceRequestKind::kListEvents,
+                                        contracts::AuditEventPage{});
+    passed &= query_response_roundtrips(contracts::ServiceRequestKind::kListMountSessions,
+                                        contracts::MountSessionPage{});
+    passed &= query_response_roundtrips(contracts::ServiceRequestKind::kPrepareRestore,
+                                        contracts::RestorePreflight{"preflight-token", "recovery:1",
+                                                                    "source:target-1", 100, 1,
+                                                                    1'800'000'000'000ULL});
+    return expect(passed, "all planned query response payload variants roundtrip");
+}
+
+bool test_command_acknowledgement_codec() {
+    contracts::ServiceResponse response;
+    response.request_id = "subscription-request-1";
+    response.kind = contracts::ServiceResponseKind::kCommandAccepted;
+    response.request_kind = contracts::ServiceRequestKind::kSubscribeTaskEvents;
+    response.boundary_error_code = base::ErrorCode::kNone;
+    response.message_code = "task.events_subscribed";
+    response.payload =
+        contracts::CommandAcknowledgement{.command_id = "command:subscription-1",
+                                          .disposition = contracts::CommandDisposition::kAccepted,
+                                          .resource_id = "subscription:1",
+                                          .event_subscription = contracts::EventSubscriptionLease{
+                                              "subscription:1", "resume-token", 1, 64}};
+    auto encoded = app::encode_service_response(response);
+    auto decoded =
+        encoded ? app::decode_service_response(encoded.value()) : app::decode_service_response({});
+    const auto* acknowledgement =
+        decoded ? std::get_if<contracts::CommandAcknowledgement>(&decoded.value().payload)
+                : nullptr;
+    return expect(acknowledgement != nullptr && acknowledgement->event_subscription &&
+                      acknowledgement->event_subscription->maximum_unacknowledged_events == 64,
+                  "command acknowledgement and subscription lease roundtrip");
+}
+
+bool test_event_codec() {
+    contracts::TaskProgress progress;
+    progress.job_id = "job:backup-1";
+    progress.trace_id = "trace:backup-1";
+    progress.phase = contracts::TaskPhase::kWriting;
+    progress.logical_bytes = 100;
+    progress.processed_bytes = 50;
+    progress.message_code = "backup.writing";
+    contracts::ServiceEvent event;
+    event.subscription_id = "subscription:desktop-1";
+    event.sequence = 7;
+    event.message_code = "backup.writing";
+    event.payload = progress;
+    auto encoded = app::encode_service_event(event);
+    auto decoded =
+        encoded ? app::decode_service_event(encoded.value()) : app::decode_service_event({});
+    const auto* decoded_progress =
+        decoded ? std::get_if<contracts::TaskProgress>(&decoded.value().payload) : nullptr;
+    bool passed = expect(decoded_progress != nullptr && decoded.value().sequence == 7 &&
+                             decoded_progress->processed_bytes == 50,
+                         "task progress event roundtrips through the V3 codec");
+
+    contracts::TaskResult result;
+    result.job_id = "job:backup-1";
+    result.trace_id = "trace:backup-1";
+    result.outcome = contracts::TaskOutcome::kSucceeded;
+    result.error_code = base::ErrorCode::kNone;
+    result.message_code = "backup.completed";
+    event.kind = contracts::ServiceEventKind::kTaskCompleted;
+    event.sequence = 8;
+    event.message_code = "backup.completed";
+    event.payload = result;
+    encoded = app::encode_service_event(event);
+    decoded = encoded ? app::decode_service_event(encoded.value()) : app::decode_service_event({});
+    passed &=
+        expect(decoded && std::holds_alternative<contracts::TaskResult>(decoded.value().payload),
+               "task completion event roundtrips");
+
+    contracts::MountSessionSummary mount{
+        "mount:1", "recovery:1", contracts::MountSessionState::kMounted, "M:", 1, "mount.ready"};
+    event.kind = contracts::ServiceEventKind::kMountSessionChanged;
+    event.sequence = 9;
+    event.message_code = "mount.ready";
+    event.payload = mount;
+    encoded = app::encode_service_event(event);
+    decoded = encoded ? app::decode_service_event(encoded.value()) : app::decode_service_event({});
+    passed &= expect(
+        decoded && std::holds_alternative<contracts::MountSessionSummary>(decoded.value().payload),
+        "mount session event roundtrips");
     return passed;
 }
 
@@ -121,7 +358,8 @@ bool test_structured_rejections() {
             invalid_response.value().boundary_error_code == base::ErrorCode::kInvalidArgument,
         "malformed request returns a structured rejection");
     auto unsupported = app::handle_service_message(
-        R"({"schema_version":1,"request_id":"request-2","kind":1})", runtime_info());
+        R"({"schema_version":2,"message_type":1,"request_id":"request-2","kind":1,"idempotency_key":null,"payload":{"minimum_api_version":3,"maximum_api_version":3}})",
+        runtime_info());
     auto unsupported_response = unsupported ? app::decode_service_response(unsupported.value())
                                             : app::decode_service_response({});
     passed &= expect(unsupported_response && unsupported_response.value().boundary_error_code ==
@@ -172,8 +410,11 @@ bool test_session() {
 
 int run_tests() {
     return test_request_codec() && test_response_codec_and_dispatch() &&
-                   test_repository_list_codec_and_dispatch() && test_structured_rejections() &&
-                   test_session()
+                   test_repository_list_codec_and_dispatch() &&
+                   test_command_codec_and_unavailable_dispatch() &&
+                   test_planned_request_payload_codecs() &&
+                   test_planned_response_payload_codecs() && test_command_acknowledgement_codec() &&
+                   test_event_codec() && test_structured_rejections() && test_session()
                ? EXIT_SUCCESS
                : EXIT_FAILURE;
 }

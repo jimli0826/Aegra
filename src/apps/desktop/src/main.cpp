@@ -1,6 +1,6 @@
-#include "service_client.h"
+#include "client/service_client.h"
+#include "locale/locale_controller.h"
 
-#include <QFile>
 #include <QGuiApplication>
 #include <QIcon>
 #include <QQmlApplicationEngine>
@@ -36,9 +36,14 @@ int main(int argument_count, char* arguments[]) {
     QGuiApplication application(argument_count, arguments);
     configure_application(application);
 
-    ServiceClient service_client;
     QQmlApplicationEngine engine;
+    aegra::desktop::LocaleController locale_controller(&engine);
+    aegra::desktop::ServiceClient service_client;
+    service_client.set_locale_controller(&locale_controller);
+
     engine.addImportPath(QStringLiteral("qrc:/Aegra/qml"));
+    engine.rootContext()->setContextProperty(QStringLiteral("localeController"),
+                                             &locale_controller);
     engine.rootContext()->setContextProperty(QStringLiteral("serviceClient"), &service_client);
     const QUrl root(QStringLiteral("qrc:/Aegra/qml/Main.qml"));
     QObject::connect(

@@ -43,10 +43,14 @@ Event 互斥表达 `TaskProgress` 或最终 `WorkerResponse`。协议要求零�
 具体 framing、JSON 和 Named Pipe 不进入 Contracts。长期决策见
 [ADR-0008](../adr/0008-worker-session-named-pipe-protocol.md)。
 
-`ServiceRequest` / `ServiceResponse` schema 2 定义本地 Desktop 查询契约。`GetServiceInfo` 与分页
-`ListRecoveryPoints` 请求严格互斥 payload；响应互斥表达 `ServiceInfo`、`RequestFailed` 或
-`RecoveryPointPage`。每页最多 100 项，时间和容量字段不超过非负有符号 64 位范围，以保证 Qt 进程边界无损
-解码。Catalog 状态不表达 Archive 已认证或 Restore Ready。
+`ServiceRequest`、`ServiceResponse` 与 `ServiceEvent` schema 3 定义本地 Desktop 控制面契约。根 envelope
+显式区分 Request、Response 和 Event，request kind 与强类型 payload 必须匹配。查询不携带幂等键，命令必须
+携带稳定幂等键；Response 互斥表达 QueryResult、CommandAccepted 或 RequestFailed。
+
+V3 已定义 Repository connection、Source Inventory、Job、Schedule、Audit Event、Restore preflight、Mount
+Session 和 task event DTO。列表每页最多 100 项，event 未确认窗口最多 128；所有 Qt 可见整数不超过非负
+有符号 64 位范围。Catalog 状态仍不表达 Archive 已认证或 Restore Ready。完整 wire 决策见
+[ADR-0013](../adr/0013-service-control-protocol-v3.md)。
 
 ## 测试
 

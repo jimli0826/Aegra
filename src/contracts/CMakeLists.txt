@@ -3,6 +3,7 @@ add_library(aegra_contracts STATIC
     src/progress.cpp
     src/repository_query.cpp
     src/service.cpp
+    src/service_control.cpp
     src/task_result.cpp
     src/worker_response.cpp
     src/worker_session.cpp

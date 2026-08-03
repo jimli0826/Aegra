@@ -3,6 +3,8 @@ find_package(nlohmann_json CONFIG REQUIRED)
 add_library(aegra_app_service STATIC
     src/service_host.cpp
     src/service_protocol.cpp
+    src/service_protocol_request_json.cpp
+    src/service_protocol_response_json.cpp
 )
 
 add_library(Aegra::AppService ALIAS aegra_app_service)

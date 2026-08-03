@@ -10,8 +10,8 @@
 
 namespace aegra::desktop {
 
-inline constexpr quint32 kServiceSchemaVersion = 2;
-inline constexpr quint32 kServiceApiVersion = 2;
+inline constexpr quint32 kServiceSchemaVersion = 3;
+inline constexpr quint32 kServiceApiVersion = 3;
 inline constexpr quint32 kRecoveryPointPageSize = 100;
 
 struct ServiceInfo final {

@@ -1,0 +1,335 @@
+#pragma once
+
+#include "aegra/base/result.h"
+#include "aegra/contracts/job.h"
+#include "aegra/contracts/progress.h"
+#include "aegra/contracts/repository_query.h"
+#include "aegra/contracts/task_result.h"
+
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <variant>
+#include <vector>
+
+namespace aegra::contracts {
+
+inline constexpr std::uint32_t kMaximumServicePageResults = 100;
+inline constexpr std::uint32_t kMaximumUnacknowledgedServiceEvents = 128;
+
+struct MessageArgument final {
+    std::string name;
+    std::string value;
+};
+
+using MessageArguments = std::vector<MessageArgument>;
+
+struct ServiceVersionRange final {
+    std::uint32_t minimum_api_version{3};
+    std::uint32_t maximum_api_version{3};
+};
+
+struct ServicePageRequest final {
+    std::uint32_t maximum_results{50};
+    std::optional<std::string> continuation_token;
+};
+
+struct ServiceRecoveryPointListRequest final {
+    std::optional<std::string> repository_connection_id;
+    RecoveryPointListRequest page;
+};
+
+struct ServiceRecoveryPointPage final {
+    std::optional<std::string> repository_connection_id;
+    RecoveryPointPage catalog;
+};
+
+enum class RepositoryConnectionState : std::uint8_t {
+    kAvailable = 1,
+    kUnavailable = 2,
+};
+
+struct RepositoryConnectionSummary final {
+    std::string connection_id;
+    std::string display_name;
+    RepositoryConnectionState state{RepositoryConnectionState::kUnavailable};
+    bool is_default{false};
+    std::vector<std::string> capabilities;
+};
+
+struct RepositoryConnectionListRequest final {
+    ServicePageRequest page;
+    std::optional<RepositoryConnectionState> state;
+};
+
+enum class SourceKind : std::uint8_t {
+    kVolume = 1,
+};
+
+enum class SourceAvailability : std::uint8_t {
+    kAvailable = 1,
+    kUnavailable = 2,
+};
+
+struct SourceInventoryItem final {
+    std::string source_id;
+    std::string display_name;
+    SourceKind kind{SourceKind::kVolume};
+    SourceAvailability availability{SourceAvailability::kUnavailable};
+    std::uint64_t capacity_bytes{0};
+    bool is_system{false};
+    bool is_read_only{false};
+    bool is_selectable{false};
+};
+
+struct SourceInventoryListRequest final {
+    ServicePageRequest page;
+    bool include_unavailable{true};
+};
+
+enum class ServiceJobState : std::uint8_t {
+    kQueued = 1,
+    kRunning = 2,
+    kCancelling = 3,
+    kSucceeded = 4,
+    kFailed = 5,
+    kCancelled = 6,
+    kInterrupted = 7,
+};
+
+struct JobSummary final {
+    std::string job_id;
+    std::string trace_id;
+    JobOperation operation{JobOperation::kBackup};
+    ServiceJobState state{ServiceJobState::kQueued};
+    std::uint64_t created_utc_ms{0};
+    std::optional<std::uint64_t> started_utc_ms;
+    std::optional<std::uint64_t> completed_utc_ms;
+    std::optional<TaskProgress> progress;
+    std::string message_code;
+};
+
+struct JobListRequest final {
+    ServicePageRequest page;
+    std::optional<JobOperation> operation;
+    std::optional<ServiceJobState> state;
+};
+
+enum class ScheduleTriggerKind : std::uint8_t {
+    kDaily = 1,
+    kWeekly = 2,
+};
+
+struct ScheduleTrigger final {
+    ScheduleTriggerKind kind{ScheduleTriggerKind::kDaily};
+    std::uint16_t local_minute_of_day{0};
+    std::uint8_t weekday_mask{0};
+    std::string timezone_id;
+};
+
+struct ScheduleSummary final {
+    std::string schedule_id;
+    std::string display_name;
+    bool enabled{false};
+    std::string source_id;
+    std::string repository_connection_id;
+    BackupType backup_type{BackupType::kFull};
+    ScheduleTrigger trigger;
+    std::optional<std::uint64_t> next_run_utc_ms;
+};
+
+struct ScheduleListRequest final {
+    ServicePageRequest page;
+    std::optional<bool> enabled;
+};
+
+enum class AuditSeverity : std::uint8_t {
+    kInformation = 1,
+    kWarning = 2,
+    kError = 3,
+    kCritical = 4,
+};
+
+struct AuditEventSummary final {
+    std::string event_id;
+    std::uint64_t created_utc_ms{0};
+    AuditSeverity severity{AuditSeverity::kInformation};
+    std::string message_code;
+    MessageArguments message_arguments;
+    std::string correlation_id;
+};
+
+struct AuditEventListRequest final {
+    ServicePageRequest page;
+    std::optional<AuditSeverity> minimum_severity;
+    std::optional<std::uint64_t> from_utc_ms;
+    std::optional<std::uint64_t> to_utc_ms;
+    std::optional<std::string> correlation_id;
+};
+
+enum class MountSessionState : std::uint8_t {
+    kMounting = 1,
+    kMounted = 2,
+    kUnmounting = 3,
+    kFailed = 4,
+};
+
+struct MountSessionSummary final {
+    std::string session_id;
+    std::string recovery_point_id;
+    MountSessionState state{MountSessionState::kMounting};
+    std::string mount_point;
+    std::uint64_t started_utc_ms{0};
+    std::string message_code;
+};
+
+struct MountSessionListRequest final {
+    ServicePageRequest page;
+    std::optional<MountSessionState> state;
+};
+
+template <typename Item> struct ServicePage final {
+    std::vector<Item> items;
+    std::optional<std::string> continuation_token;
+};
+
+using RepositoryConnectionPage = ServicePage<RepositoryConnectionSummary>;
+using SourceInventoryPage = ServicePage<SourceInventoryItem>;
+using JobPage = ServicePage<JobSummary>;
+using SchedulePage = ServicePage<ScheduleSummary>;
+using AuditEventPage = ServicePage<AuditEventSummary>;
+using MountSessionPage = ServicePage<MountSessionSummary>;
+
+struct RepositoryConnectionInput final {
+    std::string display_name;
+    std::string locator;
+    std::optional<SecretRef> credential_ref;
+};
+
+struct ResourceRef final {
+    std::string resource_id;
+};
+
+struct StartBackupCommand final {
+    std::string source_id;
+    std::string repository_connection_id;
+    BackupType backup_type{BackupType::kFull};
+    std::optional<std::string> parent_recovery_point_id;
+};
+
+struct RestorePreflightRequest final {
+    std::string recovery_point_id;
+    std::string target_source_id;
+};
+
+struct RestorePreflight final {
+    std::string preflight_token;
+    std::string recovery_point_id;
+    std::string target_source_id;
+    std::uint64_t logical_size_bytes{0};
+    std::uint32_t chain_depth{0};
+    std::uint64_t expires_utc_ms{0};
+};
+
+struct StartRestoreCommand final {
+    std::string preflight_token;
+};
+
+struct MountRecoveryPointCommand final {
+    std::string recovery_point_id;
+    std::optional<std::string> preferred_drive_letter;
+};
+
+struct UpsertScheduleCommand final {
+    std::optional<std::string> schedule_id;
+    std::string display_name;
+    bool enabled{false};
+    std::string source_id;
+    std::string repository_connection_id;
+    BackupType backup_type{BackupType::kFull};
+    ScheduleTrigger trigger;
+};
+
+struct EventSubscriptionRequest final {
+    std::optional<std::string> resume_token;
+    std::uint64_t after_sequence{0};
+    std::uint32_t maximum_unacknowledged_events{64};
+};
+
+struct EventAcknowledgement final {
+    std::string subscription_id;
+    std::uint64_t through_sequence{0};
+};
+
+enum class CommandDisposition : std::uint8_t {
+    kAccepted = 1,
+    kReplayed = 2,
+};
+
+struct EventSubscriptionLease final {
+    std::string subscription_id;
+    std::string resume_token;
+    std::uint64_t next_sequence{1};
+    std::uint32_t maximum_unacknowledged_events{64};
+};
+
+struct CommandAcknowledgement final {
+    std::string command_id;
+    CommandDisposition disposition{CommandDisposition::kAccepted};
+    std::optional<std::string> resource_id;
+    std::optional<EventSubscriptionLease> event_subscription;
+};
+
+[[nodiscard]] base::Result<void> validate_message_arguments(const MessageArguments& arguments);
+[[nodiscard]] base::Result<void> validate_service_version_range(const ServiceVersionRange& range);
+[[nodiscard]] base::Result<void> validate_service_page_request(const ServicePageRequest& request);
+[[nodiscard]] base::Result<void>
+validate_service_recovery_point_list_request(const ServiceRecoveryPointListRequest& request);
+[[nodiscard]] base::Result<void>
+validate_service_recovery_point_page(const ServiceRecoveryPointPage& page);
+[[nodiscard]] base::Result<void>
+validate_repository_connection_list_request(const RepositoryConnectionListRequest& request);
+[[nodiscard]] base::Result<void>
+validate_repository_connection_summary(const RepositoryConnectionSummary& summary);
+[[nodiscard]] base::Result<void>
+validate_source_inventory_list_request(const SourceInventoryListRequest& request);
+[[nodiscard]] base::Result<void> validate_source_inventory_item(const SourceInventoryItem& item);
+[[nodiscard]] base::Result<void> validate_job_list_request(const JobListRequest& request);
+[[nodiscard]] base::Result<void> validate_job_summary(const JobSummary& summary);
+[[nodiscard]] base::Result<void> validate_schedule_trigger(const ScheduleTrigger& trigger);
+[[nodiscard]] base::Result<void> validate_schedule_summary(const ScheduleSummary& summary);
+[[nodiscard]] base::Result<void> validate_schedule_list_request(const ScheduleListRequest& request);
+[[nodiscard]] base::Result<void> validate_audit_event_summary(const AuditEventSummary& summary);
+[[nodiscard]] base::Result<void>
+validate_audit_event_list_request(const AuditEventListRequest& request);
+[[nodiscard]] base::Result<void> validate_mount_session_summary(const MountSessionSummary& summary);
+[[nodiscard]] base::Result<void>
+validate_mount_session_list_request(const MountSessionListRequest& request);
+[[nodiscard]] base::Result<void>
+validate_repository_connection_input(const RepositoryConnectionInput& input);
+[[nodiscard]] base::Result<void> validate_resource_ref(const ResourceRef& reference);
+[[nodiscard]] base::Result<void> validate_start_backup_command(const StartBackupCommand& command);
+[[nodiscard]] base::Result<void>
+validate_restore_preflight_request(const RestorePreflightRequest& request);
+[[nodiscard]] base::Result<void> validate_restore_preflight(const RestorePreflight& preflight);
+[[nodiscard]] base::Result<void> validate_start_restore_command(const StartRestoreCommand& command);
+[[nodiscard]] base::Result<void>
+validate_mount_recovery_point_command(const MountRecoveryPointCommand& command);
+[[nodiscard]] base::Result<void>
+validate_upsert_schedule_command(const UpsertScheduleCommand& command);
+[[nodiscard]] base::Result<void>
+validate_event_subscription_request(const EventSubscriptionRequest& request);
+[[nodiscard]] base::Result<void>
+validate_event_acknowledgement(const EventAcknowledgement& acknowledgement);
+[[nodiscard]] base::Result<void>
+validate_command_acknowledgement(const CommandAcknowledgement& acknowledgement);
+
+[[nodiscard]] base::Result<void>
+validate_repository_connection_page(const RepositoryConnectionPage& page);
+[[nodiscard]] base::Result<void> validate_source_inventory_page(const SourceInventoryPage& page);
+[[nodiscard]] base::Result<void> validate_job_page(const JobPage& page);
+[[nodiscard]] base::Result<void> validate_schedule_page(const SchedulePage& page);
+[[nodiscard]] base::Result<void> validate_audit_event_page(const AuditEventPage& page);
+[[nodiscard]] base::Result<void> validate_mount_session_page(const MountSessionPage& page);
+
+} // namespace aegra::contracts

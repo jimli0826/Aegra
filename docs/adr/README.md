@@ -11,6 +11,9 @@ ADR 用于记录会长期约束多个模块、持久化格式、外部协议或�
 个人版 Repository Catalog 的分页 Service 查询见
 [ADR-0012](0012-personal-repository-catalog-query.md)。
 
+本地 Service 控制面 V3 envelope、命令幂等和 task event 见
+[ADR-0013](0013-service-control-protocol-v3.md)。
+
 ## 状态
 
 - `Proposed`：讨论中，不构成实现依据。

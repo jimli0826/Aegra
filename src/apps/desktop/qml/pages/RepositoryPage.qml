@@ -9,35 +9,11 @@ Item {
     property bool recoveryPointDrawerOpen: false
     property bool repositorySelected: serviceClient.repositoryConfigured
 
-    function formatBytes(value) {
-        const units = ["B", "KiB", "MiB", "GiB", "TiB"]
-        let amount = Number(value)
-        let unit = 0
-        while (amount >= 1024 && unit < units.length - 1) {
-            amount /= 1024
-            ++unit
-        }
-        return (unit === 0 ? amount.toFixed(0) : amount.toFixed(1)) + " " + units[unit]
-    }
-
-    function formatDate(value) {
-        if (Number(value) === 0)
-            return "未记录"
-        return new Date(Number(value)).toLocaleString(Qt.locale(), "yyyy-MM-dd hh:mm")
-    }
-
-    function backupTypeLabel(value) {
-        if (value === 1)
-            return "全量"
-        if (value === 2)
-            return "增量"
-        return "差异"
-    }
-
     readonly property var repositoryModel: serviceClient.repositoryConfigured ? [{
-        name: "个人版 Repository",
+        //% "Personal Repository"
+        name: qsTrId("aegra.repository.personal_name"),
         repoUuid: serviceClient.repositoryUuid,
-        checkpointCount: serviceClient.recoveryPoints.length,
+        checkpointCount: serviceClient.recoveryPointCount,
         status: serviceClient.repositoryStatusText
     }] : []
 
@@ -51,7 +27,8 @@ Item {
             spacing: 10
 
             Text {
-                text: "Repository"
+                //% "Repository"
+                text: qsTrId("aegra.repository.title")
                 color: Theme.colorTextWhite
                 font.family: Theme.fontFamily
                 font.pixelSize: 22
@@ -61,13 +38,26 @@ Item {
             Item { Layout.fillWidth: true }
 
             AppButton {
-                text: serviceClient.connected ? "刷新" : "重新连接"
+                //% "Refresh"
+                //% "Reconnect"
+                text: serviceClient.connected
+                      ? qsTrId("aegra.common.refresh")
+                      : qsTrId("aegra.common.reconnect")
                 enabled: !serviceClient.repositoryLoading
                 onClicked: serviceClient.connected
                            ? serviceClient.refreshRepository() : serviceClient.reconnect()
             }
-            AppButton { text: "添加"; primary: true; enabled: false }
-            AppButton { text: "导入"; enabled: false }
+            AppButton {
+                //% "Add"
+                text: qsTrId("aegra.common.add")
+                primary: true
+                enabled: false
+            }
+            AppButton {
+                //% "Import"
+                text: qsTrId("aegra.common.import")
+                enabled: false
+            }
         }
 
         RowLayout {
@@ -148,7 +138,9 @@ Item {
                             Text {
                                 id: recoveryCount
                                 anchors.centerIn: parent
-                                text: modelData.checkpointCount + " 个恢复点"
+                                //% "%1 recovery points"
+                                text: qsTrId("aegra.repository.recovery_points_count")
+                                      .arg(modelData.checkpointCount)
                                 color: Theme.colorTextWhite
                                 font.family: Theme.fontFamily
                                 font.pixelSize: 11
@@ -183,7 +175,8 @@ Item {
 
                     Text {
                         Layout.fillWidth: true
-                        text: "local · catalog"
+                        //% "local · catalog"
+                        text: qsTrId("aegra.repository.kind_local_catalog")
                         color: Theme.colorTextDim
                         font.family: Theme.fontFamily
                         font.pixelSize: 11
@@ -195,7 +188,8 @@ Item {
                 anchors.centerIn: parent
                 visible: repositoryList.count === 0 && !serviceClient.repositoryLoading
                          && serviceClient.repositoryErrorText.length === 0
-                text: "没有 Repository"
+                //% "No repository"
+                text: qsTrId("aegra.repository.empty")
                 color: Theme.colorTextGrey
                 font.family: Theme.fontFamily
                 font.pixelSize: 13
@@ -208,15 +202,48 @@ Item {
             enabled: root.repositorySelected
             opacity: enabled ? 1.0 : 0.5
 
-            AppButton { text: "设为默认"; enabled: false }
-            AppButton { text: "连接测试"; enabled: false }
-            AppButton { text: "解锁"; enabled: false }
-            AppButton { text: "锁定"; enabled: false }
-            AppButton { text: "重建索引"; enabled: false }
-            AppButton { text: "导出"; enabled: false }
-            AppButton { text: "设置密码"; enabled: false }
+            AppButton {
+                //% "Set default"
+                text: qsTrId("aegra.repository.set_default")
+                enabled: false
+            }
+            AppButton {
+                //% "Test connection"
+                text: qsTrId("aegra.repository.test_connection")
+                enabled: false
+            }
+            AppButton {
+                //% "Unlock"
+                text: qsTrId("aegra.repository.unlock")
+                enabled: false
+            }
+            AppButton {
+                //% "Lock"
+                text: qsTrId("aegra.repository.lock")
+                enabled: false
+            }
+            AppButton {
+                //% "Rebuild index"
+                text: qsTrId("aegra.repository.rebuild_index")
+                enabled: false
+            }
+            AppButton {
+                //% "Export"
+                text: qsTrId("aegra.common.export")
+                enabled: false
+            }
+            AppButton {
+                //% "Set password"
+                text: qsTrId("aegra.repository.set_password")
+                enabled: false
+            }
             Item { Layout.fillWidth: true }
-            AppButton { text: "删除"; danger: true; enabled: false }
+            AppButton {
+                //% "Delete"
+                text: qsTrId("aegra.common.delete")
+                danger: true
+                enabled: false
+            }
         }
     }
 
@@ -272,7 +299,8 @@ Item {
 
                     Text {
                         Layout.fillWidth: true
-                        text: "个人版 Repository — 恢复点"
+                        //% "Personal Repository — Recovery Points"
+                        text: qsTrId("aegra.repository.drawer_title")
                         color: Theme.colorTextWhite
                         font.family: Theme.fontFamily
                         font.pixelSize: 16
@@ -308,14 +336,22 @@ Item {
                     spacing: 8
 
                     AppButton {
-                        text: "刷新"
+                        //% "Refresh"
+                        text: qsTrId("aegra.common.refresh")
                         enabled: serviceClient.connected && !serviceClient.repositoryLoading
                         onClicked: serviceClient.refreshRepository()
                     }
-                    AppButton { text: "删除"; danger: true; enabled: false }
+                    AppButton {
+                        //% "Delete"
+                        text: qsTrId("aegra.common.delete")
+                        danger: true
+                        enabled: false
+                    }
                     Item { Layout.fillWidth: true }
                     Text {
-                        text: serviceClient.recoveryPoints.length + " 个恢复点"
+                        //% "%1 recovery points"
+                        text: qsTrId("aegra.repository.recovery_points_count")
+                              .arg(serviceClient.recoveryPointCount)
                         color: Theme.colorTextDim
                         font.family: Theme.fontFamily
                         font.pixelSize: 11
@@ -334,18 +370,49 @@ Item {
                         spacing: 10
 
                         Item { Layout.preferredWidth: 28 }
-                        Text { Layout.fillWidth: true; text: "恢复点"; color: Theme.colorTextGrey; font.pixelSize: 11 }
-                        Text { Layout.preferredWidth: 120; text: "备份时间"; color: Theme.colorTextGrey; font.pixelSize: 11 }
-                        Text { Layout.preferredWidth: 60; text: "类型"; color: Theme.colorTextGrey; font.pixelSize: 11 }
-                        Text { Layout.preferredWidth: 80; text: "逻辑大小"; color: Theme.colorTextGrey; font.pixelSize: 11 }
                         Text {
-                            visible: drawerPanel.width >= 800
-                            Layout.preferredWidth: 80
-                            text: "存储大小"
+                            Layout.fillWidth: true
+                            //% "Recovery point"
+                            text: qsTrId("aegra.repository.column.recovery_point")
                             color: Theme.colorTextGrey
                             font.pixelSize: 11
                         }
-                        Text { Layout.preferredWidth: 72; text: "备份链"; color: Theme.colorTextGrey; font.pixelSize: 11 }
+                        Text {
+                            Layout.preferredWidth: 120
+                            //% "Backup time"
+                            text: qsTrId("aegra.repository.column.backup_time")
+                            color: Theme.colorTextGrey
+                            font.pixelSize: 11
+                        }
+                        Text {
+                            Layout.preferredWidth: 60
+                            //% "Type"
+                            text: qsTrId("aegra.repository.column.type")
+                            color: Theme.colorTextGrey
+                            font.pixelSize: 11
+                        }
+                        Text {
+                            Layout.preferredWidth: 80
+                            //% "Logical size"
+                            text: qsTrId("aegra.repository.column.logical_size")
+                            color: Theme.colorTextGrey
+                            font.pixelSize: 11
+                        }
+                        Text {
+                            visible: drawerPanel.width >= 800
+                            Layout.preferredWidth: 80
+                            //% "Stored size"
+                            text: qsTrId("aegra.repository.column.stored_size")
+                            color: Theme.colorTextGrey
+                            font.pixelSize: 11
+                        }
+                        Text {
+                            Layout.preferredWidth: 72
+                            //% "Backup chain"
+                            text: qsTrId("aegra.repository.column.chain")
+                            color: Theme.colorTextGrey
+                            font.pixelSize: 11
+                        }
                     }
                 }
 
@@ -357,7 +424,14 @@ Item {
                     model: serviceClient.recoveryPoints
 
                     delegate: Rectangle {
-                        required property var modelData
+                        required property string fileUuid
+                        required property string backupSetUuid
+                        required property string createdText
+                        required property string backupTypeText
+                        required property string logicalSizeText
+                        required property string storedSizeText
+                        required property string chainStateText
+                        required property bool chainComplete
                         required property int index
                         width: recoveryPointList.width
                         height: 58
@@ -386,7 +460,7 @@ Item {
 
                                 Text {
                                     width: parent.width
-                                    text: modelData.fileUuid
+                                    text: fileUuid
                                     color: Theme.colorTextWhite
                                     font.family: "Consolas"
                                     font.pixelSize: 11
@@ -394,7 +468,7 @@ Item {
                                 }
                                 Text {
                                     width: parent.width
-                                    text: modelData.backupSetUuid
+                                    text: backupSetUuid
                                     color: Theme.colorTextDim
                                     font.family: "Consolas"
                                     font.pixelSize: 9
@@ -404,21 +478,21 @@ Item {
 
                             Text {
                                 Layout.preferredWidth: 120
-                                text: root.formatDate(modelData.createdUtcMs)
+                                text: createdText
                                 color: Theme.colorTextGrey
                                 font.family: Theme.fontFamily
                                 font.pixelSize: 11
                             }
                             Text {
                                 Layout.preferredWidth: 60
-                                text: root.backupTypeLabel(modelData.backupType)
+                                text: backupTypeText
                                 color: Theme.colorTextGrey
                                 font.family: Theme.fontFamily
                                 font.pixelSize: 11
                             }
                             Text {
                                 Layout.preferredWidth: 80
-                                text: root.formatBytes(modelData.logicalSizeBytes)
+                                text: logicalSizeText
                                 color: Theme.colorTextGrey
                                 font.family: Theme.fontFamily
                                 font.pixelSize: 11
@@ -426,15 +500,15 @@ Item {
                             Text {
                                 visible: drawerPanel.width >= 800
                                 Layout.preferredWidth: 80
-                                text: root.formatBytes(modelData.storedSizeBytes)
+                                text: storedSizeText
                                 color: Theme.colorTextGrey
                                 font.family: Theme.fontFamily
                                 font.pixelSize: 11
                             }
                             Text {
                                 Layout.preferredWidth: 72
-                                text: modelData.chainState === 1 ? "完整" : "不完整"
-                                color: modelData.chainState === 1
+                                text: chainStateText
+                                color: chainComplete
                                        ? Theme.colorGreen : Theme.colorAccentRed
                                 font.family: Theme.fontFamily
                                 font.pixelSize: 11
@@ -455,7 +529,8 @@ Item {
                     Text {
                         anchors.centerIn: parent
                         visible: recoveryPointList.count === 0 && !serviceClient.repositoryLoading
-                        text: "没有恢复点"
+                        //% "No recovery points"
+                        text: qsTrId("aegra.repository.empty_recovery_points")
                         color: Theme.colorTextGrey
                         font.family: Theme.fontFamily
                         font.pixelSize: 13

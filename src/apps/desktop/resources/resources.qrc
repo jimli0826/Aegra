@@ -4,6 +4,11 @@
         <file alias="icons/product.png">product.png</file>
         <file alias="icons/product_32.png">product_32.png</file>
         <file alias="icons/product_64.png">product_64.png</file>
+        <file alias="i18n/aegra_desktop_en_US.qm">../translations/aegra_desktop_en_US.qm</file>
+        <file alias="i18n/aegra_desktop_zh_CN.qm">../translations/aegra_desktop_zh_CN.qm</file>
+        <file alias="i18n/aegra_desktop_zh_TW.qm">../translations/aegra_desktop_zh_TW.qm</file>
+        <file alias="i18n/aegra_desktop_ja_JP.qm">../translations/aegra_desktop_ja_JP.qm</file>
+        <file alias="i18n/aegra_desktop_de_DE.qm">../translations/aegra_desktop_de_DE.qm</file>
         <file alias="qml/Main.qml">../qml/Main.qml</file>
         <file alias="qml/Theme.qml">../qml/Theme.qml</file>
         <file alias="qml/qmldir">../qml/qmldir</file>

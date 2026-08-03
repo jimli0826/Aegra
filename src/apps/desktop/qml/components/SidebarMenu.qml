@@ -16,12 +16,18 @@ Rectangle {
     clip: true
 
     readonly property var menuItems: [
-        { label: "首页", icon: "\uE80F", index: 0, enabled: false },
-        { label: "备份", icon: "\uEA35", index: 1, enabled: false },
-        { label: "恢复", icon: "\uE965", index: 2, enabled: false },
-        { label: "挂载", icon: "\uE8B9", index: 3, enabled: false },
-        { label: "Repository", icon: "\uE8B7", index: 4, enabled: true },
-        { label: "事件日志", icon: "\uE7C3", index: 5, enabled: false }
+        //% "Home"
+        { label: qsTrId("aegra.nav.home"), icon: "\uE80F", index: 0, enabled: false },
+        //% "Backup"
+        { label: qsTrId("aegra.nav.backup"), icon: "\uEA35", index: 1, enabled: false },
+        //% "Restore"
+        { label: qsTrId("aegra.nav.restore"), icon: "\uE965", index: 2, enabled: false },
+        //% "Mount"
+        { label: qsTrId("aegra.nav.mount"), icon: "\uE8B9", index: 3, enabled: false },
+        //% "Repository"
+        { label: qsTrId("aegra.nav.repository"), icon: "\uE8B7", index: 4, enabled: true },
+        //% "Event Log"
+        { label: qsTrId("aegra.nav.event_log"), icon: "\uE7C3", index: 5, enabled: false }
     ]
 
     ColumnLayout {
@@ -92,14 +98,16 @@ Rectangle {
         Item { Layout.fillHeight: true }
 
         SidebarCommand {
-            label: "设置"
+            //% "Settings"
+            label: qsTrId("aegra.nav.settings")
             icon: "\uE713"
             collapsed: root.collapsed
             enabled: false
         }
 
         SidebarCommand {
-            label: "反馈"
+            //% "Feedback"
+            label: qsTrId("aegra.nav.feedback")
             icon: "\uE715"
             collapsed: root.collapsed
             enabled: false
@@ -127,7 +135,11 @@ Rectangle {
                 cursorShape: Qt.PointingHandCursor
                 onClicked: root.collapsed = !root.collapsed
                 ToolTip.visible: containsMouse
-                ToolTip.text: root.collapsed ? "展开侧栏" : "折叠侧栏"
+                //% "Expand menu"
+                //% "Collapse menu"
+                ToolTip.text: root.collapsed
+                              ? qsTrId("aegra.nav.expand_sidebar")
+                              : qsTrId("aegra.nav.collapse_sidebar")
             }
         }
     }

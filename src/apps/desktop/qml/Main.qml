@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Window 2.15
 import QtQuick.Layouts 1.15
+import QtQuick.Controls 2.15
 import "."
 import "components"
 import "pages"
@@ -12,7 +13,8 @@ Window {
     height: 720
     minimumWidth: 900
     minimumHeight: 600
-    title: "Aegra"
+    //% "Aegra"
+    title: qsTrId("aegra.app.title")
     color: Theme.colorBg
     flags: Qt.Window | Qt.FramelessWindowHint
 
@@ -56,7 +58,8 @@ Window {
                 }
 
                 Text {
-                    text: "Aegra"
+                    //% "Aegra"
+                    text: qsTrId("aegra.app.title")
                     color: Theme.colorTextWhite
                     font.family: Theme.fontFamily
                     font.pixelSize: 12
@@ -81,11 +84,83 @@ Window {
                 }
 
                 Text {
-                    text: "Service " + serviceClient.statusText
+                    //% "Service %1"
+                    text: qsTrId("aegra.shell.service_label").arg(serviceClient.statusText)
                     color: Theme.colorTextGrey
                     font.family: Theme.fontFamily
                     font.pixelSize: 11
+                    Layout.rightMargin: 4
+                }
+
+                ComboBox {
+                    id: languageCombo
+                    Layout.preferredHeight: 24
+                    Layout.preferredWidth: 118
                     Layout.rightMargin: 8
+                    model: localeController.availableLanguages
+                    textRole: "label"
+                    currentIndex: {
+                        const tags = localeController.availableLanguages
+                        for (let i = 0; i < tags.length; ++i) {
+                            if (tags[i].tag === localeController.language)
+                                return i
+                        }
+                        return 0
+                    }
+                    onActivated: function(index) {
+                        const languages = localeController.availableLanguages
+                        if (index >= 0 && index < languages.length)
+                            localeController.setLanguage(languages[index].tag)
+                    }
+
+                    background: Rectangle {
+                        color: languageCombo.hovered ? Theme.colorButtonHover : Theme.colorButton
+                        border.width: 1
+                        border.color: Theme.colorBorder
+                        radius: 3
+                    }
+                    contentItem: Text {
+                        leftPadding: 8
+                        rightPadding: 18
+                        text: languageCombo.displayText
+                        color: Theme.colorTextWhite
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 11
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
+                    }
+                    popup: Popup {
+                        y: languageCombo.height
+                        width: languageCombo.width
+                        implicitHeight: contentItem.implicitHeight
+                        padding: 1
+                        contentItem: ListView {
+                            clip: true
+                            implicitHeight: contentHeight
+                            model: languageCombo.popup.visible ? languageCombo.delegateModel : null
+                            currentIndex: languageCombo.highlightedIndex
+                        }
+                        background: Rectangle {
+                            color: Theme.colorCard
+                            border.color: Theme.colorBorder
+                            radius: 3
+                        }
+                    }
+                    delegate: ItemDelegate {
+                        width: languageCombo.width
+                        height: 28
+                        contentItem: Text {
+                            text: modelData.label
+                            color: Theme.colorTextWhite
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 11
+                            elide: Text.ElideRight
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            color: parent.highlighted ? Theme.colorHover : "transparent"
+                        }
+                    }
                 }
 
                 Row {

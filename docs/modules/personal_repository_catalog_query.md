@@ -6,7 +6,7 @@
 
 ```text
 Local Object Storage -> RepositoryCatalogScanner -> PersonalRepositoryQuery
-                     -> Service schema 2 -> Desktop Recovery Point list
+                     -> Service schema 3 -> Desktop Recovery Point list
 ```
 
 本阶段只读取 Descriptor、Catalog Entry 和 Deletion Tombstone。不读取 Archive Header/Chunk/Footer，不认证
@@ -16,7 +16,7 @@ Metadata，不发布或修复 Catalog，不访问 SQLite，也不允许 Desktop 
 
 - `personal_repository`：实现 Scanner，只依赖 Base、Format 和 Ports。
 - `application`：实现查询用例并映射 Contracts，只依赖 PersonalRepository、Ports 和 Contracts。
-- `apps/service`：组合 Local Storage 与查询用例，编码 schema 2。
+- `apps/service`：组合 Local Storage 与查询用例，编码 schema 3。
 - `apps/desktop`：只依赖 Qt，通过 IPC 分页读取，不链接上述核心模块。
 
 具体 Windows 路径只存在于 `service_main.cpp` composition root。Contracts 不包含路径、Qt 或 Adapter 类型。
@@ -49,6 +49,6 @@ UI 展示 backup type、创建时间、逻辑/存储大小和 chain complete/inc
 
 ## 当前状态
 
-阶段 13B 查询链已经实现。Scanner、Application、Service schema 2、Desktop 分页聚合与 Recovery Point 首屏
+阶段 13B 查询链已经实现，并在 S0 直接切换到 Service schema 3。Scanner、Application、Desktop 分页聚合与 Recovery Point 首屏
 均已接入；真实 Service 进程测试使用临时 Local Storage Repository 验证 Descriptor/Catalog 到 IPC 响应。
 Restore、Verify 和 Delete 仍不在本查询切片范围内。

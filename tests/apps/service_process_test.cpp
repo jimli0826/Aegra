@@ -14,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 
 namespace {
 
@@ -190,8 +191,10 @@ bool test_once_process(const std::wstring& service_executable) {
     contracts::ServiceRequest request;
     request.request_id = "process-request-1";
     auto response = send_request(pipe_name, request);
+    const auto* service =
+        response ? std::get_if<contracts::ServiceInfo>(&response->payload) : nullptr;
     bool passed = expect(response && response->request_id == "process-request-1" &&
-                             response->service && response->service->service_version == "0.1.0",
+                             service != nullptr && service->service_version == "0.1.0",
                          "service process returns correlated Ready info");
     passed &= expect(process.wait_for_success(), "--once service exits successfully");
     return passed;
@@ -210,14 +213,15 @@ bool test_repository_process(const std::wstring& service_executable) {
     contracts::ServiceRequest request;
     request.request_id = "repository-process-request-1";
     request.kind = contracts::ServiceRequestKind::kListRecoveryPoints;
-    request.repository_list = contracts::RecoveryPointListRequest{100, std::nullopt};
+    request.payload = contracts::ServiceRecoveryPointListRequest{std::nullopt, {100, std::nullopt}};
     auto response = send_request(pipe_name, request);
-    const auto valid_page =
-        response && response->recovery_points &&
-        response->recovery_points->state == contracts::RepositoryCatalogState::kCatalogReady &&
-        response->recovery_points->repository_uuid == kRepositoryUuid &&
-        response->recovery_points->items.size() == 1 &&
-        response->recovery_points->items.front().file_uuid == kFileUuid;
+    const auto* service_page =
+        response ? std::get_if<contracts::ServiceRecoveryPointPage>(&response->payload) : nullptr;
+    const auto* page = service_page != nullptr ? &service_page->catalog : nullptr;
+    const auto valid_page = page != nullptr &&
+                            page->state == contracts::RepositoryCatalogState::kCatalogReady &&
+                            page->repository_uuid == kRepositoryUuid && page->items.size() == 1 &&
+                            page->items.front().file_uuid == kFileUuid;
     bool passed = expect(valid_page, "service reads the local repository catalog through IPC");
     passed &= expect(process.wait_for_success(), "repository --once service exits successfully");
     return passed;

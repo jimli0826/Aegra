@@ -1,4 +1,4 @@
-#include "service_client.h"
+#include "client/service_client.h"
 
 #include <QByteArray>
 #include <QCoreApplication>
@@ -17,6 +17,8 @@
 #include <utility>
 
 namespace {
+
+using aegra::desktop::ServiceClient;
 
 constexpr auto kPipeName = "aegra-service-control";
 constexpr auto kRepositoryUuid = "01234567-89ab-4cde-8f01-23456789abcd";
@@ -96,26 +98,29 @@ bool send_object(QLocalSocket& socket, const QJsonObject& object) {
     return socket.write(encoded) == encoded.size() && socket.waitForBytesWritten(1'000);
 }
 
-QJsonObject response(const QString& request_id, const qint64 kind, const qint64 error,
-                     QString message_code, QJsonValue service, QJsonValue recovery_points) {
-    return {{QStringLiteral("schema_version"), 2},
+QJsonObject response(const QString& request_id, const qint64 kind, const qint64 request_kind,
+                     const qint64 error, QString message_code, QJsonValue payload) {
+    return {{QStringLiteral("schema_version"), 3},
+            {QStringLiteral("message_type"), 2},
             {QStringLiteral("request_id"), request_id},
             {QStringLiteral("kind"), kind},
+            {QStringLiteral("request_kind"), request_kind},
             {QStringLiteral("boundary_error_code"), error},
             {QStringLiteral("message_code"), std::move(message_code)},
-            {QStringLiteral("service"), std::move(service)},
-            {QStringLiteral("recovery_points"), std::move(recovery_points)}};
+            {QStringLiteral("message_arguments"), QJsonArray{}},
+            {QStringLiteral("payload"), std::move(payload)}};
 }
 
 bool send_service_info(QLocalSocket& socket, const QString& request_id,
                        QJsonArray capabilities = {QStringLiteral("repository.list"),
                                                   QStringLiteral("service.info")}) {
-    const QJsonObject service{{QStringLiteral("api_version"), 2},
+    const QJsonObject service{{QStringLiteral("minimum_api_version"), 3},
+                              {QStringLiteral("api_version"), 3},
                               {QStringLiteral("state"), 2},
                               {QStringLiteral("service_version"), QStringLiteral("0.1.0")},
                               {QStringLiteral("capabilities"), std::move(capabilities)}};
-    return send_object(socket, response(request_id, 1, 0, QStringLiteral("service.ready"), service,
-                                        QJsonValue(QJsonValue::Null)));
+    return send_object(socket,
+                       response(request_id, 1, 1, 0, QStringLiteral("service.ready"), service));
 }
 
 QJsonObject recovery_point(const QString& file_uuid, const std::optional<QString>& parent_uuid,
@@ -135,35 +140,42 @@ QJsonObject recovery_point(const QString& file_uuid, const std::optional<QString
 
 bool send_catalog_page(QLocalSocket& socket, const QString& request_id, QJsonArray items,
                        const std::optional<QString>& token) {
-    const QJsonObject page{{QStringLiteral("state"), 2},
-                           {QStringLiteral("repository_uuid"), QLatin1String(kRepositoryUuid)},
-                           {QStringLiteral("items"), std::move(items)},
-                           {QStringLiteral("continuation_token"),
-                            token ? QJsonValue(*token) : QJsonValue(QJsonValue::Null)}};
-    return send_object(socket,
-                       response(request_id, 3, 0, QStringLiteral("repository.catalog_ready"),
-                                QJsonValue(QJsonValue::Null), page));
+    const QJsonObject catalog{{QStringLiteral("state"), 2},
+                              {QStringLiteral("repository_uuid"), QLatin1String(kRepositoryUuid)},
+                              {QStringLiteral("items"), std::move(items)},
+                              {QStringLiteral("continuation_token"),
+                               token ? QJsonValue(*token) : QJsonValue(QJsonValue::Null)}};
+    const QJsonObject page{
+        {QStringLiteral("repository_connection_id"), QJsonValue(QJsonValue::Null)},
+        {QStringLiteral("catalog"), catalog}};
+    return send_object(
+        socket, response(request_id, 1, 2, 0, QStringLiteral("repository.catalog_ready"), page));
 }
 
 bool send_not_configured(QLocalSocket& socket, const QString& request_id) {
-    const QJsonObject page{{QStringLiteral("state"), 1},
-                           {QStringLiteral("repository_uuid"), QString{}},
-                           {QStringLiteral("items"), QJsonArray{}},
-                           {QStringLiteral("continuation_token"), QJsonValue(QJsonValue::Null)}};
-    return send_object(socket,
-                       response(request_id, 3, 0, QStringLiteral("repository.not_configured"),
-                                QJsonValue(QJsonValue::Null), page));
+    const QJsonObject catalog{{QStringLiteral("state"), 1},
+                              {QStringLiteral("repository_uuid"), QString{}},
+                              {QStringLiteral("items"), QJsonArray{}},
+                              {QStringLiteral("continuation_token"), QJsonValue(QJsonValue::Null)}};
+    const QJsonObject page{
+        {QStringLiteral("repository_connection_id"), QJsonValue(QJsonValue::Null)},
+        {QStringLiteral("catalog"), catalog}};
+    return send_object(
+        socket, response(request_id, 1, 2, 0, QStringLiteral("repository.not_configured"), page));
 }
 
 bool send_repository_failure(QLocalSocket& socket, const QString& request_id) {
     return send_object(socket,
-                       response(request_id, 2, 5, QStringLiteral("repository.query_failed"),
-                                QJsonValue(QJsonValue::Null), QJsonValue(QJsonValue::Null)));
+                       response(request_id, 3, 2, 5, QStringLiteral("repository.query_failed"),
+                                QJsonValue(QJsonValue::Null)));
 }
 
 bool valid_request(const QJsonObject& request, const qint64 kind) {
-    return request.value(QStringLiteral("schema_version")).toInteger() == 2 &&
+    return request.value(QStringLiteral("schema_version")).toInteger() == 3 &&
+           request.value(QStringLiteral("message_type")).toInteger() == 1 &&
            request.value(QStringLiteral("kind")).toInteger() == kind &&
+           request.value(QStringLiteral("idempotency_key")).isNull() &&
+           request.value(QStringLiteral("payload")).isObject() &&
            !request.value(QStringLiteral("request_id")).toString().isEmpty();
 }
 
@@ -184,8 +196,10 @@ bool begin_repository_query(QLocalServer& server, ServiceClient& client, QLocalS
 }
 
 bool first_page_request_is_valid(const QJsonObject& request) {
-    const auto list = request.value(QStringLiteral("repository_list")).toObject();
-    return request.size() == 4 && list.size() == 2 &&
+    const auto payload = request.value(QStringLiteral("payload")).toObject();
+    const auto list = payload.value(QStringLiteral("page")).toObject();
+    return request.size() == 6 && payload.size() == 2 &&
+           payload.value(QStringLiteral("repository_connection_id")).isNull() && list.size() == 2 &&
            list.value(QStringLiteral("maximum_results")).toInteger() == 100 &&
            list.value(QStringLiteral("continuation_token")).isNull();
 }
@@ -194,7 +208,7 @@ bool verify_reconnect(QLocalServer& server, ServiceClient& client, QLocalSocket&
     socket.abort();
     bool passed =
         expect(wait_until([&] { return !client.connected(); }, kShortTimeoutMilliseconds) &&
-                   client.recoveryPoints().isEmpty(),
+                   client.recoveryPointCount() == 0,
                "disconnect clears repository state");
     auto* reconnected = accept_client(server, 3'500);
     if (!expect(reconnected != nullptr, "desktop automatically reconnects")) {
@@ -210,7 +224,7 @@ bool verify_reconnect(QLocalServer& server, ServiceClient& client, QLocalSocket&
                      "reconnected service reports no repository");
     passed &= expect(wait_until([&] { return client.connected() && !client.repositoryLoading(); },
                                 kShortTimeoutMilliseconds) &&
-                         !client.repositoryConfigured() && client.recoveryPoints().isEmpty(),
+                         !client.repositoryConfigured() && client.recoveryPointCount() == 0,
                      "reconnect starts a fresh repository query");
     reconnected->abort();
     return passed;
@@ -237,7 +251,8 @@ bool test_pagination_and_reconnect() {
                           {recovery_point(QLatin1String(kFirstFileUuid), std::nullopt, 1)}, token),
         "fake service sends the first page");
     const auto second_request = receive_object(*socket, kShortTimeoutMilliseconds);
-    const auto second_list = second_request.value(QStringLiteral("repository_list")).toObject();
+    const auto second_payload = second_request.value(QStringLiteral("payload")).toObject();
+    const auto second_list = second_payload.value(QStringLiteral("page")).toObject();
     passed &=
         expect(valid_request(second_request, 2) &&
                    second_list.value(QStringLiteral("continuation_token")).toString() == token,
@@ -250,9 +265,22 @@ bool test_pagination_and_reconnect() {
         "fake service sends the final page");
     passed &=
         expect(wait_until([&] { return !client.repositoryLoading(); }, kShortTimeoutMilliseconds) &&
-                   client.repositoryConfigured() && client.recoveryPoints().size() == 2 &&
+                   client.repositoryConfigured() && client.recoveryPointCount() == 2 &&
                    client.repositoryUuid() == QLatin1String(kRepositoryUuid),
                "desktop atomically publishes the merged catalog");
+    const auto* model = client.recoveryPoints();
+    passed &= expect(model != nullptr && model->rowCount() == 2, "recovery point model owns rows");
+    if (model != nullptr && model->rowCount() == 2) {
+        const auto first = model->index(0, 0);
+        passed &= expect(
+            model->data(first, aegra::desktop::RecoveryPointModel::FileUuidRole).toString() ==
+                QLatin1String(kFirstFileUuid),
+            "model exposes structured file uuid");
+        passed &= expect(!model->data(first, aegra::desktop::RecoveryPointModel::BackupTypeTextRole)
+                              .toString()
+                              .isEmpty(),
+                         "model exposes localized backup type text");
+    }
     passed &= verify_reconnect(server, client, *socket);
     server.close();
     QLocalServer::removeServer(QLatin1String(kPipeName));

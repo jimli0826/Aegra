@@ -22,4 +22,8 @@ encode_service_response(const contracts::ServiceResponse& response);
 [[nodiscard]] base::Result<contracts::ServiceResponse>
 decode_service_response(std::string_view encoded);
 
+[[nodiscard]] base::Result<std::string> encode_service_event(const contracts::ServiceEvent& event);
+
+[[nodiscard]] base::Result<contracts::ServiceEvent> decode_service_event(std::string_view encoded);
+
 } // namespace aegra::apps::service

@@ -10,6 +10,9 @@ target_link_libraries(aegra_base_tests PRIVATE Aegra::Base)
 aegra_add_test(aegra_contracts_tests contracts/job_test.cpp)
 target_link_libraries(aegra_contracts_tests PRIVATE Aegra::Contracts)
 
+aegra_add_test(aegra_service_contract_tests contracts/service_test.cpp)
+target_link_libraries(aegra_service_contract_tests PRIVATE Aegra::Contracts)
+
 aegra_add_test(aegra_ports_compile_test ports/ports_compile_test.cpp)
 target_link_libraries(aegra_ports_compile_test PRIVATE Aegra::Ports)
 
@@ -68,6 +71,45 @@ if(WIN32)
     aegra_add_test(aegra_windows_ipc_tests adapters/windows_ipc_test.cpp)
     target_compile_definitions(aegra_windows_ipc_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
     target_link_libraries(aegra_windows_ipc_tests PRIVATE Aegra::AdapterWindowsIpc)
+
+    aegra_add_test(aegra_service_protocol_tests apps/service_protocol_test.cpp)
+    target_link_libraries(aegra_service_protocol_tests PRIVATE Aegra::AppService)
+
+    add_executable(aegra_service_process_tests apps/service_process_test.cpp)
+    aegra_configure_target(aegra_service_process_tests)
+    target_compile_definitions(aegra_service_process_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(
+        aegra_service_process_tests
+        PRIVATE Aegra::AppService Aegra::AdapterWindowsIpc
+    )
+    add_dependencies(aegra_service_process_tests aegra_service)
+    add_test(
+        NAME aegra_service_process_tests
+        COMMAND
+            $<TARGET_FILE:aegra_service_process_tests>
+            $<TARGET_FILE:aegra_service>
+    )
+
+    if(AEGRA_BUILD_DESKTOP)
+        find_package(Qt6 6.8 REQUIRED COMPONENTS Core Network)
+        add_executable(
+            aegra_desktop_service_client_tests
+            apps/desktop_service_client_test.cpp
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/service_client.cpp"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/service_client.h"
+        )
+        set_target_properties(aegra_desktop_service_client_tests PROPERTIES AUTOMOC ON)
+        target_include_directories(
+            aegra_desktop_service_client_tests
+            PRIVATE "${PROJECT_SOURCE_DIR}/src/apps/desktop/src"
+        )
+        target_link_libraries(
+            aegra_desktop_service_client_tests
+            PRIVATE Qt6::Core Qt6::Network
+        )
+        aegra_configure_target(aegra_desktop_service_client_tests)
+        add_test(NAME aegra_desktop_service_client_tests COMMAND aegra_desktop_service_client_tests)
+    endif()
 
     aegra_add_test(aegra_windows_vss_tests adapters/windows_vss_test.cpp)
     target_include_directories(

@@ -253,10 +253,67 @@ bool test_server_disconnect() {
                   "server disconnect maps to I/O failure");
 }
 
+bool test_service_listener_roundtrip() {
+    const auto name = unique_pipe_name();
+    auto listener = windows_ipc::WindowsNamedPipeListener::create({name, 4096});
+    if (!expect(listener.has_value(), "service pipe listener is created")) {
+        return false;
+    }
+    aegra::base::CancellationSource accept_cancellation;
+    auto accepted = std::async(std::launch::async, [&] {
+        return listener.value()->accept(accept_cancellation.get_token());
+    });
+    auto client = windows_ipc::WindowsNamedPipeChannel::connect(
+        {name, 2'000, 4096, windows_ipc::WindowsNamedPipeNamespace::kService}, {});
+    if (!client) {
+        accept_cancellation.request_stop();
+        (void)accepted.get();
+        return expect(false, "service pipe client connects to listener namespace");
+    }
+    auto server = accepted.get();
+    if (!expect(server.has_value(), "service listener accepts a local client")) {
+        return false;
+    }
+    auto server_exchange = std::async(std::launch::async, [&] {
+        auto received = server.value()->receive({});
+        auto sent = server.value()->send("service-to-desktop", {});
+        return received && received.value() == "desktop-to-service" && sent.has_value();
+    });
+    auto sent = client.value()->send("desktop-to-service", {});
+    auto received = client.value()->receive({});
+    return expect(sent.has_value(), "service client sends a framed request") &&
+           expect(received && received.value() == "service-to-desktop",
+                  "service client receives a framed response") &&
+           expect(server_exchange.get(), "accepted channel completes a bidirectional exchange");
+}
+
+bool test_service_listener_cancellation() {
+    auto invalid = windows_ipc::WindowsNamedPipeListener::create({"../remote", 4096});
+    bool passed =
+        expect(!invalid && invalid.error().code == aegra::base::ErrorCode::kInvalidArgument,
+               "invalid service listener name is rejected");
+    auto listener = windows_ipc::WindowsNamedPipeListener::create({unique_pipe_name(), 4096});
+    if (!expect(listener.has_value(), "cancellation listener is created")) {
+        return false;
+    }
+    aegra::base::CancellationSource cancellation;
+    auto pending = std::async(std::launch::async,
+                              [&] { return listener.value()->accept(cancellation.get_token()); });
+    const auto state = pending.wait_for(std::chrono::milliseconds(50));
+    cancellation.request_stop();
+    auto result = pending.get();
+    passed &= expect(state == std::future_status::timeout,
+                     "listener accept remains pending before cancellation");
+    passed &= expect(!result && result.error().code == aegra::base::ErrorCode::kCancelled,
+                     "pending listener accept is cancelled");
+    return passed;
+}
+
 int run_tests() {
     const bool passed = test_connect_validation() && test_bidirectional_roundtrip() &&
                         test_invalid_frame_lengths() && test_receive_cancellation() &&
-                        test_server_disconnect();
+                        test_server_disconnect() && test_service_listener_roundtrip() &&
+                        test_service_listener_cancellation();
     return passed ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 

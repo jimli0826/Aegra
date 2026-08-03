@@ -1,5 +1,6 @@
 add_library(aegra_adapter_windows_ipc STATIC
     src/windows_named_pipe_channel.cpp
+    src/windows_named_pipe_listener.cpp
 )
 
 add_library(Aegra::AdapterWindowsIpc ALIAS aegra_adapter_windows_ipc)

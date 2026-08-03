@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -64,8 +65,16 @@ bool valid_pipe_name(const std::string_view name) {
     return true;
 }
 
-std::wstring pipe_path(const std::string_view name) {
-    std::wstring result = LR"(\\.\pipe\aegra-worker-)";
+bool valid_pipe_namespace(const WindowsNamedPipeNamespace value) noexcept {
+    return value == WindowsNamedPipeNamespace::kWorker ||
+           value == WindowsNamedPipeNamespace::kService;
+}
+
+std::wstring pipe_path(const WindowsNamedPipeNamespace pipe_namespace,
+                       const std::string_view name) {
+    std::wstring result = pipe_namespace == WindowsNamedPipeNamespace::kWorker
+                              ? LR"(\\.\pipe\aegra-worker-)"
+                              : LR"(\\.\pipe\aegra-service-)";
     result.reserve(result.size() + name.size());
     for (const char value : name) {
         result.push_back(static_cast<wchar_t>(value));
@@ -165,9 +174,9 @@ std::uint32_t decode_length(const std::array<std::byte, 4>& value) noexcept {
 
 base::Result<UniqueHandle> connect_pipe(const std::wstring& path, const std::uint32_t timeout_ms,
                                         const base::CancellationToken& cancellation) {
-    constexpr DWORD kPollMilliseconds = 50;
-    std::uint32_t waited = 0;
-    while (waited <= timeout_ms && !cancellation.stop_requested()) {
+    constexpr auto kPollInterval = std::chrono::milliseconds(50);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    while (!cancellation.stop_requested()) {
         UniqueHandle pipe(CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
                                       OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr));
         if (pipe.valid()) {
@@ -178,13 +187,19 @@ base::Result<UniqueHandle> connect_pipe(const std::wstring& path, const std::uin
             return base::Result<UniqueHandle>::failure(
                 io_error(error, "named pipe connect failed"));
         }
-        const auto remaining = timeout_ms - waited;
-        if (remaining == 0) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) {
             break;
         }
-        const auto interval = (std::min)(remaining, static_cast<std::uint32_t>(kPollMilliseconds));
-        WaitNamedPipeW(path.c_str(), interval);
-        waited += interval;
+        const auto remaining =
+            std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+        const auto interval = (std::min)(remaining, kPollInterval);
+        const auto interval_ms = static_cast<DWORD>((std::max)(interval.count(), 1LL));
+        if (error == ERROR_PIPE_BUSY) {
+            (void)WaitNamedPipeW(path.c_str(), interval_ms);
+        } else {
+            Sleep(interval_ms);
+        }
     }
     const auto code =
         cancellation.stop_requested() ? base::ErrorCode::kCancelled : base::ErrorCode::kNotFound;
@@ -203,24 +218,32 @@ WindowsNamedPipeChannel::WindowsNamedPipeChannel(std::unique_ptr<Impl> impl)
 
 WindowsNamedPipeChannel::~WindowsNamedPipeChannel() = default;
 
+std::unique_ptr<WindowsNamedPipeChannel>
+WindowsNamedPipeChannel::adopt_connected(const std::uintptr_t native_handle,
+                                         const std::uint32_t maximum_frame_bytes) {
+    UniqueHandle owned(reinterpret_cast<HANDLE>(native_handle));
+    auto impl = std::make_unique<Impl>();
+    impl->pipe = std::move(owned);
+    impl->maximum_frame_bytes = maximum_frame_bytes;
+    return std::unique_ptr<WindowsNamedPipeChannel>(new WindowsNamedPipeChannel(std::move(impl)));
+}
+
 base::Result<std::unique_ptr<WindowsNamedPipeChannel>>
 WindowsNamedPipeChannel::connect(const WindowsNamedPipeConnectRequest& request,
                                  const base::CancellationToken& cancellation) {
     if (!valid_pipe_name(request.pipe_name) || request.connect_timeout_ms == 0 ||
-        request.maximum_frame_bytes == 0) {
+        request.maximum_frame_bytes == 0 || !valid_pipe_namespace(request.pipe_namespace)) {
         return base::Result<std::unique_ptr<WindowsNamedPipeChannel>>::failure(
             base::Error{base::ErrorCode::kInvalidArgument, "named pipe request is invalid"});
     }
-    auto pipe =
-        connect_pipe(pipe_path(request.pipe_name), request.connect_timeout_ms, cancellation);
+    auto pipe = connect_pipe(pipe_path(request.pipe_namespace, request.pipe_name),
+                             request.connect_timeout_ms, cancellation);
     if (!pipe) {
         return base::Result<std::unique_ptr<WindowsNamedPipeChannel>>::failure(pipe.error());
     }
-    auto impl = std::make_unique<Impl>();
-    impl->pipe = std::move(pipe).value();
-    impl->maximum_frame_bytes = request.maximum_frame_bytes;
+    const auto native_handle = reinterpret_cast<std::uintptr_t>(pipe.value().release());
     return base::Result<std::unique_ptr<WindowsNamedPipeChannel>>::success(
-        std::unique_ptr<WindowsNamedPipeChannel>(new WindowsNamedPipeChannel(std::move(impl))));
+        adopt_connected(native_handle, request.maximum_frame_bytes));
 }
 
 base::Result<std::string>

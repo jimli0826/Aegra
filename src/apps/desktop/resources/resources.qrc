@@ -1,0 +1,11 @@
+<RCC>
+    <qresource prefix="/Aegra">
+        <file alias="icons/product.ico">product.ico</file>
+        <file alias="icons/product.png">product.png</file>
+        <file alias="icons/product_32.png">product_32.png</file>
+        <file alias="icons/product_64.png">product_64.png</file>
+        <file alias="qml/Main.qml">../qml/Main.qml</file>
+        <file alias="qml/Theme.qml">../qml/Theme.qml</file>
+        <file alias="qml/qmldir">../qml/qmldir</file>
+    </qresource>
+</RCC>

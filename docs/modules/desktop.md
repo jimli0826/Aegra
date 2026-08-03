@@ -2,8 +2,8 @@
 
 ## 目标与迁移范围
 
-`apps/desktop` 是普通用户 Qt/QML 客户端，只通过版本化 Service IPC 获取状态和发起用例。阶段 13A 提供
-Service 连接、握手、重连和版本/capability 展示，作为旧 GUI 页面逐步迁移的运行骨架。
+`apps/desktop` 是普通用户 Qt/QML 客户端，只通过版本化 Service IPC 获取状态和发起用例。阶段 13B 在连接、
+握手和重连骨架上增加个人版 Repository 与 Recovery Point 列表。
 
 旧 `backup/src/gui` 只作为视觉和交互参考。迁移品牌 PNG/ICO、窗口结构和必要 QML 组件；不迁移 qmake
 生成物、构建产物、超过源码限制的 Backend、HTTP/WebSocket 通信、TLS 校验豁免或让 GUI 直接执行备份、
@@ -30,8 +30,13 @@ Repository、Windows Disk/VSS、数据库或 Worker 实现。
 
 - 使用 `QLocalSocket` 连接 `aegra-service-control`。
 - 发送和接收与 ADR-0011 相同的 4 字节长度帧，最大 64 KiB。
-- 连接后生成新的 request ID 并发送 `GetServiceInfo`。
+- 连接后生成新的 request ID 并发送 schema 2 `GetServiceInfo`，握手成功后分页发送
+  `ListRecoveryPoints`。
 - 只接受 schema、kind、request ID、字段类型和范围全部合法的响应。
+- 每页最多 100 项，跨页 `file_uuid` 必须严格递增，token 必须前进，最多累计 10,000 项；全部页面完成后
+  才原子发布给 QML。
+- Repository 查询失败只更新 Repository 错误状态，不把已经 Ready 的 Service 误报为断开；协议损坏仍断开
+  并重连。
 - 断线或错误进入 Disconnected 状态，并以有界固定间隔重连；同一时刻最多一个连接尝试。
 - QML 只观察 `connected`、`statusText`、`serviceVersion`、`apiVersion` 和 `errorText` 等拥有数据的属性。
 - 日志不输出 frame body、路径、凭据或 Service 原始错误文本。
@@ -39,7 +44,11 @@ Repository、Windows Disk/VSS、数据库或 Worker 实现。
 ## 首屏
 
 首屏是实际 Desktop 工作区，不是营销页。左侧保留旧 GUI 的紧凑导航结构，但未接入的功能明确禁用；主区域
-显示 Service 状态、版本和当前可用 capability。连接失败时提供重试命令，不用说明性大段文字替代状态。
+显示 Service 状态、Repository 状态、UUID 和 Recovery Point 摘要。连接失败时提供重试命令，不用说明性
+大段文字替代状态。
+
+Recovery Point 列表展示备份类型、创建时间、逻辑/存储大小和链完整性。Catalog-only 数据不表示 Archive
+结构或认证完成，因此 Restore、Verify 和 Delete 图标保持禁用。
 
 颜色从旧界面演进为中性浅色工作区，蓝色只作为操作强调，绿色/红色分别表达 Ready 和错误，避免单一深蓝
 主题。布局必须在 1024x640 和较小桌面窗口下不重叠。
@@ -54,6 +63,6 @@ Repository、Windows Disk/VSS、数据库或 Worker 实现。
 
 ## 当前状态
 
-阶段 13A 已完成。Desktop 已迁移品牌资源和工作区首屏，通过 `ServiceClient` 完成 framing、握手、严格响应
-校验、断线状态和自动重连；自动化测试覆盖有效响应、request ID 不匹配和 Service 重启，真实 Qt/QML
-可执行文件已与 `aegra_service.exe` 完成启动烟雾联调。
+阶段 13B 已完成。Desktop 使用独立私有 Qt codec 严格解析 schema 2，握手后自动分页聚合 Recovery Point；
+自动化测试覆盖两页合并、opaque token、跨页乱序/重复拒绝、NotConfigured、Repository RequestFailed、断线
+清空和重连重查。QML 首屏已改为 Recovery Point 工作区，且不链接 Repository、Storage 或 Application。

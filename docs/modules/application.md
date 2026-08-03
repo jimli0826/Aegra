@@ -38,3 +38,10 @@
 ## 测试
 
 使用 Fake Port 验证权限、调用顺序、幂等、取消、超时、错误映射和 Outbox。Controller/API 测试与 Use Case 单元测试分离。
+
+## 当前状态
+
+阶段 13B 已建立 `Aegra::Application` Target，并实现 `IPersonalRepositoryQuery` 与
+`PersonalRepositoryQuery`。未配置 Repository 时返回合法空页；配置后通过 `RepositoryCatalogScanner`
+分页读取并映射为 Contracts，输入、输出和取消均在 Use Case 边界校验。Application 不知道本地路径、Qt、
+JSON 或具体 Storage Adapter。

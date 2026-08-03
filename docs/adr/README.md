@@ -8,6 +8,9 @@ ADR 用于记录会长期约束多个模块、持久化格式、外部协议或�
 本地 Service 与 Desktop 的进程通信见
 [ADR-0011](0011-local-service-desktop-ipc.md)。
 
+个人版 Repository Catalog 的分页 Service 查询见
+[ADR-0012](0012-personal-repository-catalog-query.md)。
+
 ## 状态
 
 - `Proposed`：讨论中，不构成实现依据。

@@ -4,6 +4,8 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
+#include <optional>
 
 namespace {
 
@@ -55,6 +57,14 @@ bool test_request_validation() {
     passed &= expect(!contracts::validate_service_request(request),
                      "request id with whitespace is rejected");
     request.request_id = "request-1";
+    request.kind = contracts::ServiceRequestKind::kListRecoveryPoints;
+    request.repository_list = contracts::RecoveryPointListRequest{25, std::nullopt};
+    passed &= expect(contracts::validate_service_request(request).has_value(),
+                     "valid recovery point list request is accepted");
+    request.repository_list->maximum_results = 0;
+    passed &= expect(!contracts::validate_service_request(request),
+                     "zero-sized recovery point page is rejected");
+    request.repository_list.reset();
     request.kind = static_cast<contracts::ServiceRequestKind>(255);
     passed &=
         expect(!contracts::validate_service_request(request), "unknown request kind is rejected");
@@ -67,7 +77,7 @@ bool test_service_info_validation() {
                          "valid ready service info is accepted");
     service.state = contracts::ServiceState::kStarting;
     passed &= expect(!contracts::validate_service_info(service),
-                     "non-ready service info is rejected by schema 1");
+                     "non-ready service info is rejected by schema 2");
     service = ready_service();
     service.capabilities = {"service.info", "repository.list"};
     passed &=
@@ -88,19 +98,34 @@ bool test_response_validation() {
     response.boundary_error_code = base::ErrorCode::kInternal;
     passed &= expect(!contracts::validate_service_response(response),
                      "successful response cannot carry a boundary error");
-    contracts::ServiceResponse rejection;
-    rejection.kind = contracts::ServiceResponseKind::kRequestRejected;
-    rejection.boundary_error_code = base::ErrorCode::kInvalidArgument;
-    rejection.message_code = "service.request_rejected";
-    passed &= expect(contracts::validate_service_response(rejection).has_value(),
-                     "request rejection may omit an untrusted request id");
-    rejection.service = ready_service();
-    passed &= expect(!contracts::validate_service_response(rejection),
-                     "request rejection cannot carry service info");
-    rejection.service.reset();
-    rejection.boundary_error_code = base::ErrorCode::kInternal;
-    passed &= expect(!contracts::validate_service_response(rejection),
-                     "request rejection only exposes stable client errors");
+    contracts::ServiceResponse failure;
+    failure.kind = contracts::ServiceResponseKind::kRequestFailed;
+    failure.boundary_error_code = base::ErrorCode::kInternal;
+    failure.message_code = "repository.query_failed";
+    passed &= expect(contracts::validate_service_response(failure).has_value(),
+                     "request failure may omit an untrusted request id");
+    failure.service = ready_service();
+    passed &= expect(!contracts::validate_service_response(failure),
+                     "request failure cannot carry service info");
+
+    contracts::ServiceResponse page;
+    page.request_id = "request-2";
+    page.kind = contracts::ServiceResponseKind::kRecoveryPointPage;
+    page.boundary_error_code = base::ErrorCode::kNone;
+    page.message_code = "repository.not_configured";
+    page.recovery_points = contracts::RecoveryPointPage{};
+    passed &= expect(contracts::validate_service_response(page).has_value(),
+                     "not-configured recovery point page is valid");
+    page.service = ready_service();
+    passed &= expect(!contracts::validate_service_response(page),
+                     "response payload variants are mutually exclusive");
+    contracts::RecoveryPointSummary summary;
+    summary.file_uuid = "11111111-2222-4333-8444-555555555555";
+    summary.backup_set_uuid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    summary.chain_state = contracts::RecoveryPointChainState::kComplete;
+    summary.logical_size_bytes = (std::numeric_limits<std::uint64_t>::max)();
+    passed &= expect(!contracts::validate_recovery_point_summary(summary),
+                     "wire integers larger than signed 64-bit are rejected");
     return passed;
 }
 

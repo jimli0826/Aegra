@@ -43,6 +43,11 @@ Event 互斥表达 `TaskProgress` 或最终 `WorkerResponse`。协议要求零�
 具体 framing、JSON 和 Named Pipe 不进入 Contracts。长期决策见
 [ADR-0008](../adr/0008-worker-session-named-pipe-protocol.md)。
 
+`ServiceRequest` / `ServiceResponse` schema 2 定义本地 Desktop 查询契约。`GetServiceInfo` 与分页
+`ListRecoveryPoints` 请求严格互斥 payload；响应互斥表达 `ServiceInfo`、`RequestFailed` 或
+`RecoveryPointPage`。每页最多 100 项，时间和容量字段不超过非负有符号 64 位范围，以保证 Qt 进程边界无损
+解码。Catalog 状态不表达 Archive 已认证或 Restore Ready。
+
 ## 测试
 
 - 每个消息的必填字段、版本和枚举验证。

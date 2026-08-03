@@ -10,19 +10,26 @@
 #include <string_view>
 #include <vector>
 
+namespace aegra::application {
+class IPersonalRepositoryQuery;
+}
+
 namespace aegra::apps::service {
 
 struct ServiceRuntimeInfo final {
     std::string service_version;
     std::vector<std::string> capabilities;
+    application::IPersonalRepositoryQuery* repository_query{nullptr};
 };
 
 [[nodiscard]] base::Result<contracts::ServiceResponse>
 dispatch_service_request(const contracts::ServiceRequest& request,
-                         const ServiceRuntimeInfo& runtime);
+                         const ServiceRuntimeInfo& runtime,
+                         base::CancellationToken cancellation = {});
 
-[[nodiscard]] base::Result<std::string> handle_service_message(std::string_view encoded_request,
-                                                               const ServiceRuntimeInfo& runtime);
+[[nodiscard]] base::Result<std::string>
+handle_service_message(std::string_view encoded_request, const ServiceRuntimeInfo& runtime,
+                       base::CancellationToken cancellation = {});
 
 [[nodiscard]] base::Result<void> run_service_session(ports::IMessageChannel& channel,
                                                      const ServiceRuntimeInfo& runtime,

@@ -2,6 +2,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 
 add_library(aegra_personal_repository STATIC
     src/catalog_codec.cpp
+    src/catalog_scanner.cpp
     src/catalog_validation.cpp
     src/chain_graph.cpp
     src/deletion_codec.cpp
@@ -17,9 +18,8 @@ target_include_directories(
 
 target_link_libraries(
     aegra_personal_repository
-    PUBLIC Aegra::Base Aegra::Format
+    PUBLIC Aegra::Base Aegra::Format Aegra::Ports
     PRIVATE nlohmann_json::nlohmann_json
 )
 
 aegra_configure_target(aegra_personal_repository)
-

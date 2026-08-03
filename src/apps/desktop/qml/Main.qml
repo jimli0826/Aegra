@@ -13,6 +13,31 @@ ApplicationWindow {
     title: "Aegra"
     color: Theme.workspace
 
+    function formatBytes(value) {
+        const units = ["B", "KiB", "MiB", "GiB", "TiB"]
+        let amount = Number(value)
+        let unit = 0
+        while (amount >= 1024 && unit < units.length - 1) {
+            amount /= 1024
+            ++unit
+        }
+        return (unit === 0 ? amount.toFixed(0) : amount.toFixed(1)) + " " + units[unit]
+    }
+
+    function formatDate(value) {
+        if (Number(value) === 0)
+            return "未记录"
+        return new Date(Number(value)).toLocaleString(Qt.locale(), "yyyy-MM-dd hh:mm")
+    }
+
+    function backupTypeLabel(value) {
+        if (value === 1)
+            return "全量"
+        if (value === 2)
+            return "增量"
+        return "差异"
+    }
+
     RowLayout {
         anchors.fill: parent
         spacing: 0
@@ -51,7 +76,7 @@ ApplicationWindow {
 
                 Repeater {
                     model: [
-                        { label: "概览", glyph: "\uE80F", enabled: true },
+                        { label: "恢复点", glyph: "\uE81E", enabled: true },
                         { label: "备份", glyph: "\uEA35", enabled: false },
                         { label: "恢复", glyph: "\uE965", enabled: false },
                         { label: "存储库", glyph: "\uE8B7", enabled: false }
@@ -118,29 +143,30 @@ ApplicationWindow {
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 34
-                anchors.rightMargin: 34
-                anchors.topMargin: 28
-                anchors.bottomMargin: 28
-                spacing: 18
+                anchors.leftMargin: 30
+                anchors.rightMargin: 30
+                anchors.topMargin: 24
+                anchors.bottomMargin: 24
+                spacing: 14
 
                 RowLayout {
                     Layout.fillWidth: true
 
                     Column {
-                        spacing: 4
+                        spacing: 3
 
                         Text {
-                            text: "概览"
+                            text: "恢复点"
                             color: Theme.text
                             font.family: Theme.fontFamily
-                            font.pixelSize: 26
+                            font.pixelSize: 24
                             font.weight: Font.DemiBold
                         }
 
                         Text {
-                            text: "本机管理服务"
-                            color: Theme.textMuted
+                            text: serviceClient.repositoryStatusText
+                            color: serviceClient.repositoryErrorText.length > 0
+                                   ? Theme.danger : Theme.textMuted
                             font.family: Theme.fontFamily
                             font.pixelSize: 13
                         }
@@ -172,117 +198,296 @@ ApplicationWindow {
 
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: serviceClient.connected ? 236 : 176
+                    Layout.preferredHeight: 68
                     radius: 6
                     color: Theme.surface
                     border.color: Theme.border
                     border.width: 1
 
-                    ColumnLayout {
+                    RowLayout {
                         anchors.fill: parent
-                        anchors.margins: 22
-                        spacing: 14
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 12
-
-                            Rectangle {
-                                Layout.preferredWidth: 40
-                                Layout.preferredHeight: 40
-                                radius: 5
-                                color: serviceClient.connected ? Theme.successSoft : Theme.dangerSoft
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: serviceClient.connected ? "\uE930" : "\uE783"
-                                    color: serviceClient.connected ? Theme.success : Theme.danger
-                                    font.family: "Segoe MDL2 Assets"
-                                    font.pixelSize: 18
-                                }
-                            }
-
-                            Column {
-                                spacing: 3
-
-                                Text {
-                                    text: serviceClient.statusText
-                                    color: Theme.text
-                                    font.family: Theme.fontFamily
-                                    font.pixelSize: 17
-                                    font.weight: Font.DemiBold
-                                }
-
-                                Text {
-                                    text: serviceClient.errorText
-                                    visible: text.length > 0
-                                    color: Theme.danger
-                                    font.family: Theme.fontFamily
-                                    font.pixelSize: 12
-                                }
-                            }
-                        }
+                        anchors.leftMargin: 18
+                        anchors.rightMargin: 18
+                        spacing: 12
 
                         Rectangle {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 1
-                            color: Theme.border
+                            Layout.preferredWidth: 34
+                            Layout.preferredHeight: 34
+                            radius: 4
+                            color: serviceClient.connected ? Theme.successSoft : Theme.dangerSoft
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: serviceClient.connected ? "\uE930" : "\uE783"
+                                color: serviceClient.connected ? Theme.success : Theme.danger
+                                font.family: "Segoe MDL2 Assets"
+                                font.pixelSize: 16
+                            }
                         }
 
-                        GridLayout {
+                        Column {
+                            spacing: 2
+
+                            Text {
+                                text: "本机管理服务"
+                                color: Theme.text
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 14
+                                font.weight: Font.DemiBold
+                            }
+
+                            Text {
+                                text: serviceClient.errorText.length > 0
+                                      ? serviceClient.errorText : serviceClient.statusText
+                                color: serviceClient.errorText.length > 0
+                                       ? Theme.danger : Theme.textMuted
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 12
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Text {
                             visible: serviceClient.connected
-                            Layout.fillWidth: true
-                            columns: 2
-                            columnSpacing: 28
-                            rowSpacing: 10
-
-                            Text { text: "Service 版本"; color: Theme.textMuted; font.pixelSize: 12 }
-                            Text { text: serviceClient.serviceVersion; color: Theme.text; font.pixelSize: 13 }
-                            Text { text: "API 版本"; color: Theme.textMuted; font.pixelSize: 12 }
-                            Text { text: serviceClient.apiVersion.toString(); color: Theme.text; font.pixelSize: 13 }
-                            Text { text: "连接端点"; color: Theme.textMuted; font.pixelSize: 12 }
-                            Text { text: "aegra-service-control"; color: Theme.text; font.pixelSize: 13 }
+                            text: "Service " + serviceClient.serviceVersion
+                                  + "  |  API " + serviceClient.apiVersion
+                            color: Theme.textMuted
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 12
                         }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    Rectangle {
+                        Layout.preferredWidth: 8
+                        Layout.preferredHeight: 8
+                        radius: 4
+                        color: serviceClient.repositoryErrorText.length > 0
+                               ? Theme.danger
+                               : (serviceClient.repositoryConfigured ? Theme.success : Theme.textMuted)
+                    }
+
+                    Text {
+                        text: "个人版 Repository"
+                        color: Theme.text
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 15
+                        font.weight: Font.DemiBold
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: serviceClient.repositoryUuid
+                        visible: text.length > 0
+                        color: Theme.textMuted
+                        font.family: "Consolas"
+                        font.pixelSize: 11
+                        elide: Text.ElideMiddle
+                        horizontalAlignment: Text.AlignRight
                     }
                 }
 
                 Text {
-                    visible: serviceClient.connected
-                    text: "可用能力"
-                    color: Theme.text
+                    Layout.fillWidth: true
+                    visible: serviceClient.repositoryErrorText.length > 0
+                    text: serviceClient.repositoryErrorText
+                    color: Theme.danger
                     font.family: Theme.fontFamily
-                    font.pixelSize: 15
-                    font.weight: Font.DemiBold
+                    font.pixelSize: 12
+                    wrapMode: Text.Wrap
+                }
+
+                BusyIndicator {
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.topMargin: 24
+                    running: serviceClient.repositoryLoading
+                    visible: running
+                }
+
+                Text {
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.topMargin: 36
+                    visible: serviceClient.connected && !serviceClient.repositoryLoading
+                             && !serviceClient.repositoryConfigured
+                             && serviceClient.repositoryErrorText.length === 0
+                    text: "未配置个人版 Repository"
+                    color: Theme.textMuted
+                    font.family: Theme.fontFamily
+                    font.pixelSize: 14
+                }
+
+                Rectangle {
+                    visible: serviceClient.repositoryConfigured
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 32
+                    color: "#e9edf2"
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 12
+                        anchors.rightMargin: 8
+                        spacing: 12
+
+                        Text { Layout.fillWidth: true; text: "恢复点"; color: Theme.textMuted; font.pixelSize: 11 }
+                        Text { Layout.preferredWidth: 56; text: "类型"; color: Theme.textMuted; font.pixelSize: 11 }
+                        Text { Layout.preferredWidth: 116; text: "创建时间"; color: Theme.textMuted; font.pixelSize: 11 }
+                        Text { Layout.preferredWidth: 74; text: "逻辑大小"; color: Theme.textMuted; font.pixelSize: 11 }
+                        Text {
+                            visible: window.width >= 1000
+                            Layout.preferredWidth: 74
+                            text: "存储大小"
+                            color: Theme.textMuted
+                            font.pixelSize: 11
+                        }
+                        Item { Layout.preferredWidth: 108 }
+                    }
                 }
 
                 ListView {
-                    visible: serviceClient.connected
+                    visible: serviceClient.repositoryConfigured
+                             && serviceClient.recoveryPoints.length > 0
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    model: serviceClient.capabilities
+                    model: serviceClient.recoveryPoints
                     spacing: 1
                     clip: true
 
                     delegate: Rectangle {
+                        required property var modelData
+                        required property int index
                         width: ListView.view.width
-                        height: 42
+                        height: 68
                         color: index % 2 === 0 ? Theme.surface : "#f8f9fb"
                         border.color: Theme.border
                         border.width: 1
 
-                        Text {
-                            anchors.left: parent.left
-                            anchors.leftMargin: 14
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: modelData
-                            color: Theme.text
-                            font.family: Theme.fontFamily
-                            font.pixelSize: 13
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 12
+                            anchors.rightMargin: 8
+                            spacing: 12
+
+                            Column {
+                                Layout.fillWidth: true
+                                spacing: 3
+
+                                Text {
+                                    width: parent.width
+                                    text: modelData.fileUuid
+                                    color: Theme.text
+                                    font.family: "Consolas"
+                                    font.pixelSize: 11
+                                    elide: Text.ElideMiddle
+                                }
+
+                                Text {
+                                    width: parent.width
+                                    text: modelData.chainState === 1 ? "链完整" : "链不完整"
+                                    color: modelData.chainState === 1 ? Theme.success : Theme.danger
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: 11
+                                }
+                            }
+
+                            Text {
+                                Layout.preferredWidth: 56
+                                text: window.backupTypeLabel(modelData.backupType)
+                                color: Theme.text
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 12
+                            }
+
+                            Text {
+                                Layout.preferredWidth: 116
+                                text: window.formatDate(modelData.createdUtcMs)
+                                color: Theme.text
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 12
+                            }
+
+                            Text {
+                                Layout.preferredWidth: 74
+                                text: window.formatBytes(modelData.logicalSizeBytes)
+                                color: Theme.text
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 12
+                            }
+
+                            Text {
+                                visible: window.width >= 1000
+                                Layout.preferredWidth: 74
+                                text: window.formatBytes(modelData.storedSizeBytes)
+                                color: Theme.text
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 12
+                            }
+
+                            Row {
+                                Layout.preferredWidth: 108
+                                spacing: 4
+
+                                Repeater {
+                                    model: [
+                                        { glyph: "\uE777", tip: "恢复" },
+                                        { glyph: "\uE73E", tip: "校验" },
+                                        { glyph: "\uE74D", tip: "删除" }
+                                    ]
+
+                                    delegate: Button {
+                                        required property var modelData
+                                        width: 32
+                                        height: 32
+                                        enabled: false
+                                        opacity: 0.45
+
+                                        contentItem: Text {
+                                            text: modelData.glyph
+                                            color: Theme.textMuted
+                                            font.family: "Segoe MDL2 Assets"
+                                            font.pixelSize: 14
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+
+                                        background: Rectangle {
+                                            radius: 4
+                                            color: Theme.workspace
+                                            border.color: Theme.border
+                                        }
+
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: modelData.tip
+                                    }
+                                }
+                            }
                         }
                     }
                 }
 
-                Item { visible: !serviceClient.connected; Layout.fillHeight: true }
+                Item {
+                    visible: serviceClient.repositoryConfigured
+                             && serviceClient.recoveryPoints.length === 0
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Repository 中没有恢复点"
+                        color: Theme.textMuted
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 13
+                    }
+                }
+
+                Item {
+                    visible: !serviceClient.repositoryConfigured
+                    Layout.fillHeight: true
+                }
             }
         }
     }

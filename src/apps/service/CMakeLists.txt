@@ -14,7 +14,7 @@ target_include_directories(
 
 target_link_libraries(
     aegra_app_service
-    PUBLIC Aegra::Base Aegra::Contracts Aegra::Ports
+    PUBLIC Aegra::Application Aegra::Base Aegra::Contracts Aegra::Ports
     PRIVATE nlohmann_json::nlohmann_json
 )
 aegra_configure_target(aegra_app_service)
@@ -29,6 +29,6 @@ target_compile_definitions(
 )
 target_link_libraries(
     aegra_service
-    PRIVATE Aegra::AppService Aegra::AdapterWindowsIpc
+    PRIVATE Aegra::AppService Aegra::AdapterStorageLocal Aegra::AdapterWindowsIpc
 )
 aegra_configure_target(aegra_service)

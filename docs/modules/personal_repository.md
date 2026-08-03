@@ -193,5 +193,9 @@ Object Storage 参考实现和可复用 Contract Test。Memory 实现支持范�
 generation 条件发布、幂等删除、取消和确定性故障注入。
 
 阶段 12C 已实现 Windows Local Storage Adapter，并通过公共 Object Storage Contract；其路径、staging、
-generation、发布和删除语义见 [Local Storage 模块文档](storage_local.md)。Repository Scanner、Catalog
-Reconcile、Delete Plan 生成和 Tombstone 执行尚未实现，属于后续阶段。
+generation、发布和删除语义见 [Local Storage 模块文档](storage_local.md)。
+
+阶段 13B 已实现 `RepositoryCatalogScanner`：先验证 Descriptor，再分页读取 Catalog Entry 与 Deletion
+Tombstone，隐藏删除中的 Recovery Point，验证 Repository/UUID/链图不变量，并按 `file_uuid` 稳定分页。
+读取具有短读、取消、对象数量、单文档和总字节上限，扫描期间 generation 变化会使查询失败。Scanner 不读取
+`.bkf`，不执行 KDF，也不修复 Catalog。Catalog Reconcile、Delete Plan 生成和 Tombstone 执行仍属后续阶段。

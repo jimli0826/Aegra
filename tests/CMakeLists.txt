@@ -16,6 +16,15 @@ target_link_libraries(aegra_service_contract_tests PRIVATE Aegra::Contracts)
 aegra_add_test(aegra_ports_compile_test ports/ports_compile_test.cpp)
 target_link_libraries(aegra_ports_compile_test PRIVATE Aegra::Ports)
 
+aegra_add_test(
+    aegra_personal_repository_query_tests
+    application/personal_repository_query_test.cpp
+)
+target_link_libraries(
+    aegra_personal_repository_query_tests
+    PRIVATE Aegra::Application Aegra::AdapterMemory
+)
+
 aegra_add_test(aegra_format_tests format/manifest_codec_test.cpp)
 target_link_libraries(aegra_format_tests PRIVATE Aegra::Format)
 
@@ -27,6 +36,15 @@ aegra_add_test(
     personal_repository/personal_repository_test.cpp
 )
 target_link_libraries(aegra_personal_repository_tests PRIVATE Aegra::PersonalRepository)
+
+aegra_add_test(
+    aegra_personal_repository_scanner_tests
+    personal_repository/catalog_scanner_test.cpp
+)
+target_link_libraries(
+    aegra_personal_repository_scanner_tests
+    PRIVATE Aegra::PersonalRepository Aegra::AdapterMemory
+)
 
 aegra_add_test(aegra_memory_adapter_tests adapters/memory_adapter_test.cpp)
 target_link_libraries(aegra_memory_adapter_tests PRIVATE Aegra::AdapterMemory)
@@ -80,7 +98,7 @@ if(WIN32)
     target_compile_definitions(aegra_service_process_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
     target_link_libraries(
         aegra_service_process_tests
-        PRIVATE Aegra::AppService Aegra::AdapterWindowsIpc
+        PRIVATE Aegra::AppService Aegra::AdapterWindowsIpc Aegra::PersonalRepository
     )
     add_dependencies(aegra_service_process_tests aegra_service)
     add_test(
@@ -97,6 +115,8 @@ if(WIN32)
             apps/desktop_service_client_test.cpp
             "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/service_client.cpp"
             "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/service_client.h"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/service_protocol.cpp"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/service_protocol.h"
         )
         set_target_properties(aegra_desktop_service_client_tests PROPERTIES AUTOMOC ON)
         target_include_directories(
@@ -109,6 +129,11 @@ if(WIN32)
         )
         aegra_configure_target(aegra_desktop_service_client_tests)
         add_test(NAME aegra_desktop_service_client_tests COMMAND aegra_desktop_service_client_tests)
+        set_tests_properties(
+            aegra_desktop_service_client_tests
+            PROPERTIES ENVIRONMENT_MODIFICATION
+                       "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+        )
     endif()
 
     aegra_add_test(aegra_windows_vss_tests adapters/windows_vss_test.cpp)

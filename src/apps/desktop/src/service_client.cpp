@@ -1,17 +1,14 @@
 #include "service_client.h"
 
+#include "service_protocol.h"
+
 #include <QAbstractSocket>
 #include <QByteArray>
-#include <QJsonArray>
-#include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocalSocket>
 #include <QTimer>
 #include <QUuid>
 
-#include <algorithm>
-#include <array>
-#include <initializer_list>
 #include <utility>
 
 namespace {
@@ -19,9 +16,7 @@ namespace {
 constexpr auto kServicePipeName = "aegra-service-control";
 constexpr quint32 kMaximumFrameBytes = 64U * 1024U;
 constexpr int kReconnectDelayMilliseconds = 2'000;
-constexpr qsizetype kMaximumVersionCharacters = 64;
-constexpr qsizetype kMaximumCapabilities = 64;
-constexpr qsizetype kMaximumCapabilityCharacters = 64;
+constexpr qsizetype kMaximumRecoveryPoints = 10'000;
 
 [[nodiscard]] quint32 decode_length(const QByteArray& input) noexcept {
     return static_cast<quint32>(static_cast<unsigned char>(input[0])) |
@@ -40,30 +35,6 @@ constexpr qsizetype kMaximumCapabilityCharacters = 64;
     result.append(static_cast<char>((size >> 24U) & 0xFFU));
     result.append(body);
     return result;
-}
-
-[[nodiscard]] bool has_exact_keys(const QJsonObject& object,
-                                  const std::initializer_list<const char*> keys) {
-    if (object.size() != static_cast<int>(keys.size())) {
-        return false;
-    }
-    for (const auto* key : keys) {
-        if (!object.contains(QLatin1String(key))) {
-            return false;
-        }
-    }
-    return true;
-}
-
-[[nodiscard]] bool is_stable_code(const QString& value, const qsizetype maximum_characters) {
-    if (value.isEmpty() || value.size() > maximum_characters) {
-        return false;
-    }
-    return std::all_of(value.cbegin(), value.cend(), [](const QChar character) {
-        const auto code = character.unicode();
-        return (code >= 'a' && code <= 'z') || (code >= '0' && code <= '9') || code == '.' ||
-               code == '_' || code == '-';
-    });
 }
 
 } // namespace
@@ -102,6 +73,29 @@ QStringList ServiceClient::capabilities() const { return capabilities_; }
 
 QString ServiceClient::errorText() const { return error_text_; }
 
+bool ServiceClient::repositoryConfigured() const noexcept { return repository_configured_; }
+
+bool ServiceClient::repositoryLoading() const noexcept { return repository_loading_; }
+
+QString ServiceClient::repositoryUuid() const { return repository_uuid_; }
+
+QString ServiceClient::repositoryStatusText() const {
+    if (!connected()) {
+        return QStringLiteral("等待 Service");
+    }
+    if (repository_loading_) {
+        return QStringLiteral("正在读取目录");
+    }
+    if (!repository_error_text_.isEmpty()) {
+        return QStringLiteral("目录读取失败");
+    }
+    return repository_configured_ ? QStringLiteral("目录可用") : QStringLiteral("未配置");
+}
+
+QString ServiceClient::repositoryErrorText() const { return repository_error_text_; }
+
+QVariantList ServiceClient::recoveryPoints() const { return recovery_points_; }
+
 void ServiceClient::reconnect() {
     reconnect_timer_->stop();
     input_.clear();
@@ -138,13 +132,24 @@ void ServiceClient::on_socket_error() {
 
 void ServiceClient::send_service_info_request() {
     request_id_ = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    const QJsonObject request{
-        {QStringLiteral("schema_version"), 1},
-        {QStringLiteral("request_id"), request_id_},
-        {QStringLiteral("kind"), 1},
-    };
-    const auto body = QJsonDocument(request).toJson(QJsonDocument::Compact);
-    socket_->write(frame(body));
+    pending_request_ = PendingRequest::kServiceInfo;
+    socket_->write(frame(aegra::desktop::encode_service_info_request(request_id_)));
+    socket_->flush();
+}
+
+void ServiceClient::start_repository_query() {
+    reset_repository();
+    repository_loading_ = true;
+    emit repositoryChanged();
+    send_recovery_point_request(std::nullopt);
+}
+
+void ServiceClient::send_recovery_point_request(const std::optional<QString>& token) {
+    request_id_ = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    pending_request_ = PendingRequest::kRecoveryPoints;
+    requested_token_ = token;
+    socket_->write(
+        frame(aegra::desktop::encode_recovery_point_request(request_id_, requested_token_)));
     socket_->flush();
 }
 
@@ -175,55 +180,102 @@ void ServiceClient::consume_frames() {
 }
 
 bool ServiceClient::apply_response(const QByteArray& frame_body) {
-    QJsonParseError parse_error{};
-    const auto document = QJsonDocument::fromJson(frame_body, &parse_error);
-    if (parse_error.error != QJsonParseError::NoError || !document.isObject()) {
+    QJsonObject root;
+    if (!aegra::desktop::parse_response_root(frame_body, request_id_, root)) {
         return false;
     }
-    const auto root = document.object();
-    if (!has_exact_keys(root, {"schema_version", "request_id", "kind", "boundary_error_code",
-                               "message_code", "service"}) ||
-        root.value(QStringLiteral("schema_version")).toInt(-1) != 1 ||
-        root.value(QStringLiteral("request_id")).toString() != request_id_ ||
-        root.value(QStringLiteral("kind")).toInt(-1) != 1 ||
-        root.value(QStringLiteral("boundary_error_code")).toInt(-1) != 0 ||
-        root.value(QStringLiteral("message_code")).toString() != QStringLiteral("service.ready") ||
-        !root.value(QStringLiteral("service")).isObject()) {
+    switch (pending_request_) {
+    case PendingRequest::kServiceInfo:
+        return apply_service_info(root);
+    case PendingRequest::kRecoveryPoints:
+        if (aegra::desktop::is_repository_failure_response(root)) {
+            finish_repository_failure();
+            return true;
+        }
+        return apply_recovery_point_page(root);
+    case PendingRequest::kNone:
         return false;
     }
-    return apply_service_info(root.value(QStringLiteral("service")).toObject());
+    return false;
 }
 
-bool ServiceClient::apply_service_info(const QJsonObject& service) {
-    if (!has_exact_keys(service, {"api_version", "state", "service_version", "capabilities"}) ||
-        service.value(QStringLiteral("api_version")).toInt(-1) != 1 ||
-        service.value(QStringLiteral("state")).toInt(-1) != 2 ||
-        !service.value(QStringLiteral("service_version")).isString() ||
-        !service.value(QStringLiteral("capabilities")).isArray()) {
+bool ServiceClient::apply_service_info(const QJsonObject& root) {
+    aegra::desktop::ServiceInfo service;
+    if (!aegra::desktop::parse_service_info_response(root, service) ||
+        !service.capabilities.contains(QStringLiteral("repository.list"))) {
         return false;
     }
-    const auto capability_values = service.value(QStringLiteral("capabilities")).toArray();
-    if (capability_values.isEmpty() || capability_values.size() > kMaximumCapabilities) {
+    service_version_ = std::move(service.version);
+    api_version_ = aegra::desktop::kServiceApiVersion;
+    capabilities_ = std::move(service.capabilities);
+    pending_request_ = PendingRequest::kNone;
+    set_state(State::kReady);
+    start_repository_query();
+    return true;
+}
+
+bool ServiceClient::apply_recovery_point_page(const QJsonObject& root) {
+    aegra::desktop::RecoveryPointPage page;
+    if (!aegra::desktop::parse_recovery_point_response(root, page)) {
         return false;
     }
-    QStringList capabilities;
-    for (const auto value : capability_values) {
-        if (!value.isString() || !is_stable_code(value.toString(), kMaximumCapabilityCharacters)) {
+    if (!page.configured) {
+        if (requested_token_ || !pending_recovery_points_.isEmpty()) {
             return false;
         }
-        capabilities.push_back(value.toString());
+        repository_loading_ = false;
+        pending_request_ = PendingRequest::kNone;
+        emit repositoryChanged();
+        return true;
     }
-    const auto service_version = service.value(QStringLiteral("service_version")).toString();
-    if (service_version.isEmpty() || service_version.size() > kMaximumVersionCharacters ||
-        !std::is_sorted(capabilities.cbegin(), capabilities.cend()) ||
-        std::adjacent_find(capabilities.cbegin(), capabilities.cend()) != capabilities.cend()) {
+    if ((!repository_uuid_.isEmpty() && page.repository_uuid != repository_uuid_) ||
+        (page.continuation_token && page.continuation_token == requested_token_) ||
+        pending_recovery_points_.size() + page.items.size() > kMaximumRecoveryPoints) {
         return false;
     }
-    service_version_ = service_version;
-    api_version_ = static_cast<quint32>(service.value(QStringLiteral("api_version")).toInt());
-    capabilities_ = std::move(capabilities);
-    set_state(State::kReady);
+    repository_uuid_ = page.repository_uuid;
+    for (auto& item : page.items) {
+        const auto file_uuid = item.toMap().value(QStringLiteral("fileUuid")).toString();
+        if (!last_file_uuid_.isEmpty() && file_uuid <= last_file_uuid_) {
+            return false;
+        }
+        last_file_uuid_ = file_uuid;
+        pending_recovery_points_.push_back(std::move(item));
+    }
+    if (page.continuation_token) {
+        send_recovery_point_request(page.continuation_token);
+        return true;
+    }
+    recovery_points_ = std::move(pending_recovery_points_);
+    repository_configured_ = true;
+    repository_loading_ = false;
+    pending_request_ = PendingRequest::kNone;
+    requested_token_.reset();
+    emit repositoryChanged();
     return true;
+}
+
+void ServiceClient::finish_repository_failure() {
+    repository_uuid_.clear();
+    pending_recovery_points_.clear();
+    requested_token_.reset();
+    last_file_uuid_.clear();
+    repository_loading_ = false;
+    pending_request_ = PendingRequest::kNone;
+    repository_error_text_ = QStringLiteral("无法读取 Repository 目录");
+    emit repositoryChanged();
+}
+
+void ServiceClient::reset_repository() {
+    repository_uuid_.clear();
+    repository_error_text_.clear();
+    recovery_points_.clear();
+    pending_recovery_points_.clear();
+    requested_token_.reset();
+    last_file_uuid_.clear();
+    repository_configured_ = false;
+    repository_loading_ = false;
+    emit repositoryChanged();
 }
 
 void ServiceClient::fail_protocol() {
@@ -245,6 +297,9 @@ void ServiceClient::set_state(const State state, QString error) {
         service_version_.clear();
         api_version_ = 0;
         capabilities_.clear();
+        request_id_.clear();
+        pending_request_ = PendingRequest::kNone;
+        reset_repository();
     }
     emit stateChanged();
 }

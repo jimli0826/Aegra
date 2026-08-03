@@ -40,22 +40,51 @@ constexpr std::size_t kMaximumCapabilityBytes = 64;
 
 [[nodiscard]] base::Result<void> validate_info_response(const ServiceResponse& response) {
     if (!valid_request_id(response.request_id) ||
-        response.boundary_error_code != base::ErrorCode::kNone || !response.service) {
+        response.boundary_error_code != base::ErrorCode::kNone || !response.service ||
+        response.recovery_points) {
         return invalid("service info response fields are invalid");
     }
     return validate_service_info(*response.service);
 }
 
-[[nodiscard]] base::Result<void> validate_rejection(const ServiceResponse& response) {
-    if (response.service ||
-        (response.boundary_error_code != base::ErrorCode::kInvalidArgument &&
-         response.boundary_error_code != base::ErrorCode::kUnsupportedVersion)) {
-        return invalid("service rejection fields are invalid");
+[[nodiscard]] bool known_error_code(const base::ErrorCode code) noexcept {
+    switch (code) {
+    case base::ErrorCode::kInvalidArgument:
+    case base::ErrorCode::kUnsupportedVersion:
+    case base::ErrorCode::kCancelled:
+    case base::ErrorCode::kIoFailure:
+    case base::ErrorCode::kCorruptData:
+    case base::ErrorCode::kNotFound:
+    case base::ErrorCode::kConflict:
+    case base::ErrorCode::kUnauthorized:
+    case base::ErrorCode::kInternal:
+    case base::ErrorCode::kInsufficientSpace:
+    case base::ErrorCode::kOutcomeUnknown:
+        return true;
+    case base::ErrorCode::kNone:
+        return false;
+    }
+    return false;
+}
+
+[[nodiscard]] base::Result<void> validate_failure(const ServiceResponse& response) {
+    if (response.service || response.recovery_points ||
+        !known_error_code(response.boundary_error_code)) {
+        return invalid("service failure fields are invalid");
     }
     if (!response.request_id.empty() && !valid_request_id(response.request_id)) {
-        return invalid("service rejection request id is invalid");
+        return invalid("service failure request id is invalid");
     }
     return base::Result<void>::success();
+}
+
+[[nodiscard]] base::Result<void> validate_page_response(const ServiceResponse& response) {
+    if (!valid_request_id(response.request_id) ||
+        response.boundary_error_code != base::ErrorCode::kNone || response.service ||
+        !response.recovery_points) {
+        return invalid("recovery point page response fields are invalid");
+    }
+    return validate_recovery_point_page(*response.recovery_points);
 }
 
 } // namespace
@@ -70,10 +99,16 @@ base::Result<void> validate_service_request(const ServiceRequest& request) {
     if (!valid_request_id(request.request_id)) {
         return invalid("service request id is invalid");
     }
-    if (request.kind != ServiceRequestKind::kGetServiceInfo) {
-        return invalid("service request kind is invalid");
+    switch (request.kind) {
+    case ServiceRequestKind::kGetServiceInfo:
+        return request.repository_list ? invalid("service info request payload is invalid")
+                                       : base::Result<void>::success();
+    case ServiceRequestKind::kListRecoveryPoints:
+        return request.repository_list
+                   ? validate_recovery_point_list_request(*request.repository_list)
+                   : invalid("recovery point list request payload is missing");
     }
-    return base::Result<void>::success();
+    return invalid("service request kind is invalid");
 }
 
 base::Result<void> validate_service_info(const ServiceInfo& service) {
@@ -108,8 +143,10 @@ base::Result<void> validate_service_response(const ServiceResponse& response) {
     switch (response.kind) {
     case ServiceResponseKind::kServiceInfo:
         return validate_info_response(response);
-    case ServiceResponseKind::kRequestRejected:
-        return validate_rejection(response);
+    case ServiceResponseKind::kRequestFailed:
+        return validate_failure(response);
+    case ServiceResponseKind::kRecoveryPointPage:
+        return validate_page_response(response);
     }
     return invalid("service response kind is invalid");
 }

@@ -9,6 +9,8 @@ add_executable(aegra_desktop WIN32
     src/main.cpp
     src/service_client.cpp
     src/service_client.h
+    src/service_protocol.cpp
+    src/service_protocol.h
 )
 
 set_target_properties(

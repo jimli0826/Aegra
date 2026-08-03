@@ -45,3 +45,15 @@
 `PersonalRepositoryQuery`。未配置 Repository 时返回合法空页；配置后通过 `RepositoryCatalogScanner`
 分页读取并映射为 Contracts，输入、输出和取消均在 Use Case 边界校验。Application 不知道本地路径、Qt、
 JSON 或具体 Storage Adapter。
+
+S4 已增加：
+
+- `SourceInventoryQuery`：通过 `ISourceInventory` 分页返回 opaque `source_id`，不向 Desktop 暴露设备路径；
+- `RepositoryConnectionService`：add/import/test/set-default/list/remove，仅持久化 locator 与
+  `SecretRef`，删除只移除控制面引用；
+- `ConnectedRepositoryQuery`：按 connection id 或 default 连接打开 `IRepositoryStorageFactory`，
+  扫描 Catalog 并返回 `ServiceRecoveryPointPage`。
+
+上述用例依赖 `IControlPlaneDatabase`、`IRepositoryStorageFactory`、`ISourceInventory` 与 `IClock`，现已由
+Service composition root 注入。Repository command 使用持久化幂等记录；同键同请求 replay，同键不同请求
+返回冲突。连接测试只把可用性写入控制面，不把 Catalog 或 Archive metadata 复制为权威数据。

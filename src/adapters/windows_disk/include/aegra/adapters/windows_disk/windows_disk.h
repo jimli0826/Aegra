@@ -1,6 +1,7 @@
 #pragma once
 
 #include "aegra/ports/block_io.h"
+#include "aegra/ports/source_inventory.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -74,8 +75,7 @@ class WindowsBlockSink final : public ports::IBlockSink {
     is_canonical_volume_guid_path(const std::filesystem::path& path) noexcept;
 
     [[nodiscard]] std::uint64_t capacity_bytes() const noexcept override;
-    [[nodiscard]] base::Result<void> write(std::uint64_t offset,
-                                           std::span<const std::byte> source,
+    [[nodiscard]] base::Result<void> write(std::uint64_t offset, std::span<const std::byte> source,
                                            base::CancellationToken cancellation) override;
     [[nodiscard]] base::Result<void> flush(base::CancellationToken cancellation) override;
 
@@ -104,11 +104,18 @@ struct WindowsVolumeInfo final {
     bool filesystem_metadata_available{false};
     bool volume_size_available{false};
     bool disk_extents_available{false};
+    bool is_read_only{false};
 };
 
 class WindowsVolumeEnumerator final {
   public:
     [[nodiscard]] static base::Result<std::vector<WindowsVolumeInfo>> enumerate();
+};
+
+class WindowsSourceInventory final : public ports::ISourceInventory {
+  public:
+    [[nodiscard]] base::Result<std::vector<ports::SourceInventoryRecord>>
+    list_sources(base::CancellationToken cancellation) override;
 };
 
 } // namespace aegra::adapters::windows_disk

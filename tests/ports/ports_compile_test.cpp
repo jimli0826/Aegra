@@ -7,6 +7,8 @@
 #include "aegra/ports/object_storage.h"
 #include "aegra/ports/progress.h"
 #include "aegra/ports/random.h"
+#include "aegra/ports/repository_storage.h"
+#include "aegra/ports/source_inventory.h"
 
 #include <cstdlib>
 #include <type_traits>
@@ -19,9 +21,11 @@ int main() {
     static_assert(aegra::ports::kControlPlaneSchemaVersion == 1);
     static_assert(aegra::ports::is_valid_job_state_transition(
         aegra::contracts::ServiceJobState::kQueued, aegra::contracts::ServiceJobState::kRunning));
-    static_assert(!aegra::ports::is_valid_job_state_transition(
-        aegra::contracts::ServiceJobState::kSucceeded, aegra::contracts::ServiceJobState::kRunning));
-    static_assert(aegra::ports::is_terminal_job_state(aegra::contracts::ServiceJobState::kInterrupted));
+    static_assert(
+        !aegra::ports::is_valid_job_state_transition(aegra::contracts::ServiceJobState::kSucceeded,
+                                                     aegra::contracts::ServiceJobState::kRunning));
+    static_assert(
+        aegra::ports::is_terminal_job_state(aegra::contracts::ServiceJobState::kInterrupted));
     static_assert(std::has_virtual_destructor_v<aegra::ports::IBlockSource>);
     static_assert(std::has_virtual_destructor_v<aegra::ports::IBlockSink>);
     static_assert(std::has_virtual_destructor_v<aegra::ports::IBackupSession>);
@@ -45,5 +49,8 @@ int main() {
     static_assert(std::has_virtual_destructor_v<aegra::ports::IJobStore>);
     static_assert(std::has_virtual_destructor_v<aegra::ports::IScheduleStore>);
     static_assert(std::has_virtual_destructor_v<aegra::ports::IAuditEventStore>);
+    static_assert(std::has_virtual_destructor_v<aegra::ports::ISourceInventory>);
+    static_assert(std::has_virtual_destructor_v<aegra::ports::IRepositoryStorageAccess>);
+    static_assert(std::has_virtual_destructor_v<aegra::ports::IRepositoryStorageFactory>);
     return EXIT_SUCCESS;
 }

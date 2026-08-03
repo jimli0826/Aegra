@@ -1,5 +1,6 @@
 add_library(aegra_adapter_storage_local STATIC
     src/local_object_storage.cpp
+    src/local_repository_storage_factory.cpp
     src/local_staged_writer.cpp
     src/local_storage_paths.cpp
 )

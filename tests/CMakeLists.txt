@@ -16,13 +16,7 @@ target_link_libraries(aegra_service_contract_tests PRIVATE Aegra::Contracts)
 aegra_add_test(aegra_ports_compile_test ports/ports_compile_test.cpp)
 target_link_libraries(aegra_ports_compile_test PRIVATE Aegra::Ports)
 
-# S2 adapter target: pull in until Service integration owner registers it in top-level CMake.
-if(NOT TARGET Aegra::AdapterSqlite)
-    add_subdirectory(
-        "${PROJECT_SOURCE_DIR}/src/adapters/sqlite"
-        "${CMAKE_BINARY_DIR}/_aegra_adapter_sqlite"
-    )
-endif()
+
 aegra_add_test(aegra_sqlite_control_plane_tests adapters/sqlite_control_plane_test.cpp)
 target_link_libraries(aegra_sqlite_control_plane_tests PRIVATE Aegra::AdapterSqlite)
 
@@ -33,6 +27,15 @@ aegra_add_test(
 target_link_libraries(
     aegra_personal_repository_query_tests
     PRIVATE Aegra::Application Aegra::AdapterMemory
+)
+
+aegra_add_test(
+    aegra_s4_inventory_repository_api_tests
+    application/s4_inventory_repository_api_test.cpp
+)
+target_link_libraries(
+    aegra_s4_inventory_repository_api_tests
+    PRIVATE Aegra::Application Aegra::AdapterMemory Aegra::AdapterSqlite
 )
 
 aegra_add_test(aegra_format_tests format/manifest_codec_test.cpp)
@@ -125,6 +128,31 @@ if(WIN32)
         COMMAND
             $<TARGET_FILE:aegra_service_process_tests>
             $<TARGET_FILE:aegra_service>
+    )
+
+    aegra_add_test(aegra_service_composition_tests apps/service_composition_test.cpp)
+    target_compile_definitions(aegra_service_composition_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(
+        aegra_service_composition_tests
+        PRIVATE Aegra::AppService Aegra::AdapterSqlite
+    )
+
+    add_executable(aegra_worker_supervisor_process_tests apps/worker_supervisor_process_test.cpp)
+    aegra_configure_target(aegra_worker_supervisor_process_tests)
+    target_compile_definitions(
+        aegra_worker_supervisor_process_tests
+        PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN
+    )
+    target_link_libraries(
+        aegra_worker_supervisor_process_tests
+        PRIVATE Aegra::AppService Aegra::AdapterSqlite Aegra::AdapterWindowsProcess
+    )
+    add_dependencies(aegra_worker_supervisor_process_tests aegra_personal_worker)
+    add_test(
+        NAME aegra_worker_supervisor_process_tests
+        COMMAND
+            $<TARGET_FILE:aegra_worker_supervisor_process_tests>
+            $<TARGET_FILE:aegra_personal_worker>
     )
 
     if(AEGRA_BUILD_DESKTOP)

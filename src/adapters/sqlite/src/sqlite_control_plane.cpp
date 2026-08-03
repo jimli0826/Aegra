@@ -81,13 +81,12 @@ resolve_database_path(const SqliteControlPlaneOpenRequest& request) {
         if (request.mode == SqliteOpenMode::kCreateIfMissing) {
             std::filesystem::create_directories(parent, error_code);
             if (error_code) {
-                return base::Result<std::filesystem::path>::failure(
-                    detail::make_error(base::ErrorCode::kIoFailure,
-                                       "database parent directory create failed"));
+                return base::Result<std::filesystem::path>::failure(detail::make_error(
+                    base::ErrorCode::kIoFailure, "database parent directory create failed"));
             }
         } else if (!std::filesystem::exists(parent, error_code) || error_code) {
-            return base::Result<std::filesystem::path>::failure(
-                detail::make_error(base::ErrorCode::kNotFound, "database parent directory missing"));
+            return base::Result<std::filesystem::path>::failure(detail::make_error(
+                base::ErrorCode::kNotFound, "database parent directory missing"));
         }
     }
     if (request.mode == SqliteOpenMode::kOpenExisting) {
@@ -118,12 +117,12 @@ ControlPlaneUnitOfWork::ControlPlaneUnitOfWork(std::shared_ptr<SqliteControlPlan
                                                std::unique_lock<std::mutex> write_lock)
     : state_(std::move(state)), write_lock_(std::move(write_lock)),
       repository_connections_(*state_, &active_), jobs_(*state_, &active_),
-      schedules_(*state_, &active_), audit_events_(*state_, &active_) {}
+      schedules_(*state_, &active_), audit_events_(*state_, &active_),
+      commands_(*state_, &active_) {}
 
 ControlPlaneUnitOfWork::~ControlPlaneUnitOfWork() { rollback(); }
 
-ports::IRepositoryConnectionStore&
-ControlPlaneUnitOfWork::repository_connections() noexcept {
+ports::IRepositoryConnectionStore& ControlPlaneUnitOfWork::repository_connections() noexcept {
     return repository_connections_;
 }
 
@@ -132,6 +131,8 @@ ports::IJobStore& ControlPlaneUnitOfWork::jobs() noexcept { return jobs_; }
 ports::IScheduleStore& ControlPlaneUnitOfWork::schedules() noexcept { return schedules_; }
 
 ports::IAuditEventStore& ControlPlaneUnitOfWork::audit_events() noexcept { return audit_events_; }
+
+ports::ICommandStore& ControlPlaneUnitOfWork::commands() noexcept { return commands_; }
 
 void ControlPlaneUnitOfWork::finish_unlocked() noexcept {
     active_ = false;
@@ -192,7 +193,8 @@ SqliteControlPlaneDatabase::open(const SqliteControlPlaneOpenRequest& request) {
         auto mapped = detail::map_sqlite_result(rc, nullptr, "open control plane database failed");
         if (mapped) {
             return base::Result<std::unique_ptr<SqliteControlPlaneDatabase>>::failure(
-                detail::make_error(base::ErrorCode::kIoFailure, "open control plane database failed"));
+                detail::make_error(base::ErrorCode::kIoFailure,
+                                   "open control plane database failed"));
         }
         return base::Result<std::unique_ptr<SqliteControlPlaneDatabase>>::failure(mapped.error());
     }
@@ -216,7 +218,8 @@ SqliteControlPlaneDatabase::open(const SqliteControlPlaneOpenRequest& request) {
     state->db = db;
     state->schema_version = version.value();
     return base::Result<std::unique_ptr<SqliteControlPlaneDatabase>>::success(
-        std::unique_ptr<SqliteControlPlaneDatabase>(new SqliteControlPlaneDatabase(std::move(state))));
+        std::unique_ptr<SqliteControlPlaneDatabase>(
+            new SqliteControlPlaneDatabase(std::move(state))));
 }
 
 SqliteControlPlaneDatabase::SqliteControlPlaneDatabase(
@@ -249,7 +252,8 @@ SqliteControlPlaneDatabase::begin_unit_of_work(const base::CancellationToken can
     }
     auto begin = detail::exec_sql(state_->db, "BEGIN IMMEDIATE");
     if (!begin) {
-        return base::Result<std::unique_ptr<ports::IControlPlaneUnitOfWork>>::failure(begin.error());
+        return base::Result<std::unique_ptr<ports::IControlPlaneUnitOfWork>>::failure(
+            begin.error());
     }
     state_->write_transaction_open = true;
     return base::Result<std::unique_ptr<ports::IControlPlaneUnitOfWork>>::success(
@@ -279,6 +283,39 @@ SqliteControlPlaneDatabase::get_job(const std::string_view job_id,
     std::lock_guard lock(state_->mutex);
     detail::JobStore store(*state_);
     return store.get(job_id, cancellation);
+}
+
+base::Result<std::optional<ports::JobRecord>>
+SqliteControlPlaneDatabase::get_job_by_idempotency_key(const std::string_view idempotency_key,
+                                                       const base::CancellationToken cancellation) {
+    std::lock_guard lock(state_->mutex);
+    if (auto cancelled = detail::check_cancelled(cancellation); !cancelled) {
+        return base::Result<std::optional<ports::JobRecord>>::failure(cancelled.error());
+    }
+    auto statement = detail::SqliteStatement::prepare(
+        state_->db,
+        "SELECT job_id, trace_id, operation, state, created_utc_ms, started_utc_ms, "
+        "completed_utc_ms, source_id, repository_connection_id, target_source_id, backup_type, "
+        "parent_recovery_point_id, preflight_token, message_code, idempotency_key, "
+        "result_error_code, result_outcome, result_message_code FROM jobs "
+        "WHERE idempotency_key = ?");
+    if (!statement) {
+        return base::Result<std::optional<ports::JobRecord>>::failure(statement.error());
+    }
+    if (auto bound = statement.value().bind_text(1, idempotency_key); !bound) {
+        return base::Result<std::optional<ports::JobRecord>>::failure(bound.error());
+    }
+    auto stepped = statement.value().step();
+    if (!stepped) {
+        return base::Result<std::optional<ports::JobRecord>>::failure(stepped.error());
+    }
+    if (stepped.value() == SQLITE_DONE) {
+        return base::Result<std::optional<ports::JobRecord>>::success(std::nullopt);
+    }
+    auto record = detail::read_job(statement.value().get());
+    return record
+               ? base::Result<std::optional<ports::JobRecord>>::success(std::move(record).value())
+               : base::Result<std::optional<ports::JobRecord>>::failure(record.error());
 }
 
 base::Result<contracts::JobPage>
@@ -311,6 +348,14 @@ SqliteControlPlaneDatabase::list_audit_events(const contracts::AuditEventListReq
     std::lock_guard lock(state_->mutex);
     detail::AuditEventStore store(*state_);
     return store.list(request, cancellation);
+}
+
+base::Result<std::optional<ports::CommandRecord>>
+SqliteControlPlaneDatabase::get_command(const std::string_view idempotency_key,
+                                        const base::CancellationToken cancellation) {
+    std::lock_guard lock(state_->mutex);
+    detail::CommandStore store(*state_);
+    return store.get(idempotency_key, cancellation);
 }
 
 } // namespace aegra::adapters::sqlite

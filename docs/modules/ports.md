@@ -12,8 +12,11 @@
 - 生命周期：`ISnapshotSession`、`IBackupSession`、`IRecoveryPointReader`。
 - 系统能力：`IClock`、`IProgressSink`、`ICredentialResolver`、`IRandomSource`。
 - 进程传输：`IMessageChannel`。
+- 进程生命周期：`IProcessLauncher`。
 - 个人版控制面：`IControlPlaneDatabase`、`IControlPlaneUnitOfWork`、`IRepositoryConnectionStore`、
-  `IJobStore`、`IScheduleStore`、`IAuditEventStore`（见 `control_plane.h`）。
+  `IJobStore`、`IScheduleStore`、`IAuditEventStore`、`ICommandStore`（见 `control_plane.h`）。
+- 个人版 Inventory / Repository 访问：`ISourceInventory`（见 `source_inventory.h`）、
+  `IRepositoryStorageFactory` / `IRepositoryStorageAccess`（见 `repository_storage.h`）。
 
 ## 依赖
 
@@ -98,3 +101,7 @@
 
 S2 已在 `control_plane.h` 定义个人版控制面细粒度 Store 与 Job 状态机纯函数。SQLite Adapter 见
 [control_plane_sqlite.md](control_plane_sqlite.md)；Application/Service 不得 include SQLite 头。
+
+S4 已增加 `source_inventory.h` 与 `repository_storage.h`，供 Application Inventory 与多连接 Catalog
+查询使用；Windows Inventory Adapter 与 Local Storage Factory 已接入 Service composition。S3 增加
+`process_launcher.h`，由 Service Supervisor 使用，接口不暴露 Win32 handle。

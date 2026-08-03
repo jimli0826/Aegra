@@ -75,9 +75,18 @@ struct AuditEventRecord final {
     std::string correlation_id;
 };
 
+struct CommandRecord final {
+    std::string idempotency_key;
+    std::string request_fingerprint;
+    std::string command_id;
+    std::optional<std::string> resource_id;
+    std::uint64_t created_utc_ms{0};
+};
+
 // ---- Job state machine (shared pure rules) ----
 
-[[nodiscard]] constexpr bool is_terminal_job_state(const contracts::ServiceJobState state) noexcept {
+[[nodiscard]] constexpr bool
+is_terminal_job_state(const contracts::ServiceJobState state) noexcept {
     return state == contracts::ServiceJobState::kSucceeded ||
            state == contracts::ServiceJobState::kFailed ||
            state == contracts::ServiceJobState::kCancelled ||
@@ -134,8 +143,8 @@ class IRepositoryConnectionStore {
     IRepositoryConnectionStore& operator=(IRepositoryConnectionStore&&) = delete;
 
     // Insert or replace by connection_id. Enforces at most one default in the same transaction.
-    [[nodiscard]] virtual base::Result<void>
-    upsert(const RepositoryConnectionRecord& record, base::CancellationToken cancellation) = 0;
+    [[nodiscard]] virtual base::Result<void> upsert(const RepositoryConnectionRecord& record,
+                                                    base::CancellationToken cancellation) = 0;
 
     [[nodiscard]] virtual base::Result<std::optional<RepositoryConnectionRecord>>
     get(std::string_view connection_id, base::CancellationToken cancellation) = 0;
@@ -145,8 +154,8 @@ class IRepositoryConnectionStore {
          base::CancellationToken cancellation) = 0;
 
     // Clears default from every other row when making this connection the default.
-    [[nodiscard]] virtual base::Result<void>
-    set_default(std::string_view connection_id, base::CancellationToken cancellation) = 0;
+    [[nodiscard]] virtual base::Result<void> set_default(std::string_view connection_id,
+                                                         base::CancellationToken cancellation) = 0;
 
     // Removes control-plane reference only; never deletes Repository objects or Archives.
     [[nodiscard]] virtual base::Result<void> remove(std::string_view connection_id,
@@ -182,7 +191,8 @@ class IJobStore {
     [[nodiscard]] virtual base::Result<contracts::JobPage>
     list(const contracts::JobListRequest& request, base::CancellationToken cancellation) = 0;
 
-    // CAS transition: fails with Conflict when expected_state does not match or transition is illegal.
+    // CAS transition: fails with Conflict when expected_state does not match or transition is
+    // illegal.
     [[nodiscard]] virtual base::Result<JobRecord>
     transition(const JobStateTransition& transition, base::CancellationToken cancellation) = 0;
 
@@ -232,6 +242,22 @@ class IAuditEventStore {
     list(const contracts::AuditEventListRequest& request, base::CancellationToken cancellation) = 0;
 };
 
+class ICommandStore {
+  public:
+    ICommandStore() = default;
+    virtual ~ICommandStore() = default;
+    ICommandStore(const ICommandStore&) = delete;
+    ICommandStore& operator=(const ICommandStore&) = delete;
+    ICommandStore(ICommandStore&&) = delete;
+    ICommandStore& operator=(ICommandStore&&) = delete;
+
+    [[nodiscard]] virtual base::Result<std::optional<CommandRecord>>
+    get(std::string_view idempotency_key, base::CancellationToken cancellation) = 0;
+
+    [[nodiscard]] virtual base::Result<void> insert(const CommandRecord& record,
+                                                    base::CancellationToken cancellation) = 0;
+};
+
 // Single-writer unit of work. Commit is explicit; destruction without commit rolls back.
 // After commit or rollback, every Store reference obtained from this unit rejects further access.
 class IControlPlaneUnitOfWork {
@@ -247,6 +273,7 @@ class IControlPlaneUnitOfWork {
     [[nodiscard]] virtual IJobStore& jobs() noexcept = 0;
     [[nodiscard]] virtual IScheduleStore& schedules() noexcept = 0;
     [[nodiscard]] virtual IAuditEventStore& audit_events() noexcept = 0;
+    [[nodiscard]] virtual ICommandStore& commands() noexcept = 0;
 
     [[nodiscard]] virtual base::Result<void> commit(base::CancellationToken cancellation) = 0;
     virtual void rollback() noexcept = 0;
@@ -276,6 +303,9 @@ class IControlPlaneDatabase {
                                 base::CancellationToken cancellation) = 0;
     [[nodiscard]] virtual base::Result<std::optional<JobRecord>>
     get_job(std::string_view job_id, base::CancellationToken cancellation) = 0;
+    [[nodiscard]] virtual base::Result<std::optional<JobRecord>>
+    get_job_by_idempotency_key(std::string_view idempotency_key,
+                               base::CancellationToken cancellation) = 0;
     [[nodiscard]] virtual base::Result<contracts::JobPage>
     list_jobs(const contracts::JobListRequest& request, base::CancellationToken cancellation) = 0;
     [[nodiscard]] virtual base::Result<std::optional<ScheduleRecord>>
@@ -286,6 +316,8 @@ class IControlPlaneDatabase {
     [[nodiscard]] virtual base::Result<contracts::AuditEventPage>
     list_audit_events(const contracts::AuditEventListRequest& request,
                       base::CancellationToken cancellation) = 0;
+    [[nodiscard]] virtual base::Result<std::optional<CommandRecord>>
+    get_command(std::string_view idempotency_key, base::CancellationToken cancellation) = 0;
 };
 
 } // namespace aegra::ports

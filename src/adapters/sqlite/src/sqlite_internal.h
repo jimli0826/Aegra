@@ -39,8 +39,7 @@ class SqliteStatement final {
     SqliteStatement(SqliteStatement&& other) noexcept;
     SqliteStatement& operator=(SqliteStatement&& other) noexcept;
 
-    [[nodiscard]] static base::Result<SqliteStatement> prepare(sqlite3* db,
-                                                               std::string_view sql);
+    [[nodiscard]] static base::Result<SqliteStatement> prepare(sqlite3* db, std::string_view sql);
     [[nodiscard]] sqlite3_stmt* get() const noexcept { return stmt_; }
     [[nodiscard]] base::Result<void> bind_text(int index, std::string_view value);
     [[nodiscard]] base::Result<void> bind_text_nullable(int index,
@@ -69,11 +68,12 @@ decode_message_arguments(std::string_view encoded);
 [[nodiscard]] std::uint64_t column_uint64(sqlite3_stmt* stmt, int index);
 [[nodiscard]] std::optional<std::uint64_t> column_uint64_optional(sqlite3_stmt* stmt, int index);
 
-[[nodiscard]] base::Result<void> validate_repository_connection_record(
-    const ports::RepositoryConnectionRecord& record);
+[[nodiscard]] base::Result<void>
+validate_repository_connection_record(const ports::RepositoryConnectionRecord& record);
 [[nodiscard]] base::Result<void> validate_job_record(const ports::JobRecord& record);
 [[nodiscard]] base::Result<void> validate_schedule_record(const ports::ScheduleRecord& record);
 [[nodiscard]] base::Result<void> validate_audit_event_record(const ports::AuditEventRecord& record);
+[[nodiscard]] base::Result<void> validate_command_record(const ports::CommandRecord& record);
 [[nodiscard]] base::Result<void>
 validate_job_transition(const ports::JobStateTransition& transition);
 
@@ -87,21 +87,20 @@ read_repository_connection(sqlite3_stmt* stmt);
 [[nodiscard]] base::Result<ports::JobRecord> read_job(sqlite3_stmt* stmt);
 [[nodiscard]] base::Result<ports::ScheduleRecord> read_schedule(sqlite3_stmt* stmt);
 [[nodiscard]] base::Result<ports::AuditEventRecord> read_audit_event(sqlite3_stmt* stmt);
+[[nodiscard]] base::Result<ports::CommandRecord> read_command(sqlite3_stmt* stmt);
 
 [[nodiscard]] contracts::RepositoryConnectionSummary
 to_connection_summary(const ports::RepositoryConnectionRecord& record);
 [[nodiscard]] contracts::JobSummary to_job_summary(const ports::JobRecord& record);
 [[nodiscard]] contracts::ScheduleSummary to_schedule_summary(const ports::ScheduleRecord& record);
-[[nodiscard]] contracts::AuditEventSummary
-to_audit_summary(const ports::AuditEventRecord& record);
+[[nodiscard]] contracts::AuditEventSummary to_audit_summary(const ports::AuditEventRecord& record);
 
 class RepositoryConnectionStore final : public ports::IRepositoryConnectionStore {
   public:
     explicit RepositoryConnectionStore(SqliteControlPlaneState& state,
                                        const bool* unit_of_work_active = nullptr) noexcept;
-    [[nodiscard]] base::Result<void>
-    upsert(const ports::RepositoryConnectionRecord& record,
-           base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<void> upsert(const ports::RepositoryConnectionRecord& record,
+                                            base::CancellationToken cancellation) override;
     [[nodiscard]] base::Result<std::optional<ports::RepositoryConnectionRecord>>
     get(std::string_view connection_id, base::CancellationToken cancellation) override;
     [[nodiscard]] base::Result<contracts::RepositoryConnectionPage>
@@ -173,6 +172,20 @@ class AuditEventStore final : public ports::IAuditEventStore {
     const bool* unit_of_work_active_{nullptr};
 };
 
+class CommandStore final : public ports::ICommandStore {
+  public:
+    explicit CommandStore(SqliteControlPlaneState& state,
+                          const bool* unit_of_work_active = nullptr) noexcept;
+    [[nodiscard]] base::Result<std::optional<ports::CommandRecord>>
+    get(std::string_view idempotency_key, base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<void> insert(const ports::CommandRecord& record,
+                                            base::CancellationToken cancellation) override;
+
+  private:
+    SqliteControlPlaneState& state_;
+    const bool* unit_of_work_active_{nullptr};
+};
+
 class ControlPlaneUnitOfWork final : public ports::IControlPlaneUnitOfWork {
   public:
     // write_lock must own state->mutex for the full unit-of-work lifetime.
@@ -183,6 +196,7 @@ class ControlPlaneUnitOfWork final : public ports::IControlPlaneUnitOfWork {
     [[nodiscard]] ports::IJobStore& jobs() noexcept override;
     [[nodiscard]] ports::IScheduleStore& schedules() noexcept override;
     [[nodiscard]] ports::IAuditEventStore& audit_events() noexcept override;
+    [[nodiscard]] ports::ICommandStore& commands() noexcept override;
     [[nodiscard]] base::Result<void> commit(base::CancellationToken cancellation) override;
     void rollback() noexcept override;
 
@@ -196,6 +210,7 @@ class ControlPlaneUnitOfWork final : public ports::IControlPlaneUnitOfWork {
     JobStore jobs_;
     ScheduleStore schedules_;
     AuditEventStore audit_events_;
+    CommandStore commands_;
 };
 
 // Opaque continuation: v1|<scope>|<filter>|<created_utc_ms>|<id>, bound to list kind + filters.
@@ -211,9 +226,8 @@ struct PageCursor final {
 
 [[nodiscard]] std::string
 repository_connection_page_filter(const std::optional<contracts::RepositoryConnectionState>& state);
-[[nodiscard]] std::string
-job_page_filter(const std::optional<contracts::JobOperation>& operation,
-                const std::optional<contracts::ServiceJobState>& state);
+[[nodiscard]] std::string job_page_filter(const std::optional<contracts::JobOperation>& operation,
+                                          const std::optional<contracts::ServiceJobState>& state);
 [[nodiscard]] std::string schedule_page_filter(const std::optional<bool>& enabled);
 [[nodiscard]] std::string
 audit_event_page_filter(const std::optional<contracts::AuditSeverity>& minimum_severity,
@@ -231,8 +245,8 @@ decode_page_token(const std::optional<std::string>& token, std::string_view expe
 [[nodiscard]] base::Result<void> begin_savepoint(sqlite3* db, std::string_view name);
 [[nodiscard]] base::Result<void> release_savepoint(sqlite3* db, std::string_view name);
 void rollback_savepoint(sqlite3* db, std::string_view name) noexcept;
-[[nodiscard]] base::Result<void>
-bind_page_cursor(SqliteStatement& statement, int& index, const std::optional<PageCursor>& cursor);
+[[nodiscard]] base::Result<void> bind_page_cursor(SqliteStatement& statement, int& index,
+                                                  const std::optional<PageCursor>& cursor);
 
 inline constexpr const char* kSelectConnectionSql =
     "SELECT connection_id, display_name, locator, credential_ref, state, is_default, "
@@ -244,6 +258,10 @@ inline constexpr const char* kSelectJobSql =
     "source_id, repository_connection_id, target_source_id, backup_type, parent_recovery_point_id, "
     "preflight_token, message_code, idempotency_key, result_error_code, result_outcome, "
     "result_message_code FROM jobs WHERE job_id = ?";
+
+inline constexpr const char* kSelectCommandSql =
+    "SELECT idempotency_key, request_fingerprint, command_id, resource_id, created_utc_ms "
+    "FROM commands WHERE idempotency_key = ?";
 
 inline constexpr const char* kSelectScheduleSql =
     "SELECT schedule_id, display_name, enabled, source_id, repository_connection_id, backup_type, "

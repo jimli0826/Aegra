@@ -9,6 +9,9 @@ add_library(aegra_app_service STATIC
     src/windows_service_control.cpp
     src/windows_service_control_win32.cpp
     src/windows_service_scm_host.cpp
+    src/worker_job_service.cpp
+    src/worker_supervisor.cpp
+    src/supervisor_worker_protocol.cpp
 )
 
 add_library(Aegra::AppService ALIAS aegra_app_service)
@@ -42,5 +45,7 @@ target_compile_definitions(
 target_link_libraries(
     aegra_service
     PRIVATE Aegra::AppService Aegra::AdapterStorageLocal Aegra::AdapterWindowsIpc
+            Aegra::AdapterSqlite Aegra::AdapterWindowsDisk Aegra::AdapterWindowsProcess
+            Aegra::AdapterWindowsSystem Shell32
 )
 aegra_configure_target(aegra_service)

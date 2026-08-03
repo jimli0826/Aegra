@@ -11,15 +11,29 @@
 #include <vector>
 
 namespace aegra::application {
+class IConnectedRepositoryQuery;
 class IPersonalRepositoryQuery;
+class IRepositoryConnectionService;
+class ISourceInventoryQuery;
+} // namespace aegra::application
+
+namespace aegra::ports {
+class IControlPlaneDatabase;
 }
 
 namespace aegra::apps::service {
+
+class IWorkerJobService;
 
 struct ServiceRuntimeInfo final {
     std::string service_version;
     std::vector<std::string> capabilities;
     application::IPersonalRepositoryQuery* repository_query{nullptr};
+    application::IConnectedRepositoryQuery* connected_repository_query{nullptr};
+    application::IRepositoryConnectionService* repository_connections{nullptr};
+    application::ISourceInventoryQuery* source_inventory{nullptr};
+    IWorkerJobService* worker_jobs{nullptr};
+    ports::IControlPlaneDatabase* control_plane{nullptr};
 };
 
 [[nodiscard]] base::Result<contracts::ServiceResponse>

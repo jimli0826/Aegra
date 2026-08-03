@@ -79,10 +79,15 @@ CREATE TABLE IF NOT EXISTS audit_events (
 );
 CREATE INDEX IF NOT EXISTS ix_audit_created ON audit_events(created_utc_ms DESC, event_id ASC);
 CREATE INDEX IF NOT EXISTS ix_audit_correlation ON audit_events(correlation_id, created_utc_ms DESC);
+CREATE TABLE IF NOT EXISTS commands (
+    idempotency_key TEXT PRIMARY KEY NOT NULL,
+    request_fingerprint TEXT NOT NULL,
+    command_id TEXT NOT NULL UNIQUE,
+    resource_id TEXT,
+    created_utc_ms INTEGER NOT NULL CHECK (created_utc_ms >= 0)
+);
 )sql";
     return exec_sql(db, kSchema);
 }
 
-
 } // namespace aegra::adapters::sqlite::detail
-

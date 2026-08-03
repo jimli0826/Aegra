@@ -1,0 +1,510 @@
+#include "aegra/apps/service/worker_supervisor.h"
+#include "supervisor_worker_protocol.h"
+
+#include "aegra/adapters/windows_ipc/windows_named_pipe_channel.h"
+#include "aegra/base/error.h"
+#include "aegra/ports/clock.h"
+#include "aegra/ports/control_plane.h"
+#include "aegra/ports/process_launcher.h"
+#include "aegra/ports/random.h"
+
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <format>
+#include <memory>
+#include <mutex>
+#include <thread>
+#include <unordered_map>
+#include <vector>
+
+namespace aegra::apps::service {
+
+namespace {
+
+using adapters::windows_ipc::WindowsNamedPipeListenRequest;
+using adapters::windows_ipc::WindowsNamedPipeListener;
+
+struct SessionDependencies {
+    WorkerSupervisorConfig config;
+    ports::IProcessLauncher* launcher{nullptr};
+    ports::IControlPlaneDatabase* control_plane{nullptr};
+    ports::IClock* clock{nullptr};
+    SupervisorProgressCallback on_progress;
+    SupervisorCompletionCallback on_completion;
+};
+
+struct WorkerSessionState {
+    std::string job_id;
+    std::string trace_id;
+    contracts::JobOperation operation{contracts::JobOperation::kBackup};
+    std::string pipe_name;
+    std::uint32_t worker_pid{0};
+
+    base::CancellationSource cancel_source;
+    std::atomic<bool> result_received{false};
+    std::atomic<bool> completed{false};
+    std::atomic<contracts::ServiceJobState> terminal_state{contracts::ServiceJobState::kFailed};
+
+    std::jthread session_thread;
+    std::jthread deadline_thread;
+
+    ~WorkerSessionState() {
+        cancel_source.request_stop();
+        if (session_thread.joinable()) {
+            session_thread.join();
+        }
+        if (deadline_thread.joinable()) {
+            deadline_thread.join();
+        }
+    }
+};
+
+std::string generate_pipe_name(ports::IRandomSource& random) {
+    std::array<std::byte, 8> bytes{};
+    (void)random.fill(bytes, base::CancellationToken{});
+    std::string hex;
+    hex.reserve(16);
+    constexpr char kHexDigits[] = "0123456789abcdef";
+    for (const auto b : bytes) {
+        hex.push_back(kHexDigits[static_cast<unsigned>(b) >> 4]);
+        hex.push_back(kHexDigits[static_cast<unsigned>(b) & 0x0f]);
+    }
+    return std::format("aegra-worker-{}", hex);
+}
+
+contracts::ServiceJobState persist_job_failure(ports::IControlPlaneDatabase& db,
+                                                ports::IClock& clock,
+                                                std::string_view job_id,
+                                                base::ErrorCode code,
+                                                std::string_view message_code) {
+    auto uow_result = db.begin_unit_of_work(base::CancellationToken{});
+    if (!uow_result) return contracts::ServiceJobState::kFailed;
+    auto uow = std::move(uow_result).value();
+
+    ports::JobStateTransition transition;
+    transition.job_id = std::string(job_id);
+    transition.expected_state = contracts::ServiceJobState::kRunning;
+    transition.next_state = contracts::ServiceJobState::kFailed;
+    transition.transition_utc_ms = clock.now_utc_ms();
+    transition.message_code = std::string(message_code);
+    transition.result_error_code = static_cast<std::uint32_t>(code);
+
+    auto t_result = uow->jobs().transition(transition, base::CancellationToken{});
+    if (t_result) {
+        (void)uow->commit(base::CancellationToken{});
+        return transition.next_state;
+    }
+    // Might already be in cancelling state; re-attempt from there.
+    transition.expected_state = contracts::ServiceJobState::kCancelling;
+    if (code == base::ErrorCode::kCancelled) {
+        transition.next_state = contracts::ServiceJobState::kCancelled;
+    }
+    auto retry = uow->jobs().transition(transition, base::CancellationToken{});
+    if (retry) {
+        (void)uow->commit(base::CancellationToken{});
+        return transition.next_state;
+    }
+    return contracts::ServiceJobState::kFailed;
+}
+
+// Terminates the worker and cleans up session state when the session thread encounters a
+// fatal error before the IPC loop starts.
+void abort_session(const std::shared_ptr<WorkerSessionState>& session,
+                   const std::shared_ptr<SessionDependencies>& deps,
+                   std::string_view message_code) {
+    auto final_state = persist_job_failure(*deps->control_plane, *deps->clock, session->job_id,
+                                           base::ErrorCode::kInternal, message_code);
+    (void)deps->launcher->terminate(session->worker_pid);
+    session->terminal_state = final_state;
+    session->completed = true;
+    if (deps->on_completion) deps->on_completion(session->job_id, final_state);
+}
+
+// Persists the terminal result event received from the worker process.
+contracts::ServiceJobState persist_result_event(
+    ports::IControlPlaneDatabase& db, ports::IClock& clock, std::string_view job_id,
+    const contracts::WorkerResponse& response) {
+    auto uow_result = db.begin_unit_of_work(base::CancellationToken{});
+    if (!uow_result) return contracts::ServiceJobState::kFailed;
+    auto uow = std::move(uow_result).value();
+
+    ports::JobStateTransition transition;
+    transition.job_id = std::string(job_id);
+    transition.expected_state = contracts::ServiceJobState::kRunning;
+    transition.transition_utc_ms = clock.now_utc_ms();
+
+    if (response.task_result && response.task_result->outcome == contracts::TaskOutcome::kSucceeded) {
+        transition.next_state = contracts::ServiceJobState::kSucceeded;
+    } else if (response.task_result && response.task_result->outcome == contracts::TaskOutcome::kCancelled) {
+        transition.next_state = contracts::ServiceJobState::kCancelled;
+    } else {
+        transition.next_state = contracts::ServiceJobState::kFailed;
+    }
+
+    if (response.task_result) {
+        transition.result_error_code = static_cast<std::uint32_t>(response.task_result->error_code);
+        transition.result_outcome = static_cast<std::uint32_t>(response.task_result->outcome);
+        transition.result_message_code = response.task_result->message_code;
+    } else {
+        transition.result_error_code = static_cast<std::uint32_t>(response.boundary_error_code);
+        transition.result_message_code = response.message_code;
+    }
+
+    auto t_res = uow->jobs().transition(transition, base::CancellationToken{});
+    if (!t_res) {
+        // May already be cancelling; retry from that state.
+        transition.expected_state = contracts::ServiceJobState::kCancelling;
+        t_res = uow->jobs().transition(transition, base::CancellationToken{});
+    }
+    if (t_res) {
+        (void)uow->commit(base::CancellationToken{});
+        return transition.next_state;
+    }
+    return contracts::ServiceJobState::kFailed;
+}
+
+void run_session_ipc_loop(const std::shared_ptr<WorkerSessionState>& session,
+                          const std::shared_ptr<SessionDependencies>& deps,
+                          ports::IMessageChannel& channel) {
+    while (!session->cancel_source.get_token().stop_requested()) {
+        auto recv_res = channel.receive(session->cancel_source.get_token());
+        if (!recv_res) break;
+
+        auto event_res = decode_supervisor_worker_event(recv_res.value());
+        if (!event_res) continue;
+
+        auto& event = event_res.value();
+        if (event.kind == contracts::WorkerEventKind::kProgress && event.progress) {
+            if (deps->on_progress) {
+                deps->on_progress(session->job_id, *event.progress);
+            }
+        } else if (event.kind == contracts::WorkerEventKind::kResult && event.response) {
+            session->terminal_state =
+                persist_result_event(*deps->control_plane, *deps->clock, session->job_id,
+                                     *event.response);
+            session->result_received = true;
+            break;
+        }
+    }
+}
+
+void run_session(std::shared_ptr<WorkerSessionState> session,
+                 std::shared_ptr<SessionDependencies> deps,
+                 std::weak_ptr<std::mutex> map_mutex_weak,
+                 std::weak_ptr<std::unordered_map<std::string, std::shared_ptr<WorkerSessionState>>> map_weak,
+                 contracts::JobRequest job_request,
+                 std::chrono::seconds deadline) {
+
+    // 1. Create pipe listener (must exist before worker tries to connect).
+    WindowsNamedPipeListenRequest listen_req;
+    listen_req.pipe_name = session->pipe_name;
+    auto listener_res = WindowsNamedPipeListener::create(listen_req);
+    if (!listener_res) {
+        abort_session(session, deps, "service.pipe_listen_failed");
+        return;
+    }
+
+    auto channel_res = listener_res.value()->accept(session->cancel_source.get_token());
+    if (!channel_res) {
+        abort_session(session, deps, "service.pipe_accept_failed");
+        return;
+    }
+    auto channel = std::move(channel_res).value();
+
+    // 2. Encode and send the job request.
+    auto encoded_req = encode_supervisor_job_request(job_request);
+    if (!encoded_req) {
+        abort_session(session, deps, "service.encode_request_failed");
+        return;
+    }
+    if (auto s = channel->send(encoded_req.value(), session->cancel_source.get_token()); !s) {
+        abort_session(session, deps, "service.send_request_failed");
+        return;
+    }
+
+    // 3. Deadline thread: sleeps for the deadline duration, then triggers cancellation and
+    //    terminates the worker process.  Uses std::condition_variable_any with stop_token
+    //    so that early cancellation (user or shutdown) wakes the thread immediately.
+    if (deadline.count() > 0) {
+        session->deadline_thread = std::jthread(
+            [session_w = std::weak_ptr(session), deps, deadline](std::stop_token stoken) {
+                std::condition_variable_any cv;
+                std::mutex mtx;
+                std::unique_lock lock(mtx);
+                const bool woken = cv.wait_for(lock, stoken, deadline, [] { return false; });
+                (void)woken;
+                if (stoken.stop_requested()) return;
+                auto s = session_w.lock();
+                if (!s) return;
+                s->cancel_source.request_stop();
+                (void)deps->launcher->terminate(s->worker_pid);
+            });
+    }
+
+    // 4. IPC event loop.
+    run_session_ipc_loop(session, deps, *channel);
+
+    // 5. On error or stop, try to send cancel command (best-effort).
+    if (!session->result_received) {
+        contracts::WorkerCommand cancel_cmd;
+        cancel_cmd.job_id = session->job_id;
+        cancel_cmd.trace_id = session->trace_id;
+        cancel_cmd.kind = contracts::WorkerCommandKind::kCancel;
+        if (auto enc_cmd = encode_supervisor_worker_command(cancel_cmd); enc_cmd) {
+            (void)channel->send(enc_cmd.value(), base::CancellationToken{});
+        }
+    }
+
+    // 6. Wait for process exit.
+    (void)deps->launcher->wait(session->worker_pid, base::CancellationToken{});
+
+    // 7. If no result was received, persist failure (crash/timeout).
+    if (!session->result_received) {
+        session->terminal_state = persist_job_failure(
+            *deps->control_plane, *deps->clock, session->job_id,
+            base::ErrorCode::kInternal, "service.worker_crashed");
+    }
+
+    // 8. Stop deadline thread before marking completed.
+    if (session->deadline_thread.joinable()) {
+        session->deadline_thread.request_stop();
+        session->deadline_thread.join();
+    }
+
+    session->completed = true;
+
+    // 9. Remove self from session map (brief lock, no IPC/join under lock).
+    if (auto mtx = map_mutex_weak.lock()) {
+        if (auto map = map_weak.lock()) {
+            std::lock_guard lock(*mtx);
+            map->erase(session->job_id);
+        }
+    }
+
+    // 10. Completion callback with actual terminal state.
+    if (deps->on_completion) {
+        deps->on_completion(session->job_id, session->terminal_state.load());
+    }
+}
+
+} // namespace
+
+struct WorkerSupervisor::Impl {
+    WorkerSupervisorConfig config;
+    ports::IProcessLauncher& launcher;
+    ports::IControlPlaneDatabase& control_plane;
+    ports::IClock& clock;
+    ports::IRandomSource& random;
+    SupervisorProgressCallback on_progress;
+    SupervisorCompletionCallback on_completion;
+
+    std::shared_ptr<SessionDependencies> deps;
+    std::shared_ptr<std::mutex> sessions_mutex_;
+    std::shared_ptr<std::unordered_map<std::string, std::shared_ptr<WorkerSessionState>>> active_sessions_;
+
+    Impl(WorkerSupervisorConfig cfg,
+         ports::IProcessLauncher& pl,
+         ports::IControlPlaneDatabase& cpd,
+         ports::IClock& clk,
+         ports::IRandomSource& rnd,
+         SupervisorProgressCallback prog_cb,
+         SupervisorCompletionCallback comp_cb)
+        : config(std::move(cfg)), launcher(pl), control_plane(cpd), clock(clk), random(rnd),
+          on_progress(std::move(prog_cb)), on_completion(std::move(comp_cb)) {
+        
+        deps = std::make_shared<SessionDependencies>();
+        deps->config = config;
+        deps->launcher = &launcher;
+        deps->control_plane = &control_plane;
+        deps->clock = &clock;
+        deps->on_progress = on_progress;
+        deps->on_completion = on_completion;
+
+        sessions_mutex_ = std::make_shared<std::mutex>();
+        active_sessions_ = std::make_shared<std::unordered_map<std::string, std::shared_ptr<WorkerSessionState>>>();
+    }
+};
+
+WorkerSupervisor::WorkerSupervisor(WorkerSupervisorConfig config,
+                                   ports::IProcessLauncher& launcher,
+                                   ports::IControlPlaneDatabase& control_plane,
+                                   ports::IClock& clock,
+                                   ports::IRandomSource& random,
+                                   SupervisorProgressCallback on_progress,
+                                   SupervisorCompletionCallback on_completion)
+    : impl_(std::make_unique<Impl>(std::move(config), launcher, control_plane, clock, random,
+                                   std::move(on_progress), std::move(on_completion))) {}
+
+WorkerSupervisor::~WorkerSupervisor() {
+    shutdown(base::CancellationToken{});
+}
+
+base::Result<void>
+WorkerSupervisor::submit(const WorkerJobRequest& request, base::CancellationToken cancel) {
+    {
+        std::lock_guard lock(*impl_->sessions_mutex_);
+        if (impl_->active_sessions_->size() >= impl_->config.max_concurrent_workers) {
+            return base::Result<void>::failure(base::Error{base::ErrorCode::kConflict, "max workers reached"});
+        }
+    }
+
+    auto uow_res = impl_->control_plane.begin_unit_of_work(cancel);
+    if (!uow_res) return base::Result<void>::failure(uow_res.error());
+    auto uow = std::move(uow_res).value();
+
+    ports::JobRecord record;
+    record.job_id = request.job_id;
+    record.trace_id = request.trace_id;
+    record.operation = request.operation;
+    record.state = contracts::ServiceJobState::kQueued;
+    record.created_utc_ms = impl_->clock.now_utc_ms();
+    record.source_id = request.source_id;
+    record.repository_connection_id = request.repository_connection_id;
+    record.backup_type = request.backup_type;
+    record.parent_recovery_point_id = request.parent_recovery_point_id;
+    record.idempotency_key = request.idempotency_key;
+
+    if (auto ins_res = uow->jobs().insert(record, cancel); !ins_res) {
+        return base::Result<void>::failure(ins_res.error());
+    }
+
+    std::string pipe_name = generate_pipe_name(impl_->random);
+
+    ports::ProcessLaunchRequest launch_req;
+    launch_req.executable_path = impl_->config.worker_executable_path;
+    launch_req.arguments = {"--pipe", pipe_name};
+
+    auto launch_res = impl_->launcher.launch(launch_req);
+    if (!launch_res) {
+        return base::Result<void>::failure(launch_res.error());
+    }
+
+    ports::JobStateTransition transition;
+    transition.job_id = request.job_id;
+    transition.expected_state = contracts::ServiceJobState::kQueued;
+    transition.next_state = contracts::ServiceJobState::kRunning;
+    transition.transition_utc_ms = impl_->clock.now_utc_ms();
+
+    if (auto t_res = uow->jobs().transition(transition, cancel); !t_res) {
+        (void)impl_->launcher.terminate(launch_res.value().pid);
+        return base::Result<void>::failure(t_res.error());
+    }
+
+    if (auto c_res = uow->commit(cancel); !c_res) {
+        (void)impl_->launcher.terminate(launch_res.value().pid);
+        return base::Result<void>::failure(c_res.error());
+    }
+
+    auto session = std::make_shared<WorkerSessionState>();
+    session->job_id = request.job_id;
+    session->trace_id = request.trace_id;
+    session->operation = request.operation;
+    session->pipe_name = pipe_name;
+    session->worker_pid = launch_res.value().pid;
+
+    {
+        std::lock_guard lock(*impl_->sessions_mutex_);
+        impl_->active_sessions_->emplace(request.job_id, session);
+    }
+
+    contracts::JobRequest job_request;
+    job_request.job_id = request.job_id;
+    job_request.trace_id = request.trace_id;
+    job_request.operation = request.operation;
+    job_request.source_refs = {request.source_id};
+    job_request.target_ref = request.repository_connection_id;
+    
+    auto deadline = request.deadline;
+    if (deadline.count() == 0) {
+        deadline = impl_->config.default_job_deadline;
+    }
+    job_request.deadline_utc_ms = impl_->clock.now_utc_ms() + std::chrono::duration_cast<std::chrono::milliseconds>(deadline).count();
+
+    if (request.operation == contracts::JobOperation::kBackup) {
+        contracts::BackupOptions bo;
+        bo.type = request.backup_type;
+        if (request.parent_recovery_point_id) {
+            bo.parent_source_ref = *request.parent_recovery_point_id;
+        }
+        job_request.backup = bo;
+    }
+
+    session->session_thread = std::jthread(
+        [session, deps = impl_->deps, map_mutex = std::weak_ptr(impl_->sessions_mutex_), map = std::weak_ptr(impl_->active_sessions_), job_request, deadline]() {
+            run_session(session, deps, map_mutex, map, job_request, deadline);
+        });
+
+    return base::Result<void>::success();
+}
+
+base::Result<void>
+WorkerSupervisor::cancel_job(std::string_view job_id, base::CancellationToken cancel) {
+    std::shared_ptr<WorkerSessionState> session;
+    {
+        std::lock_guard lock(*impl_->sessions_mutex_);
+        auto it = impl_->active_sessions_->find(std::string(job_id));
+        if (it == impl_->active_sessions_->end()) {
+            return base::Result<void>::failure(base::Error{base::ErrorCode::kNotFound, "job not found"});
+        }
+        session = it->second;
+    }
+
+    auto uow_res = impl_->control_plane.begin_unit_of_work(cancel);
+    if (!uow_res) return base::Result<void>::failure(uow_res.error());
+    auto uow = std::move(uow_res).value();
+
+    ports::JobStateTransition transition;
+    transition.job_id = std::string(job_id);
+    transition.expected_state = contracts::ServiceJobState::kRunning;
+    transition.next_state = contracts::ServiceJobState::kCancelling;
+    transition.transition_utc_ms = impl_->clock.now_utc_ms();
+
+    if (auto t_res = uow->jobs().transition(transition, cancel); !t_res) {
+        return base::Result<void>::failure(t_res.error());
+    }
+
+    if (auto c_res = uow->commit(cancel); !c_res) {
+        return base::Result<void>::failure(c_res.error());
+    }
+
+    session->cancel_source.request_stop();
+
+    return base::Result<void>::success();
+}
+
+void WorkerSupervisor::shutdown(const base::CancellationToken& cancel) {
+    (void)cancel;
+    std::vector<std::shared_ptr<WorkerSessionState>> sessions;
+    {
+        std::lock_guard lock(*impl_->sessions_mutex_);
+        for (const auto& [id, s] : *impl_->active_sessions_) {
+            sessions.push_back(s);
+        }
+    }
+
+    for (auto& s : sessions) {
+        s->cancel_source.request_stop();
+    }
+
+    auto deadline = std::chrono::steady_clock::now() + impl_->config.stop_drain_timeout;
+    for (auto& s : sessions) {
+        while (!s->completed && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        if (!s->completed) {
+            (void)impl_->launcher.terminate(s->worker_pid);
+        }
+        if (s->session_thread.joinable()) {
+            s->session_thread.join();
+        }
+    }
+}
+
+std::uint32_t WorkerSupervisor::active_count() const noexcept {
+    std::lock_guard lock(*impl_->sessions_mutex_);
+    return static_cast<std::uint32_t>(impl_->active_sessions_->size());
+}
+
+} // namespace aegra::apps::service

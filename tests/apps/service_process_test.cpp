@@ -53,20 +53,31 @@ class ChildProcess final {
             }
             CloseHandle(process_);
         }
+        std::error_code ignored;
+        std::filesystem::remove_all(data_dir_, ignored);
     }
 
     ChildProcess(const ChildProcess&) = delete;
     ChildProcess& operator=(const ChildProcess&) = delete;
     ChildProcess(ChildProcess&& other) noexcept
         : process_(std::exchange(other.process_, nullptr)),
-          exited_(std::exchange(other.exited_, true)) {}
+          exited_(std::exchange(other.exited_, true)),
+          data_dir_(std::exchange(other.data_dir_, {})) {}
     ChildProcess& operator=(ChildProcess&&) = delete;
 
     [[nodiscard]] static ChildProcess start(const std::wstring& executable,
                                             const std::string& pipe_name,
                                             const std::filesystem::path& repository_root = {}) {
         ChildProcess child;
+        child.data_dir_ = std::filesystem::temp_directory_path() / "AegraServiceProcessTests" /
+                          widen_ascii(unique_pipe_name());
+        std::error_code directory_error;
+        std::filesystem::create_directories(child.data_dir_, directory_error);
+        if (directory_error) {
+            return child;
+        }
         std::wstring command = L"\"" + executable + L"\" --once --pipe " + widen_ascii(pipe_name);
+        command += L" --data-dir \"" + child.data_dir_.wstring() + L"\"";
         if (!repository_root.empty()) {
             command += L" --repository-root \"" + repository_root.wstring() + L"\"";
         }
@@ -97,6 +108,7 @@ class ChildProcess final {
 
     HANDLE process_{nullptr};
     bool exited_{false};
+    std::filesystem::path data_dir_;
 };
 
 class TemporaryRepository final {

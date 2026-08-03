@@ -1,6 +1,7 @@
 #pragma once
 
 #include "aegra/ports/object_storage.h"
+#include "aegra/ports/repository_storage.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -60,6 +61,12 @@ class LocalObjectStorage final : public ports::IObjectReader,
     explicit LocalObjectStorage(std::shared_ptr<detail::LocalObjectStorageState> state) noexcept;
 
     std::shared_ptr<detail::LocalObjectStorageState> state_;
+};
+
+class LocalRepositoryStorageFactory final : public ports::IRepositoryStorageFactory {
+  public:
+    [[nodiscard]] base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>
+    open(std::string_view locator, base::CancellationToken cancellation) override;
 };
 
 } // namespace aegra::adapters::storage_local

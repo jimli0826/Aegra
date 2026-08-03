@@ -6,8 +6,8 @@
 schema version。`.bkf`、Recovery Point、Manifest 与 Chunk Index **不是**本库权威数据；数据库删除后
 可从 Repository 与配置重新建立索引。
 
-非目标：Worker Supervisor（S3）、Inventory/Repository API 编排（S4）、Schedule 触发引擎与完整审计查询
-产品能力（S8）、Service Host 接入、Desktop 接入。
+非目标：Worker Supervisor（S3）与 Inventory/Repository API 编排（S4）的业务逻辑、Schedule 触发引擎与
+完整审计查询产品能力（S8）、Desktop 接入。Service composition root 可以构造并注入本 Adapter。
 
 ## 依赖与 Target
 
@@ -18,6 +18,7 @@ src/adapters/sqlite/
 ├── include/aegra/adapters/sqlite/sqlite_control_plane.h
 └── src/
     ├── sqlite_internal.h
+    ├── sqlite_command_store.cpp
     ├── sqlite_control_plane.cpp
     ├── sqlite_support.cpp
     ├── sqlite_schema.cpp
@@ -40,6 +41,7 @@ src/adapters/sqlite/
 - `IJobStore`：insert/get/list/CAS `transition`/`mark_active_as_interrupted`。
 - `IScheduleStore`：upsert/get/list/remove。
 - `IAuditEventStore`：append/list。
+- `ICommandStore`：按 idempotency key 读取/插入不可变 command record。
 - `IControlPlaneUnitOfWork`：同一事务内访问上述 store；显式 `commit`，析构回滚。
 - `IControlPlaneDatabase`：schema version、begin unit of work、只读查询快照。
 
@@ -53,7 +55,9 @@ Service 启动应对 `running` 与 `cancelling` 调用 `mark_active_as_interrupt
   `kUnsupportedVersion`。
 - 外键：`jobs.repository_connection_id` → `ON DELETE SET NULL`；
   `schedules.repository_connection_id` → `ON DELETE CASCADE`。
-- 唯一：`locator`、`idempotency_key`（非空）、至多一个 `is_default=1`。
+- 唯一：Repository `locator`、Job `idempotency_key`（非空）、Command `idempotency_key`、至多一个
+  `is_default=1`。
+- Command record 保存请求指纹、command ID 与可选 resource ID；同键同请求可重放，同键不同请求冲突。
 - 时间全部为非负 UTC 毫秒整数；超出有符号 64 位线范围拒绝。
 - 只存 `SecretRef` 字符串；不存明文凭据、Chunk Index、Manifest 或 Archive metadata。
 
@@ -81,9 +85,10 @@ request kind 或不同 filter 复用 token 返回 `kInvalidArgument`。
 - UTC/非法时间与事务回滚；
 - 损坏数据库与缺失 open-existing；
 - 单写者 + 并发只读。
+- command store 持久化、唯一键、同请求 replay 与请求指纹冲突。
 
 ## Definition of Done
 
 - 细粒度 ports 与独立 SQLite adapter target 可构建；
 - 上述测试通过；
-- 文档同步；顶层 CMake / Service composition 集成列入交接清单。
+- 文档同步；顶层 CMake 与 Service composition 已接入。

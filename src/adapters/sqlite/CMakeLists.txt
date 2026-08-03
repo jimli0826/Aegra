@@ -1,5 +1,6 @@
 add_library(aegra_adapter_sqlite STATIC
     src/sqlite_audit_event_store.cpp
+    src/sqlite_command_store.cpp
     src/sqlite_control_plane.cpp
     src/sqlite_job_store.cpp
     src/sqlite_page_token.cpp

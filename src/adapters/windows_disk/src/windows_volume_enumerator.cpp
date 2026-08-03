@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstddef>
 #include <cstring>
 #include <limits>
@@ -119,7 +120,54 @@ bool load_filesystem_metadata(const wchar_t* volume_name, WindowsVolumeInfo& inf
     info.filesystem = std::move(utf8_filesystem).value();
     info.cluster_size_bytes = static_cast<std::uint32_t>(cluster_size);
     info.filesystem_metadata_available = true;
+    info.is_read_only = (flags & FILE_READ_ONLY_VOLUME) != 0;
     return true;
+}
+
+[[nodiscard]] std::optional<std::wstring> system_volume_root() {
+    std::array<wchar_t, MAX_PATH + 1> windows_directory{};
+    if (GetWindowsDirectoryW(windows_directory.data(),
+                             static_cast<UINT>(windows_directory.size())) == 0) {
+        return std::nullopt;
+    }
+    std::array<wchar_t, MAX_PATH + 1> root{};
+    if (!GetVolumePathNameW(windows_directory.data(), root.data(),
+                            static_cast<DWORD>(root.size()))) {
+        return std::nullopt;
+    }
+    return std::wstring(root.data());
+}
+
+[[nodiscard]] bool equal_path(const std::filesystem::path& left, const std::wstring_view right) {
+    return _wcsicmp(left.c_str(), std::wstring(right).c_str()) == 0;
+}
+
+[[nodiscard]] std::string source_id_for(const std::string_view stable_key) {
+    const auto begin = stable_key.find('{');
+    const auto end = stable_key.find('}', begin == std::string_view::npos ? 0 : begin + 1);
+    if (begin == std::string_view::npos || end == std::string_view::npos || end <= begin + 1) {
+        return {};
+    }
+    std::string id = "vol.";
+    id.append(stable_key.substr(begin + 1, end - begin - 1));
+    std::ranges::transform(id, id.begin(), [](const unsigned char character) {
+        return static_cast<char>(std::tolower(character));
+    });
+    return id;
+}
+
+[[nodiscard]] std::string display_name_for(const WindowsVolumeInfo& volume,
+                                           const std::string_view source_id) {
+    if (!volume.label.empty()) {
+        return volume.label;
+    }
+    if (!volume.mount_points.empty()) {
+        auto mount = to_utf8(volume.mount_points.front().wstring());
+        if (mount && !mount.value().empty()) {
+            return std::move(mount).value();
+        }
+    }
+    return std::string(source_id);
 }
 
 std::wstring volume_device_path(const std::wstring_view volume_name) {
@@ -239,6 +287,54 @@ base::Result<std::vector<WindowsVolumeInfo>> WindowsVolumeEnumerator::enumerate(
             detail::win32_error(error, "FindNextVolumeW"));
     }
     return base::Result<std::vector<WindowsVolumeInfo>>::success(std::move(volumes));
+}
+
+base::Result<std::vector<ports::SourceInventoryRecord>>
+WindowsSourceInventory::list_sources(const base::CancellationToken cancellation) {
+    if (cancellation.stop_requested()) {
+        return base::Result<std::vector<ports::SourceInventoryRecord>>::failure(
+            {base::ErrorCode::kCancelled, "volume inventory cancelled"});
+    }
+    auto volumes = WindowsVolumeEnumerator::enumerate();
+    if (!volumes) {
+        return base::Result<std::vector<ports::SourceInventoryRecord>>::failure(volumes.error());
+    }
+    const auto system_root = system_volume_root();
+    std::vector<ports::SourceInventoryRecord> records;
+    records.reserve(volumes.value().size());
+    for (const auto& volume : volumes.value()) {
+        if (cancellation.stop_requested()) {
+            return base::Result<std::vector<ports::SourceInventoryRecord>>::failure(
+                {base::ErrorCode::kCancelled, "volume inventory cancelled"});
+        }
+        auto stable_key = to_utf8(volume.volume_guid_path.wstring());
+        if (!stable_key) {
+            return base::Result<std::vector<ports::SourceInventoryRecord>>::failure(
+                stable_key.error());
+        }
+        auto source_id = source_id_for(stable_key.value());
+        if (source_id.empty()) {
+            continue;
+        }
+        const bool is_system =
+            system_root && std::ranges::any_of(volume.mount_points, [&](const auto& mount) {
+                return equal_path(mount, *system_root);
+            });
+        records.push_back({
+            .source_id = source_id,
+            .stable_key = std::move(stable_key).value(),
+            .display_name = display_name_for(volume, source_id),
+            .kind = contracts::SourceKind::kVolume,
+            .availability = volume.volume_size_available
+                                ? contracts::SourceAvailability::kAvailable
+                                : contracts::SourceAvailability::kUnavailable,
+            .capacity_bytes = volume.total_size_bytes,
+            .is_system = is_system,
+            .is_read_only = volume.is_read_only,
+        });
+    }
+    std::ranges::sort(records, {}, &ports::SourceInventoryRecord::source_id);
+    return base::Result<std::vector<ports::SourceInventoryRecord>>::success(std::move(records));
 }
 
 } // namespace aegra::adapters::windows_disk

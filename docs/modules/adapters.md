@@ -55,11 +55,16 @@ Snapshot Device Object，Block Source 本身不创建快照。
 Worker 的 Windows 时钟、CNG 随机源和 Credential Manager Resolver 也由独立 Windows System Adapter
 实现；Secret 必须复制到锁页内存并在析构前清零，不允许锁页失败时降级。
 
-`Aegra::AdapterWindowsIpc` 实现本地 Worker Named Pipe Client 与 Service Named Pipe Listener。它只接受
+`Aegra::AdapterWindowsIpc` 实现本地 Worker Named Pipe Client 与 Service/Worker Named Pipe Listener。它只接受
 受限逻辑名称，使用 4 字节 little-endian 长度前缀和帧上限，支持一个 Reader/Writer 并发及
 `CancelIoEx` 取消；它不解析 JSON。Worker 侧 ACL 仍由父进程决定（[ADR-0008](../adr/0008-worker-session-named-pipe-protocol.md)）；
 Service 侧提供显式本地 ACL 与调用方身份校验（[ADR-0014](../adr/0014-windows-service-ipc-security.md)、
 [windows_ipc.md](windows_ipc.md)）。
+
+S3/S4 增加 `Aegra::AdapterWindowsProcess`、`WindowsSourceInventory` 与
+`LocalRepositoryStorageFactory`。Process Adapter 只负责受控 executable/argument 启动、等待和终止；
+Inventory 返回 opaque source ID 并在 Service 内解析为稳定设备 key；Storage Factory 只接受受信任 locator，
+打开后继续复用 Local Object Storage 的根目录安全检查。
 
 ## Dokan/虚拟磁盘约束
 
@@ -81,6 +86,7 @@ S2 实现 `Aegra::AdapterSqlite` / `SqliteControlPlaneDatabase`，实现 `ports/
 Store。只保存 Repository 连接（含 SecretRef）、Job、Schedule、Event/Audit 与 schema version；不保存
 明文凭据或 Recovery Point 权威数据。Schema 迁移在打开事务中完成；Job 支持状态机 CAS 与启动时
 running/cancelling → interrupted 收敛。详见 [control_plane_sqlite.md](control_plane_sqlite.md)。
+Command store 还持久化幂等请求指纹与 command/resource ID，支持 Service command replay 和冲突检测。
 
 ## PostgreSQL 约束
 

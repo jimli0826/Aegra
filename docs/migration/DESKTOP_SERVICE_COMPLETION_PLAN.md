@@ -5,10 +5,10 @@
 本文把旧项目 `backup/src/gui` 中仍有价值的 Desktop 体验迁移到 Aegra，并收敛个人版 Service 剩余控制面工作。
 它是后续 agent 领取任务、确定文件所有权和验收合并的执行依据。
 
-当前基线为阶段 13C + D0/D1/S0：Desktop 已能通过 schema 3 Named Pipe 与 Service 握手、自动重连并分页查询个人版
-Recovery Point；Repository 页面、无边框窗口、折叠侧栏和 `blueExtra` 主题已迁移。Worker 已能执行 Backup、
-Verify 和非系统卷 Restore，但 Service 尚未监督 Worker，也没有任务、计划、事件和 Repository 连接状态的
-持久化控制面。
+当前基线为阶段 13C + D0/D1/S0-S4：Desktop 已能通过 schema 3 Named Pipe 与 Service 握手、自动重连并分页
+查询个人版 Recovery Point；Repository 页面、无边框窗口、折叠侧栏和 `blueExtra` 主题已迁移。Service 已接入
+SQLite 控制面、Inventory、Repository connection/query API 和单任务 Worker Supervisor；计划触发、完整事件查询、
+Verify/Restore/Mount Service 编排与对应 Desktop 页面仍待后续工作包完成。
 
 工作包状态最后更新于 2026-08-03。状态定义如下：
 
@@ -132,21 +132,21 @@ Makefile、`release/` 生成物和 `.bak` 文件全部禁止迁移。
 | D0 | 已完成 | P0 | Desktop 国际化基础 | Linguist、LocaleController、语言设置、门禁测试 | 无 |
 | D1 | 已完成 | P0 | Desktop 客户端分层 | transport、request coordinator、models、协议适配边界 | 无 |
 | S0 | 已完成 | P0 | Service 协议 V3 | commands/queries/events DTO、codec、ADR | 无 |
-| S1 | 进行中 | P1 | 正式 Windows Service 边界 | SCM、Pipe ACL、调用方身份、安装生命周期 | S0 |
-| S2 | 进行中 | P1 | SQLite 控制面 | schema、repository connection、job/schedule/event stores | S0 |
-| S3 | 等待前置 | P1 | Worker Supervisor | 启动、进度、取消、崩溃回收、结果持久化 | S0, S2 |
-| S4 | 等待前置 | P1 | Inventory 与 Repository API | source inventory、connection/test、recovery point queries | S0, S2 |
+| S1 | 已完成 | P1 | 正式 Windows Service 边界 | SCM、Pipe ACL、调用方身份、安装生命周期 | S0 |
+| S2 | 已完成 | P1 | SQLite 控制面 | schema、repository connection、job/schedule/event stores | S0 |
+| S3 | 已完成 | P1 | Worker Supervisor | 启动、进度、取消、崩溃回收、结果持久化 | S0, S2 |
+| S4 | 已完成 | P1 | Inventory 与 Repository API | source inventory、connection/test、recovery point queries | S0, S2 |
 | D2 | 可开始 | P1 | Home 与全局任务体验 | Home、Splash、toast、task model | D0, D1, S0 |
-| D3 | 等待前置 | P1 | Backup 页面 | source/target/options、启动/取消/进度 | D0, D1, S3, S4 |
-| S5 | 等待前置 | P2 | Archive 深度操作 | authenticate、verify、显式链解析、删除计划 | S2, S3, S4 |
+| D3 | 可开始 | P1 | Backup 页面 | source/target/options、启动/取消/进度 | D0, D1, S3, S4 |
+| S5 | 可开始 | P2 | Archive 深度操作 | authenticate、verify、显式链解析、删除计划 | S2, S3, S4 |
 | S6 | 等待前置 | P2 | Restore 编排 | preflight、目标检查、任务监督、结果查询 | S3, S5 |
 | D4 | 等待前置 | P2 | Restore 页面 | recovery point、链、目标、确认、进度 | D0, D1, S6 |
 | D5 | 等待前置 | P2 | Repository 管理 | add/import/test/default/delete/verify actions | D0, D1, S4, S5 |
 | S7 | 等待前置 | P3 | Mount Host 编排 | mounted session、unmount、崩溃清理 | S3, S5 |
 | D6 | 等待前置 | P3 | Mount 页面 | mount/unmount/session table | D0, D1, S7 |
-| S8 | 等待前置 | P3 | Schedule 与 Event/Audit | trigger engine、history、paged queries | S2, S3 |
+| S8 | 可开始 | P3 | Schedule 与 Event/Audit | trigger engine、history、paged queries | S2, S3 |
 | D7 | 等待前置 | P3 | Event Log 页面 | filter、分页、详情、导出入口 | D0, D1, S8 |
-| D8 | 等待前置 | P3 | Settings 页面 | language、theme、service/repository settings | D0, D1, S1, S4 |
+| D8 | 可开始 | P3 | Settings 页面 | language、theme、service/repository settings | D0, D1, S1, S4 |
 | R0 | 等待前置 | Gate | 发布工程 | installer、upgrade/uninstall、recovery、diagnostics、E2E | 全部发布范围 |
 
 ## 6. P0 基础工作包
@@ -202,7 +202,7 @@ V3 codec 只在 S0 contract 合并后由 integration owner 接入。
 
 ### S1：Windows Service 与 IPC 安全
 
-**状态：库级完成（Composition Root 接线待 integration owner）。** 决策见
+**状态：已完成。** 正式 Composition Root 已接入 SCM `ServiceMain`、授权 Host 和 Service ACL。决策见
 [ADR-0014](../adr/0014-windows-service-ipc-security.md)。
 
 - 提供 SCM 安装、启动、停止、恢复策略和受控卸载入口（`IWindowsServiceControlManager` + Fake/Win32）。
@@ -213,12 +213,13 @@ V3 codec 只在 S0 contract 合并后由 integration owner 接入。
 
 ### S2：个人版 SQLite 控制面
 
-**状态：Adapter/ports 已完成（独立可测）；Service composition 接入待 integration owner。**
+**状态：已完成。** Adapter/ports 已独立验证并接入 Service composition root。
 
 - 已增加 `ports/control_plane.h` 与 `Aegra::AdapterSqlite`，保存 Repository connection、SecretRef、Job、
   Schedule、Event/Audit 和 schema version。
 - 使用迁移事务、外键、唯一约束和显式 UTC 时间；Service 单写者，读操作有一致快照语义。
 - Job 状态机至少包含 queued/running/cancelling/succeeded/failed/cancelled/interrupted。
+- command store 持久化幂等键、请求指纹、command/resource ID；同键同请求返回 replay，不同请求返回冲突。
 - Service 启动时把遗留 running/cancelling 任务收敛为 interrupted（`mark_active_as_interrupted`），
   并由上层策略决定是否允许重新提交。
 - 数据库删除后可由 Repository 与配置重新建立索引；不得把 DB 当作 `.bkf` 或 Recovery Point 的权威来源。
@@ -227,24 +228,32 @@ V3 codec 只在 S0 contract 合并后由 integration owner 接入。
 
 ### S3：Worker Supervisor
 
-**状态：等待前置 S2 集成到 Service composition root。**
+**状态：已完成。**
 
-- 从受信任配置构造 Worker 命令行和随机 Pipe 名，启动单任务低权限/适当权限 Worker。
+- 从受信任配置构造 Worker 命令行和随机 Pipe 名；默认 Worker 为 Service 可执行文件同目录的
+  `aegra_personal_worker.exe`，`--worker-path` 可覆盖绝对路径。
 - 完成 Job/Cancel、Progress/Result 会话，持久化状态转换和最终稳定结果。
 - 支持 Desktop 取消、Service 停止、deadline、Worker crash、无 Result 退出和 Pipe 断开。
 - 进程退出码只用于快速分类，权威结果来自合法 `WorkerResponse`；stderr 不作为协议。
 - Service 重启后不尝试附着到未知 Worker；标记 interrupted，并清理遗留 IPC/临时状态。
-- 添加 fake-process 单元测试和真实 Worker 进程测试，覆盖成功、拒绝、取消、超时和崩溃。
+- 每个 live Worker session 由一个拥有生命周期的 `std::jthread` 处理；Supervisor 序列化 submit/shutdown，
+  会话完成后回收线程与进程状态。
+- Worker listener 使用独立 `aegra-worker-*` namespace 和 1 MiB frame limit；真实 Worker 进程测试覆盖
+  launch、协议交互、失败结果持久化与 session 回收。
 
 ### S4：Inventory 与 Repository Connection API
 
-**状态：等待前置 S2。**
+**状态：已完成。** Application/ports、Windows Inventory、Local Storage Factory、Host dispatch、capability 与
+Service composition root 已接入。
 
 - Inventory query 返回稳定 source ID、卷标签、容量、系统/只读/可选状态，不暴露可伪造的 Desktop 路径输入。
 - Repository connection 支持 add/import/test/set-default/list/remove；持久化根定位符和 SecretRef，不保存明文凭据。
-- Recovery Point list 继续从 Repository Catalog Scanner 获取，并带连接 ID、能力和 stale/scan 状态。
-- 删除连接只删除控制面引用，除非独立 destructive command 明确确认，不删除 `.bkf`。
-- 测试未配置、离线、损坏 catalog、取消、分页稳定性和多个 Repository。
+- Recovery Point list 继续从 Repository Catalog Scanner 获取，并带连接 ID；离线/未配置返回
+  `not_configured`，损坏 catalog 返回结构化失败。
+- 删除连接只删除控制面引用，不删除 `.bkf`。
+- Application 测试覆盖未配置、离线、损坏 catalog、取消、分页与多 Repository。
+- Repository descriptor 读取允许重复短读并限制为 1 MiB；source ID 解析为 Adapter 内部受信任稳定 key，
+  重复 source ID 拒绝启动任务。
 
 ### D2：Home、Splash 与全局任务体验
 
@@ -257,7 +266,7 @@ V3 codec 只在 S0 contract 合并后由 integration owner 接入。
 
 ### D3：Backup 页面
 
-**状态：等待前置 S3、S4。**
+**状态：可开始。**
 
 - 将旧 2480 行页面拆为 source selector、repository selector、backup options、schedule editor、confirmation 和 progress。
 - source 只来自 Service Inventory model；target 只来自 Repository connection model。
@@ -269,7 +278,7 @@ V3 codec 只在 S0 contract 合并后由 integration owner 接入。
 
 ### S5：Archive 深度扫描、Verify 与删除计划
 
-**状态：等待前置 S2、S3、S4。**
+**状态：可开始。**
 
 - 区分 Catalog 摘要扫描与需要凭据的 Archive 认证；列表成功不代表可恢复。
 - 由 `personal_repository` 解析显式 base-first 链、缺层、循环、parent mismatch 和 credential mapping。
@@ -314,7 +323,7 @@ V3 codec 只在 S0 contract 合并后由 integration owner 接入。
 
 ### S8 / D7：Schedule 与 Event Log
 
-**状态：S8 等待前置 S2、S3；D7 等待前置 S8。**
+**状态：S8 可开始；D7 等待前置 S8。**
 
 - Schedule engine 使用持久化 next-run 和 timezone/UTC 规则；机器休眠、时钟跳变和 missed run 有确定策略。
 - 同一 schedule 触发使用幂等 key，避免 Service 重启重复启动备份。
@@ -323,7 +332,7 @@ V3 codec 只在 S0 contract 合并后由 integration owner 接入。
 
 ### D8：Settings
 
-**状态：等待前置 S1、S4。**
+**状态：可开始。**
 
 - 迁移语言、主题、Service 状态、默认 Repository 和诊断入口。
 - 语言和纯 UI 主题保存在 Desktop `QSettings`；影响 Service 行为的设置必须通过 Service API。
@@ -365,15 +374,31 @@ V3 codec 只在 S0 contract 合并后由 integration owner 接入。
 
 ```text
 Wave 0: D0 + D1 + S0
-Wave 1: S1 + S2 + S4；S0 合并后启动 D2 静态部分
-Wave 2: S3；随后 D3 接入并完成备份闭环
-Wave 3: S5 + S6；随后 D4 + D5
-Wave 4: S7 + S8；随后 D6 + D7 + D8
-Wave 5: R0 发布门禁与全链路回归
+Wave 1: S1 + S2（已完成）
+Wave 2: S3 + S4（已完成）
+Wave 3: D2 + D3；S5 可与 Desktop 基础工作并行
+Wave 4: S5 + S6；随后 D4 + D5
+Wave 5: S7 + S8；随后 D6 + D7 + D8
+Wave 6: R0 发布门禁与全链路回归
 ```
 
 同一 wave 表示允许并行，不表示可以忽略表中前置依赖。每个 Service API 先合并 contract 和 fake-backed
 contract test，Desktop agent 才开始真实接入。
+
+### 11.4 下一轮双 Agent 安排
+
+**Agent A：S5 Archive 深度操作**
+
+- 实现 Archive authenticate、显式链解析、Verify job 和删除影响计划，复用现有 Worker Supervisor。
+- 独占 S5 Application/Service handler 与专属测试；需要扩展公共协议时先由 protocol owner 合入 contract。
+
+**Agent B：D2 Home 与全局任务体验**
+
+- 实现 Home、Splash、全局 task model、toast 和 loading/error 状态，复用现有 D0/D1 Desktop 分层。
+- 独占 Home/Task 领域 QML、models 和专属测试；不修改 S5 Service 领域实现。
+
+**集成交接**：Service integration owner 负责 S5 capability/composition 接线，Desktop integration owner 负责
+导航、共享翻译目录和顶层 CMake。两项可并行；S5 合并后再由后续 D3/D5 消费真实 Verify/删除能力。
 
 ## 12. 测试与发布门禁
 

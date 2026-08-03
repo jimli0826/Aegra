@@ -49,6 +49,9 @@ class SqliteControlPlaneDatabase final : public ports::IControlPlaneDatabase {
                                 base::CancellationToken cancellation) override;
     [[nodiscard]] base::Result<std::optional<ports::JobRecord>>
     get_job(std::string_view job_id, base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<std::optional<ports::JobRecord>>
+    get_job_by_idempotency_key(std::string_view idempotency_key,
+                               base::CancellationToken cancellation) override;
     [[nodiscard]] base::Result<contracts::JobPage>
     list_jobs(const contracts::JobListRequest& request,
               base::CancellationToken cancellation) override;
@@ -60,6 +63,8 @@ class SqliteControlPlaneDatabase final : public ports::IControlPlaneDatabase {
     [[nodiscard]] base::Result<contracts::AuditEventPage>
     list_audit_events(const contracts::AuditEventListRequest& request,
                       base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<std::optional<ports::CommandRecord>>
+    get_command(std::string_view idempotency_key, base::CancellationToken cancellation) override;
 
   private:
     explicit SqliteControlPlaneDatabase(

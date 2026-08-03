@@ -76,7 +76,8 @@ ports::RepositoryConnectionRecord make_connection(const std::string& id, const s
 }
 
 ports::JobRecord make_job(const std::string& id, const contracts::ServiceJobState state,
-                          const std::uint64_t created, const std::optional<std::string>& connection) {
+                          const std::uint64_t created,
+                          const std::optional<std::string>& connection) {
     ports::JobRecord record;
     record.job_id = id;
     record.trace_id = "trace-" + id;
@@ -97,6 +98,40 @@ ports::JobRecord make_job(const std::string& id, const contracts::ServiceJobStat
     return record;
 }
 
+bool test_command_store_persistence_and_uniqueness() {
+    TemporaryDirectory directory;
+    auto database = open_db(directory.database_path());
+    if (!database)
+        return false;
+
+    auto unit = database.value()->begin_unit_of_work({});
+    if (!unit)
+        return false;
+    ports::CommandRecord command{"idem-command", "fingerprint-a", "command-1", "resource-1", 100};
+    bool passed = expect(unit.value()->commands().insert(command, {}).has_value(),
+                         "command record inserts") &&
+                  expect(unit.value()->commit({}).has_value(), "command record commits");
+    auto loaded = database.value()->get_command("idem-command", {});
+    passed &= expect(loaded && loaded.value() && loaded.value()->command_id == "command-1" &&
+                         loaded.value()->request_fingerprint == "fingerprint-a" &&
+                         loaded.value()->resource_id == "resource-1",
+                     "command acknowledgement persists across the database facade");
+
+    auto duplicate = database.value()->begin_unit_of_work({});
+    if (!duplicate)
+        return false;
+    auto conflict = duplicate.value()->commands().insert(
+        {"idem-command", "fingerprint-b", "command-2", "resource-2", 101}, {});
+    passed &= expect(!conflict && conflict.error().code == base::ErrorCode::kConflict,
+                     "idempotency key is unique");
+    duplicate.value()->rollback();
+    auto unchanged = database.value()->get_command("idem-command", {});
+    passed &= expect(unchanged && unchanged.value() &&
+                         unchanged.value()->request_fingerprint == "fingerprint-a",
+                     "conflicting command does not replace durable acknowledgement");
+    return passed;
+}
+
 bool test_schema_open_and_secret_ref_only() {
     TemporaryDirectory directory;
     auto database = open_db(directory.database_path());
@@ -113,7 +148,8 @@ bool test_schema_open_and_secret_ref_only() {
     auto connection = make_connection("conn-1", "file:///repos/one", true, 1'700'000'000'000ULL);
     passed &= expect(unit.value()->repository_connections().upsert(connection, {}).has_value(),
                      "upsert repository connection");
-    auto job = make_job("job-1", contracts::ServiceJobState::kQueued, 1'700'000'000'100ULL, "conn-1");
+    auto job =
+        make_job("job-1", contracts::ServiceJobState::kQueued, 1'700'000'000'100ULL, "conn-1");
     passed &= expect(unit.value()->jobs().insert(job, {}).has_value(), "insert queued job");
     ports::ScheduleRecord schedule;
     schedule.schedule_id = "sched-1";
@@ -170,8 +206,8 @@ bool test_job_state_machine_and_interrupt_convergence() {
     auto queued = make_job("job-run", contracts::ServiceJobState::kQueued, 200, "conn-1");
     passed &= expect(unit.value()->jobs().insert(queued, {}).has_value(), "insert job");
     auto illegal = unit.value()->jobs().transition(
-        {"job-run", contracts::ServiceJobState::kQueued, contracts::ServiceJobState::kSucceeded, 250,
-         "job.succeeded", std::nullopt, std::nullopt, "job.succeeded"},
+        {"job-run", contracts::ServiceJobState::kQueued, contracts::ServiceJobState::kSucceeded,
+         250, "job.succeeded", std::nullopt, std::nullopt, "job.succeeded"},
         {});
     passed &= expect(!illegal && illegal.error().code == aegra::base::ErrorCode::kInvalidArgument,
                      "illegal queued->succeeded rejected");
@@ -183,11 +219,12 @@ bool test_job_state_machine_and_interrupt_convergence() {
                          running.value().started_utc_ms == 260,
                      "queued->running transition");
     auto cancelling = unit.value()->jobs().transition(
-        {"job-run", contracts::ServiceJobState::kRunning, contracts::ServiceJobState::kCancelling, 270,
-         "job.cancelling", std::nullopt, std::nullopt, std::nullopt},
+        {"job-run", contracts::ServiceJobState::kRunning, contracts::ServiceJobState::kCancelling,
+         270, "job.cancelling", std::nullopt, std::nullopt, std::nullopt},
         {});
-    passed &= expect(cancelling && cancelling.value().state == contracts::ServiceJobState::kCancelling,
-                     "running->cancelling transition");
+    passed &=
+        expect(cancelling && cancelling.value().state == contracts::ServiceJobState::kCancelling,
+               "running->cancelling transition");
     auto cas_miss = unit.value()->jobs().transition(
         {"job-run", contracts::ServiceJobState::kRunning, contracts::ServiceJobState::kFailed, 280,
          "job.failed", 9, 3, "job.failed"},
@@ -235,19 +272,20 @@ bool test_foreign_keys_and_unique_constraints() {
     second.is_default = true;
     passed &= expect(unit.value()->repository_connections().upsert(second, {}).has_value(),
                      "second connection becomes sole default");
-    auto listed = unit.value()->repository_connections().list({{50, std::nullopt}, std::nullopt}, {});
+    auto listed =
+        unit.value()->repository_connections().list({{50, std::nullopt}, std::nullopt}, {});
     passed &= expect(listed && listed.value().items.size() == 2, "two connections listed");
     if (listed) {
-        const auto defaults =
-            static_cast<int>(listed.value().items[0].is_default) +
-            static_cast<int>(listed.value().items[1].is_default);
+        const auto defaults = static_cast<int>(listed.value().items[0].is_default) +
+                              static_cast<int>(listed.value().items[1].is_default);
         passed &= expect(defaults == 1, "exactly one default connection");
     }
 
-    auto orphan_job = make_job("job-orphan", contracts::ServiceJobState::kQueued, 120, "missing-conn");
+    auto orphan_job =
+        make_job("job-orphan", contracts::ServiceJobState::kQueued, 120, "missing-conn");
     auto orphan = unit.value()->jobs().insert(orphan_job, {});
-    passed &=
-        expect(!orphan && orphan.error().code == aegra::base::ErrorCode::kConflict, "FK rejects orphan job");
+    passed &= expect(!orphan && orphan.error().code == aegra::base::ErrorCode::kConflict,
+                     "FK rejects orphan job");
 
     auto good_job = make_job("job-1", contracts::ServiceJobState::kQueued, 130, "conn-2");
     passed &= expect(unit.value()->jobs().insert(good_job, {}).has_value(), "job with valid FK");
@@ -301,8 +339,10 @@ bool test_utc_and_transaction_rollback() {
     auto invalid = unit.value()->jobs().insert(bad_job, {});
     passed &= expect(!invalid, "invalid timestamps rejected");
     unit.value()->rollback();
-    auto listed = database.value()->list_repository_connections({{50, std::nullopt}, std::nullopt}, {});
-    passed &= expect(listed && listed.value().items.empty(), "rollback discards uncommitted writes");
+    auto listed =
+        database.value()->list_repository_connections({{50, std::nullopt}, std::nullopt}, {});
+    passed &=
+        expect(listed && listed.value().items.empty(), "rollback discards uncommitted writes");
     return passed;
 }
 
@@ -321,8 +361,7 @@ bool test_corrupt_database() {
 
 bool test_open_existing_missing() {
     TemporaryDirectory directory;
-    auto database =
-        open_db(directory.database_path(), sqlite_cp::SqliteOpenMode::kOpenExisting);
+    auto database = open_db(directory.database_path(), sqlite_cp::SqliteOpenMode::kOpenExisting);
     return expect(!database && database.error().code == aegra::base::ErrorCode::kNotFound,
                   "open existing rejects missing database");
 }
@@ -351,9 +390,8 @@ bool test_concurrent_readers_with_single_writer() {
     for (int index = 0; index < 4; ++index) {
         readers.emplace_back([&database, &readers_ok] {
             for (int round = 0; round < 20; ++round) {
-                auto page =
-                    database.value()->list_repository_connections({{10, std::nullopt}, std::nullopt},
-                                                                  {});
+                auto page = database.value()->list_repository_connections(
+                    {{10, std::nullopt}, std::nullopt}, {});
                 if (!page || page.value().items.size() != 1) {
                     readers_ok = false;
                     return;
@@ -395,9 +433,8 @@ bool test_concurrent_readers_with_single_writer() {
     for (auto& reader : readers) {
         reader.join();
     }
-    auto events = database.value()->list_audit_events({{50, std::nullopt}, std::nullopt, std::nullopt,
-                                                       std::nullopt, std::nullopt},
-                                                      {});
+    auto events = database.value()->list_audit_events(
+        {{50, std::nullopt}, std::nullopt, std::nullopt, std::nullopt, std::nullopt}, {});
     return expect(writer_ok && readers_ok.load() && events && events.value().items.size() == 10,
                   "single writer and concurrent readers stay consistent");
 }
@@ -410,10 +447,9 @@ bool test_second_unit_of_work_conflict() {
     }
     auto first = database.value()->begin_unit_of_work({});
     auto second = database.value()->begin_unit_of_work({});
-    const bool passed =
-        expect(first.has_value(), "first unit of work opens") &&
-        expect(!second && second.error().code == aegra::base::ErrorCode::kConflict,
-               "second concurrent write unit is rejected");
+    const bool passed = expect(first.has_value(), "first unit of work opens") &&
+                        expect(!second && second.error().code == aegra::base::ErrorCode::kConflict,
+                               "second concurrent write unit is rejected");
     if (first) {
         first.value()->rollback();
     }
@@ -469,12 +505,11 @@ bool test_finished_unit_of_work_rejects_store_access() {
     auto late = make_connection("conn-late", "file:///repos/late", false, 110);
     auto late_write = unit.value()->repository_connections().upsert(late, {});
     auto late_read = unit.value()->repository_connections().get("conn-committed", {});
-    bool passed = expect(!late_write &&
-                             late_write.error().code == aegra::base::ErrorCode::kConflict,
-                         "finished unit rejects transaction-external writes") &&
-                  expect(!late_read &&
-                             late_read.error().code == aegra::base::ErrorCode::kConflict,
-                         "finished unit rejects transaction-external reads");
+    bool passed =
+        expect(!late_write && late_write.error().code == aegra::base::ErrorCode::kConflict,
+               "finished unit rejects transaction-external writes") &&
+        expect(!late_read && late_read.error().code == aegra::base::ErrorCode::kConflict,
+               "finished unit rejects transaction-external reads");
     auto listed =
         database.value()->list_repository_connections({{50, std::nullopt}, std::nullopt}, {});
     passed &= expect(listed && listed.value().items.size() == 1 &&
@@ -590,32 +625,26 @@ bool test_continuation_token_scope_and_filter() {
 
     auto connection_page =
         database.value()->list_repository_connections({{1, std::nullopt}, std::nullopt}, {});
-    bool passed =
-        expect(connection_page && connection_page.value().items.size() == 1 &&
-                   connection_page.value().continuation_token.has_value(),
-               "connection page yields scoped token");
+    bool passed = expect(connection_page && connection_page.value().items.size() == 1 &&
+                             connection_page.value().continuation_token.has_value(),
+                         "connection page yields scoped token");
     if (!passed) {
         return false;
     }
-    const auto job_with_connection_token =
-        database.value()->list_jobs({{1, connection_page.value().continuation_token}, std::nullopt,
-                                     std::nullopt},
-                                    {});
-    passed &= expect(!job_with_connection_token &&
-                         job_with_connection_token.error().code ==
-                             aegra::base::ErrorCode::kInvalidArgument,
-                      "job list rejects repository continuation token");
+    const auto job_with_connection_token = database.value()->list_jobs(
+        {{1, connection_page.value().continuation_token}, std::nullopt, std::nullopt}, {});
+    passed &= expect(!job_with_connection_token && job_with_connection_token.error().code ==
+                                                       aegra::base::ErrorCode::kInvalidArgument,
+                     "job list rejects repository continuation token");
 
     auto oversized_cursor = database.value()->list_repository_connections(
         {{1, std::string{"v1|rc|s%3d%2a|18446744073709551615|conn-0"}}, std::nullopt}, {});
     passed &= expect(!oversized_cursor &&
-                         oversized_cursor.error().code ==
-                             aegra::base::ErrorCode::kInvalidArgument,
+                         oversized_cursor.error().code == aegra::base::ErrorCode::kInvalidArgument,
                      "token rejects timestamp outside SQLite integer range");
 
-    auto filtered =
-        database.value()->list_repository_connections(
-            {{1, std::nullopt}, contracts::RepositoryConnectionState::kAvailable}, {});
+    auto filtered = database.value()->list_repository_connections(
+        {{1, std::nullopt}, contracts::RepositoryConnectionState::kAvailable}, {});
     passed &= expect(filtered && filtered.value().continuation_token.has_value(),
                      "filtered connection page yields token");
     if (filtered && filtered.value().continuation_token) {
@@ -637,14 +666,15 @@ bool test_continuation_token_scope_and_filter() {
 
 int main() {
     const bool passed =
-        test_schema_open_and_secret_ref_only() && test_job_state_machine_and_interrupt_convergence() &&
+        test_schema_open_and_secret_ref_only() && test_command_store_persistence_and_uniqueness() &&
+        test_job_state_machine_and_interrupt_convergence() &&
         test_foreign_keys_and_unique_constraints() && test_utc_and_transaction_rollback() &&
         test_corrupt_database() && test_open_existing_missing() &&
         test_concurrent_readers_with_single_writer() && test_second_unit_of_work_conflict() &&
         test_unit_of_work_owns_database_lifetime() &&
         test_finished_unit_of_work_rejects_store_access() &&
-        test_uncommitted_writes_not_visible_to_readers() && test_default_upsert_failure_is_atomic() &&
-        test_continuation_token_scope_and_filter();
+        test_uncommitted_writes_not_visible_to_readers() &&
+        test_default_upsert_failure_is_atomic() && test_continuation_token_scope_and_filter();
     if (!passed) {
         std::cerr << "sqlite control plane tests failed\n";
         return EXIT_FAILURE;

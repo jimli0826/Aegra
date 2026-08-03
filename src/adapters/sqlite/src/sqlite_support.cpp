@@ -20,6 +20,7 @@ constexpr std::size_t kMaximumCapabilities = 64;
 constexpr std::size_t kMaximumCapabilityBytes = 64;
 constexpr std::size_t kMaximumTimezoneBytes = 128;
 constexpr std::size_t kMaximumTokenBytes = 1'024;
+constexpr std::size_t kMaximumCommandFingerprintBytes = 4'096;
 
 [[nodiscard]] bool valid_stable_character(const unsigned char value) noexcept {
     return (value >= 'a' && value <= 'z') || (value >= '0' && value <= '9') || value == '.' ||
@@ -65,7 +66,8 @@ constexpr std::size_t kMaximumTokenBytes = 1'024;
            type == contracts::BackupType::kDifferential;
 }
 
-[[nodiscard]] bool known_repository_state(const contracts::RepositoryConnectionState state) noexcept {
+[[nodiscard]] bool
+known_repository_state(const contracts::RepositoryConnectionState state) noexcept {
     return state == contracts::RepositoryConnectionState::kAvailable ||
            state == contracts::RepositoryConnectionState::kUnavailable;
 }
@@ -139,9 +141,7 @@ constexpr std::size_t kMaximumTokenBytes = 1'024;
 
 } // namespace
 
-base::Error make_error(const base::ErrorCode code, const char* message) {
-    return {code, message};
-}
+base::Error make_error(const base::ErrorCode code, const char* message) { return {code, message}; }
 
 base::Result<void> check_cancelled(const base::CancellationToken cancellation) {
     if (cancellation.stop_requested()) {
@@ -176,8 +176,8 @@ base::Result<void> map_sqlite_result(const int rc, sqlite3* const db, const char
             make_error(base::ErrorCode::kConflict, "control plane constraint violated"));
     }
     if (rc == SQLITE_FULL || rc == SQLITE_IOERR || rc == SQLITE_CANTOPEN) {
-        return base::Result<void>::failure(
-            make_error(base::ErrorCode::kIoFailure, context != nullptr ? context : "sqlite io failure"));
+        return base::Result<void>::failure(make_error(
+            base::ErrorCode::kIoFailure, context != nullptr ? context : "sqlite io failure"));
     }
     (void)db;
     return base::Result<void>::failure(
@@ -211,8 +211,7 @@ void SqliteStatement::finalize() noexcept {
 base::Result<SqliteStatement> SqliteStatement::prepare(sqlite3* const db,
                                                        const std::string_view sql) {
     sqlite3_stmt* stmt = nullptr;
-    const int rc =
-        sqlite3_prepare_v2(db, sql.data(), static_cast<int>(sql.size()), &stmt, nullptr);
+    const int rc = sqlite3_prepare_v2(db, sql.data(), static_cast<int>(sql.size()), &stmt, nullptr);
     auto mapped = map_sqlite_result(rc, db, "prepare statement failed");
     if (!mapped) {
         if (stmt != nullptr) {
@@ -229,8 +228,8 @@ base::Result<void> SqliteStatement::bind_text(const int index, const std::string
     return map_sqlite_result(rc, sqlite3_db_handle(stmt_), "bind text failed");
 }
 
-base::Result<void>
-SqliteStatement::bind_text_nullable(const int index, const std::optional<std::string>& value) {
+base::Result<void> SqliteStatement::bind_text_nullable(const int index,
+                                                       const std::optional<std::string>& value) {
     if (!value) {
         return bind_null(index);
     }
@@ -242,8 +241,8 @@ base::Result<void> SqliteStatement::bind_int64(const int index, const std::int64
                              "bind int64 failed");
 }
 
-base::Result<void>
-SqliteStatement::bind_int64_nullable(const int index, const std::optional<std::uint64_t>& value) {
+base::Result<void> SqliteStatement::bind_int64_nullable(const int index,
+                                                        const std::optional<std::uint64_t>& value) {
     if (!value) {
         return bind_null(index);
     }
@@ -323,8 +322,7 @@ std::string encode_message_arguments(const contracts::MessageArguments& argument
     return encoded;
 }
 
-base::Result<contracts::MessageArguments>
-decode_message_arguments(const std::string_view encoded) {
+base::Result<contracts::MessageArguments> decode_message_arguments(const std::string_view encoded) {
     contracts::MessageArguments arguments;
     if (encoded.empty()) {
         return base::Result<contracts::MessageArguments>::success(std::move(arguments));
@@ -387,14 +385,13 @@ validate_repository_connection_record(const ports::RepositoryConnectionRecord& r
     if (!valid_stable_value(record.connection_id, kMaximumIdentifierBytes) ||
         !valid_text(record.display_name, kMaximumDisplayNameBytes) ||
         !valid_text(record.locator, kMaximumLocatorBytes) ||
-        !known_repository_state(record.state) ||
-        !valid_wire_integer(record.created_utc_ms) || !valid_wire_integer(record.updated_utc_ms) ||
+        !known_repository_state(record.state) || !valid_wire_integer(record.created_utc_ms) ||
+        !valid_wire_integer(record.updated_utc_ms) ||
         record.updated_utc_ms < record.created_utc_ms ||
         record.capabilities.size() > kMaximumCapabilities) {
         return invalid("repository connection record is invalid");
     }
-    if (record.credential_ref &&
-        !valid_text(record.credential_ref->value, kMaximumLocatorBytes)) {
+    if (record.credential_ref && !valid_text(record.credential_ref->value, kMaximumLocatorBytes)) {
         return invalid("repository credential ref is invalid");
     }
     std::string_view previous;
@@ -428,8 +425,8 @@ base::Result<void> validate_job_record(const ports::JobRecord& record) {
         (record.backup_type && !known_backup_type(*record.backup_type)) ||
         (record.parent_recovery_point_id &&
          !valid_stable_value(*record.parent_recovery_point_id, kMaximumIdentifierBytes)) ||
-        (record.preflight_token &&
-         (record.preflight_token->empty() || record.preflight_token->size() > kMaximumTokenBytes)) ||
+        (record.preflight_token && (record.preflight_token->empty() ||
+                                    record.preflight_token->size() > kMaximumTokenBytes)) ||
         (record.idempotency_key &&
          !valid_stable_value(*record.idempotency_key, kMaximumIdentifierBytes)) ||
         (record.result_message_code &&
@@ -482,6 +479,17 @@ base::Result<void> validate_audit_event_record(const ports::AuditEventRecord& re
     return base::Result<void>::success();
 }
 
+base::Result<void> validate_command_record(const ports::CommandRecord& record) {
+    if (!valid_stable_value(record.idempotency_key, kMaximumIdentifierBytes) ||
+        !valid_text(record.request_fingerprint, kMaximumCommandFingerprintBytes) ||
+        !valid_stable_value(record.command_id, kMaximumIdentifierBytes) ||
+        (record.resource_id && !valid_stable_value(*record.resource_id, kMaximumIdentifierBytes)) ||
+        !valid_wire_integer(record.created_utc_ms)) {
+        return invalid("command record is invalid");
+    }
+    return base::Result<void>::success();
+}
+
 base::Result<void> validate_job_transition(const ports::JobStateTransition& transition) {
     if (!valid_stable_value(transition.job_id, kMaximumIdentifierBytes) ||
         !known_job_state(transition.expected_state) || !known_job_state(transition.next_state) ||
@@ -494,8 +502,8 @@ base::Result<void> validate_job_transition(const ports::JobStateTransition& tran
     if (!ports::is_valid_job_state_transition(transition.expected_state, transition.next_state)) {
         return invalid("job state transition is not allowed");
     }
-    if (ports::is_terminal_job_state(transition.next_state) &&
-        transition.result_message_code && transition.result_message_code->empty()) {
+    if (ports::is_terminal_job_state(transition.next_state) && transition.result_message_code &&
+        transition.result_message_code->empty()) {
         return invalid("terminal job transition result message is invalid");
     }
     return base::Result<void>::success();
@@ -523,7 +531,8 @@ base::Result<std::uint32_t> read_schema_version(sqlite3* const db) {
         return base::Result<std::uint32_t>::success(0);
     }
     const auto version = sqlite3_column_int64(statement.value().get(), 0);
-    if (version <= 0 || version > static_cast<std::int64_t>((std::numeric_limits<std::uint32_t>::max)())) {
+    if (version <= 0 ||
+        version > static_cast<std::int64_t>((std::numeric_limits<std::uint32_t>::max)())) {
         return base::Result<std::uint32_t>::failure(
             make_error(base::ErrorCode::kCorruptData, "schema version is corrupt"));
     }
@@ -648,6 +657,18 @@ base::Result<ports::AuditEventRecord> read_audit_event(sqlite3_stmt* const stmt)
     return base::Result<ports::AuditEventRecord>::success(std::move(record));
 }
 
+base::Result<ports::CommandRecord> read_command(sqlite3_stmt* const stmt) {
+    ports::CommandRecord record;
+    record.idempotency_key = column_text_required(stmt, 0);
+    record.request_fingerprint = column_text_required(stmt, 1);
+    record.command_id = column_text_required(stmt, 2);
+    record.resource_id = column_text_optional(stmt, 3);
+    record.created_utc_ms = column_uint64(stmt, 4);
+    auto valid = validate_command_record(record);
+    return valid ? base::Result<ports::CommandRecord>::success(std::move(record))
+                 : base::Result<ports::CommandRecord>::failure(valid.error());
+}
+
 contracts::RepositoryConnectionSummary
 to_connection_summary(const ports::RepositoryConnectionRecord& record) {
     return {record.connection_id, record.display_name, record.state, record.is_default,
@@ -668,13 +689,18 @@ contracts::JobSummary to_job_summary(const ports::JobRecord& record) {
 }
 
 contracts::ScheduleSummary to_schedule_summary(const ports::ScheduleRecord& record) {
-    return {record.schedule_id,  record.display_name,           record.enabled,
-            record.source_id,    record.repository_connection_id, record.backup_type,
-            record.trigger,      record.next_run_utc_ms};
+    return {record.schedule_id,
+            record.display_name,
+            record.enabled,
+            record.source_id,
+            record.repository_connection_id,
+            record.backup_type,
+            record.trigger,
+            record.next_run_utc_ms};
 }
 
 contracts::AuditEventSummary to_audit_summary(const ports::AuditEventRecord& record) {
-    return {record.event_id,   record.created_utc_ms,     record.severity,
+    return {record.event_id,     record.created_utc_ms,    record.severity,
             record.message_code, record.message_arguments, record.correlation_id};
 }
 

@@ -1,0 +1,59 @@
+#pragma once
+
+#include "aegra/base/cancellation.h"
+#include "aegra/base/result.h"
+#include "aegra/contracts/service_control.h"
+
+#include <string_view>
+
+namespace aegra::application {
+class ISourceInventoryQuery;
+}
+
+namespace aegra::ports {
+class IClock;
+class IControlPlaneDatabase;
+class IRandomSource;
+} // namespace aegra::ports
+
+namespace aegra::apps::service {
+
+class WorkerSupervisor;
+
+class IWorkerJobService {
+  public:
+    IWorkerJobService() = default;
+    virtual ~IWorkerJobService() = default;
+    IWorkerJobService(const IWorkerJobService&) = delete;
+    IWorkerJobService& operator=(const IWorkerJobService&) = delete;
+
+    [[nodiscard]] virtual base::Result<contracts::CommandAcknowledgement>
+    start_backup(const contracts::StartBackupCommand& command, std::string_view idempotency_key,
+                 base::CancellationToken cancellation) = 0;
+    [[nodiscard]] virtual base::Result<contracts::CommandAcknowledgement>
+    cancel_job(const contracts::ResourceRef& job, std::string_view idempotency_key,
+               base::CancellationToken cancellation) = 0;
+};
+
+class WorkerJobService final : public IWorkerJobService {
+  public:
+    WorkerJobService(application::ISourceInventoryQuery& source_inventory,
+                     ports::IControlPlaneDatabase& control_plane, WorkerSupervisor& supervisor,
+                     ports::IClock& clock, ports::IRandomSource& random) noexcept;
+
+    [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
+    start_backup(const contracts::StartBackupCommand& command, std::string_view idempotency_key,
+                 base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
+    cancel_job(const contracts::ResourceRef& job, std::string_view idempotency_key,
+               base::CancellationToken cancellation) override;
+
+  private:
+    application::ISourceInventoryQuery& source_inventory_;
+    ports::IControlPlaneDatabase& control_plane_;
+    WorkerSupervisor& supervisor_;
+    ports::IClock& clock_;
+    ports::IRandomSource& random_;
+};
+
+} // namespace aegra::apps::service

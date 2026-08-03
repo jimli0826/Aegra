@@ -21,11 +21,16 @@ Backup Session 外，阶段 12B 已实现线程安全 `MemoryObjectStorage`：�
 Prefix Enumerator、Publisher、Deleter 和 capability Port，支持短读、分页、generation、条件冲突、取消、
 RAII Abort、幂等删除及 publish/delete unknown outcome 故障注入。
 
+阶段 12C 已实现 Windows `Aegra::AdapterStorageLocal`。它使用规范化扩展路径、逐级 reparse-point 检查和
+最终文件句柄复核保护 Repository 根；partial 写入位于保留的 `.aegra-internal/writes`，完成后才移动到公开
+staging key。发布支持 create-only rename 与 generation 条件替换，删除绑定已校验文件句柄。详细接口、
+并发和崩溃语义见 [Windows Local Object Storage Adapter](storage_local.md)。
+
 个人版 Archive Adapter 组合 `format`、`IBackupSession`、`IRecoveryPointReader`、libsodium 和 Zstandard。当前数据面支持一个 volume，并可在完整 chunk 边界透明分卷。写入期间所有分卷与 Sidecar 使用 partial 路径，完整 Footer 和加密 Sidecar 均写完后，先发布 Sidecar/续卷，最后发布首卷；Abort 和析构清理本次创建的 partial 文件。Reader 在解析 CBOR 前必须完成 Header/Envelope 范围校验和 AEAD 认证，随后发现并验证连续分卷。普通恢复不依赖 `.bhx`；增量比较通过显式 API 加载并认证 Sidecar。
 
 增量 Session 在创建时验证显式父 Archive 及父 Sidecar，继承备份集 UUID，并把输入完整源转换为连续变化区间组成的稀疏层；新 Sidecar 仍保存完整状态。`PersonalArchiveReader` 可以 inspect 单个稀疏层，`PersonalArchiveChainReader` 接受显式 base-first 层列表并验证链关系，对通用 Restore Pipeline 提供连续覆盖视图。链恢复不读取 Sidecar；链发现和逐层凭据选择属于 Application，不由 Adapter 扫描目录猜测。
 
-Local、SMB、S3 和 Azure Storage Adapter 还必须实现个人版 Repository 所需的细粒度对象 Port。Adapter
+SMB、S3 和 Azure Storage Adapter 还必须实现个人版 Repository 所需的细粒度对象 Port。Adapter
 负责 Repository 相对 key 到本地路径或对象 key 的安全映射，并显式报告原子 rename、条件创建和列举
 一致性 capability；不得把 URI 判断、临时发布或删除重试逻辑泄漏到 Application。具体契约见
 [个人版 Repository 模块](personal_repository.md)。

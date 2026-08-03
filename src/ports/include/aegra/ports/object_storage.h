@@ -14,6 +14,55 @@
 
 namespace aegra::ports {
 
+inline constexpr std::size_t kMaximumObjectKeyBytes = 1'024;
+inline constexpr std::uint32_t kMaximumObjectListResults = 10'000;
+
+namespace object_storage_detail {
+
+[[nodiscard]] constexpr bool valid_segment(const std::string_view segment) noexcept {
+    if (segment.empty() || segment == "." || segment == "..") {
+        return false;
+    }
+    for (const char character : segment) {
+        const auto byte = static_cast<unsigned char>(character);
+        if (character == '\\' || character == ':' || byte < 0x20 || byte == 0x7F) {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace object_storage_detail
+
+[[nodiscard]] constexpr bool is_valid_object_key(const std::string_view key) noexcept {
+    if (key.empty() || key.size() > kMaximumObjectKeyBytes || key.front() == '/' ||
+        key.back() == '/') {
+        return false;
+    }
+    std::size_t begin = 0;
+    while (begin < key.size()) {
+        const auto end = key.find('/', begin);
+        const auto segment =
+            key.substr(begin, end == std::string_view::npos ? key.size() - begin : end - begin);
+        if (!object_storage_detail::valid_segment(segment)) {
+            return false;
+        }
+        if (end == std::string_view::npos) {
+            break;
+        }
+        begin = end + 1;
+    }
+    return true;
+}
+
+[[nodiscard]] constexpr bool is_valid_object_prefix(const std::string_view prefix) noexcept {
+    if (prefix.empty() || prefix.size() > kMaximumObjectKeyBytes || prefix.front() == '/') {
+        return false;
+    }
+    return prefix.back() == '/' ? is_valid_object_key(prefix.substr(0, prefix.size() - 1))
+                                : is_valid_object_key(prefix);
+}
+
 struct ObjectAttributes final {
     std::string key;
     std::uint64_t size_bytes{0};

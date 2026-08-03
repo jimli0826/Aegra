@@ -11,6 +11,10 @@
 #include <type_traits>
 
 int main() {
+    static_assert(aegra::ports::is_valid_object_key("archives/2026/08/archive.bkf"));
+    static_assert(aegra::ports::is_valid_object_prefix("catalog/recovery-points/"));
+    static_assert(!aegra::ports::is_valid_object_key("archives/../escape.bkf"));
+    static_assert(!aegra::ports::is_valid_object_prefix("/absolute/"));
     static_assert(std::has_virtual_destructor_v<aegra::ports::IBlockSource>);
     static_assert(std::has_virtual_destructor_v<aegra::ports::IBlockSink>);
     static_assert(std::has_virtual_destructor_v<aegra::ports::IBackupSession>);

@@ -51,6 +51,14 @@ target_link_libraries(
 )
 
 if(WIN32)
+    aegra_add_test(aegra_storage_local_tests adapters/storage_local_test.cpp)
+    target_include_directories(
+        aegra_storage_local_tests
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    target_compile_definitions(aegra_storage_local_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(aegra_storage_local_tests PRIVATE Aegra::AdapterStorageLocal)
+
     aegra_add_test(aegra_windows_disk_tests adapters/windows_disk_test.cpp)
     target_link_libraries(aegra_windows_disk_tests PRIVATE Aegra::AdapterWindowsDisk)
 

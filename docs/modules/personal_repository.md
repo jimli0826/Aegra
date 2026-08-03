@@ -192,5 +192,6 @@ Manifest。删除 SQLite 不得删除 Repository 数据；重新连接后必须�
 Object Storage 参考实现和可复用 Contract Test。Memory 实现支持范围短读、流式 staging、分页列举、
 generation 条件发布、幂等删除、取消和确定性故障注入。
 
-Local Storage Adapter、Repository Scanner、Catalog Reconcile、Delete Plan 生成和 Tombstone 执行尚未实现，
-属于后续阶段。
+阶段 12C 已实现 Windows Local Storage Adapter，并通过公共 Object Storage Contract；其路径、staging、
+generation、发布和删除语义见 [Local Storage 模块文档](storage_local.md)。Repository Scanner、Catalog
+Reconcile、Delete Plan 生成和 Tombstone 执行尚未实现，属于后续阶段。

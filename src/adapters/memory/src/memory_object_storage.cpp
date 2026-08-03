@@ -43,49 +43,8 @@ struct MemoryObjectStorageState final {
 } // namespace detail
 namespace {
 
-constexpr std::size_t kMaximumObjectKeyBytes = 1'024;
-
 [[nodiscard]] base::Error error(const base::ErrorCode code, const char* message) {
     return {code, message};
-}
-
-[[nodiscard]] bool valid_segment(const std::string_view segment) noexcept {
-    if (segment.empty() || segment == "." || segment == "..") {
-        return false;
-    }
-    return std::ranges::none_of(segment, [](const char character) {
-        const auto byte = static_cast<unsigned char>(character);
-        return character == '\\' || character == ':' || byte < 0x20 || byte == 0x7F;
-    });
-}
-
-[[nodiscard]] bool valid_key(const std::string_view key) noexcept {
-    if (key.empty() || key.size() > kMaximumObjectKeyBytes || key.front() == '/' ||
-        key.back() == '/') {
-        return false;
-    }
-    std::size_t begin = 0;
-    while (begin < key.size()) {
-        const auto end = key.find('/', begin);
-        const auto segment =
-            key.substr(begin, end == std::string_view::npos ? key.size() - begin : end - begin);
-        if (!valid_segment(segment)) {
-            return false;
-        }
-        if (end == std::string_view::npos) {
-            break;
-        }
-        begin = end + 1;
-    }
-    return true;
-}
-
-[[nodiscard]] bool valid_prefix(const std::string_view prefix) noexcept {
-    if (prefix.empty() || prefix.size() > kMaximumObjectKeyBytes || prefix.front() == '/') {
-        return false;
-    }
-    return prefix.back() == '/' ? valid_key(prefix.substr(0, prefix.size() - 1))
-                                : valid_key(prefix);
 }
 
 [[nodiscard]] base::Result<void> check_cancelled(const base::CancellationToken cancellation) {
@@ -177,7 +136,8 @@ void MemoryStagedObjectWriteSession::abort() noexcept {
 }
 
 [[nodiscard]] bool valid_publish_request(const ports::ObjectPublishRequest& request) noexcept {
-    if (!valid_key(request.staging_key) || !valid_key(request.destination_key) ||
+    if (!ports::is_valid_object_key(request.staging_key) ||
+        !ports::is_valid_object_key(request.destination_key) ||
         request.staging_key == request.destination_key) {
         return false;
     }
@@ -212,7 +172,7 @@ MemoryObjectStorage::get_attributes(const std::string_view key,
     if (!active) {
         return base::Result<ports::ObjectAttributes>::failure(active.error());
     }
-    if (!valid_key(key)) {
+    if (!ports::is_valid_object_key(key)) {
         return base::Result<ports::ObjectAttributes>::failure(
             error(base::ErrorCode::kInvalidArgument, "object key is invalid"));
     }
@@ -233,7 +193,7 @@ MemoryObjectStorage::read_range(const std::string_view key, const std::uint64_t 
     if (!active) {
         return base::Result<std::size_t>::failure(active.error());
     }
-    if (!valid_key(key)) {
+    if (!ports::is_valid_object_key(key)) {
         return base::Result<std::size_t>::failure(
             error(base::ErrorCode::kInvalidArgument, "object key is invalid"));
     }
@@ -265,7 +225,7 @@ MemoryObjectStorage::begin_staged_write(const std::string_view staging_key,
         return base::Result<std::unique_ptr<ports::IStagedObjectWriteSession>>::failure(
             active.error());
     }
-    if (!valid_key(staging_key)) {
+    if (!ports::is_valid_object_key(staging_key)) {
         return base::Result<std::unique_ptr<ports::IStagedObjectWriteSession>>::failure(
             error(base::ErrorCode::kInvalidArgument, "staging key is invalid"));
     }
@@ -286,9 +246,10 @@ MemoryObjectStorage::enumerate(const ports::ObjectListRequest& request,
     if (!active) {
         return base::Result<ports::ObjectListPage>::failure(active.error());
     }
-    if (!valid_prefix(request.prefix) || request.maximum_results == 0 ||
+    if (!ports::is_valid_object_prefix(request.prefix) || request.maximum_results == 0 ||
+        request.maximum_results > ports::kMaximumObjectListResults ||
         (request.continuation_token &&
-         (!valid_key(*request.continuation_token) ||
+         (!ports::is_valid_object_key(*request.continuation_token) ||
           !request.continuation_token->starts_with(request.prefix)))) {
         return base::Result<ports::ObjectListPage>::failure(
             error(base::ErrorCode::kInvalidArgument, "object list request is invalid"));
@@ -363,7 +324,7 @@ base::Result<void> MemoryObjectStorage::delete_object(const ports::ObjectDeleteR
     if (!active) {
         return active;
     }
-    if (!valid_key(request.key) || request.operation_id.empty()) {
+    if (!ports::is_valid_object_key(request.key) || request.operation_id.empty()) {
         return base::Result<void>::failure(
             error(base::ErrorCode::kInvalidArgument, "object delete request is invalid"));
     }

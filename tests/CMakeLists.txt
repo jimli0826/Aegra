@@ -16,6 +16,16 @@ target_link_libraries(aegra_service_contract_tests PRIVATE Aegra::Contracts)
 aegra_add_test(aegra_ports_compile_test ports/ports_compile_test.cpp)
 target_link_libraries(aegra_ports_compile_test PRIVATE Aegra::Ports)
 
+# S2 adapter target: pull in until Service integration owner registers it in top-level CMake.
+if(NOT TARGET Aegra::AdapterSqlite)
+    add_subdirectory(
+        "${PROJECT_SOURCE_DIR}/src/adapters/sqlite"
+        "${CMAKE_BINARY_DIR}/_aegra_adapter_sqlite"
+    )
+endif()
+aegra_add_test(aegra_sqlite_control_plane_tests adapters/sqlite_control_plane_test.cpp)
+target_link_libraries(aegra_sqlite_control_plane_tests PRIVATE Aegra::AdapterSqlite)
+
 aegra_add_test(
     aegra_personal_repository_query_tests
     application/personal_repository_query_test.cpp
@@ -90,8 +100,17 @@ if(WIN32)
     target_compile_definitions(aegra_windows_ipc_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
     target_link_libraries(aegra_windows_ipc_tests PRIVATE Aegra::AdapterWindowsIpc)
 
+    aegra_add_test(aegra_windows_ipc_security_tests adapters/windows_ipc_security_test.cpp)
+    target_compile_definitions(aegra_windows_ipc_security_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(aegra_windows_ipc_security_tests PRIVATE Aegra::AdapterWindowsIpc)
+
     aegra_add_test(aegra_service_protocol_tests apps/service_protocol_test.cpp)
     target_link_libraries(aegra_service_protocol_tests PRIVATE Aegra::AppService)
+
+    aegra_add_test(aegra_service_security_host_tests apps/service_security_host_test.cpp)
+    target_compile_definitions(aegra_service_security_host_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(aegra_service_security_host_tests PRIVATE Aegra::AppService)
+
 
     add_executable(aegra_service_process_tests apps/service_process_test.cpp)
     aegra_configure_target(aegra_service_process_tests)

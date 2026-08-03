@@ -75,15 +75,17 @@ Set，成功后幂等；未显式关闭或关闭失败时，析构路径执行 `
   析构前清零。具体安全与部署决策见
   [ADR-0007](../adr/0007-windows-worker-system-capabilities.md)。
 
-### `WindowsNamedPipeChannel`
+### `WindowsNamedPipeChannel` / `WindowsNamedPipeListener`
 
-实现 `IMessageChannel`，作为 Client 连接父进程预创建的本地 Pipe。公开输入是最长 128 字节且只含
-`[A-Za-z0-9_.-]` 的逻辑名称，Adapter 内部映射到 `\\.\pipe\aegra-worker-<name>`。传输使用 byte mode、
-4 字节 little-endian 长度前缀和 UTF-8 body；零长度或超过配置上限的帧直接拒绝。
+实现 `IMessageChannel` 与 Service 侧 Listener。逻辑名称最长 128 字节且只含 `[A-Za-z0-9_.-]`，映射到
+`\\.\pipe\aegra-worker-<name>` 或 `\\.\pipe\aegra-service-<name>`。传输使用 byte mode、4 字节
+little-endian 长度前缀和 UTF-8 body；零长度或超过配置上限的帧直接拒绝。
 
 同一实例允许一个接收和一个发送并发，不保证多 Reader 或多 Writer 安全。连接轮询响应取消，挂起
-Overlapped I/O 通过 `CancelIoEx` 中止。父进程负责 Server 生命周期、ACL 与 Worker SID 授权，具体协议见
-[ADR-0008](../adr/0008-worker-session-named-pipe-protocol.md)。
+Overlapped I/O 通过 `CancelIoEx` 中止。Worker 父进程负责 Server 生命周期与 Worker SID 授权，见
+[ADR-0008](../adr/0008-worker-session-named-pipe-protocol.md)。Service 控制 Pipe 的显式 ACL、远程拒绝
+与调用方 SID/session 校验见 [windows_ipc.md](windows_ipc.md) 与
+[ADR-0014](../adr/0014-windows-service-ipc-security.md)。
 
 ## 核心不变量
 

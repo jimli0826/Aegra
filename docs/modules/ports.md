@@ -12,6 +12,8 @@
 - 生命周期：`ISnapshotSession`、`IBackupSession`、`IRecoveryPointReader`。
 - 系统能力：`IClock`、`IProgressSink`、`ICredentialResolver`、`IRandomSource`。
 - 进程传输：`IMessageChannel`。
+- 个人版控制面：`IControlPlaneDatabase`、`IControlPlaneUnitOfWork`、`IRepositoryConnectionStore`、
+  `IJobStore`、`IScheduleStore`、`IAuditEventStore`（见 `control_plane.h`）。
 
 ## 依赖
 
@@ -93,3 +95,6 @@
 
 阶段 12B 已提供 `tests/ports/object_storage_contract.h`，覆盖 staging 可见性、条件发布、generation、分页、
 取消和幂等删除。新增 Storage Adapter 必须复用该套件。
+
+S2 已在 `control_plane.h` 定义个人版控制面细粒度 Store 与 Job 状态机纯函数。SQLite Adapter 见
+[control_plane_sqlite.md](control_plane_sqlite.md)；Application/Service 不得 include SQLite 头。

@@ -8,7 +8,7 @@
 
 - Storage：Local、SMB、S3、Azure。
 - Windows：Disk、Volume、VSS、Partition、BCD/WinRE。
-- 控制面：PostgreSQL、个人版 SQLite 查询缓存。
+- 控制面：PostgreSQL（企业版）、个人版 SQLite 控制面（`Aegra::AdapterSqlite`）。
 - 虚拟化：VMware、Hyper-V。
 - 挂载：Dokan 与虚拟磁盘格式呈现。
 - 传输：HTTP/gRPC/Named Pipe。
@@ -55,10 +55,11 @@ Snapshot Device Object，Block Source 本身不创建快照。
 Worker 的 Windows 时钟、CNG 随机源和 Credential Manager Resolver 也由独立 Windows System Adapter
 实现；Secret 必须复制到锁页内存并在析构前清零，不允许锁页失败时降级。
 
-`Aegra::AdapterWindowsIpc` 实现本地 Worker Named Pipe Client。它只接受受限逻辑名称，使用 4 字节
-little-endian 长度前缀和默认 1 MiB 帧上限，支持一个 Reader/Writer 并发及 `CancelIoEx` 取消；它不
-解析 JSON，不创建 Server 或决定 ACL。协议决策见
-[ADR-0008](../adr/0008-worker-session-named-pipe-protocol.md)。
+`Aegra::AdapterWindowsIpc` 实现本地 Worker Named Pipe Client 与 Service Named Pipe Listener。它只接受
+受限逻辑名称，使用 4 字节 little-endian 长度前缀和帧上限，支持一个 Reader/Writer 并发及
+`CancelIoEx` 取消；它不解析 JSON。Worker 侧 ACL 仍由父进程决定（[ADR-0008](../adr/0008-worker-session-named-pipe-protocol.md)）；
+Service 侧提供显式本地 ACL 与调用方身份校验（[ADR-0014](../adr/0014-windows-service-ipc-security.md)、
+[windows_ipc.md](windows_ipc.md)）。
 
 ## Dokan/虚拟磁盘约束
 
@@ -73,6 +74,13 @@ little-endian 长度前缀和默认 1 MiB 帧上限，支持一个 Reader/Writer
 - 对原始备份视图的任何写入都不得修改 Recovery Point。
 
 旧文档中的具体类名、64KB 固定值、`/MT` 和旧 vcxproj 不是新实现约束；这些需要基准、格式和部署测试重新决定。
+
+## 个人版 SQLite 控制面
+
+S2 实现 `Aegra::AdapterSqlite` / `SqliteControlPlaneDatabase`，实现 `ports/control_plane.h` 的细粒度
+Store。只保存 Repository 连接（含 SecretRef）、Job、Schedule、Event/Audit 与 schema version；不保存
+明文凭据或 Recovery Point 权威数据。Schema 迁移在打开事务中完成；Job 支持状态机 CAS 与启动时
+running/cancelling → interrupted 收敛。详见 [control_plane_sqlite.md](control_plane_sqlite.md)。
 
 ## PostgreSQL 约束
 

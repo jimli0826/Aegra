@@ -1,0 +1,65 @@
+# Windows Named Pipe IPC Adapter
+
+## 目标与非目标
+
+`adapters/windows_ipc` 提供本地 Named Pipe 传输：Worker 父子会话 Client，以及 Service 控制面 Listener。
+Adapter 只负责连接、监听、framing、取消、Handle 生命周期、显式 ACL 与调用方身份；不解析 JSON、不实现
+Service 协议、不启动 SCM。
+
+## 依赖
+
+- Target：`aegra_adapter_windows_ipc` / `Aegra::AdapterWindowsIpc`
+- 仅依赖 `Aegra::Ports` 与 Windows Named Pipe / Advapi32 API
+- 公共头不 include `Windows.h`
+
+## 公共接口
+
+### `WindowsNamedPipeChannel`
+
+实现 `ports::IMessageChannel`。逻辑名称最长 128 字节，字符集 `[A-Za-z0-9_.-]`，映射为：
+
+- Worker：`\\.\pipe\aegra-worker-<name>`
+- Service：`\\.\pipe\aegra-service-<name>`
+
+传输：byte mode、4 字节 little-endian 长度前缀、UTF-8 body；零长度非法。默认最大帧 Worker 1 MiB、
+Service Listener 默认 64 KiB（可配置，上限 1 MiB）。
+
+`peer_identity()` 在已连接句柄上查询客户端进程 token，返回 SID、session ID、process ID 与
+interactive/admin 标志。
+
+### `WindowsNamedPipeListener`
+
+Service 侧监听器。`WindowsNamedPipeListenRequest` 支持 ACL 配置：
+
+| Profile | 行为 |
+| --- | --- |
+| `kProcessDefault` | 进程 token 默认 DACL + 拒绝远程（交互/开发模式） |
+| `kServiceLocalControl` | LocalSystem 向显式 ACL + 拒绝远程（仅 LocalSystem 监听进程） |
+
+`accept_authorized` 在 accept 后执行身份校验；未授权客户端断开并返回 `kUnauthorized`。
+
+### 授权
+
+见 `windows_named_pipe_security.h` 与 [ADR-0014](../adr/0014-windows-service-ipc-security.md)。
+
+- `kLocalInteractiveOrAdmin`：本机 interactive session 或 Administrators
+- 当前不使用 SID allowlist
+
+## 核心不变量
+
+- 拒绝远程 Pipe Client
+- 不使用 NULL DACL / Everyone full access
+- 取消通过 `CancelIoEx` 唤醒 pending connect/read/write
+- 错误映射为稳定 `ErrorCode`，消息不含客户路径或数据
+- Adapter 不解析 JSON
+
+## 测试
+
+- framing、取消、断线、名称校验
+- 显式 ACL 连接、peer identity、allowlist 拒绝、多 session 授权、accept 取消
+
+## Definition of Done
+
+- 公共头无 Win32 类型泄漏
+- Service 安全 ACL 与身份校验可独立单测
+- Debug/Release 与源码规模门禁通过

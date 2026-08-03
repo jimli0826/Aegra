@@ -1,5 +1,7 @@
 #include "aegra/adapters/windows_ipc/windows_named_pipe_channel.h"
 
+#include "windows_named_pipe_security_internal.h"
+
 #include <Windows.h>
 
 #include <algorithm>
@@ -58,6 +60,11 @@ class UniqueHandle final {
     });
 }
 
+[[nodiscard]] bool valid_acl_profile(const WindowsNamedPipeAclProfile profile) noexcept {
+    return profile == WindowsNamedPipeAclProfile::kProcessDefault ||
+           profile == WindowsNamedPipeAclProfile::kServiceLocalControl;
+}
+
 [[nodiscard]] std::wstring service_pipe_path(const std::string_view name) {
     std::wstring result = LR"(\\.\pipe\aegra-service-)";
     result.reserve(result.size() + name.size());
@@ -112,6 +119,30 @@ struct CancelPendingConnect final {
     return base::Result<void>::success();
 }
 
+[[nodiscard]] base::Result<UniqueHandle>
+create_service_pipe(const std::wstring& path, const std::uint32_t buffer_bytes,
+                    const WindowsNamedPipeAclProfile acl_profile,
+                    detail::UniqueLocal& security_owner, SECURITY_ATTRIBUTES& security_attributes) {
+    LPSECURITY_ATTRIBUTES security = nullptr;
+    if (acl_profile == WindowsNamedPipeAclProfile::kServiceLocalControl) {
+        auto created =
+            detail::create_service_local_security_attributes(security_attributes, security_owner);
+        if (!created) {
+            return base::Result<UniqueHandle>::failure(created.error());
+        }
+        security = created.value();
+    }
+    UniqueHandle pipe(CreateNamedPipeW(path.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+                                       PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT |
+                                           PIPE_REJECT_REMOTE_CLIENTS,
+                                       PIPE_UNLIMITED_INSTANCES, buffer_bytes, buffer_bytes, 0,
+                                       security));
+    if (!pipe.valid()) {
+        return base::Result<UniqueHandle>::failure(accept_error(GetLastError()));
+    }
+    return base::Result<UniqueHandle>::success(std::move(pipe));
+}
+
 } // namespace
 
 WindowsNamedPipeListener::WindowsNamedPipeListener(WindowsNamedPipeListenRequest request)
@@ -122,7 +153,8 @@ WindowsNamedPipeListener::~WindowsNamedPipeListener() = default;
 base::Result<std::unique_ptr<WindowsNamedPipeListener>>
 WindowsNamedPipeListener::create(const WindowsNamedPipeListenRequest& request) {
     if (!valid_pipe_name(request.pipe_name) || request.maximum_frame_bytes == 0 ||
-        request.maximum_frame_bytes > kMaximumListenerFrameBytes) {
+        request.maximum_frame_bytes > kMaximumListenerFrameBytes ||
+        !valid_acl_profile(request.acl_profile)) {
         return base::Result<std::unique_ptr<WindowsNamedPipeListener>>::failure(base::Error{
             base::ErrorCode::kInvalidArgument, "named pipe listener request is invalid"});
     }
@@ -137,22 +169,41 @@ WindowsNamedPipeListener::accept(const base::CancellationToken& cancellation) {
             base::Error{base::ErrorCode::kCancelled, "named pipe accept cancelled"});
     }
     const auto path = service_pipe_path(request_.pipe_name);
-    UniqueHandle pipe(CreateNamedPipeW(path.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
-                                       PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT |
-                                           PIPE_REJECT_REMOTE_CLIENTS,
-                                       PIPE_UNLIMITED_INSTANCES, request_.maximum_frame_bytes,
-                                       request_.maximum_frame_bytes, 0, nullptr));
-    if (!pipe.valid()) {
-        return base::Result<std::unique_ptr<WindowsNamedPipeChannel>>::failure(
-            accept_error(GetLastError()));
+    detail::UniqueLocal security_owner;
+    SECURITY_ATTRIBUTES security_attributes{};
+    auto pipe = create_service_pipe(path, request_.maximum_frame_bytes, request_.acl_profile,
+                                    security_owner, security_attributes);
+    if (!pipe) {
+        return base::Result<std::unique_ptr<WindowsNamedPipeChannel>>::failure(pipe.error());
     }
-    auto connected = wait_for_client(pipe.get(), cancellation);
+    auto connected = wait_for_client(pipe.value().get(), cancellation);
     if (!connected) {
         return base::Result<std::unique_ptr<WindowsNamedPipeChannel>>::failure(connected.error());
     }
-    const auto native_handle = reinterpret_cast<std::uintptr_t>(pipe.release());
+    const auto native_handle = reinterpret_cast<std::uintptr_t>(pipe.value().release());
     return base::Result<std::unique_ptr<WindowsNamedPipeChannel>>::success(
         WindowsNamedPipeChannel::adopt_connected(native_handle, request_.maximum_frame_bytes));
+}
+
+base::Result<WindowsNamedPipeAcceptedClient>
+WindowsNamedPipeListener::accept_authorized(const WindowsServiceCallerAuthorization& authorization,
+                                            const base::CancellationToken& cancellation) {
+    auto channel = accept(cancellation);
+    if (!channel) {
+        return base::Result<WindowsNamedPipeAcceptedClient>::failure(channel.error());
+    }
+    auto peer = channel.value()->peer_identity();
+    if (!peer) {
+        return base::Result<WindowsNamedPipeAcceptedClient>::failure(peer.error());
+    }
+    auto authorized = authorize_service_caller(peer.value(), authorization);
+    if (!authorized) {
+        return base::Result<WindowsNamedPipeAcceptedClient>::failure(authorized.error());
+    }
+    WindowsNamedPipeAcceptedClient accepted;
+    accepted.channel = std::move(channel).value();
+    accepted.peer = std::move(peer).value();
+    return base::Result<WindowsNamedPipeAcceptedClient>::success(std::move(accepted));
 }
 
 } // namespace aegra::adapters::windows_ipc

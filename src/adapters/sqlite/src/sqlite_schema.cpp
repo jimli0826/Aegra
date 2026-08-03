@@ -1,0 +1,88 @@
+#include "sqlite_internal.h"
+
+namespace aegra::adapters::sqlite::detail {
+base::Result<void> apply_schema_v1(sqlite3* const db) {
+    static constexpr char kSchema[] = R"sql(
+PRAGMA foreign_keys = ON;
+CREATE TABLE IF NOT EXISTS schema_meta (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    version INTEGER NOT NULL CHECK (version > 0)
+);
+CREATE TABLE IF NOT EXISTS repository_connections (
+    connection_id TEXT PRIMARY KEY NOT NULL,
+    display_name TEXT NOT NULL,
+    locator TEXT NOT NULL,
+    credential_ref TEXT,
+    state INTEGER NOT NULL CHECK (state IN (1, 2)),
+    is_default INTEGER NOT NULL CHECK (is_default IN (0, 1)),
+    capabilities TEXT NOT NULL,
+    created_utc_ms INTEGER NOT NULL CHECK (created_utc_ms >= 0),
+    updated_utc_ms INTEGER NOT NULL CHECK (updated_utc_ms >= 0),
+    CHECK (updated_utc_ms >= created_utc_ms)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_repository_connections_locator
+    ON repository_connections(locator);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_repository_connections_one_default
+    ON repository_connections(is_default) WHERE is_default = 1;
+CREATE TABLE IF NOT EXISTS jobs (
+    job_id TEXT PRIMARY KEY NOT NULL,
+    trace_id TEXT NOT NULL,
+    operation INTEGER NOT NULL CHECK (operation BETWEEN 1 AND 4),
+    state INTEGER NOT NULL CHECK (state BETWEEN 1 AND 7),
+    created_utc_ms INTEGER NOT NULL CHECK (created_utc_ms >= 0),
+    started_utc_ms INTEGER CHECK (started_utc_ms IS NULL OR started_utc_ms >= 0),
+    completed_utc_ms INTEGER CHECK (completed_utc_ms IS NULL OR completed_utc_ms >= 0),
+    source_id TEXT,
+    repository_connection_id TEXT,
+    target_source_id TEXT,
+    backup_type INTEGER CHECK (backup_type IS NULL OR backup_type BETWEEN 1 AND 3),
+    parent_recovery_point_id TEXT,
+    preflight_token TEXT,
+    message_code TEXT NOT NULL,
+    idempotency_key TEXT,
+    result_error_code INTEGER,
+    result_outcome INTEGER,
+    result_message_code TEXT,
+    FOREIGN KEY (repository_connection_id)
+        REFERENCES repository_connections(connection_id) ON DELETE SET NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_jobs_idempotency_key
+    ON jobs(idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_jobs_created ON jobs(created_utc_ms DESC, job_id ASC);
+CREATE INDEX IF NOT EXISTS ix_jobs_state ON jobs(state, created_utc_ms DESC);
+CREATE TABLE IF NOT EXISTS schedules (
+    schedule_id TEXT PRIMARY KEY NOT NULL,
+    display_name TEXT NOT NULL,
+    enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+    source_id TEXT NOT NULL,
+    repository_connection_id TEXT NOT NULL,
+    backup_type INTEGER NOT NULL CHECK (backup_type BETWEEN 1 AND 3),
+    trigger_kind INTEGER NOT NULL CHECK (trigger_kind IN (1, 2)),
+    local_minute_of_day INTEGER NOT NULL CHECK (local_minute_of_day >= 0 AND local_minute_of_day < 1440),
+    weekday_mask INTEGER NOT NULL CHECK (weekday_mask >= 0 AND weekday_mask <= 127),
+    timezone_id TEXT NOT NULL,
+    next_run_utc_ms INTEGER CHECK (next_run_utc_ms IS NULL OR next_run_utc_ms >= 0),
+    created_utc_ms INTEGER NOT NULL CHECK (created_utc_ms >= 0),
+    updated_utc_ms INTEGER NOT NULL CHECK (updated_utc_ms >= 0),
+    CHECK (updated_utc_ms >= created_utc_ms),
+    FOREIGN KEY (repository_connection_id)
+        REFERENCES repository_connections(connection_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_schedules_enabled ON schedules(enabled, schedule_id);
+CREATE TABLE IF NOT EXISTS audit_events (
+    event_id TEXT PRIMARY KEY NOT NULL,
+    created_utc_ms INTEGER NOT NULL CHECK (created_utc_ms >= 0),
+    severity INTEGER NOT NULL CHECK (severity BETWEEN 1 AND 4),
+    message_code TEXT NOT NULL,
+    message_arguments TEXT NOT NULL,
+    correlation_id TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_audit_created ON audit_events(created_utc_ms DESC, event_id ASC);
+CREATE INDEX IF NOT EXISTS ix_audit_correlation ON audit_events(correlation_id, created_utc_ms DESC);
+)sql";
+    return exec_sql(db, kSchema);
+}
+
+
+} // namespace aegra::adapters::sqlite::detail
+

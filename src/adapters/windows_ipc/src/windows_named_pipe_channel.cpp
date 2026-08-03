@@ -1,5 +1,7 @@
 #include "aegra/adapters/windows_ipc/windows_named_pipe_channel.h"
 
+#include "windows_named_pipe_security_internal.h"
+
 #include <Windows.h>
 
 #include <algorithm>
@@ -282,6 +284,10 @@ base::Result<void> WindowsNamedPipeChannel::send(const std::string_view message,
     }
     const auto body = std::as_bytes(std::span<const char>(message.data(), message.size()));
     return transfer_all(impl_->pipe.get(), body, cancellation);
+}
+
+base::Result<WindowsNamedPipePeerIdentity> WindowsNamedPipeChannel::peer_identity() const {
+    return detail::query_pipe_peer(impl_->pipe.get());
 }
 
 } // namespace aegra::adapters::windows_ipc

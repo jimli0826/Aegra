@@ -5,6 +5,10 @@ add_library(aegra_app_service STATIC
     src/service_protocol.cpp
     src/service_protocol_request_json.cpp
     src/service_protocol_response_json.cpp
+    src/service_security_host.cpp
+    src/windows_service_control.cpp
+    src/windows_service_control_win32.cpp
+    src/windows_service_scm_host.cpp
 )
 
 add_library(Aegra::AppService ALIAS aegra_app_service)
@@ -14,10 +18,16 @@ target_include_directories(
     PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
 )
 
+target_compile_definitions(aegra_app_service PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 target_link_libraries(
     aegra_app_service
-    PUBLIC Aegra::Application Aegra::Base Aegra::Contracts Aegra::Ports
-    PRIVATE nlohmann_json::nlohmann_json
+    PUBLIC
+        Aegra::Application
+        Aegra::Base
+        Aegra::Contracts
+        Aegra::Ports
+        Aegra::AdapterWindowsIpc
+    PRIVATE nlohmann_json::nlohmann_json Advapi32
 )
 aegra_configure_target(aegra_app_service)
 

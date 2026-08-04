@@ -7,10 +7,10 @@ namespace {
 
 class WindowsPersonalBackupTaskBackend final : public IWindowsPersonalBackupTaskBackend {
   public:
-    [[nodiscard]] base::Result<WindowsPersonalVolumeBackupResult>
-    run(const WindowsPersonalVolumeBackupRequest& request,
+    [[nodiscard]] base::Result<WindowsPersonalBackupResult>
+    run(const WindowsPersonalBackupRequest& request,
         const base::CancellationToken& cancellation, ports::IProgressSink* progress) override {
-        return backup_windows_personal_volume(request, cancellation, progress);
+        return backup_windows_personal_volumes(request, cancellation, progress);
     }
 };
 

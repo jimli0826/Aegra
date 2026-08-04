@@ -9,7 +9,7 @@
 
 namespace aegra::contracts {
 
-inline constexpr std::uint32_t kJobSchemaVersion = 2;
+inline constexpr std::uint32_t kJobSchemaVersion = 3;
 
 enum class JobOperation : std::uint8_t {
     kBackup = 1,
@@ -34,6 +34,9 @@ struct BackupOptions final {
     BackupType type{BackupType::kFull};
     std::string parent_source_ref;
     SecretRef parent_credential_ref;
+    std::string file_uuid;
+    std::string backup_set_uuid;
+    std::int64_t created_utc_ms{0};
 };
 
 struct JobRequest final {

@@ -25,16 +25,41 @@ class IControlPlaneDatabase;
 namespace aegra::apps::service {
 
 class IWorkerJobService;
+class ScheduleService;
+class WorkerSupervisor;
+
+enum class ServiceLogLevel {
+    kInfo,
+    kWarning,
+    kError,
+};
+
+class IServiceLog {
+  public:
+    IServiceLog() = default;
+    virtual ~IServiceLog() = default;
+
+    IServiceLog(const IServiceLog&) = delete;
+    IServiceLog& operator=(const IServiceLog&) = delete;
+    IServiceLog(IServiceLog&&) = delete;
+    IServiceLog& operator=(IServiceLog&&) = delete;
+
+    virtual void write(ServiceLogLevel level, std::string_view message_code,
+                       std::string_view detail) noexcept = 0;
+};
 
 struct ServiceRuntimeInfo final {
     std::string service_version;
     std::vector<std::string> capabilities;
+    IServiceLog* logger{nullptr};
     application::IPersonalRepositoryQuery* repository_query{nullptr};
     application::IConnectedRepositoryQuery* connected_repository_query{nullptr};
     application::IRepositoryConnectionService* repository_connections{nullptr};
     application::ISourceInventoryQuery* source_inventory{nullptr};
     application::IRecoveryPointOperations* recovery_point_operations{nullptr};
     IWorkerJobService* worker_jobs{nullptr};
+    ScheduleService* schedules{nullptr};
+    WorkerSupervisor* worker_supervisor{nullptr};
     ports::IControlPlaneDatabase* control_plane{nullptr};
 };
 

@@ -39,16 +39,15 @@ Desktop 握手后拉取页面，最多累计 10,000 项；页面排序、重复 
 UI 展示 backup type、创建时间、逻辑/存储大小和 chain complete/incomplete。Restore、Delete 和 Verify 按钮
 保持禁用，直到后续 Archive 结构与认证状态接入。
 
-## 测试与完成标准
+## 验证与完成标准
 
-- Memory Storage Scanner 单元测试覆盖正常、分页、短读、损坏、冲突、隐藏和取消。
-- Local Storage + Service 真实进程测试读取临时 Repository fixture。
-- Desktop fake Service 测试覆盖多页和错误状态。
+- 审查 Scanner 的正常、分页、短读、损坏、冲突、隐藏和取消路径。
+- 使用临时非生产 Repository 人工验证 Local Storage、Service 与 Desktop 的多页和错误状态。
 - Qt 不进入 Contracts/Application/PersonalRepository，Windows Adapter 不反向依赖核心模块。
 - VS 2026 Insiders + Qt 6.8 Debug/Release 和全部质量门禁通过。
 
 ## 当前状态
 
 阶段 13B 查询链已经实现，并在 S0 直接切换到 Service schema 3。Scanner、Application、Desktop 分页聚合与 Recovery Point 首屏
-均已接入；真实 Service 进程测试使用临时 Local Storage Repository 验证 Descriptor/Catalog 到 IPC 响应。
+均已接入；可使用临时 Local Storage Repository 人工验证 Descriptor/Catalog 到 IPC 响应。
 Restore、Verify 和 Delete 仍不在本查询切片范围内。

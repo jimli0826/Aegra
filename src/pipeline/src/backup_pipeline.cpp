@@ -39,6 +39,7 @@ struct BackupProducerContext final {
     const FixedSizeChunker& chunker;
     detail::BoundedChunkQueue& queue;
     base::CancellationToken cancellation;
+    std::uint32_t source_index{0};
 };
 
 struct BackupConsumerContext final {
@@ -99,6 +100,7 @@ base::Result<ports::ChunkData> read_next_chunk(BackupProducerContext& context,
         range.logical_offset,
         range.logical_size,
         static_cast<std::uint64_t>(payload.value().size()),
+        context.source_index,
     };
     return base::Result<ports::ChunkData>::success(
         ports::ChunkData{descriptor, std::move(payload).value()});
@@ -147,8 +149,29 @@ void produce_chunks(BackupProducerContext& context) {
     }
 }
 
+[[nodiscard]] const char* backup_phase_message(const contracts::TaskPhase phase) noexcept {
+    switch (phase) {
+    case contracts::TaskPhase::kPreparing:
+        return "backup.preparing";
+    case contracts::TaskPhase::kReading:
+        return "backup.reading";
+    case contracts::TaskPhase::kTransforming:
+        return "backup.transforming";
+    case contracts::TaskPhase::kWriting:
+        return "backup.writing";
+    case contracts::TaskPhase::kCommitting:
+        return "backup.committing";
+    case contracts::TaskPhase::kCompleted:
+        return "backup.completed";
+    case contracts::TaskPhase::kUnspecified:
+        break;
+    }
+    return "backup.running";
+}
+
 void publish_progress(ports::IProgressSink* sink, const BackupPlan& plan,
-                      const contracts::TaskPhase phase, const BackupSummary& summary) {
+                      const contracts::TaskPhase phase, const BackupSummary& summary,
+                      const std::uint64_t processed_bytes) {
     if (sink == nullptr) {
         return;
     }
@@ -158,15 +181,16 @@ void publish_progress(ports::IProgressSink* sink, const BackupPlan& plan,
         plan.trace_id,
         phase,
         summary.logical_bytes,
+        processed_bytes,
         summary.stored_bytes,
-        summary.stored_bytes,
-        {},
+        backup_phase_message(phase),
     });
 }
 
 base::Result<BackupSummary> consume_chunks(BackupConsumerContext& context) {
     BackupSummary summary;
     summary.logical_bytes = context.logical_size;
+    std::uint64_t processed_bytes = 0;
     SessionGuard guard(context.session);
     while (true) {
         auto next = context.queue.pop(context.cancellation);
@@ -183,18 +207,24 @@ base::Result<BackupSummary> consume_chunks(BackupConsumerContext& context) {
         if (!written) {
             return base::Result<BackupSummary>::failure(written.error());
         }
+        processed_bytes += chunk.descriptor.logical_size;
         summary.stored_bytes += chunk.descriptor.stored_size;
         ++summary.chunk_count;
-        publish_progress(context.progress, context.plan, contracts::TaskPhase::kWriting, summary);
+        publish_progress(context.progress, context.plan, contracts::TaskPhase::kWriting, summary,
+                         processed_bytes);
     }
-    publish_progress(context.progress, context.plan, contracts::TaskPhase::kCommitting, summary);
-    auto committed = context.session.commit(context.cancellation);
-    if (!committed) {
-        return base::Result<BackupSummary>::failure(committed.error());
+    publish_progress(context.progress, context.plan, contracts::TaskPhase::kCommitting, summary,
+                     processed_bytes);
+    if (context.plan.commit_mode == BackupCommitMode::kCommit) {
+        auto committed = context.session.commit(context.cancellation);
+        if (!committed) {
+            return base::Result<BackupSummary>::failure(committed.error());
+        }
     }
     guard.mark_committed();
     summary.peak_buffered_bytes = context.queue.peak_buffered_bytes();
-    publish_progress(context.progress, context.plan, contracts::TaskPhase::kCompleted, summary);
+    publish_progress(context.progress, context.plan, contracts::TaskPhase::kCompleted, summary,
+                     processed_bytes);
     return base::Result<BackupSummary>::success(summary);
 }
 
@@ -236,7 +266,7 @@ base::Result<BackupSummary> BackupPipeline::run(const BackupPlan& plan,
     std::stop_source local_stop;
     std::stop_callback external_cancel(cancellation, [&local_stop] { local_stop.request_stop(); });
     BackupProducerContext producer_context{source_, chunker_result.value(), queue,
-                                           local_stop.get_token()};
+                                           local_stop.get_token(), plan.source_index};
     BackupConsumerContext consumer_context{
         plan, session_, progress_, queue, local_stop.get_token(), source_.size_bytes()};
     std::jthread producer([&producer_context] { produce_chunks(producer_context); });

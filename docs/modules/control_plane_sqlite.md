@@ -52,8 +52,8 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
 
 ## Schema 与不变量
 
-- `schema_meta.version` 当前为 `2`（`ports::kControlPlaneSchemaVersion`）。产品未发布，schema V2 直接定义当前
-  表结构，不提供 V1 迁移或兼容读取。
+- `schema_meta.version` 当前为 `3`（`ports::kControlPlaneSchemaVersion`）。产品未发布，schema V3 直接定义当前
+  表结构，不提供旧 schema 迁移或兼容读取；旧开发数据库必须删除后重建。
 - 打开时在 `BEGIN IMMEDIATE` 事务中 `CREATE IF NOT EXISTS` 并写入版本；未知更高版本返回
   `kUnsupportedVersion`。
 - 外键：`jobs.repository_connection_id` → `ON DELETE SET NULL`；
@@ -66,6 +66,7 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
 - 一个非空 preflight token 最多关联一个 Job；数据库提供按 token 查询 Job，供 Start 在 Worker launch 前
   持久化并确认唯一 queued intent。
 - 时间全部为非负 UTC 毫秒整数；超出有符号 64 位线范围拒绝。
+- Job 与 Schedule 的 `source_ids` 使用有序字符串列表编码，必须包含 1 至 100 个稳定且无重复的 Source ID。
 - 只存 `SecretRef` 字符串；不存明文凭据、Chunk Index、Manifest 或 Archive metadata。
 
 ## 并发模型
@@ -82,22 +83,13 @@ commit/rollback 后该 UoW 的 Store 立即失效，后续读写返回 `kConflic
 Continuation token 为不透明 `v1|<scope>|<filter>|<created>|<id>`，绑定 list 类型与过滤条件；跨
 request kind 或不同 filter 复用 token 返回 `kInvalidArgument`。
 
-## 测试
+## 验证
 
-`tests/adapters/sqlite_control_plane_test.cpp` 覆盖：
-
-- schema 打开/迁移与 SecretRef 持久化；
-- Job 合法/非法状态转换与启动 interrupt 收敛；
-- 外键、唯一约束、单 default；
-- UTC/非法时间与事务回滚；
-- 损坏数据库与缺失 open-existing；
-- 单写者 + 并发只读。
-- command store 持久化、唯一键、同请求 replay 与请求指纹冲突。
-- Restore preflight 插入/读取、非法记录、token 冲突、事务回滚、重启读取、取消、UoW 失效，以及 Job token
-  唯一占用和反查。
+构建 SQLite Adapter 与 Service 生产 Target，并审查 schema 打开、状态转换、约束、事务、并发、command replay、
+Restore preflight token 唯一占用和重启读取语义。涉及持久化变更时，使用隔离的非生产数据目录执行聚焦人工验证。
 
 ## Definition of Done
 
 - 细粒度 ports 与独立 SQLite adapter target 可构建；
-- 上述测试通过；
+- 上述持久化与事务语义完成审查和必要的人工验证；
 - 文档同步；顶层 CMake 与 Service composition 已接入。

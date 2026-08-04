@@ -5,6 +5,7 @@ Item {
     id: root
     property real value: 0
     property bool active: false
+    property color fillColor: active ? Theme.colorAccentBlue : Theme.colorTextDim
     width: parent ? parent.width : 120
     height: 8
     //% "Task progress %1 percent"
@@ -25,7 +26,7 @@ Item {
         anchors.bottom: parent.bottom
         width: parent.width * Math.max(0, Math.min(value / 100.0, 1.0))
         radius: 4
-        color: root.active ? Theme.colorAccentBlue : Theme.colorTextDim
+        color: root.fillColor
         visible: root.active || value > 0
     }
 }

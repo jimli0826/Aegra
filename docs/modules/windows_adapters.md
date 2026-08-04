@@ -8,11 +8,12 @@ VSS Snapshot Set Session；阶段 8F 实现 Worker 使用的系统时钟、密�
 实现 Worker 本地 Named Pipe Client。
 
 个人版卷恢复新增 `WindowsVolumeBlockSink`：生产模式只接受 canonical Volume GUID，拒绝系统卷，成功
-锁卷并卸载后才允许按 offset 写入，完成时 flush，析构时 best-effort 解锁。普通文件模式仅用于确定性
-契约测试。不可逆写入决策见 [ADR-0009](../adr/0009-windows-volume-restore-safety.md)。
+锁卷并卸载后才允许按 offset 写入，完成时 flush，析构时 best-effort 解锁。普通文件模式仅用于隔离验证。
+不可逆写入决策见 [ADR-0009](../adr/0009-windows-volume-restore-safety.md)。
 
-本模块不直接读取在线 Volume、不备份 `PhysicalDrive`、不修改分区表，也不执行 BCD/WinRE 修复。
-只有显式恢复用的 Block Sink 可以在完成安全检查后写入非系统目标 Volume。
+本模块允许备份 Worker 以只读方式直接读取不支持 VSS 的在线 Volume；不备份 `PhysicalDrive`、不修改
+分区表，也不执行 BCD/WinRE 修复。只有显式恢复用的 Block Sink 可以在完成安全检查后写入非系统目标
+Volume。
 
 ## 依赖
 
@@ -35,19 +36,33 @@ VSS Snapshot Set Session；阶段 8F 实现 Worker 使用的系统时钟、密�
 
 - mount points；
 - UTF-8 label 与 filesystem；
-- `IOCTL_DISK_GET_LENGTH_INFO` 返回的逻辑大小与 cluster size；
+- `IOCTL_DISK_GET_LENGTH_INFO` 返回的逻辑大小（不可用时使用受溢出检查的 extent 总长度）与 cluster size；
 - disk number、physical offset 和 length 组成的 extents；
 - filesystem metadata、逻辑大小和 extent mapping 是否可用的 capability。
 
 文件系统未就绪、可移动介质无介质或 extent 查询权限不足不会删除 Volume identity；对应 capability 为
 false。只有 Volume 枚举本身无法启动或异常终止时，整个调用失败。
 
+### `WindowsSourceInventory`（磁盘优先）
+
+`list_sources()` 对齐旧项目 `GetDisksWithVolumes`：
+
+1. 先枚举 `PhysicalDrive0..31`（容量、`MBR`/`GPT`/`RAW` 分区样式）；
+2. 再枚举 Volume，且 **仅在 extent 能解析出 disk number 时** 发布卷记录（不再把未知 extent 默认到 Disk 0）；
+3. 若某物理盘没有任何可挂卷，发布不可选的 `disk.N` 占位记录（`capacity_bytes=0`、`is_read_only`），
+   供 Desktop `disksTree` 显示空盘行（Unallocated），与磁盘管理一致。
+
+备份源可选性与恢复目标安全规则分离：Windows 系统卷（通常为 C:）、只读卷、EFI/FAT、RAW 和未知
+文件系统卷均允许作为备份源；在线恢复仍按 ADR-0009 拒绝系统目标。具备 stable Volume GUID 和可靠
+非零容量的 Volume 标记为可选。NTFS/ReFS 使用 VSS，其余 Volume 使用 raw block source。
+
 ### `WindowsBlockSource`
 
 实现 `IBlockSource`，支持：
 
 - `kStableFile`：普通文件或 UNC 文件，不允许 Win32 Device Namespace；
-- `kVssSnapshot`：严格校验的 Shadow Copy Device Object，并要求显式逻辑大小。
+- `kVssSnapshot`：严格校验的 Shadow Copy Device Object，并要求显式逻辑大小；
+- `kRawVolume`：只接受 canonical Volume GUID Path，以只读共享 Handle 打开，并要求显式非零逻辑大小。
 
 Source 独占 Handle，可以并发调用 `read()`。每次读取使用独立重叠 I/O 状态；取消会中止本次 I/O，
 不会关闭 Source Handle。`size_bytes()` 在对象生命周期内稳定。
@@ -89,7 +104,7 @@ Overlapped I/O 通过 `CancelIoEx` 中止。Worker 父进程负责 Server 生命
 
 ## 核心不变量
 
-- 在线 Volume 和 `PhysicalDrive` 不能通过公开 Block Source 请求打开。
+- 只有 `kRawVolume` 可以打开在线 Volume；任意 Device Namespace 和 `PhysicalDrive` 始终拒绝。
 - VSS Snapshot path 不接受目录穿越、尾随 path component、符号编号或其它 Device Object。
 - offset 大于逻辑大小返回 `kInvalidArgument`；offset 等于 EOF 或空 buffer 返回 0。
 - 单次 Win32 读取不超过 `DWORD`，大 buffer 通过 Port 的短读语义由 Pipeline 继续读取。
@@ -131,18 +146,12 @@ Target：`aegra_adapter_windows_vss` / `Aegra::AdapterWindowsVss`，仅在 Windo
 `aegra_adapter_windows_ipc` / `Aegra::AdapterWindowsIpc` 仅在 Windows 构建，公开头使用 PImpl 隔离
 `HANDLE` 与 `OVERLAPPED`。
 
-## 测试
+## 验证
 
-- 普通单元测试只使用临时文件，不依赖管理员权限、真实 Volume 或 VSS Service。
-- 覆盖正确读取、非零 offset、EOF、越界、取消、缺失文件和 Device Path 拒绝。
-- Shadow Copy 路径验证使用纯字符串样本。
-- VSS 单元测试通过 Adapter 私有 Backend seam 覆盖空/重复/非法请求、预取消、映射校验、幂等关闭、
-  关闭失败和析构清理，不创建真实系统快照。
-- 真实 Volume、跨盘 Volume、无介质设备、访问拒绝和 VSS 生命周期进入单独集成测试。
-- System Adapter 普通测试不创建或修改真实 Credential；成功解析、锁页清零和账户隔离进入临时
-  Credential 集成套件。
-- IPC 测试创建进程内临时本地 Pipe，覆盖双向 frame、并发 Reader/Writer、无效长度、预取消、挂起接收
-  取消和 Server 断线；真实 Worker 子进程测试验证 `--pipe` 拒绝路径。
+- 构建 Windows Disk、VSS、System 和 IPC 生产 Target。
+- 审查读取、offset、EOF、越界、取消、路径拒绝、VSS 清理、Credential 生命周期和 IPC framing 边界。
+- 真实 Volume、跨盘 Volume、无介质设备、访问拒绝、VSS 与临时 Credential 仅在隔离环境人工验证。
+- IPC 人工验证使用临时本地 Pipe，不记录 frame body、路径、凭据或客户数据。
 
 ## 安全与可观测性
 
@@ -155,8 +164,9 @@ Target：`aegra_adapter_windows_vss` / `Aegra::AdapterWindowsVss`，仅在 Windo
 ## Definition of Done
 
 - Windows SDK 类型未泄漏到公共头或核心模块。
-- Block Source 通过 `IBlockSource` 关键契约测试。
-- 普通文件模式无法打开 Device Namespace，Snapshot 模式无法伪装任意设备。
-- 多 Volume 只通过一个 Snapshot Set 创建，COM/VSS 对象始终在专用 MTA 线程释放。
+- Block Source 遵循 `IBlockSource` 关键契约。
+- 普通文件模式无法打开 Device Namespace，Snapshot/raw 模式无法伪装任意设备。
+- 支持 VSS 的多个 Volume 只通过一个 Snapshot Set 创建；raw Volume 不加入该 Set；COM/VSS 对象始终在
+  专用 MTA 线程释放。
 - 显式关闭成功后不重复删除；失败和析构路径仍承担清理责任。
-- Debug/Release 构建、测试、clang-tidy 与源码规模检查通过。
+- Debug/Release 构建、clang-tidy 与源码规模检查通过。

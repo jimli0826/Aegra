@@ -15,6 +15,7 @@ struct ChunkDescriptor final {
     std::uint64_t logical_offset{0};
     std::uint64_t logical_size{0};
     std::uint64_t stored_size{0};
+    std::uint32_t source_index{0};
 
     [[nodiscard]] bool operator==(const ChunkDescriptor&) const noexcept = default;
 };

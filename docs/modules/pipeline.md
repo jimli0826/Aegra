@@ -2,7 +2,7 @@
 
 ## 目标
 
-提供物理机、虚拟机和内存测试源共享的 Backup/Restore 数据面。
+提供物理机、虚拟机和内存源共享的 Backup/Restore 数据面。
 
 ## Backup Pipeline
 
@@ -47,7 +47,7 @@ Recovery Point Reader -> Manifest Validation -> Chunk Resolver
 1. Memory Block Source/Sink。
 2. 顺序 fixed-size Chunker。
 3. 无压缩、无加密的 Memory Backup Session。
-4. 单线程 Backup Pipeline 与错误注入测试。
+4. 单线程 Backup Pipeline 与错误注入能力。
 5. Restore Pipeline roundtrip。
 6. 有界并发、背压和取消。
 
@@ -63,6 +63,7 @@ Recovery Point Reader -> Manifest Validation -> Chunk Resolver
 
 阶段 6 的个人增量实现仍复用同一 Backup Pipeline 读取完整源，由 Archive Session 在 Adapter 内形成稀疏变化层；恢复侧由 Chain Reader 先合并为连续视图，再交给原 Restore Pipeline。Pipeline 不知道父 UUID、Sidecar 或个人备份链。
 
-## 测试
+## 验证
 
-覆盖空源、尾部短块、零块、取消、读写失败、容量不足、Commit/Abort、背压和数据 roundtrip。测试不得访问真实磁盘或网络。
+构建 Pipeline 及其生产消费者，审查空源、尾部短块、零块、取消、读写失败、容量不足、Commit/Abort、
+背压和数据 roundtrip 路径；必要的人工验证使用隔离的内存或非生产数据源，不访问客户磁盘或生产网络。

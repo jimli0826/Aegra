@@ -68,7 +68,7 @@ src/
     └── shell_extension/
 ```
 
-测试镜像 `src` 结构放在 `tests/`。详细设计、格式和 ADR 分别放在 `docs/architecture`、`docs/format`、`docs/adr`。
+仓库不维护项目测试目录或测试 Target。详细设计、格式和 ADR 分别放在 `docs/architecture`、`docs/format`、`docs/adr`。
 
 ## 3. 依赖方向
 
@@ -134,7 +134,7 @@ class ICredentialResolver;
 class IClock;
 ```
 
-物理磁盘、VMware、Hyper-V 和内存测试源统一适配 `IBlockSource`；恢复目标统一适配 `IBlockSink`。不得为每一种数据源复制 Backup/Restore Pipeline。
+物理磁盘、VMware、Hyper-V 和内存源统一适配 `IBlockSource`；恢复目标统一适配 `IBlockSink`。不得为每一种数据源复制 Backup/Restore Pipeline。
 
 ## 6. Backup 与 Restore Pipeline
 
@@ -230,13 +230,13 @@ PostgreSQL 可以保存 Recovery Point 摘要、容量、去重率和维护状�
 6. 实现 GC、Compaction、Scrub 与灾难恢复工具。
 7. 实现 VMware/Hyper-V Connector 和虚拟机备份恢复。
 
-每个阶段必须保持主分支可构建、可测试；不得先创建反向依赖再承诺后续清理。
+每个阶段必须保持主分支可构建并通过静态/架构检查；不得先创建反向依赖再承诺后续清理。
 
 ## 12. Definition of Done
 
 - 依赖方向正确，公共接口不泄漏 Adapter 或厂商类型。
-- 所有权、取消、失败和崩溃恢复路径明确并经过测试。
+- 所有权、取消、失败和崩溃恢复路径明确并完成审查与必要的人工验证。
 - 数据面权威信息可以脱离 PostgreSQL 读取和重建。
-- 新格式有版本、校验、golden、roundtrip 和损坏输入测试。
+- 新格式有版本、校验、golden、roundtrip 和损坏输入规则。
 - 直接 Target 可在干净环境独立构建。
 - 工程规范中的规模、静态分析、安全和文档要求全部通过。

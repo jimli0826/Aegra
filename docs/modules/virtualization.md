@@ -35,6 +35,7 @@ Discover -> Begin Snapshot Session -> Collect Provider Metadata
 
 接口应可扩展到原位置、新位置、单磁盘、VMDK/VHDX 导出、文件级挂载和 Instant Recovery。新增模式通过 Use Case 与 Adapter 扩展，不修改通用 Pipeline。
 
-## 测试
+## 验证
 
-Fake Connector 覆盖快照清理、CBT 失效、多磁盘、取消和 SDK 异常。真实平台测试独立运行，并禁止把生产凭据写入仓库。
+构建 Connector 生产 Target，审查快照清理、CBT 失效、多磁盘、取消和 SDK 异常路径。真实平台仅执行隔离的
+人工验收，并禁止把生产凭据写入仓库。

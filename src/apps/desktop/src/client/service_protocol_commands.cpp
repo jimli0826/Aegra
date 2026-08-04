@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonValue>
+#include <QSet>
 #include <QStringList>
 #include <QVariantMap>
 
@@ -50,8 +51,11 @@ using protocol_detail::stable_code;
         return false;
     }
     const auto object = value.toObject();
-    if (!has_exact_keys(object, {"source_id", "display_name", "kind", "availability",
-                                 "capacity_bytes", "is_system", "is_read_only", "is_selectable"})) {
+    if (!has_exact_keys(object,
+                        {"source_id", "display_name", "kind", "availability", "capacity_bytes",
+                         "free_bytes", "disk_capacity_bytes", "is_system", "is_read_only",
+                         "is_selectable", "disk_number", "mount_letter", "volume_label",
+                         "health_status", "partition_style", "media_type"})) {
         return false;
     }
     const auto source_id = object.value(QStringLiteral("source_id")).toString();
@@ -59,15 +63,30 @@ using protocol_detail::stable_code;
     qint64 kind = 0;
     qint64 availability = 0;
     qint64 capacity_bytes = 0;
+    qint64 free_bytes = 0;
+    qint64 disk_capacity_bytes = 0;
+    qint64 disk_number = 0;
     if (!object.value(QStringLiteral("source_id")).isString() || !stable_code(source_id, 128) ||
         !parse_display_name(object.value(QStringLiteral("display_name")), display_name) ||
         !integer_in_range(object.value(QStringLiteral("kind")), 1, 1, kind) ||
         !integer_in_range(object.value(QStringLiteral("availability")), 1, 2, availability) ||
         !integer_in_range(object.value(QStringLiteral("capacity_bytes")), 0,
                           (std::numeric_limits<qint64>::max)(), capacity_bytes) ||
+        !integer_in_range(object.value(QStringLiteral("free_bytes")), 0,
+                          (std::numeric_limits<qint64>::max)(), free_bytes) ||
+        free_bytes > capacity_bytes ||
+        !integer_in_range(object.value(QStringLiteral("disk_capacity_bytes")), 0,
+                          (std::numeric_limits<qint64>::max)(), disk_capacity_bytes) ||
+        !integer_in_range(object.value(QStringLiteral("disk_number")), 0,
+                          (std::numeric_limits<qint64>::max)(), disk_number) ||
         !object.value(QStringLiteral("is_system")).isBool() ||
         !object.value(QStringLiteral("is_read_only")).isBool() ||
-        !object.value(QStringLiteral("is_selectable")).isBool()) {
+        !object.value(QStringLiteral("is_selectable")).isBool() ||
+        !object.value(QStringLiteral("mount_letter")).isString() ||
+        !object.value(QStringLiteral("volume_label")).isString() ||
+        !object.value(QStringLiteral("health_status")).isString() ||
+        !object.value(QStringLiteral("partition_style")).isString() ||
+        !object.value(QStringLiteral("media_type")).isString()) {
         return false;
     }
     const auto is_selectable = object.value(QStringLiteral("is_selectable")).toBool();
@@ -79,9 +98,19 @@ using protocol_detail::stable_code;
               {QStringLiteral("kind"), kind},
               {QStringLiteral("availability"), availability},
               {QStringLiteral("capacityBytes"), capacity_bytes},
+              {QStringLiteral("freeBytes"), free_bytes},
+              {QStringLiteral("diskCapacityBytes"), disk_capacity_bytes},
               {QStringLiteral("isSystem"), object.value(QStringLiteral("is_system")).toBool()},
               {QStringLiteral("isReadOnly"), object.value(QStringLiteral("is_read_only")).toBool()},
-              {QStringLiteral("isSelectable"), is_selectable}};
+              {QStringLiteral("isSelectable"), is_selectable},
+              {QStringLiteral("diskNumber"), disk_number},
+              {QStringLiteral("mountLetter"), object.value(QStringLiteral("mount_letter")).toString()},
+              {QStringLiteral("volumeLabel"), object.value(QStringLiteral("volume_label")).toString()},
+              {QStringLiteral("healthStatus"),
+               object.value(QStringLiteral("health_status")).toString()},
+              {QStringLiteral("partitionStyle"),
+               object.value(QStringLiteral("partition_style")).toString()},
+              {QStringLiteral("mediaType"), object.value(QStringLiteral("media_type")).toString()}};
     return true;
 }
 
@@ -173,6 +202,61 @@ QByteArray encode_source_inventory_request(const QString& request_id,
         .toJson(QJsonDocument::Compact);
 }
 
+QByteArray encode_schedule_list_request(const QString& request_id,
+                                        const std::optional<QString>& continuation_token) {
+    const QJsonObject page{
+        {QStringLiteral("maximum_results"), static_cast<qint64>(kSchedulePageSize)},
+        {QStringLiteral("continuation_token"),
+         continuation_token ? QJsonValue(*continuation_token) : QJsonValue(QJsonValue::Null)}};
+    const QJsonObject payload{{QStringLiteral("page"), page},
+                              {QStringLiteral("enabled"), QJsonValue(QJsonValue::Null)}};
+    return QJsonDocument(
+               QJsonObject{
+                   {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
+                   {QStringLiteral("message_type"), 1},
+                   {QStringLiteral("request_id"), request_id},
+                   {QStringLiteral("kind"), kListSchedulesRequestKind},
+                   {QStringLiteral("idempotency_key"), QJsonValue(QJsonValue::Null)},
+                   {QStringLiteral("payload"), payload}})
+        .toJson(QJsonDocument::Compact);
+}
+
+QByteArray encode_upsert_schedule_request(const QString& request_id, const QString& idempotency_key,
+                                          const QString& schedule_id, const QString& display_name,
+                                          const bool enabled, const QVariantList& source_ids,
+                                          const QString& repository_connection_id,
+                                          const int backup_type, const int trigger_kind,
+                                          const int local_minute_of_day, const int weekday_mask,
+                                          const QString& timezone_id) {
+    const QJsonObject trigger{{QStringLiteral("kind"), trigger_kind},
+                              {QStringLiteral("local_minute_of_day"), local_minute_of_day},
+                              {QStringLiteral("weekday_mask"), weekday_mask},
+                              {QStringLiteral("timezone_id"), timezone_id}};
+    const QJsonObject payload{
+        {QStringLiteral("schedule_id"),
+         schedule_id.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(schedule_id)},
+        {QStringLiteral("display_name"), display_name},
+        {QStringLiteral("enabled"), enabled},
+        {QStringLiteral("source_ids"), QJsonArray::fromVariantList(source_ids)},
+        {QStringLiteral("repository_connection_id"), repository_connection_id},
+        {QStringLiteral("backup_type"), backup_type},
+        {QStringLiteral("trigger"), trigger}};
+    return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
+                                      static_cast<qint64>(kServiceSchemaVersion)},
+                                     {QStringLiteral("message_type"), 1},
+                                     {QStringLiteral("request_id"), request_id},
+                                     {QStringLiteral("kind"), kUpsertScheduleRequestKind},
+                                     {QStringLiteral("idempotency_key"), idempotency_key},
+                                     {QStringLiteral("payload"), payload}})
+        .toJson(QJsonDocument::Compact);
+}
+
+QByteArray encode_delete_schedule_request(const QString& request_id, const QString& idempotency_key,
+                                          const QString& schedule_id) {
+    return encode_repository_connection_resource_request(request_id, idempotency_key,
+                                                         kDeleteScheduleRequestKind, schedule_id);
+}
+
 QByteArray
 encode_repository_connection_list_request(const QString& request_id,
                                           const std::optional<QString>& continuation_token) {
@@ -194,12 +278,12 @@ encode_repository_connection_list_request(const QString& request_id,
 }
 
 QByteArray encode_start_backup_request(const QString& request_id, const QString& idempotency_key,
-                                       const QString& source_id,
+                                       const QVariantList& source_ids,
                                        const QString& repository_connection_id,
                                        const int backup_type,
                                        const QString& parent_recovery_point_id) {
     const QJsonObject payload{
-        {QStringLiteral("source_id"), source_id},
+        {QStringLiteral("source_ids"), QJsonArray::fromVariantList(source_ids)},
         {QStringLiteral("repository_connection_id"), repository_connection_id},
         {QStringLiteral("backup_type"), backup_type},
         {QStringLiteral("parent_recovery_point_id"), parent_recovery_point_id.isEmpty()
@@ -281,6 +365,124 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
                              parse_source_item, "sourceId", true, result.items) &&
            parse_token(payload.value(QStringLiteral("continuation_token")),
                        result.continuation_token);
+}
+
+[[nodiscard]] bool parse_schedule_item(const QJsonValue& value, QVariantMap& result) {
+    if (!value.isObject()) {
+        return false;
+    }
+    const auto object = value.toObject();
+    if (!has_exact_keys(object, {"schedule_id", "display_name", "enabled", "source_ids",
+                                 "repository_connection_id", "backup_type", "trigger",
+                                 "next_run_utc_ms"})) {
+        return false;
+    }
+    const auto schedule_id = object.value(QStringLiteral("schedule_id")).toString();
+    const auto source_array = object.value(QStringLiteral("source_ids")).toArray();
+    QVariantList source_ids;
+    QSet<QString> seen_source_ids;
+    for (const auto& source_value : source_array) {
+        const auto source_id = source_value.toString();
+        if (!source_value.isString() || !stable_code(source_id, 128) ||
+            seen_source_ids.contains(source_id)) {
+            return false;
+        }
+        seen_source_ids.insert(source_id);
+        source_ids.push_back(source_id);
+    }
+    QString display_name;
+    qint64 backup_type = 0;
+    if (!object.value(QStringLiteral("schedule_id")).isString() || !stable_code(schedule_id, 128) ||
+        !parse_display_name(object.value(QStringLiteral("display_name")), display_name) ||
+        !object.value(QStringLiteral("enabled")).isBool() ||
+        !object.value(QStringLiteral("source_ids")).isArray() || source_ids.isEmpty() ||
+        source_ids.size() > 100 ||
+        !object.value(QStringLiteral("repository_connection_id")).isString() ||
+        !stable_code(object.value(QStringLiteral("repository_connection_id")).toString(), 128) ||
+        !integer_in_range(object.value(QStringLiteral("backup_type")), 1, 3, backup_type) ||
+        !object.value(QStringLiteral("trigger")).isObject()) {
+        return false;
+    }
+    const auto trigger = object.value(QStringLiteral("trigger")).toObject();
+    if (!has_exact_keys(trigger,
+                        {"kind", "local_minute_of_day", "weekday_mask", "timezone_id"})) {
+        return false;
+    }
+    qint64 trigger_kind = 0;
+    qint64 local_minute = 0;
+    qint64 weekday_mask = 0;
+    if (!integer_in_range(trigger.value(QStringLiteral("kind")), 1, 2, trigger_kind) ||
+        !integer_in_range(trigger.value(QStringLiteral("local_minute_of_day")), 0, 24 * 60 - 1,
+                          local_minute) ||
+        !integer_in_range(trigger.value(QStringLiteral("weekday_mask")), 0, 127, weekday_mask) ||
+        !trigger.value(QStringLiteral("timezone_id")).isString()) {
+        return false;
+    }
+    qint64 next_run = 0;
+    const auto next_value = object.value(QStringLiteral("next_run_utc_ms"));
+    const bool has_next = !next_value.isNull();
+    if (has_next && !integer_in_range(next_value, 0, (std::numeric_limits<qint64>::max)(), next_run)) {
+        return false;
+    }
+    const auto hour = static_cast<int>(local_minute / 60);
+    const auto minute = static_cast<int>(local_minute % 60);
+    const QString time_of_day =
+        QStringLiteral("%1:%2")
+            .arg(hour, 2, 10, QLatin1Char('0'))
+            .arg(minute, 2, 10, QLatin1Char('0'));
+    const QString frequency =
+        trigger_kind == kScheduleTriggerWeekly ? QStringLiteral("weekly") : QStringLiteral("daily");
+    result = {{QStringLiteral("scheduleId"), schedule_id},
+              {QStringLiteral("id"), schedule_id},
+              {QStringLiteral("displayName"), display_name},
+              {QStringLiteral("sourceName"), display_name},
+              {QStringLiteral("enabled"), object.value(QStringLiteral("enabled")).toBool()},
+              {QStringLiteral("sourceIds"), source_ids},
+              {QStringLiteral("connectionId"),
+               object.value(QStringLiteral("repository_connection_id")).toString()},
+              {QStringLiteral("backupType"), backup_type},
+              {QStringLiteral("frequency"), frequency},
+              {QStringLiteral("timeOfDay"), time_of_day},
+              {QStringLiteral("weekdayMask"), weekday_mask},
+              {QStringLiteral("timezoneId"), trigger.value(QStringLiteral("timezone_id")).toString()},
+              {QStringLiteral("nextRunUtcMs"), has_next ? next_run : QVariant{}},
+              {QStringLiteral("lastRun"), QString{}},
+              {QStringLiteral("destinationName"), QString{}},
+              {QStringLiteral("destinationPath"), QString{}}};
+    return true;
+}
+
+bool parse_schedule_list_response(const QJsonObject& root, SchedulePage& result) {
+    qint64 kind = 0;
+    qint64 request_kind = 0;
+    qint64 error = 0;
+    if (!integer_in_range(root.value(QStringLiteral("kind")), 1, 1, kind) ||
+        !integer_in_range(root.value(QStringLiteral("request_kind")), kListSchedulesRequestKind,
+                          kListSchedulesRequestKind, request_kind) ||
+        !integer_in_range(root.value(QStringLiteral("boundary_error_code")), 0, 0, error) ||
+        !root.value(QStringLiteral("payload")).isObject()) {
+        return false;
+    }
+    const auto payload = root.value(QStringLiteral("payload")).toObject();
+    if (!has_exact_keys(payload, {"items", "continuation_token"})) {
+        return false;
+    }
+    return parse_paged_items(payload.value(QStringLiteral("items")), kSchedulePageSize,
+                             parse_schedule_item, "scheduleId", true, result.items) &&
+           parse_token(payload.value(QStringLiteral("continuation_token")),
+                       result.continuation_token);
+}
+
+bool is_schedule_list_failure_response(const QJsonObject& root) {
+    qint64 kind = 0;
+    qint64 request_kind = 0;
+    qint64 error = 0;
+    return integer_in_range(root.value(QStringLiteral("kind")), kRequestFailedResponseKind,
+                            kRequestFailedResponseKind, kind) &&
+           integer_in_range(root.value(QStringLiteral("request_kind")), kListSchedulesRequestKind,
+                            kListSchedulesRequestKind, request_kind) &&
+           integer_in_range(root.value(QStringLiteral("boundary_error_code")), 1, 11, error) &&
+           root.value(QStringLiteral("payload")).isNull();
 }
 
 bool parse_repository_connection_list_response(const QJsonObject& root,

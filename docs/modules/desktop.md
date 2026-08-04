@@ -116,11 +116,11 @@ Refresh 通过当前 Service session 重新查询 connection 与选中 connectio
 命令，成功后自动刷新列表；Remove 只删除控制面连接引用，不删除备份数据。Lock、Unlock、Rebuild、Export 与
 Password 在 Service 没有对应能力时不显示。布局必须在 900x600、1080x720 和更大窗口下不重叠。
 
-## 测试与完成标准
+## 验证与完成标准
 
-- codec/framing 与 ServiceClient 分层使用单元测试覆盖分页、opaque token、跨页乱序/重复拒绝、
-  NotConfigured、Repository RequestFailed、手动刷新、断线清空和重连重查。
-- Locale 测试覆盖 message-code 映射、格式化、无效语言、保存回退和五种语言包加载。
+- 人工协议验证覆盖分页、opaque token、跨页乱序/重复拒绝、NotConfigured、Repository RequestFailed、
+  手动刷新、断线清空和重连重查。
+- 人工本地化验证覆盖 message-code 映射、格式化、无效语言、保存回退和五种语言包加载。
 - Service 未运行、启动后连接、Service 退出和重启均能正确更新状态。
 - QML 启动不引用旧 Backend，不绕过 Service 直接操作系统资源。
 - 品牌资源来源和迁移范围可追溯，旧生成物不进入新项目。
@@ -143,12 +143,17 @@ Password 在 Service 没有对应能力时不显示。布局必须在 900x600、
   Backup/Restore/Mount 在 D3/D4/D6 接线前强制禁用（不得仅凭 capability 呈现无操作按钮）；
   进度协议严格校验与溢出安全百分比；首次 Job 快照 toast 基线与可重启 Toast 定时器；
   后台 Job 轮询不触发全屏 Loading overlay，Service Job 状态码映射到五语言稳定文案；
-  Repository/Job 客户端测试拆分为独立 Target，并生成多 viewport/locale 视觉证据
-  （`docs/migration/evidence/d2/`）。仍缺：按旧 `backup/src/gui` 对齐 Home/Splash/Toast/Loading/Shell 的
+  多 viewport/locale 视觉证据保存到 `docs/migration/evidence/d2/`。仍缺：按旧 `backup/src/gui` 对齐
+  Home/Splash/Toast/Loading/Shell 的
   显示效果，并提交旧/新并排视觉证据。
 - D3（进行中）：Backup 页面与 Inventory/Connection model/codec、`StartBackup`/`CancelJob` 门面；
   Source 仅绑定 Service Inventory 稳定 ID；Target 仅绑定 Repository connection；全量备份真实启动；
-  增量/差异/Schedule 禁用；凭据仅 SecretRef/Service 侧，QML 无明文密码；页面进度复用 D2 Job 观察；
-  五语言翻译与 `aegra_desktop_backup_client_tests`；Home↔Backup↔Repository 导航已接线。
+  增量/差异禁用；凭据仅 SecretRef/Service 侧，QML 无明文密码；页面进度复用 D2 Job 观察；
+  五语言翻译与 Home↔Backup↔Repository 导航已接线。
+  Schedule 向导允许选择多个 Volume；Desktop 把有序、去重的稳定 `source_ids[]` 保存为一条 Schedule。
+  Run 一次提交完整 Source 列表，只生成一个 Job 和一个包含全部 Volume 的 Archive；不得回退到首个可选
+  Source，也不得为每个 Volume 拆分 Schedule、Job 或 Archive。单卷可以独立选择；选中 Disk 时必须
+  选中并提交该 Disk 下所有具备稳定 identity 和可靠非零容量的 Volume。系统卷、只读卷、EFI/FAT、RAW
+  和未知文件系统卷都可勾选；读取方式由 Worker 决定，Desktop 不按 VSS 能力过滤。
   仍缺：按旧 `backup/src/gui` 对齐 Backup list + Add + 90% slide-in wizard 的显示效果、多 viewport/locale
-  旧/新并排视觉证据矩阵、真实 Service/SQLite Job E2E 证据、Debug/Release 全量 `ctest` 门禁闭环。
+  旧/新并排视觉证据矩阵、真实 Service/SQLite Job 人工运行证据和 Debug/Release 生产构建闭环。

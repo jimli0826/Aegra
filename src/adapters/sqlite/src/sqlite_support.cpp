@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <limits>
+#include <set>
 #include <utility>
 
 namespace aegra::adapters::sqlite::detail {
@@ -39,6 +40,19 @@ constexpr std::size_t kMaximumCommandFingerprintBytes = 4'096;
            std::ranges::all_of(value, [](const unsigned char character) {
                return character >= 0x20U && character != 0x7FU;
            });
+}
+
+[[nodiscard]] bool valid_source_ids(const std::vector<std::string>& source_ids,
+                                    const bool allow_empty) {
+    if ((!allow_empty && source_ids.empty()) ||
+        source_ids.size() > contracts::kMaximumBackupSources) {
+        return false;
+    }
+    std::set<std::string_view> seen;
+    return std::ranges::all_of(source_ids, [&seen](const std::string& source_id) {
+        return valid_stable_value(source_id, kMaximumIdentifierBytes) &&
+               seen.insert(source_id).second;
+    });
 }
 
 [[nodiscard]] bool valid_wire_integer(const std::uint64_t value) noexcept {
@@ -417,7 +431,7 @@ base::Result<void> validate_job_record(const ports::JobRecord& record) {
          (!record.started_utc_ms || *record.completed_utc_ms < *record.started_utc_ms)) ||
         ports::is_terminal_job_state(record.state) != record.completed_utc_ms.has_value() ||
         !valid_stable_value(record.message_code, kMaximumMessageCodeBytes) ||
-        (record.source_id && !valid_stable_value(*record.source_id, kMaximumIdentifierBytes)) ||
+        !valid_source_ids(record.source_ids, true) ||
         (record.repository_connection_id &&
          !valid_stable_value(*record.repository_connection_id, kMaximumIdentifierBytes)) ||
         (record.target_source_id &&
@@ -448,7 +462,7 @@ base::Result<void> validate_schedule_record(const ports::ScheduleRecord& record)
     auto valid_trigger = contracts::validate_schedule_trigger(record.trigger);
     if (!valid_stable_value(record.schedule_id, kMaximumIdentifierBytes) ||
         !valid_text(record.display_name, kMaximumDisplayNameBytes) ||
-        !valid_stable_value(record.source_id, kMaximumIdentifierBytes) ||
+        !valid_source_ids(record.source_ids, false) ||
         !valid_stable_value(record.repository_connection_id, kMaximumIdentifierBytes) ||
         !known_backup_type(record.backup_type) || !valid_trigger ||
         !valid_optional_wire_integer(record.next_run_utc_ms) ||
@@ -609,7 +623,11 @@ base::Result<ports::JobRecord> read_job(sqlite3_stmt* const stmt) {
     record.created_utc_ms = column_uint64(stmt, 4);
     record.started_utc_ms = column_uint64_optional(stmt, 5);
     record.completed_utc_ms = column_uint64_optional(stmt, 6);
-    record.source_id = column_text_optional(stmt, 7);
+    auto source_ids = decode_string_list(column_text_required(stmt, 7));
+    if (!source_ids) {
+        return base::Result<ports::JobRecord>::failure(source_ids.error());
+    }
+    record.source_ids = std::move(source_ids).value();
     record.repository_connection_id = column_text_optional(stmt, 8);
     record.target_source_id = column_text_optional(stmt, 9);
     if (sqlite3_column_type(stmt, 10) != SQLITE_NULL) {
@@ -638,7 +656,11 @@ base::Result<ports::ScheduleRecord> read_schedule(sqlite3_stmt* const stmt) {
     record.schedule_id = column_text_required(stmt, 0);
     record.display_name = column_text_required(stmt, 1);
     record.enabled = sqlite3_column_int(stmt, 2) != 0;
-    record.source_id = column_text_required(stmt, 3);
+    auto source_ids = decode_string_list(column_text_required(stmt, 3));
+    if (!source_ids) {
+        return base::Result<ports::ScheduleRecord>::failure(source_ids.error());
+    }
+    record.source_ids = std::move(source_ids).value();
     record.repository_connection_id = column_text_required(stmt, 4);
     record.backup_type = static_cast<contracts::BackupType>(sqlite3_column_int(stmt, 5));
     record.trigger.kind = static_cast<contracts::ScheduleTriggerKind>(sqlite3_column_int(stmt, 6));
@@ -725,6 +747,8 @@ contracts::JobSummary to_job_summary(const ports::JobRecord& record) {
     summary.started_utc_ms = record.started_utc_ms;
     summary.completed_utc_ms = record.completed_utc_ms;
     summary.message_code = record.message_code;
+    summary.source_ids = record.source_ids;
+    summary.repository_connection_id = record.repository_connection_id;
     return summary;
 }
 
@@ -732,7 +756,7 @@ contracts::ScheduleSummary to_schedule_summary(const ports::ScheduleRecord& reco
     return {record.schedule_id,
             record.display_name,
             record.enabled,
-            record.source_id,
+            record.source_ids,
             record.repository_connection_id,
             record.backup_type,
             record.trigger,

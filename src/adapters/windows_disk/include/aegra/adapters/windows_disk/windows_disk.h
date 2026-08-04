@@ -15,6 +15,7 @@ namespace aegra::adapters::windows_disk {
 enum class WindowsBlockSourceKind {
     kStableFile,
     kVssSnapshot,
+    kRawVolume,
 };
 
 struct WindowsBlockSourceOpenRequest final {
@@ -35,6 +36,8 @@ class WindowsBlockSource final : public ports::IBlockSource {
     open(const WindowsBlockSourceOpenRequest& request);
     [[nodiscard]] static bool
     is_vss_snapshot_device_path(const std::filesystem::path& path) noexcept;
+    [[nodiscard]] static bool
+    is_canonical_volume_guid_path(const std::filesystem::path& path) noexcept;
 
     [[nodiscard]] std::uint64_t size_bytes() const noexcept override;
     [[nodiscard]] base::Result<std::size_t> read(std::uint64_t offset,
@@ -99,6 +102,7 @@ struct WindowsVolumeInfo final {
     std::string label;
     std::string filesystem;
     std::uint64_t total_size_bytes{0};
+    std::uint64_t free_size_bytes{0};
     std::uint32_t cluster_size_bytes{0};
     std::vector<WindowsVolumeExtent> extents;
     bool filesystem_metadata_available{false};
@@ -106,6 +110,8 @@ struct WindowsVolumeInfo final {
     bool disk_extents_available{false};
     bool is_read_only{false};
 };
+
+[[nodiscard]] bool supports_vss_snapshot(const WindowsVolumeInfo& volume) noexcept;
 
 class WindowsVolumeEnumerator final {
   public:

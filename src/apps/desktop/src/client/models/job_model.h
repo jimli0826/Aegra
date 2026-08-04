@@ -2,6 +2,7 @@
 
 #include <QAbstractListModel>
 #include <QString>
+#include <QStringList>
 #include <QVariantList>
 #include <QVector>
 
@@ -25,6 +26,11 @@ struct JobRow final {
     std::optional<std::int64_t> progress_processed_bytes;
     std::optional<std::int64_t> progress_stored_bytes;
     QString message_code;
+    QStringList source_ids;
+    QString connection_id;
+    QString source_name;
+    QString destination_name;
+    QString destination_path;
 };
 
 class JobModel final : public QAbstractListModel {
@@ -42,18 +48,24 @@ class JobModel final : public QAbstractListModel {
         OperationTextRole,
         StateValueRole,
         StateTextRole,
+        StateColorRole,
         CreatedTextRole,
         ProgressPercentRole,
         ProgressVisibleRole,
         MessageTextRole,
         IsTerminalRole,
         IsActiveRole,
+        SourceNameRole,
+        DestinationNameRole,
+        DestinationPathRole,
     };
 
     explicit JobModel(QObject* parent = nullptr);
 
     void set_locale_format(LocaleFormat* format);
     void set_rows(QVector<JobRow> rows);
+    /// Insert or replace one job without dropping the rest (optimistic Run feedback).
+    void upsert_job(JobRow row);
     void clear();
     void retranslate();
 
@@ -75,9 +87,11 @@ class JobModel final : public QAbstractListModel {
   private:
     [[nodiscard]] QString operation_text(std::int64_t operation) const;
     [[nodiscard]] QString state_text(std::int64_t state) const;
+    [[nodiscard]] static QString state_color(std::int64_t state) noexcept;
     [[nodiscard]] static bool is_terminal_state(std::int64_t state) noexcept;
     [[nodiscard]] static bool is_active_state(std::int64_t state) noexcept;
     [[nodiscard]] static int progress_percent(const JobRow& row) noexcept;
+    [[nodiscard]] static bool progress_visible(const JobRow& row) noexcept;
 
     LocaleFormat* format_{nullptr};
     QVector<JobRow> rows_;

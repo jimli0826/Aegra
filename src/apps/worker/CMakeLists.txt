@@ -9,6 +9,7 @@ add_library(aegra_app_worker_personal STATIC
     src/worker_protocol.cpp
     src/worker_session.cpp
     src/worker_session_protocol.cpp
+    src/worker_task_log.cpp
     src/windows_personal_backup.cpp
     src/windows_personal_backup_runtime.cpp
     src/windows_personal_backup_task.cpp
@@ -22,6 +23,7 @@ target_include_directories(
     PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
 )
 
+target_compile_definitions(aegra_app_worker_personal PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 target_link_libraries(
     aegra_app_worker_personal
     PUBLIC Aegra::Base Aegra::Pipeline Aegra::Ports
@@ -30,6 +32,7 @@ target_link_libraries(
         Aegra::AdapterWindowsDisk
         Aegra::AdapterWindowsVss
         Aegra::Format
+        Aegra::ThirdPartySpdlog
         nlohmann_json::nlohmann_json
 )
 

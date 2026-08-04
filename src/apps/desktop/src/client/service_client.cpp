@@ -310,7 +310,8 @@ void ServiceClient::on_request_failed(const QString& message_code) {
         // is in flight — keep the socket and mark the domain error instead of full disconnect.
         if (handshake_complete_ && first_ready_seen_ &&
             (repository_loading_ || jobs_loading_ || inventory_loading_ || connections_loading_ ||
-             repository_command_busy_ || backup_command_busy_ || cancel_command_busy_) &&
+             repository_command_busy_ || schedule_command_busy_ || backup_command_busy_ ||
+             cancel_command_busy_) &&
             message_code == QLatin1String("service.protocol_invalid")) {
             if (repository_loading_) {
                 finish_repository_failure(QStringLiteral("repository.query_failed"));
@@ -332,6 +333,9 @@ void ServiceClient::on_request_failed(const QString& message_code) {
             }
             if (cancel_command_busy_) {
                 finish_cancel_command_failure(QStringLiteral("job.cancel_failed"));
+            }
+            if (schedule_command_busy_) {
+                finish_schedule_command_failure(QStringLiteral("schedule.command_failed"));
             }
             return;
         }
@@ -363,6 +367,9 @@ void ServiceClient::on_request_failed(const QString& message_code) {
     }
     if (cancel_command_busy_) {
         finish_cancel_command_failure(QStringLiteral("job.cancel_failed"));
+    }
+    if (schedule_command_busy_) {
+        finish_schedule_command_failure(QStringLiteral("schedule.command_failed"));
     }
 }
 
@@ -447,6 +454,7 @@ RequestDisposition ServiceClient::handle_service_info_frame(const QByteArray& bo
     job_list_available_ = capabilities_.contains(QStringLiteral("job.list"));
     inventory_available_ = capabilities_.contains(QStringLiteral("source.inventory"));
     connections_available_ = capabilities_.contains(QStringLiteral("repository.connection"));
+    schedules_available_ = capabilities_.contains(QStringLiteral("schedule"));
     backup_start_available_ = capabilities_.contains(QStringLiteral("backup.start"));
     job_cancel_available_ = capabilities_.contains(QStringLiteral("job.cancel"));
     handshake_complete_ = true;
@@ -469,6 +477,9 @@ RequestDisposition ServiceClient::handle_service_info_frame(const QByteArray& bo
         }
         if (connections_available_) {
             start_connection_query();
+        }
+        if (schedules_available_) {
+            start_schedule_query();
         }
     });
     return RequestDisposition::kFinished;
@@ -515,6 +526,9 @@ RequestDisposition ServiceClient::handle_job_list_frame(const QByteArray& body) 
         return RequestDisposition::kContinue;
     }
     auto rows = jobs_from_variant_list(pending_jobs_);
+    for (auto& row : rows) {
+        enrich_job_row(row);
+    }
     if (!jobs_baseline_seeded_) {
         seed_terminal_toast_baseline(rows);
         jobs_baseline_seeded_ = true;
@@ -587,6 +601,7 @@ void ServiceClient::set_state(const State state, QString error_code) {
             job_list_available_ = false;
             inventory_available_ = false;
             connections_available_ = false;
+            schedules_available_ = false;
             backup_start_available_ = false;
             job_cancel_available_ = false;
             handshake_complete_ = false;
@@ -594,6 +609,7 @@ void ServiceClient::set_state(const State state, QString error_code) {
             reset_jobs();
             reset_inventory();
             reset_connections();
+            reset_schedules();
             reset_repository_command();
             reset_backup_command();
         } else {
@@ -686,6 +702,23 @@ void ServiceClient::show_toast(const QString& text) {
     emit toastChanged();
     // Single restartable timer: consecutive toasts reset the full 4s visibility window.
     toast_timer_->start();
+}
+
+void ServiceClient::showToast(const QString& text) {
+    if (text.trimmed().isEmpty()) {
+        return;
+    }
+    show_toast(text);
+}
+
+QString ServiceClient::firstSelectableSourceId() const {
+    for (int row = 0; row < sources_.rowCount(); ++row) {
+        const auto index = sources_.index(row, 0);
+        if (sources_.data(index, SourceInventoryModel::IsSelectableRole).toBool()) {
+            return sources_.data(index, SourceInventoryModel::SourceIdRole).toString();
+        }
+    }
+    return {};
 }
 
 void ServiceClient::update_splash_for_state() { emit splashChanged(); }

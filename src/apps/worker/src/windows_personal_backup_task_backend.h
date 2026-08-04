@@ -16,8 +16,8 @@ class IWindowsPersonalBackupTaskBackend {
     IWindowsPersonalBackupTaskBackend(IWindowsPersonalBackupTaskBackend&&) = delete;
     IWindowsPersonalBackupTaskBackend& operator=(IWindowsPersonalBackupTaskBackend&&) = delete;
 
-    [[nodiscard]] virtual base::Result<WindowsPersonalVolumeBackupResult>
-    run(const WindowsPersonalVolumeBackupRequest& request,
+    [[nodiscard]] virtual base::Result<WindowsPersonalBackupResult>
+    run(const WindowsPersonalBackupRequest& request,
         const base::CancellationToken& cancellation, ports::IProgressSink* progress) = 0;
 };
 

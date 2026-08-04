@@ -1,5 +1,7 @@
 #include "aegra/contracts/job.h"
 
+#include "aegra/base/uuid.h"
+
 #include <algorithm>
 #include <utility>
 
@@ -56,6 +58,18 @@ base::Result<void> validate_backup_options(const JobRequest& request) {
     }
     if (request.backup->type != BackupType::kFull && !has_parent) {
         return invalid("non-full backup requires a parent source and credential");
+    }
+    if (!base::is_canonical_uuid(request.backup->file_uuid) ||
+        request.backup->created_utc_ms <= 0) {
+        return invalid("backup identity and creation time are required");
+    }
+    const bool has_set = base::is_canonical_uuid(request.backup->backup_set_uuid);
+    if (request.backup->type == BackupType::kFull &&
+        (!has_set || request.backup->backup_set_uuid == request.backup->file_uuid)) {
+        return invalid("full backup requires a distinct backup set UUID");
+    }
+    if (request.backup->type != BackupType::kFull && !request.backup->backup_set_uuid.empty()) {
+        return invalid("non-full backup inherits its backup set UUID from the parent");
     }
     return base::Result<void>::success();
 }

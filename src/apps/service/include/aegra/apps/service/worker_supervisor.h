@@ -5,11 +5,13 @@
 #include "aegra/contracts/job.h"
 #include "aegra/contracts/progress.h"
 #include "aegra/contracts/service_control.h"
+#include "aegra/contracts/worker_response.h"
 
 #include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -31,10 +33,11 @@ struct WorkerSupervisorConfig final {
 
 struct WorkerJobRequest final {
     contracts::JobRequest worker_request;
-    std::string source_id;
+    std::vector<std::string> source_ids;
     std::string repository_connection_id;
     std::optional<std::string> parent_recovery_point_id;
     std::string idempotency_key;
+    std::optional<std::string> backup_archive_key;
     std::chrono::seconds deadline{};
 };
 
@@ -42,7 +45,8 @@ using SupervisorProgressCallback =
     std::function<void(std::string_view job_id, const contracts::TaskProgress& progress)>;
 
 using SupervisorCompletionCallback =
-    std::function<void(std::string_view job_id, contracts::ServiceJobState final_state)>;
+    std::function<void(const WorkerJobRequest& request, contracts::ServiceJobState final_state,
+                       const contracts::WorkerResponse* response)>;
 
 class WorkerSupervisor {
   public:
@@ -64,6 +68,10 @@ class WorkerSupervisor {
     void shutdown(const base::CancellationToken& cancel);
 
     [[nodiscard]] std::uint32_t active_count() const noexcept;
+
+    /// Last progress event for an active job (cleared when the job ends).
+    [[nodiscard]] std::optional<contracts::TaskProgress>
+    last_progress(std::string_view job_id) const;
 
   private:
     struct Impl;

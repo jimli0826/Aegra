@@ -45,7 +45,7 @@ src/apps/service/
 ## 生命周期
 
 Service 默认监听逻辑名称 `control`，实际 Pipe 名称见 [ADR-0011](../adr/0011-local-service-desktop-ipc.md)。
-`--once` 只接受一个连接并处理一个请求，用于真实进程测试；默认模式在会话断开后继续接受连接。
+`--once` 只接受一个连接并处理一个请求，用于受控诊断；默认模式在会话断开后继续接受连接。
 
 每个 session 顺序执行：
 
@@ -61,10 +61,11 @@ Accept -> Receive Frame -> Decode/Validate -> Dispatch -> Encode -> Send -> Rece
 - schema 3 使用 Request/Response/Event envelope，不兼容未发布的 schema 1/2；详见
   [ADR-0013](../adr/0013-service-control-protocol-v3.md)。
 - `request_id` 用于请求响应对账，不作为权限或幂等凭据；查询不携带幂等键，命令必须携带幂等键。
-- V3 已对外执行 `service.info`、Inventory、Repository connection/query、Job list、Backup start 与 Job
-  cancel。Recovery Point chain、delete plan/execute 与 Verify start 的 handler 已接线，但 S5 完成门禁前不在
+- V3 已对外执行 `service.info`、Inventory、Repository connection/query、Job list、Backup start、Job
+  cancel 与 Schedule。Backup Start 和 Schedule 使用完整有序 `source_ids[]`，一个命令只创建一个 Job。
+  Recovery Point chain、delete plan/execute 与 Verify start 的 handler 已接线，但 S5 完成门禁前不在
   runtime capability 列表中；dispatcher 必须在调用 handler 前返回 `service.capability_unavailable`。尚未接入的
-  Restore/Mount/Schedule/Event 请求同样返回 capability unavailable。
+  Restore/Mount/Event 请求同样返回 capability unavailable。
 - Repository 响应只包含 Repository UUID 和不含客户 Metadata 的 Catalog 摘要，不包含根路径、Archive key、
   主机名、SID、SecretRef 或原始 Adapter 错误。
 - frame 最大 64 KiB，JSON 根必须是 object，整数必须先检查范围。
@@ -86,18 +87,17 @@ Accept -> Receive Frame -> Decode/Validate -> Dispatch -> Encode -> Send -> Rece
   当前工作目录。
 - Worker session listener 使用独立 `aegra-worker-*` namespace、1 MiB frame limit 和每 session 一个
   `std::jthread`；Service control pipe 继续使用 Service namespace 与 64 KiB frame limit。
-- `--repository-root` 仅保留为显式开发/测试直连查询；常规路径通过持久化 Repository connection 打开。
+- `--repository-root` 仅保留为显式开发诊断直连查询；常规路径通过持久化 Repository connection 打开。
 
-## 测试与完成标准
+## 验证与完成标准
 
-- 契约、codec、dispatcher、session 和真实进程均有确定性测试。
-- 授权成功、未授权拒绝、多 session、stop 取消 pending accept、install/recovery/restart/uninstall 与
-  recovery 失败 rollback 有确定性测试。
+- 审查契约、codec、dispatcher、session 和真实进程边界。
+- 人工诊断覆盖授权成功、未授权拒绝、多 session、stop 取消 pending accept、
+  install/recovery/restart/uninstall 与 recovery 失败 rollback。
 - Service 可独立启动，Desktop 可以握手并显示 Ready 与版本。
 - Service 不依赖 Qt、具体备份 Adapter 或数据库权威。
 - 未知版本、损坏请求、断线和取消不会终止整个常驻 Host。
-- Service composition 测试覆盖 SQLite 启动收敛、capability 与数据目录；真实 Supervisor 测试启动实际
-  Worker 可执行文件并验证失败结果持久化及 session 回收。
+- 人工运行验证覆盖 SQLite 启动收敛、capability、数据目录、实际 Worker 启动、失败结果持久化及 session 回收。
 - Debug/Release、源码规模、格式和秘密扫描通过。
 
 ## 后续控制面工作
@@ -112,5 +112,5 @@ Chunk Index、Manifest 或 Archive metadata 的权威副本；Repository 仍是�
 ## 当前状态
 
 S0-S4 已完成；S5 进行中并已部分接入 composition：chain/delete/verify contracts、Application 用例、
-delete-plan 核心和 Host dispatch 已存在，但 capability 保持关闭。完整真实 Verify Worker 进程测试、持久化
-per-file Archive Credential 映射与 Local Storage 故障恢复门禁仍待补齐。
+delete-plan 核心和 Host dispatch 已存在，但 capability 保持关闭。完整 Verify Worker 人工进程验证、持久化
+per-file Archive Credential 映射与 Local Storage 故障恢复验证仍待补齐。

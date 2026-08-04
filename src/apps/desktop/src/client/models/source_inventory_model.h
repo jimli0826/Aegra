@@ -18,9 +18,17 @@ struct SourceInventoryRow final {
     std::int64_t kind{1};
     std::int64_t availability{2};
     std::int64_t capacity_bytes{0};
+    std::int64_t free_bytes{0};
+    std::int64_t disk_capacity_bytes{0};
     bool is_system{false};
     bool is_read_only{false};
     bool is_selectable{false};
+    std::uint32_t disk_number{0};
+    QString mount_letter;
+    QString volume_label;
+    QString health_status;
+    QString partition_style;
+    QString media_type;
 };
 
 // Domain list model for Service Inventory sources. QML binds to display roles only.
@@ -28,6 +36,8 @@ class SourceInventoryModel final : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(int count READ rowCount NOTIFY countChanged)
     Q_PROPERTY(int selectableCount READ selectableCount NOTIFY countChanged)
+    /// Disk → volumes tree for Backup wizard (old disksTree shape).
+    Q_PROPERTY(QVariantList disksTree READ disksTree NOTIFY countChanged)
 
   public:
     enum Role : int {
@@ -40,6 +50,11 @@ class SourceInventoryModel final : public QAbstractListModel {
         IsReadOnlyRole,
         IsSelectableRole,
         DisabledReasonTextRole,
+        DiskNumberRole,
+        MountLetterRole,
+        VolumeLabelRole,
+        HealthStatusRole,
+        PartitionStyleRole,
     };
 
     explicit SourceInventoryModel(QObject* parent = nullptr);
@@ -52,6 +67,7 @@ class SourceInventoryModel final : public QAbstractListModel {
     [[nodiscard]] int selectableCount() const noexcept;
     [[nodiscard]] bool contains_selectable(const QString& source_id) const;
     [[nodiscard]] std::optional<SourceInventoryRow> find(const QString& source_id) const;
+    [[nodiscard]] QVariantList disksTree() const;
 
     [[nodiscard]] int rowCount(const QModelIndex& parent = QModelIndex()) const override;
     [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;

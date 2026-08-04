@@ -21,6 +21,10 @@ V6 使用固定二进制启动结构、加密 CBOR 元数据和 chunk 内索引�
 
 该设计支持一个备份文件包含多个磁盘和多个卷。`disks[]/partitions[]` 表达物理布局和裸机恢复所需的分区表信息，`volumes[]` 表达 VSS 一致性数据源及其到物理分区/extent 的映射。一个 chunk 只能包含一个 volume 的逻辑地址空间数据；整盘备份不直接读 `PhysicalDrive`，而是展开为该磁盘上所有可备份 volume，并通过 VSS 读取这些 volume。
 
+当前产品实现已经支持多 Volume 全量 Archive：所有选中 Volume 位于同一个 VSS Snapshot Set，按
+`volumes[]` 顺序写入同一个逻辑 chunk 流，并在最后一个 Volume 完成后一次性提交 `.bkf` 与多 Volume
+Sidecar。多 Volume 增量和多目标 Restore 尚未实现，必须明确拒绝，不得退化为只处理第一个 Volume。
+
 ## 文件布局
 
 ```text
@@ -354,7 +358,7 @@ static_assert(sizeof(CborMetadataEnvelopeHeader) == 124);
 ```cpp
 constexpr uint32_t CBOR_META_FLAG_ENCRYPTED = 0x00000001;
 
-constexpr uint8_t META_ENC_NONE                 = 0; // 仅允许测试文件使用
+constexpr uint8_t META_ENC_NONE                 = 0; // 保留值，产品文件无效
 constexpr uint8_t META_ENC_AES_256_GCM          = 1;
 constexpr uint8_t META_ENC_XCHACHA20_POLY1305   = 2;
 
@@ -363,7 +367,7 @@ constexpr uint8_t META_KDF_HKDF_SHA256     = 1;
 constexpr uint8_t META_KDF_ARGON2ID        = 2;
 ```
 
-正式备份文件必须设置 `CBOR_META_FLAG_ENCRYPTED`，且 `encryption_method != META_ENC_NONE`。`META_ENC_NONE` 只允许内存测试或不进入产品读取路径的格式测试样本使用；普通读取器必须拒绝未加密的 CBOR metadata。
+正式备份文件必须设置 `CBOR_META_FLAG_ENCRYPTED`，且 `encryption_method != META_ENC_NONE`。普通读取器必须拒绝使用 `META_ENC_NONE` 或其它未加密 CBOR metadata 的文件。
 
 个人版正式文件当前必须使用 `META_ENC_XCHACHA20_POLY1305`，`nonce_size == 24` 且
 `tag_size == 16`。使用 `META_KDF_ARGON2ID` 时，salt 必须随机生成，`kdf_opslimit` 和

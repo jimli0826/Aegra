@@ -41,9 +41,18 @@ decode_inventory_token(const std::optional<std::string>& token, const bool inclu
     item.kind = record.kind;
     item.availability = record.availability;
     item.capacity_bytes = record.capacity_bytes;
+    item.free_bytes = record.free_bytes > record.capacity_bytes ? record.capacity_bytes
+                                                                : record.free_bytes;
+    item.disk_capacity_bytes = record.disk_capacity_bytes;
     item.is_system = record.is_system;
     item.is_read_only = record.is_read_only;
     item.is_selectable = detail::is_source_selectable(record);
+    item.disk_number = record.disk_number;
+    item.mount_letter = record.mount_letter;
+    item.volume_label = record.volume_label;
+    item.health_status = record.health_status.empty() ? "Healthy" : record.health_status;
+    item.partition_style = record.partition_style.empty() ? "GPT" : record.partition_style;
+    item.media_type = record.media_type.empty() ? "Unknown" : record.media_type;
     return item;
 }
 

@@ -46,6 +46,15 @@ struct IncrementalBaseline final {
     std::vector<archive::SidecarRecord> records;
 };
 
+struct SourceWriteState final {
+    std::uint32_t source_index{0};
+    std::uint64_t logical_size{0};
+    std::uint64_t next_logical_offset{0};
+    std::uint64_t next_input_chunk_index{0};
+    std::vector<archive::SidecarRecord> sidecar_records;
+    std::vector<archive::SidecarRecord> baseline_records;
+};
+
 [[nodiscard]] base::Error error(base::ErrorCode code, std::string message) {
     return {code, std::move(message)};
 }
@@ -53,15 +62,6 @@ struct IncrementalBaseline final {
 [[nodiscard]] const char* as_chars(const std::byte* value) noexcept {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) stream byte-buffer boundary.
     return reinterpret_cast<const char*>(value);
-}
-
-[[nodiscard]] const format::Volume* find_selected_volume(const ArchiveCreateRequest& request) {
-    const auto selected =
-        std::find_if(request.manifest.volumes.begin(), request.manifest.volumes.end(),
-                     [&request](const format::Volume& candidate) {
-                         return candidate.volume_index == request.source_index;
-                     });
-    return selected == request.manifest.volumes.end() ? nullptr : &*selected;
 }
 
 [[nodiscard]] base::Result<void> validate_create_geometry(const ArchiveCreateRequest& request) {
@@ -78,14 +78,9 @@ struct IncrementalBaseline final {
         return base::Result<void>::failure(
             error(base::ErrorCode::kInvalidArgument, "archive split size is too small"));
     }
-    if (request.manifest.volumes.size() != 1) {
+    if (request.manifest.volumes.empty()) {
         return base::Result<void>::failure(
-            error(base::ErrorCode::kInvalidArgument,
-                  "personal archive MVP requires exactly one source volume"));
-    }
-    if (find_selected_volume(request) == nullptr) {
-        return base::Result<void>::failure(error(base::ErrorCode::kInvalidArgument,
-                                                 "archive source volume is absent from manifest"));
+            error(base::ErrorCode::kInvalidArgument, "archive requires at least one source volume"));
     }
     return base::Result<void>::success();
 }
@@ -100,6 +95,11 @@ struct IncrementalBaseline final {
         backup_type != format::BackupType::kIncremental) {
         return base::Result<void>::failure(
             error(base::ErrorCode::kInvalidArgument, "archive backup type is invalid"));
+    }
+    if (backup_type == format::BackupType::kIncremental && request.manifest.volumes.size() != 1) {
+        return base::Result<void>::failure(error(
+            base::ErrorCode::kInvalidArgument,
+            "multi-volume incremental archives are not implemented"));
     }
     if (backup_type == format::BackupType::kFull) {
         if (request.parent_source.empty() && request.parent_password.empty()) {
@@ -175,7 +175,7 @@ load_incremental_baseline(const ArchiveCreateRequest& request, const format::Vol
     const bool sidecar_matches =
         sidecar.value().block_size == request.block_size &&
         sidecar.value().payload.volumes.size() == 1 &&
-        sidecar.value().payload.volumes.front().volume_index == request.source_index &&
+        sidecar.value().payload.volumes.front().volume_index == volume.volume_index &&
         sidecar.value().payload.volumes.front().records.size() ==
             block_count(volume.total_size, request.block_size);
     const bool requested_set_matches = is_zero_uuid(request.backup_set_uuid) ||
@@ -423,19 +423,28 @@ struct PersonalArchiveSession::Impl final {
     crypto_sodium::KdfParameters kdf;
     std::array<std::byte, crypto_sodium::kMetadataSaltSize> salt{};
     std::uint32_t block_size{0};
-    std::uint32_t source_index{0};
     std::uint64_t split_size_bytes{0};
-    std::uint64_t logical_size{0};
-    std::uint64_t next_logical_offset{0};
-    std::uint64_t next_input_chunk_index{0};
     std::uint64_t next_archive_chunk_index{0};
     std::uint64_t total_block_count{0};
     std::uint64_t total_payload_size{0};
     std::uint64_t current_part_chunk_count{0};
-    std::vector<archive::SidecarRecord> sidecar_records;
-    std::vector<archive::SidecarRecord> baseline_records;
+    std::vector<SourceWriteState> sources;
+    std::size_t next_source_position{0};
     bool incremental{false};
     bool complete{false};
+
+    [[nodiscard]] SourceWriteState* current_source(const std::uint32_t source_index) noexcept {
+        while (next_source_position < sources.size() &&
+               sources[next_source_position].next_logical_offset ==
+                   sources[next_source_position].logical_size) {
+            ++next_source_position;
+        }
+        if (next_source_position >= sources.size() ||
+            sources[next_source_position].source_index != source_index) {
+            return nullptr;
+        }
+        return &sources[next_source_position];
+    }
 
     [[nodiscard]] base::Result<void> open_next_part() {
         if (parts.size() >= (std::numeric_limits<std::uint32_t>::max)()) {
@@ -529,8 +538,8 @@ PersonalArchiveSession::create(const ArchiveCreateRequest& request) {
     if (!available) {
         return base::Result<std::unique_ptr<PersonalArchiveSession>>::failure(available.error());
     }
-    const auto* volume = find_selected_volume(request);
-    auto baseline = load_incremental_baseline(request, *volume);
+    const auto& baseline_volume = request.manifest.volumes.front();
+    auto baseline = load_incremental_baseline(request, baseline_volume);
     if (!baseline) {
         return base::Result<std::unique_ptr<PersonalArchiveSession>>::failure(baseline.error());
     }
@@ -554,14 +563,20 @@ PersonalArchiveSession::create(const ArchiveCreateRequest& request) {
     implementation->kdf = preamble.value().metadata.kdf;
     implementation->salt = preamble.value().metadata.salt;
     implementation->block_size = request.block_size;
-    implementation->source_index = request.source_index;
     implementation->split_size_bytes = request.split_size_bytes;
     implementation->incremental = baseline_value.has_value();
+    implementation->sources.reserve(request.manifest.volumes.size());
+    for (const auto& volume : request.manifest.volumes) {
+        SourceWriteState source;
+        source.source_index = volume.volume_index;
+        source.logical_size = volume.total_size;
+        implementation->sources.push_back(std::move(source));
+    }
     if (baseline_value.has_value()) {
-        implementation->baseline_records = std::move(baseline_value).value().records;
+        implementation->sources.front().baseline_records =
+            std::move(baseline_value).value().records;
     }
     implementation->parts.push_back({request.destination, partial});
-    implementation->logical_size = volume->total_size;
     implementation->output.open(partial, std::ios::binary | std::ios::trunc);
     if (!implementation->output || !write_preamble(implementation->output, preamble.value())) {
         std::error_code filesystem_error;
@@ -580,22 +595,27 @@ base::Result<void> PersonalArchiveSession::write_chunk(const ports::ChunkWriteRe
     if (cancellation.stop_requested()) {
         return base::Result<void>::failure(error(base::ErrorCode::kCancelled, "backup cancelled"));
     }
-    if (!implementation_ || implementation_->complete ||
-        request.descriptor.chunk_index != implementation_->next_input_chunk_index ||
-        request.descriptor.logical_offset != implementation_->next_logical_offset ||
+    if (!implementation_ || implementation_->complete) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kInvalidArgument, "archive chunk descriptor is invalid"));
+    }
+    auto* source = implementation_->current_source(request.descriptor.source_index);
+    if (source == nullptr ||
+        request.descriptor.chunk_index != source->next_input_chunk_index ||
+        request.descriptor.logical_offset != source->next_logical_offset ||
         request.descriptor.logical_offset % implementation_->block_size != 0 ||
         request.descriptor.logical_size != request.payload.size() ||
-        request.descriptor.logical_offset > implementation_->logical_size ||
+        request.descriptor.logical_offset > source->logical_size ||
         request.descriptor.logical_size >
-            implementation_->logical_size - request.descriptor.logical_offset) {
+            source->logical_size - request.descriptor.logical_offset) {
         return base::Result<void>::failure(
             error(base::ErrorCode::kInvalidArgument, "archive chunk descriptor is invalid"));
     }
     const detail::ChunkPreparationRequest preparation{
         request,
-        implementation_->baseline_records,
+        source->baseline_records,
         implementation_->block_size,
-        implementation_->source_index,
+        source->source_index,
         implementation_->next_archive_chunk_index,
         implementation_->incremental,
     };
@@ -607,12 +627,12 @@ base::Result<void> PersonalArchiveSession::write_chunk(const ports::ChunkWriteRe
     if (!persisted) {
         return persisted;
     }
-    ++implementation_->next_input_chunk_index;
-    implementation_->next_logical_offset += request.descriptor.logical_size;
+    ++source->next_input_chunk_index;
+    source->next_logical_offset += request.descriptor.logical_size;
     implementation_->total_block_count += prepared.value().sidecar_records.size();
-    implementation_->sidecar_records.insert(implementation_->sidecar_records.end(),
-                                            prepared.value().sidecar_records.begin(),
-                                            prepared.value().sidecar_records.end());
+    source->sidecar_records.insert(source->sidecar_records.end(),
+                                   prepared.value().sidecar_records.begin(),
+                                   prepared.value().sidecar_records.end());
     return base::Result<void>::success();
 }
 
@@ -620,9 +640,12 @@ base::Result<void> PersonalArchiveSession::commit(const base::CancellationToken 
     if (cancellation.stop_requested()) {
         return base::Result<void>::failure(error(base::ErrorCode::kCancelled, "backup cancelled"));
     }
-    if (!implementation_ || implementation_->complete ||
-        implementation_->next_input_chunk_index == 0 ||
-        implementation_->next_logical_offset != implementation_->logical_size) {
+    const bool all_sources_complete =
+        implementation_ && std::ranges::all_of(implementation_->sources, [](const auto& source) {
+            return source.next_input_chunk_index > 0 &&
+                   source.next_logical_offset == source.logical_size;
+        });
+    if (!implementation_ || implementation_->complete || !all_sources_complete) {
         return base::Result<void>::failure(
             error(base::ErrorCode::kConflict, "archive session cannot be committed"));
     }
@@ -647,13 +670,17 @@ base::Result<void> PersonalArchiveSession::commit(const base::CancellationToken 
         return base::Result<void>::failure(
             error(base::ErrorCode::kIoFailure, "failed to finalize personal archive"));
     }
+    archive::SidecarPayload sidecar_payload;
+    sidecar_payload.volumes.reserve(implementation_->sources.size());
+    for (const auto& source : implementation_->sources) {
+        sidecar_payload.volumes.push_back({source.source_index, source.sidecar_records});
+    }
     const detail::SidecarWriteRequest sidecar_request{
         implementation_->sidecar_partial,
         implementation_->password.view(),
         implementation_->file_uuid,
         implementation_->block_size,
-        implementation_->source_index,
-        implementation_->sidecar_records,
+        sidecar_payload,
         implementation_->kdf,
         implementation_->salt,
     };

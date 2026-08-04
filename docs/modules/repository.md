@@ -39,9 +39,8 @@ PostgreSQL 投影异步更新，失败不得撤销已发布 Commit。
 
 Gateway 是唯一在线写入口。Root 更新必须串行化或使用 compare-and-swap；密钥按 epoch 管理；跨租户去重必须单独安全评审。
 
-## 测试
+## 验证
 
-- 并发提交、Root 冲突、重复上传和进程崩溃。
-- 索引丢失重建、Catalog 重建和 PostgreSQL 全丢失恢复。
-- GC 活跃事务保护、Tombstone、宽限期和 Compaction 写放大。
-- Pack、Manifest、Index 损坏和 Scrub 报告。
+- 审查并人工验证并发提交、Root 冲突、重复上传和进程崩溃恢复。
+- 使用隔离的非生产 Repository 验证索引/Catalog 重建、PostgreSQL 全丢失恢复、GC/Tombstone 和损坏报告。
+- 构建 Repository 生产 Target 并执行架构、源码规模、格式和秘密扫描。

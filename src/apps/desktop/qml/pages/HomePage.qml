@@ -15,25 +15,42 @@ Item {
     readonly property var demoDisks: [
         {
             name: "Disk 0",
-            freeLabel: "19.7 GB",
+            freeFormatted: "19.1 GB",
             size: "20.0 GB",
-            media: "SSD",
-            isSystem: false,
-            percent: 0.015
+            mediaType: "SSD",
+            isSystemDisk: false,
+            percentUsed: 0.045
         },
         {
             name: "Disk 1",
-            freeLabel: "11.3 GB",
+            freeFormatted: "11.5 GB",
             size: "30.0 GB",
-            media: "SSD",
-            isSystem: true,
-            percent: 0.62
+            mediaType: "SSD",
+            isSystemDisk: true,
+            percentUsed: 0.617
+        },
+        {
+            name: "Disk 2",
+            freeFormatted: "2.0 GB",
+            size: "2.0 GB",
+            mediaType: "SSD",
+            isSystemDisk: false,
+            percentUsed: 0.01
         }
     ]
 
+    // Old Home charts physical disks (GetDisksWithVolumes), not individual volumes.
+    readonly property var homeDisks: {
+        if (serviceClient.sources && serviceClient.sources.count > 0
+                && serviceClient.sources.disksTree
+                && serviceClient.sources.disksTree.length > 0)
+            return serviceClient.sources.disksTree
+        return []
+    }
+
     // Keep demo disks while inventory is empty (including during load) so Home does not
-    // flash "Loading sources…" → empty → demo on every connect.
-    readonly property bool useDemoDisks: serviceClient.sources.count === 0
+    // flash empty → demo on every connect.
+    readonly property bool useDemoDisks: root.homeDisks.length === 0
 
     ColumnLayout {
         anchors.fill: parent
@@ -89,7 +106,7 @@ Item {
                     Item { Layout.fillHeight: true }
                 }
 
-                // Center: inventory sources or demo disk charts
+                // Center: physical disks (old homeBackend.disks) or demo charts
                 Item {
                     Layout.fillHeight: true
                     Layout.fillWidth: true
@@ -100,7 +117,7 @@ Item {
                         contentHeight: height
                         clip: true
                         interactive: diskRow.implicitWidth > width
-                        visible: serviceClient.sources.count > 0 || root.useDemoDisks
+                        visible: root.homeDisks.length > 0 || root.useDemoDisks
                         boundsBehavior: Flickable.StopAtBounds
 
                         Row {
@@ -108,63 +125,9 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: 28
 
-                            // Live Service sources
+                            // Live: one chart per PhysicalDrive (disksTree), not per volume.
                             Repeater {
-                                model: serviceClient.sources
-                                delegate: Item {
-                                    required property string displayName
-                                    required property string capacityText
-                                    required property bool isSystem
-                                    required property bool isSelectable
-                                    width: 110
-                                    height: 120
-                                    ColumnLayout {
-                                        anchors.centerIn: parent
-                                        spacing: 6
-                                        DiskChart {
-                                            Layout.alignment: Qt.AlignHCenter
-                                            width: 72
-                                            height: 72
-                                            percent: isSelectable ? 0.35 : 0
-                                            label: capacityText
-                                            diskName: ""
-                                            animationEnabled: false
-                                        }
-                                        Text {
-                                            Layout.alignment: Qt.AlignHCenter
-                                            Layout.maximumWidth: 108
-                                            text: displayName
-                                            color: Theme.colorTextWhite
-                                            font.pixelSize: 12
-                                            font.bold: true
-                                            font.family: Theme.fontFamily
-                                            elide: Text.ElideRight
-                                            horizontalAlignment: Text.AlignHCenter
-                                        }
-                                        Text {
-                                            Layout.alignment: Qt.AlignHCenter
-                                            Layout.maximumWidth: 108
-                                            text: {
-                                                var parts = []
-                                                if (capacityText.length > 0)
-                                                    parts.push(capacityText)
-                                                if (isSystem)
-                                                    parts.push(qsTrId("aegra.home.system_tag"))
-                                                return parts.join(" · ")
-                                            }
-                                            color: Theme.colorTextGrey
-                                            font.pixelSize: 10
-                                            font.family: Theme.fontFamily
-                                            elide: Text.ElideRight
-                                            horizontalAlignment: Text.AlignHCenter
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Demo disks (old Home look)
-                            Repeater {
-                                model: root.useDemoDisks ? root.demoDisks : []
+                                model: root.useDemoDisks ? root.demoDisks : root.homeDisks
                                 delegate: Item {
                                     required property var modelData
                                     width: 110
@@ -176,25 +139,34 @@ Item {
                                             Layout.alignment: Qt.AlignHCenter
                                             width: 72
                                             height: 72
-                                            percent: modelData.percent
-                                            label: modelData.freeLabel
+                                            // used/capacity arc; free (approx) in ring center — old Home.
+                                            percent: modelData.percentUsed || 0
+                                            label: modelData.freeFormatted || modelData.size || ""
                                             diskName: ""
-                                            animationEnabled: false
+                                            animationEnabled: true
                                         }
                                         Text {
                                             Layout.alignment: Qt.AlignHCenter
-                                            text: modelData.name
+                                            Layout.maximumWidth: 108
+                                            text: modelData.name || ""
                                             color: Theme.colorTextWhite
                                             font.pixelSize: 12
                                             font.bold: true
                                             font.family: Theme.fontFamily
+                                            elide: Text.ElideRight
+                                            horizontalAlignment: Text.AlignHCenter
                                         }
                                         Text {
                                             Layout.alignment: Qt.AlignHCenter
                                             Layout.maximumWidth: 108
                                             text: {
-                                                var parts = [modelData.size, modelData.media]
-                                                if (modelData.isSystem)
+                                                // Old Home: size · mediaType · System
+                                                var parts = []
+                                                if (modelData.size)
+                                                    parts.push(modelData.size)
+                                                if (modelData.mediaType)
+                                                    parts.push(modelData.mediaType)
+                                                if (modelData.isSystemDisk)
                                                     parts.push(qsTrId("aegra.home.system_tag"))
                                                 return parts.join(" · ")
                                             }
@@ -390,15 +362,19 @@ Item {
                             required property string jobId
                             required property string operationText
                             required property string stateText
+                            required property string stateColor
+                            required property int stateValue
                             required property string createdText
                             required property int progressPercent
                             required property bool progressVisible
-                            required property string messageText
                             required property bool isActive
+                            required property string sourceName
+                            required property string destinationName
+                            required property string destinationPath
                             required property int index
 
                             width: taskList.width
-                            height: 44
+                            height: 48
                             color: index % 2 === 0 ? Theme.colorTableRow : Theme.colorTableAlt
 
                             RowLayout {
@@ -418,50 +394,105 @@ Item {
                                         color: Theme.colorAccentBlue
                                     }
                                 }
-                                // Source
-                                Text {
-                                    Layout.preferredWidth: 140
-                                    Layout.fillWidth: true
-                                    text: operationText
-                                    color: Theme.colorTextWhite
-                                    font.pixelSize: 12
-                                    font.family: Theme.fontFamily
-                                    elide: Text.ElideMiddle
-                                }
-                                // Destination
-                                Text {
-                                    Layout.preferredWidth: 180
-                                    Layout.fillWidth: true
-                                    text: messageText.length > 0 ? messageText : jobId
-                                    color: Theme.colorTextWhite
-                                    font.pixelSize: 12
-                                    font.family: Theme.fontFamily
-                                    elide: Text.ElideMiddle
-                                }
+                                // Source — disk / volume display name (old Home style)
                                 Item {
                                     Layout.preferredWidth: 140
+                                    Layout.fillWidth: true
                                     Layout.fillHeight: true
-                                    TaskProgressBar {
+                                    Text {
                                         anchors.verticalCenter: parent.verticalCenter
                                         width: parent.width
-                                        value: progressPercent
-                                        active: isActive && progressVisible
-                                        visible: progressVisible || isActive
-                                    }
-                                    Text {
-                                        anchors.centerIn: parent
-                                        visible: !progressVisible && !isActive
-                                        text: "—"
-                                        color: Theme.colorTextDim
+                                        text: sourceName
+                                        color: Theme.colorTextWhite
                                         font.pixelSize: 12
                                         font.family: Theme.fontFamily
+                                        elide: Text.ElideMiddle
+                                    }
+                                }
+                                // Destination — repository name + path (two lines when path differs)
+                                Item {
+                                    Layout.preferredWidth: 180
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    Column {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        spacing: 0
+                                        Text {
+                                            width: parent.width
+                                            height: destinationPath.length > 0
+                                                    && destinationPath !== destinationName ? 16
+                                                                                           : implicitHeight
+                                            text: destinationName
+                                            color: Theme.colorTextWhite
+                                            font.pixelSize: destinationPath.length > 0
+                                                            && destinationPath !== destinationName
+                                                            ? 11 : 12
+                                            font.family: Theme.fontFamily
+                                            elide: Text.ElideMiddle
+                                        }
+                                        Text {
+                                            width: parent.width
+                                            height: 14
+                                            visible: destinationPath.length > 0
+                                                     && destinationPath !== destinationName
+                                            text: destinationPath
+                                            color: Theme.colorTextGrey
+                                            font.pixelSize: 9
+                                            font.family: Theme.fontFamily
+                                            elide: Text.ElideMiddle
+                                        }
+                                    }
+                                }
+                                // Progress — bar + percent (old Home style)
+                                RowLayout {
+                                    Layout.preferredWidth: 140
+                                    spacing: 8
+                                    Item {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 8
+                                        TaskProgressBar {
+                                            anchors.fill: parent
+                                            value: progressPercent
+                                            active: isActive
+                                            fillColor: {
+                                                // 4=Succeeded 5=Failed 6=Cancelled 7=Interrupted
+                                                if (stateValue === 5)
+                                                    return Theme.colorAccentRed
+                                                if (stateValue === 4)
+                                                    return Theme.colorGreen
+                                                if (stateValue === 6 || stateValue === 7)
+                                                    return "#e6a817"
+                                                return Theme.colorAccentBlue
+                                            }
+                                            visible: progressVisible || isActive || progressPercent > 0
+                                        }
+                                        Text {
+                                            anchors.centerIn: parent
+                                            visible: !progressVisible && !isActive && progressPercent === 0
+                                            text: "—"
+                                            color: Theme.colorTextDim
+                                            font.pixelSize: 12
+                                            font.family: Theme.fontFamily
+                                        }
+                                    }
+                                    Text {
+                                        Layout.preferredWidth: 36
+                                        visible: progressVisible || isActive || progressPercent > 0
+                                        text: progressPercent + "%"
+                                        color: Theme.colorTextGrey
+                                        font.pixelSize: 11
+                                        font.family: Theme.fontFamily
+                                        horizontalAlignment: Text.AlignRight
                                     }
                                 }
                                 Text {
                                     Layout.preferredWidth: 90
                                     text: stateText
-                                    color: Theme.colorTextWhite
+                                    color: stateColor
                                     font.pixelSize: 12
+                                    font.bold: true
                                     font.family: Theme.fontFamily
                                     elide: Text.ElideRight
                                 }

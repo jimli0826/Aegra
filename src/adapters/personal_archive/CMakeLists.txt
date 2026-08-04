@@ -5,6 +5,7 @@ add_library(aegra_adapter_personal_archive STATIC
     src/personal_archive_preamble.cpp
     src/personal_archive_payload.cpp
     src/personal_archive_session.cpp
+    src/personal_archive_shape_validation.cpp
     src/personal_archive_sidecar_io.cpp
 )
 

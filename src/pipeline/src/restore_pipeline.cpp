@@ -36,6 +36,12 @@ base::Result<void> validate_descriptor(const ports::ChunkDescriptor& descriptor,
                                        const std::uint64_t expected_index,
                                        const std::uint64_t expected_offset,
                                        const std::uint64_t logical_size) {
+    if (descriptor.source_index != 0) {
+        return base::Result<void>::failure(base::Error{
+            base::ErrorCode::kInvalidArgument,
+            "multi-volume restore requires explicit target mapping",
+        });
+    }
     if (descriptor.chunk_index != expected_index || descriptor.logical_offset != expected_offset) {
         return base::Result<void>::failure(
             base::Error{base::ErrorCode::kCorruptData, "chunk mapping is not contiguous"});
@@ -133,6 +139,26 @@ void produce_chunks(RestoreProducerContext& context) {
     }
 }
 
+[[nodiscard]] const char* restore_phase_message(const contracts::TaskPhase phase) noexcept {
+    switch (phase) {
+    case contracts::TaskPhase::kPreparing:
+        return "restore.preparing";
+    case contracts::TaskPhase::kReading:
+        return "restore.reading";
+    case contracts::TaskPhase::kTransforming:
+        return "restore.transforming";
+    case contracts::TaskPhase::kWriting:
+        return "restore.writing";
+    case contracts::TaskPhase::kCommitting:
+        return "restore.committing";
+    case contracts::TaskPhase::kCompleted:
+        return "restore.completed";
+    case contracts::TaskPhase::kUnspecified:
+        break;
+    }
+    return "restore.running";
+}
+
 void publish_progress(ports::IProgressSink* sink, const RestorePlan& plan,
                       const contracts::TaskPhase phase, const RestoreSummary& summary,
                       const std::uint64_t logical_size) {
@@ -147,7 +173,7 @@ void publish_progress(ports::IProgressSink* sink, const RestorePlan& plan,
         logical_size,
         summary.restored_bytes,
         summary.restored_bytes,
-        {},
+        restore_phase_message(phase),
     });
 }
 

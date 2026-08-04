@@ -3,6 +3,7 @@
 #include "windows_api.h"
 
 #include <Windows.h>
+#include <winioctl.h>
 
 #include <algorithm>
 #include <chrono>
@@ -48,16 +49,54 @@ base::Result<std::uint64_t> file_size(const HANDLE handle) {
     return base::Result<std::uint64_t>::success(static_cast<std::uint64_t>(size.QuadPart));
 }
 
+base::Result<std::uint64_t> raw_volume_size(const HANDLE handle) {
+    GET_LENGTH_INFORMATION length{};
+    DWORD bytes_returned = 0;
+    if (!DeviceIoControl(handle, IOCTL_DISK_GET_LENGTH_INFO, nullptr, 0, &length, sizeof(length),
+                         &bytes_returned, nullptr)) {
+        return base::Result<std::uint64_t>::failure(
+            detail::win32_error(GetLastError(), "IOCTL_DISK_GET_LENGTH_INFO"));
+    }
+    if (bytes_returned < sizeof(length) || length.Length.QuadPart <= 0) {
+        return base::Result<std::uint64_t>::failure(
+            base::Error{base::ErrorCode::kIoFailure, "raw volume size is invalid"});
+    }
+    return base::Result<std::uint64_t>::success(
+        static_cast<std::uint64_t>(length.Length.QuadPart));
+}
+
+base::Result<void> enable_extended_raw_reads(const HANDLE handle) {
+    DWORD bytes_returned = 0;
+    if (!DeviceIoControl(handle, FSCTL_ALLOW_EXTENDED_DASD_IO, nullptr, 0, nullptr, 0,
+                         &bytes_returned, nullptr)) {
+        return base::Result<void>::failure(
+            detail::win32_error(GetLastError(), "FSCTL_ALLOW_EXTENDED_DASD_IO"));
+    }
+    return base::Result<void>::success();
+}
+
 base::Result<std::uint64_t> resolve_size(const WindowsBlockSourceOpenRequest& request,
                                          const HANDLE handle) {
     if (request.kind == WindowsBlockSourceKind::kVssSnapshot) {
         if (!request.expected_size_bytes || *request.expected_size_bytes == 0) {
             return base::Result<std::uint64_t>::failure(base::Error{
                 base::ErrorCode::kInvalidArgument,
-                "VSS snapshot source requires a nonzero expected size",
+                "device block source requires a nonzero expected size",
             });
         }
         return base::Result<std::uint64_t>::success(*request.expected_size_bytes);
+    }
+
+    if (request.kind == WindowsBlockSourceKind::kRawVolume) {
+        auto actual_size = raw_volume_size(handle);
+        if (!actual_size) {
+            return base::Result<std::uint64_t>::success(*request.expected_size_bytes);
+        }
+        if (!request.expected_size_bytes || *request.expected_size_bytes != actual_size.value()) {
+            return base::Result<std::uint64_t>::failure(
+                base::Error{base::ErrorCode::kConflict, "raw volume size changed"});
+        }
+        return actual_size;
     }
 
     auto actual_size = file_size(handle);
@@ -90,6 +129,14 @@ base::Result<void> validate_request(const WindowsBlockSourceOpenRequest& request
             return base::Result<void>::failure(base::Error{
                 base::ErrorCode::kInvalidArgument,
                 "VSS snapshot source requires a nonzero expected size",
+            });
+        }
+    } else if (request.kind == WindowsBlockSourceKind::kRawVolume) {
+        if (!WindowsBlockSource::is_canonical_volume_guid_path(request.path) ||
+            !request.expected_size_bytes || *request.expected_size_bytes == 0) {
+            return base::Result<void>::failure(base::Error{
+                base::ErrorCode::kInvalidArgument,
+                "raw source requires a canonical Volume GUID path and nonzero expected size",
             });
         }
     } else if (is_device_namespace_path(path)) {
@@ -151,13 +198,26 @@ WindowsBlockSource::open(const WindowsBlockSourceOpenRequest& request) {
         return base::Result<std::unique_ptr<WindowsBlockSource>>::failure(validation.error());
     }
 
+    auto open_path = request.path.native();
+    if (request.kind == WindowsBlockSourceKind::kRawVolume && !open_path.empty()) {
+        open_path.pop_back();
+    }
+    const DWORD flags = request.kind == WindowsBlockSourceKind::kRawVolume
+                            ? FILE_FLAG_OVERLAPPED
+                            : FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED |
+                                  FILE_FLAG_SEQUENTIAL_SCAN;
     detail::UniqueHandle handle(CreateFileW(
-        request.path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        nullptr, OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
+        open_path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, flags, nullptr));
     if (!handle.valid()) {
         return base::Result<std::unique_ptr<WindowsBlockSource>>::failure(
             detail::win32_error(GetLastError(), "CreateFileW"));
+    }
+    if (request.kind == WindowsBlockSourceKind::kRawVolume) {
+        auto enabled = enable_extended_raw_reads(handle.get());
+        if (!enabled) {
+            return base::Result<std::unique_ptr<WindowsBlockSource>>::failure(enabled.error());
+        }
     }
 
     auto size = resolve_size(request, handle.get());
@@ -181,6 +241,11 @@ bool WindowsBlockSource::is_vss_snapshot_device_path(const std::filesystem::path
     return std::ranges::all_of(value.substr(kVssPathPrefix.size()), [](const wchar_t character) {
         return character >= L'0' && character <= L'9';
     });
+}
+
+bool WindowsBlockSource::is_canonical_volume_guid_path(
+    const std::filesystem::path& path) noexcept {
+    return WindowsBlockSink::is_canonical_volume_guid_path(path);
 }
 
 std::uint64_t WindowsBlockSource::size_bytes() const noexcept { return impl_->size_bytes; }

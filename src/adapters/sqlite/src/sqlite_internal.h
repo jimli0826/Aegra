@@ -80,7 +80,7 @@ validate_restore_preflight_record(const ports::RestorePreflightRecord& record);
 validate_job_transition(const ports::JobStateTransition& transition);
 
 [[nodiscard]] base::Result<void> exec_sql(sqlite3* db, const char* sql);
-[[nodiscard]] base::Result<void> apply_schema_v2(sqlite3* db);
+[[nodiscard]] base::Result<void> apply_schema_v3(sqlite3* db);
 [[nodiscard]] base::Result<std::uint32_t> read_schema_version(sqlite3* db);
 [[nodiscard]] base::Result<void> write_schema_version(sqlite3* db, std::uint32_t version);
 
@@ -275,7 +275,7 @@ inline constexpr const char* kSelectConnectionSql =
 
 inline constexpr const char* kSelectJobSql =
     "SELECT job_id, trace_id, operation, state, created_utc_ms, started_utc_ms, completed_utc_ms, "
-    "source_id, repository_connection_id, target_source_id, backup_type, parent_recovery_point_id, "
+    "source_ids, repository_connection_id, target_source_id, backup_type, parent_recovery_point_id, "
     "preflight_token, message_code, idempotency_key, result_error_code, result_outcome, "
     "result_message_code FROM jobs WHERE job_id = ?";
 
@@ -284,7 +284,7 @@ inline constexpr const char* kSelectCommandSql =
     "FROM commands WHERE idempotency_key = ?";
 
 inline constexpr const char* kSelectScheduleSql =
-    "SELECT schedule_id, display_name, enabled, source_id, repository_connection_id, backup_type, "
+    "SELECT schedule_id, display_name, enabled, source_ids, repository_connection_id, backup_type, "
     "trigger_kind, local_minute_of_day, weekday_mask, timezone_id, next_run_utc_ms, "
     "created_utc_ms, updated_utc_ms FROM schedules WHERE schedule_id = ?";
 

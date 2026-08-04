@@ -72,6 +72,11 @@ state: discovery, structural, authentication, chain, verification projection
 同一字段存在多个来源时采用固定优先级：认证 Archive > 结构扫描 Archive > Catalog Entry。任何身份冲突
 都返回损坏/冲突，不进行 last-writer-wins。
 
+正常备份由 Service 先按 UTC 计算 `archives/YYYY/MM/<file_uuid>.bkf`，Worker 提交 Archive Group，
+Service 再核对固定 Header、连续分卷、末卷 Footer 和 Sidecar Header，最后通过 staging + create-only
+publish 写入对应 Catalog Entry。文件名、Archive Header 和 Catalog Entry 必须使用同一个 `file_uuid`；
+不得使用 job ID 作为 Archive 文件名。
+
 状态维度彼此独立：
 
 | 维度 | 取值示例 | 权威依据 |
@@ -159,15 +164,11 @@ Manifest。删除 SQLite 不得删除 Repository 数据；重新连接后必须�
 - 日志可以记录 Repository UUID、operation UUID、file UUID、稳定 message code 和对象数量，不记录
   Storage Credential、SecretRef、源路径或客户 Metadata。
 
-## 测试
+## 验证
 
-- Catalog codec：golden、roundtrip、重复/未知 key、错误类型、非法 UUID/key 和容量上限。
-- Storage Contract：短读、分页、取消、条件冲突、unknown outcome、幂等删除和 capability。
-- Scanner：空仓库、Catalog 缺失/冲突、孤立 staging、缺卷、缺 Footer、重复 UUID和损坏 Header。
-- Graph：全量、增量、差异、分叉、断链、环、跨 Set、重复节点和最大深度。
-- Registration：Catalog 成功、失败后 Reconcile、同内容重复登记和 UUID 冲突。
-- Delete Plan：叶子、子树、整链、遗漏后代拒绝、generation 变化和部分删除恢复。
-- Local Adapter 集成：进程重启、文件 rename、只读目录、空间不足和路径逃逸。
+- 审查 Catalog codec、Storage Port、Scanner、Graph、Registration 和 Delete Plan 的全部边界规则。
+- 使用隔离的非生产 Repository 人工验证重启、rename、只读目录、空间不足、损坏输入和路径逃逸。
+- 构建 PersonalRepository、Memory/Local Storage Adapter 及其直接生产消费者。
 
 ## Definition of Done
 
@@ -175,7 +176,7 @@ Manifest。删除 SQLite 不得删除 Repository 数据；重新连接后必须�
 - Catalog 丢失后可完全从结构完整的 Archive Group 重建身份、位置和链图。
 - 无 Credential 扫描不执行 KDF；正式 Restore 前仍执行 Archive 认证和 Chain Reader 校验。
 - 删除不能产生仍显示为可恢复的断链后代，并可从任意单对象失败幂等继续。
-- Local Storage Adapter 通过公共 Contract Test；Memory Adapter 覆盖所有故障注入路径。
+- Local Storage 与 Memory Adapter 的行为与公共 Storage Port 契约一致。
 - Debug/Release、源码规模、依赖、静态分析、格式和秘密扫描通过。
 
 ## 当前状态
@@ -189,10 +190,10 @@ Manifest。删除 SQLite 不得删除 Repository 数据；重新连接后必须�
 - 缺父节点的可发现状态，以及可恢复节点的 base-first 显式链解析。
 
 阶段 12B 已实现细粒度 Repository Object Storage Port、稳定 `kOutcomeUnknown` 错误语义、线程安全 Memory
-Object Storage 参考实现和可复用 Contract Test。Memory 实现支持范围短读、流式 staging、分页列举、
+Object Storage 参考实现。Memory 实现支持范围短读、流式 staging、分页列举、
 generation 条件发布、幂等删除、取消和确定性故障注入。
 
-阶段 12C 已实现 Windows Local Storage Adapter，并通过公共 Object Storage Contract；其路径、staging、
+阶段 12C 已实现 Windows Local Storage Adapter，并遵循公共 Object Storage Contract；其路径、staging、
 generation、发布和删除语义见 [Local Storage 模块文档](storage_local.md)。
 
 阶段 13B 已实现 `RepositoryCatalogScanner`：先验证 Descriptor，再分页读取 Catalog Entry 与 Deletion

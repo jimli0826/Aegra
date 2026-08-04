@@ -3,6 +3,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonValue>
+#include <QSet>
 
 #include <algorithm>
 #include <functional>
@@ -397,7 +398,8 @@ namespace {
 [[nodiscard]] bool parse_job_item_object(const QJsonObject& object, QVariantMap& result) {
     if (!has_exact_keys(object,
                         {"job_id", "trace_id", "operation", "state", "created_utc_ms",
-                         "started_utc_ms", "completed_utc_ms", "progress", "message_code"})) {
+                         "started_utc_ms", "completed_utc_ms", "progress", "message_code",
+                         "source_ids", "repository_connection_id"})) {
         return false;
     }
     qint64 operation = 0;
@@ -419,13 +421,38 @@ namespace {
         !stable_code(object.value(QStringLiteral("message_code")).toString(), 128)) {
         return false;
     }
+    QVariantList source_ids;
+    QSet<QString> seen_source_ids;
+    QString connection_id;
+    const auto source_value = object.value(QStringLiteral("source_ids"));
+    if (!source_value.isArray() || source_value.toArray().size() > 100) {
+        return false;
+    }
+    for (const auto& value : source_value.toArray()) {
+        const auto source_id = value.toString();
+        if (!value.isString() || !stable_code(source_id, 128) ||
+            seen_source_ids.contains(source_id)) {
+            return false;
+        }
+        seen_source_ids.insert(source_id);
+        source_ids.push_back(source_id);
+    }
+    const auto connection_value = object.value(QStringLiteral("repository_connection_id"));
+    if (!connection_value.isNull()) {
+        if (!connection_value.isString() || !stable_code(connection_value.toString(), 128)) {
+            return false;
+        }
+        connection_id = connection_value.toString();
+    }
     QVariantMap map{
         {QStringLiteral("jobId"), object.value(QStringLiteral("job_id")).toString()},
         {QStringLiteral("traceId"), object.value(QStringLiteral("trace_id")).toString()},
         {QStringLiteral("operation"), operation},
         {QStringLiteral("state"), state},
         {QStringLiteral("createdUtcMs"), created_utc_ms},
-        {QStringLiteral("messageCode"), object.value(QStringLiteral("message_code")).toString()}};
+        {QStringLiteral("messageCode"), object.value(QStringLiteral("message_code")).toString()},
+        {QStringLiteral("sourceIds"), source_ids},
+        {QStringLiteral("connectionId"), connection_id}};
     if (started_utc_ms) {
         map.insert(QStringLiteral("startedUtcMs"), *started_utc_ms);
     }

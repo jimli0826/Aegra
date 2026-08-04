@@ -3,6 +3,7 @@
 #include "client/service_protocol.h"
 #include "locale/message_code_map.h"
 
+#include <QDateTime>
 #include <QJsonObject>
 #include <QUuid>
 
@@ -11,6 +12,27 @@ namespace {
 
 constexpr qsizetype kMaximumSources = 10'000;
 constexpr qsizetype kMaximumConnections = 1'000;
+constexpr qsizetype kMaximumBackupSources = 100;
+
+[[nodiscard]] std::optional<QStringList>
+validated_backup_sources(const QVariantList& source_ids, const SourceInventoryModel& inventory) {
+    if (source_ids.isEmpty() || source_ids.size() > kMaximumBackupSources) {
+        return std::nullopt;
+    }
+    QStringList result;
+    QSet<QString> seen;
+    result.reserve(source_ids.size());
+    for (const auto& value : source_ids) {
+        const auto source_id = value.toString();
+        if (source_id.isEmpty() || seen.contains(source_id) ||
+            !inventory.contains_selectable(source_id)) {
+            return std::nullopt;
+        }
+        seen.insert(source_id);
+        result.push_back(source_id);
+    }
+    return result;
+}
 
 [[nodiscard]] QString job_state_translation(const std::int64_t state) {
     switch (state) {
@@ -60,19 +82,44 @@ constexpr qsizetype kMaximumConnections = 1'000;
 
 QString ServiceClient::defaultConnectionId() const { return connections_.default_connection_id(); }
 
-void ServiceClient::startBackup(const QString& source_id, const QString& connection_id) {
-    if (state_ != State::kReady || !backup_start_available_ || backup_command_busy_ ||
-        cancel_command_busy_) {
-        return;
+bool ServiceClient::startBackup(const QVariantList& source_ids, const QString& connection_id) {
+    if (state_ != State::kReady) {
+        //% "Service is not connected"
+        const auto msg = qtTrId("aegra.error.service.disconnected");
+        emit backupStartFailed(msg);
+        show_toast(msg);
+        return false;
+    }
+    if (!backup_start_available_) {
+        //% "Service does not support backup.start"
+        const auto msg = qtTrId("aegra.backup.run.capability_missing");
+        emit backupStartFailed(msg);
+        show_toast(msg);
+        return false;
+    }
+    if (backup_command_busy_ || cancel_command_busy_) {
+        //% "A backup command is already in progress"
+        const auto msg = qtTrId("aegra.backup.run.busy");
+        emit backupStartFailed(msg);
+        show_toast(msg);
+        return false;
     }
     // Do not start a second backup while the observed job is still active.
     if (!active_backup_job_id_.isEmpty() && !active_backup_terminal_) {
-        return;
+        //% "A backup job is already running"
+        const auto msg = qtTrId("aegra.backup.run.already_running");
+        emit backupStartFailed(msg);
+        show_toast(msg);
+        return false;
     }
-    if (!sources_.contains_selectable(source_id) ||
-        !connections_.contains_available(connection_id)) {
+    const auto validated_sources = validated_backup_sources(source_ids, sources_);
+    if (!validated_sources) {
         finish_backup_command_failure(QStringLiteral("backup.preflight_failed"));
-        return;
+        return false;
+    }
+    if (!connections_.contains_available(connection_id)) {
+        finish_backup_command_failure(QStringLiteral("backup.repository_unavailable"));
+        return false;
     }
     // Fresh attempt after terminal or first click: mint a new idempotency key.
     // Mid-flight retry (key set, no job yet) reuses the key so Service can replay.
@@ -84,20 +131,24 @@ void ServiceClient::startBackup(const QString& source_id, const QString& connect
     }
     backup_command_error_code_.clear();
     backup_command_busy_ = true;
+    pending_backup_source_ids_ = *validated_sources;
+    pending_backup_connection_id_ = connection_id;
     emit backupCommandChanged();
     update_active_backup_observe();
 
     const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     start_backup_request_id_ = request_id;
     const auto body = encode_start_backup_request(request_id, start_backup_idempotency_key_,
-                                                  source_id, connection_id, kBackupTypeFull, {});
+                                                   source_ids, connection_id, kBackupTypeFull, {});
     const auto started =
         coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
             return handle_start_backup_frame(frame_body);
         });
     if (!started) {
         finish_backup_command_failure(QStringLiteral("service.send_failed"));
+        return false;
     }
+    return true;
 }
 
 void ServiceClient::cancelActiveBackup() {
@@ -275,6 +326,10 @@ RequestDisposition ServiceClient::handle_connection_list_frame(const QByteArray&
         selected_repository_connection_id_ = connections_.default_connection_id();
     }
     emit connectionsChanged();
+    if (!schedules_.isEmpty()) {
+        enrich_schedules_with_connections();
+        emit schedulesChanged();
+    }
     if (selected_repository_connection_id_.isEmpty()) {
         reset_repository();
     } else if (!repository_loading_) {
@@ -306,8 +361,24 @@ RequestDisposition ServiceClient::handle_start_backup_frame(const QByteArray& bo
     // Keep idempotency key until the job terminates so reconnect/replay cannot create a second job.
     backup_command_error_code_.clear();
     cancel_job_idempotency_key_.clear();
+    // Optimistic task row so Home Tasks updates immediately (before job.list returns).
+    {
+        JobRow optimistic;
+        optimistic.job_id = active_backup_job_id_;
+        optimistic.operation = 1; // backup
+        optimistic.state = 1;      // queued
+        optimistic.created_utc_ms = QDateTime::currentMSecsSinceEpoch();
+        optimistic.source_ids = pending_backup_source_ids_;
+        optimistic.connection_id = pending_backup_connection_id_;
+        enrich_job_row(optimistic);
+        jobs_.upsert_job(std::move(optimistic));
+        emit jobsChanged();
+    }
     emit backupCommandChanged();
     update_active_backup_observe();
+    //% "Backup started"
+    show_toast(qtTrId("aegra.backup.run.started"));
+    emit backupStartSucceeded(active_backup_job_id_);
     if (job_list_available_ && !jobs_loading_) {
         start_job_query();
     }
@@ -366,6 +437,9 @@ void ServiceClient::finish_backup_command_failure(const QString& message_code) {
     backup_command_error_code_ = message_code;
     emit backupCommandChanged();
     update_active_backup_observe();
+    const auto msg = localize_message_code(message_code);
+    show_toast(msg);
+    emit backupStartFailed(msg);
 }
 
 void ServiceClient::finish_cancel_command_failure(const QString& message_code) {
@@ -409,6 +483,32 @@ void ServiceClient::reset_backup_command() {
     update_active_backup_observe();
 }
 
+void ServiceClient::enrich_job_row(JobRow& row) const {
+    if (!row.source_ids.isEmpty()) {
+        QStringList source_names;
+        source_names.reserve(row.source_ids.size());
+        for (const auto& source_id : row.source_ids) {
+            if (const auto source = sources_.find(source_id)) {
+                source_names.push_back(source->display_name);
+            } else {
+                source_names.push_back(source_id);
+            }
+        }
+        row.source_name = source_names.join(QStringLiteral(", "));
+    }
+    if (!row.connection_id.isEmpty()) {
+        if (const auto connection = connections_.find(row.connection_id)) {
+            row.destination_name = connection->display_name;
+            // Connection summary currently exposes display name only (no path locator).
+            if (row.destination_path.isEmpty()) {
+                row.destination_path = connection->display_name;
+            }
+        } else if (row.destination_name.isEmpty()) {
+            row.destination_name = row.connection_id;
+        }
+    }
+}
+
 void ServiceClient::update_active_backup_observe() {
     QString state_text;
     QString message_text;
@@ -421,9 +521,9 @@ void ServiceClient::update_active_backup_observe() {
             state_text = job_state_translation(job->state);
             message_text =
                 job->message_code.isEmpty() ? QString{} : localize_message_code(job->message_code);
-            percent = progress_percent_of(*job);
-            progress_visible = (job->state == 1 || job->state == 2 || job->state == 3) &&
-                               job->progress_processed_bytes.has_value();
+            percent = job->state == 4 ? 100 : progress_percent_of(*job);
+            progress_visible = job->state == 4 || job->state == 1 || job->state == 2 ||
+                               job->state == 3 || job->progress_processed_bytes.has_value();
             terminal = job->state == 4 || job->state == 5 || job->state == 6 || job->state == 7;
             cancellable = job_cancel_available_ && (job->state == 1 || job->state == 2) &&
                           !cancel_command_busy_ && !backup_command_busy_;

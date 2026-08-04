@@ -54,13 +54,13 @@ Service 侧监听器。`WindowsNamedPipeListenRequest` 支持 ACL 配置：
 - 错误映射为稳定 `ErrorCode`，消息不含客户路径或数据
 - Adapter 不解析 JSON
 
-## 测试
+## 验证
 
-- framing、取消、断线、名称校验
-- 显式 ACL 连接、peer identity、allowlist 拒绝、多 session 授权、accept 取消
+- 审查 framing、取消、断线、名称校验、ACL、peer identity、多 session 授权和 accept 取消路径。
+- 使用临时本地 Pipe 执行隔离的人工运行验证。
 
 ## Definition of Done
 
 - 公共头无 Win32 类型泄漏
-- Service 安全 ACL 与身份校验可独立单测
+- Service 安全 ACL 与身份校验边界清晰且可独立人工验证
 - Debug/Release 与源码规模门禁通过

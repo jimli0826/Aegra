@@ -2,7 +2,7 @@
 
 ## 目标
 
-以最小能力接口隔离外部 I/O、系统能力和可替换策略，使核心数据面可用内存实现进行确定性测试。
+以最小能力接口隔离外部 I/O、系统能力和可替换策略，使核心数据面可用内存实现进行确定性验证。
 
 ## 端口集合
 
@@ -59,7 +59,7 @@
 - `ICredentialResolver::resolve()` 接受 `SecretRef` 和取消令牌，返回独占的 `IResolvedSecret`；Secret
   view 只在对象生命周期内有效，Resolver 实现负责受控内存与析构清零。
 - `IRandomSource::fill()` 填充调用方提供的缓冲区并支持取消，不暴露随机库或操作系统类型。
-- `IClock::now_utc_ms()` 提供 UTC 毫秒时间；测试必须注入确定性时钟。
+- `IClock::now_utc_ms()` 提供 UTC 毫秒时间；人工验证场景可以注入确定性时钟。
 - `IProgressSink::publish()` 不得抛出异常；事件拥有 job/trace 关联字段且不得包含 Secret 或客户数据。
 - `IMessageChannel` 传递拥有所有权的 UTF-8 消息；一个 Reader 和一个 Writer可以并发，挂起 I/O 必须
   响应取消，Adapter 必须执行帧大小限制。消息 schema 与状态机不属于 Port。
@@ -93,12 +93,10 @@
 安全对象。所有操作支持取消，已进入外部单对象 mutation 后不能伪报取消，必须成功或返回
 `kOutcomeUnknown`。详细语义见 [个人版 Repository 模块](personal_repository.md)。
 
-## 测试
+## 验证
 
-每个 Port 提供可复用 Contract Test Suite。所有 Adapter 必须运行同一组边界、短读、取消、并发、错误注入和资源释放测试。
-
-阶段 12B 已提供 `tests/ports/object_storage_contract.h`，覆盖 staging 可见性、条件发布、generation、分页、
-取消和幂等删除。新增 Storage Adapter 必须复用该套件。
+每个 Port 必须完整记录边界、短读、取消、并发、错误注入和资源释放语义。所有 Adapter 的实现审查和人工验证
+必须以同一份 Port 契约为准，不得为具体后端放宽行为。
 
 S2 已在 `control_plane.h` 定义个人版控制面细粒度 Store 与 Job 状态机纯函数。SQLite Adapter 见
 [control_plane_sqlite.md](control_plane_sqlite.md)；Application/Service 不得 include SQLite 头。

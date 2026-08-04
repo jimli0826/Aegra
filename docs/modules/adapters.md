@@ -12,7 +12,7 @@
 - 虚拟化：VMware、Hyper-V。
 - 挂载：Dokan 与虚拟磁盘格式呈现。
 - 传输：HTTP/gRPC/Named Pipe。
-- 测试与本地验证：Memory Block Source/Sink、Memory Backup Session/Reader。
+- 内存参考实现：Memory Block Source/Sink、Memory Backup Session/Reader。
 - 格式组合：个人版 `.bkf` Session/Reader。
 - 数据转换：libsodium metadata crypto、Zstandard block compression。
 
@@ -26,9 +26,9 @@ RAII Abort、幂等删除及 publish/delete unknown outcome 故障注入。
 staging key。发布支持 create-only rename 与 generation 条件替换，删除绑定已校验文件句柄。详细接口、
 并发和崩溃语义见 [Windows Local Object Storage Adapter](storage_local.md)。
 
-个人版 Archive Adapter 组合 `format`、`IBackupSession`、`IRecoveryPointReader`、libsodium 和 Zstandard。当前数据面支持一个 volume，并可在完整 chunk 边界透明分卷。写入期间所有分卷与 Sidecar 使用 partial 路径，完整 Footer 和加密 Sidecar 均写完后，先发布 Sidecar/续卷，最后发布首卷；Abort 和析构清理本次创建的 partial 文件。Reader 在解析 CBOR 前必须完成 Header/Envelope 范围校验和 AEAD 认证，随后发现并验证连续分卷。普通恢复不依赖 `.bhx`；增量比较通过显式 API 加载并认证 Sidecar。
+个人版 Archive Adapter 组合 `format`、`IBackupSession`、`IRecoveryPointReader`、libsodium 和 Zstandard。当前全量数据面支持一个 Archive 包含多个 volume，并可在完整 chunk 边界透明分卷；每个 chunk 通过 `source_index` 归属一个 Manifest Volume，Sidecar 为每个 Volume 保存独立块表。写入期间所有分卷与 Sidecar 使用 partial 路径，全部 Volume 完整写入且 Footer 和加密 Sidecar 均写完后，先发布 Sidecar/续卷，最后发布首卷；任一 Volume 失败时 Abort 和析构清理本次创建的 partial 文件。Reader 在解析 CBOR 前必须完成 Header/Envelope 范围校验和 AEAD 认证，随后发现并验证连续分卷和每个 Volume 的完整覆盖。普通恢复不依赖 `.bhx`；增量比较通过显式 API 加载并认证 Sidecar。
 
-增量 Session 在创建时验证显式父 Archive 及父 Sidecar，继承备份集 UUID，并把输入完整源转换为连续变化区间组成的稀疏层；新 Sidecar 仍保存完整状态。`PersonalArchiveReader` 可以 inspect 单个稀疏层，`PersonalArchiveChainReader` 接受显式 base-first 层列表并验证链关系，对通用 Restore Pipeline 提供连续覆盖视图。链恢复不读取 Sidecar；链发现和逐层凭据选择属于 Application，不由 Adapter 扫描目录猜测。
+增量 Session 当前只接受单 Volume：创建时验证显式父 Archive 及父 Sidecar，继承备份集 UUID，并把输入完整源转换为连续变化区间组成的稀疏层；新 Sidecar 仍保存完整状态。`PersonalArchiveReader` 可以 inspect 单个稀疏层，`PersonalArchiveChainReader` 接受显式 base-first 层列表并验证链关系，对通用 Restore Pipeline 提供连续覆盖视图。多 Volume Restore 在建立明确目标映射前由 Restore Pipeline 在写入前拒绝。链恢复不读取 Sidecar；链发现和逐层凭据选择属于 Application，不由 Adapter 扫描目录猜测。
 
 SMB、S3 和 Azure Storage Adapter 还必须实现个人版 Repository 所需的细粒度对象 Port。Adapter
 负责 Repository 相对 key 到本地路径或对象 key 的安全映射，并显式报告原子 rename、条件创建和列举
@@ -46,9 +46,9 @@ Archive Reader 分别限制 metadata、chunk stored payload 和展开后的 chun
 - 资源使用 RAII；长操作响应取消。
 - Adapter 之间不 include 实现文件，不使用共享全局 SDK Session。
 - [ADR-0001](../adr/0001-personal-format-crypto-and-codec-dependencies.md) 仅允许 Personal Archive 通过 PRIVATE target dependency 组合两个无状态算法 Adapter；不得据此放宽有状态 Adapter 的依赖规则。
-- 每个 Adapter 运行对应 Port 的 Contract Test Suite。
+- 每个 Adapter 必须完整实现对应 Port 的边界、取消、错误和资源释放语义。
 
-Windows Disk、Volume 和 VSS 的具体边界、公开接口与测试要求见
+Windows Disk、Volume 和 VSS 的具体边界、公开接口与验证要求见
 [Windows Adapter 开发文档](windows_adapters.md)。在线 Volume 必须先由独立 VSS Session 变成稳定
 Snapshot Device Object，Block Source 本身不创建快照。
 
@@ -78,7 +78,7 @@ Inventory 返回 opaque source ID 并在 Service 内解析为稳定设备 key；
 - Dokan C 回调使用静态跳板进入实例，不使用全局实例。
 - 对原始备份视图的任何写入都不得修改 Recovery Point。
 
-旧文档中的具体类名、64KB 固定值、`/MT` 和旧 vcxproj 不是新实现约束；这些需要基准、格式和部署测试重新决定。
+旧文档中的具体类名、64KB 固定值、`/MT` 和旧 vcxproj 不是新实现约束；这些需要基准、格式和部署验证重新决定。
 
 ## 个人版 SQLite 控制面
 
@@ -92,6 +92,6 @@ Command store 还持久化幂等请求指纹与 command/resource ID，支持 Ser
 
 只有 Management Service 侧 Adapter 访问 PostgreSQL。使用参数化 SQL、显式事务、tenant scope、RLS 第二层防护和 Transactional Outbox。Recovery Point 投影必须支持全量重建与 generation 对账。
 
-## 测试
+## 验证
 
-除真实集成套件外，单元测试不得依赖云账户、生产数据库、物理磁盘或安装的 Dokan 驱动。故障注入覆盖短读、超时、限流、断线、重复请求和清理失败。
+构建每个受影响 Adapter Target，并通过代码审查与必要的人工运行验证短读、超时、限流、断线、重复请求和清理失败边界。验证不得使用生产云账户、生产数据库或客户数据。

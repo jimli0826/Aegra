@@ -6,6 +6,21 @@
 外部停止与 deadline 合并、任务调用、异常收口、稳定退出码和响应编码，不负责备份算法、凭据持久化、
 任务调度或控制面数据库访问。
 
+## 任务日志
+
+每个已接受的 Backup / Restore / Verify 任务写入一份独立文本日志（对齐旧版 `logs/backup` 风格）：
+
+| 项 | 规则 |
+| --- | --- |
+| 根目录 | 优先 `AEGRA_DATA_DIR`（Service 启动时注入）；否则 `%LOCALAPPDATA%\Aegra` 或 `%ProgramData%\Aegra` |
+| 路径 | `<data_dir>/logs/<operation>/YYYYMMDD_HHMMSS.log`，`operation` 为 `backup` / `restore` / `verify` |
+| 格式 | `[YYYY-MM-DD HH:MM:SS.mmm] [info] ...`，仅文件、无控制台 |
+| 内容 | 起止分隔线、job/trace、源/目标路径、几何参数、完成/失败摘要与容量指标 |
+| 禁止 | 密码、SecretRef 明文、凭据材料 |
+
+Service 在 composition root 设置 `AEGRA_DATA_DIR`，Worker 子进程通过环境继承同一数据目录，保证
+task log 与 `service.log` 同树。
+
 当前消息使用 UTF-8 JSON。JSON 依赖只存在于 `apps/worker`，`contracts` 保持与传输技术无关。
 `aegra_personal_worker.exe` 无参数时从 stdin 读取一个最大 1 MiB 的 Job，stdout 只写最终响应；正式父进程
 监督使用 `--pipe <logical-name>` 双向会话。运行时系统能力与凭据部署见
@@ -18,7 +33,7 @@
 
 | 字段 | JSON 类型 | 规则 |
 | --- | --- | --- |
-| `schema_version` | unsigned integer | 当前固定为 `2` |
+| `schema_version` | unsigned integer | 当前固定为 `3` |
 | `job_id` | string | 必填、非空 |
 | `tenant_id` | string | 必填、非空 |
 | `operation` | unsigned integer | 使用 `JobOperation` 的显式数值 |
@@ -33,9 +48,10 @@
 字段缺失或格式错误都表示请求未被接受。业务运行参数，例如 block/chunk 大小、KDF 参数、应用版本和
 主机名，来自 Worker 的受信任配置，不从 Job 消息接收。
 
-个人版 Windows Worker 的 Backup 和 Verify 当前只接受 `wincred://<target>` Credential Ref。Credential
-Blob 是非空、长度明确的密码字节，位于 Worker 运行账户的 Generic Credential Store；Job 和响应都不携带
-target 对应的明文值。Backup 的 `backup.type` 数值为 `1=full`、`2=incremental`、`3=differential`；当前
+个人版 Windows Worker 的 Backup 接受 1 至 100 个有序且无重复的 Volume `source_refs`，并在一个 VSS
+Snapshot Set 中为同一 Job 创建一致性快照。Credential Blob 是非空、长度明确的密码字节，位于 Worker
+运行账户的 Generic Credential Store；Job 和响应都不携带 target 对应的明文值。Backup 的
+`backup.type` 数值为 `1=full`、`2=incremental`、`3=differential`；当前
 Worker 明确拒绝 differential。Incremental 必须提供 `parent_source_ref` 与 `parent_credential_ref`，并在
 Backend 调用期间同时保持新 Archive 和父 Archive 的 Secret 存活。
 
@@ -47,7 +63,7 @@ Restore Job 的 `operation` 为 `2`，`source_refs` 按 base-first 顺序包含�
 Worker 在所有层完成认证和链关系验证后才锁定、卸载并写入非系统目标卷；链深度由受信任运行配置限制，
 安全边界见 [ADR-0009](../adr/0009-windows-volume-restore-safety.md)。
 
-全量和增量 Backup 的 schema 2 片段分别为：
+全量和增量 Backup 的 schema 3 片段分别为：
 
 ```json
 {"backup":{"type":1}}
@@ -106,10 +122,10 @@ Host 核心收口任务执行抛出的异常；未来真正的 `main` 仍必须�
 入口同步调用期间以 `IResolvedSecret` 存活；恢复链的全部 Secret 会共同存活到 Chain Reader 打开完成，
 协议响应不会返回凭据引用。
 
-## 测试与完成标准
+## 验证与完成标准
 
-- JSON 覆盖合法请求、错误类型、未知版本、数值溢出和明文凭据字段；
-- Host 覆盖成功、任务失败、请求拒绝、异常、无效响应、外部取消、运行中 deadline 和无效时钟；
+- 人工协议验证覆盖合法请求、错误类型、未知版本、数值溢出和明文凭据字段拒绝；
+- 审查成功、任务失败、请求拒绝、异常、无效响应、外部取消、运行中 deadline 和无效时钟路径；
 - 所有响应通过契约校验，job/trace 不得串任务；
 - Host 与协议代码只位于 `apps/worker`，核心模块不依赖 JSON、线程 Host 或 Windows API；
 - Debug/Release、源码限制、静态分析、依赖检查和秘密扫描通过。

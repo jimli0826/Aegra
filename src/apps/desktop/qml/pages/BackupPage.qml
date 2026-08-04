@@ -5,71 +5,37 @@ import ".."
 import "../components"
 
 // Visual baseline: backup/src/gui BackupPage — schedule list + Add Schedule Wizard step 1.
-// Demo data fills UI when Service inventory/locations are empty.
 Item {
     id: root
     //% "Backup"
     Accessible.name: qsTrId("aegra.nav.backup")
+    /// Request Main to switch to Home after a real backup job is accepted.
+    signal navigateHomeRequested()
 
     property bool wizardOpen: false
     property int wizardStep: 1
-    property int selectedDiskIndex: -1
     property int selectedLocationIndex: 0
     property var expandedDisks: ({})
+    /// Volume selection keys "d{diskIndex}v{volIndex}" → true (old wizard multi-select).
+    property var selectedVolumeKeys: ({})
+    property int selectionEpoch: 0
 
-    // Local UI schedule list (wizard Create appends; Service schedule API later).
-    property var schedules: [
-        {
-            id: 1,
-            sourceName: "disk0",
-            destinationName: "fff",
-            destinationPath: "E:\\qqqq",
-            frequency: "daily",
-            timeOfDay: "02:00",
-            lastRun: "",
-            nextRun: "2026-08-05 02:00",
-            enabled: true
-        }
-    ]
+    // Service-backed schedules (empty until list_schedules returns).
+    readonly property var schedules: serviceClient.schedules || []
 
-    // Demo disks matching old wizard look (used when Service has no inventory).
-    readonly property var demoDisks: [
-        {
-            name: "Disk 0",
-            size: "20.0 GB",
-            type: "GPT",
-            isSystem: false,
-            volumes: [
-                { name: "System Reserved", letter: "", size: "100 MB" },
-                { name: "Windows", letter: "C:", size: "19.9 GB" }
-            ]
-        },
-        {
-            name: "Disk 1",
-            size: "30.0 GB",
-            type: "GPT",
-            isSystem: true,
-            volumes: [
-                { name: "Data", letter: "D:", size: "30.0 GB" }
-            ]
-        }
-    ]
-
-    readonly property var demoLocations: [
-        { name: "e", path: "E:\\", isDefault: true, type: "local" },
-        { name: "444", path: "C:\\", isDefault: false, type: "local" }
-    ]
-
-    readonly property var sourceModel: {
-        if (serviceClient.sources && serviceClient.sources.count > 0)
-            return null // use live model via ListView below
-        return demoDisks
+    readonly property var disksTree: {
+        if (serviceClient.sources && serviceClient.sources.count > 0
+                && serviceClient.sources.disksTree
+                && serviceClient.sources.disksTree.length > 0)
+            return serviceClient.sources.disksTree
+        return []
     }
 
+    // Destination list: only real repository connections (no demo locations).
     readonly property var locationModel: {
         if (serviceClient.connections && serviceClient.connections.count > 0)
             return null
-        return demoLocations
+        return []
     }
 
     function isDiskExpanded(index) {
@@ -83,16 +49,20 @@ Item {
     }
 
     function openWizard() {
-        selectedDiskIndex = -1
         selectedLocationIndex = 0
         expandedDisks = ({})
+        selectedVolumeKeys = ({})
+        selectionEpoch = 0
         wizardStep = 1
+        // Disks start collapsed (old wizard default: click chevron to expand).
+        expandedDisks = ({})
         if (wizardStep2)
             wizardStep2.resetDefaults()
         wizardOpen = true
         if (serviceClient.connected) {
             serviceClient.refreshInventory()
             serviceClient.refreshConnections()
+            serviceClient.refreshSchedules()
         }
     }
 
@@ -101,8 +71,107 @@ Item {
         wizardStep = 1
     }
 
+    function volumeKey(diskIndex, volumeIndex) {
+        return "d" + diskIndex + "v" + volumeIndex
+    }
+
+    function isVolumeSelected(diskIndex, volumeIndex) {
+        var epoch = selectionEpoch
+        return epoch >= 0 && selectedVolumeKeys[volumeKey(diskIndex, volumeIndex)] === true
+    }
+
+    function isVolumeSelectable(diskIndex, volumeIndex) {
+        if (diskIndex < 0 || diskIndex >= disksTree.length)
+            return false
+        var vols = disksTree[diskIndex].volumes || []
+        return volumeIndex >= 0 && volumeIndex < vols.length
+                && vols[volumeIndex].selectable === true
+    }
+
+    function isDiskSelected(diskIndex) {
+        var epoch = selectionEpoch
+        if (epoch < 0 || diskIndex < 0 || diskIndex >= disksTree.length)
+            return false
+        var vols = disksTree[diskIndex].volumes || []
+        var selectableCount = 0
+        for (var i = 0; i < vols.length; ++i) {
+            if (!isVolumeSelectable(diskIndex, i))
+                continue
+            selectableCount++
+            if (!isVolumeSelected(diskIndex, i))
+                return false
+        }
+        return selectableCount > 0
+    }
+
+    function toggleVolumeSelected(diskIndex, volumeIndex) {
+        if (!isVolumeSelectable(diskIndex, volumeIndex))
+            return
+        var key = volumeKey(diskIndex, volumeIndex)
+        var next = Object.assign({}, selectedVolumeKeys)
+        if (next[key])
+            delete next[key]
+        else
+            next[key] = true
+        selectedVolumeKeys = next
+        selectionEpoch++
+    }
+
+    function toggleDiskSelected(diskIndex) {
+        if (diskIndex < 0 || diskIndex >= disksTree.length)
+            return
+        var vols = disksTree[diskIndex].volumes || []
+        var allOn = isDiskSelected(diskIndex)
+        var next = Object.assign({}, selectedVolumeKeys)
+        for (var i = 0; i < vols.length; ++i) {
+            if (!isVolumeSelectable(diskIndex, i))
+                continue
+            var key = volumeKey(diskIndex, i)
+            if (allOn)
+                delete next[key]
+            else
+                next[key] = true
+        }
+        selectedVolumeKeys = next
+        selectionEpoch++
+    }
+
+    function selectedSourceName() {
+        var names = []
+        for (var d = 0; d < disksTree.length; ++d) {
+            var vols = disksTree[d].volumes || []
+            for (var v = 0; v < vols.length; ++v) {
+                if (isVolumeSelectable(d, v) && isVolumeSelected(d, v)) {
+                    var letter = vols[v].letter || ""
+                    names.push(letter.length > 0 ? letter : (vols[v].name || ("vol" + v)))
+                }
+            }
+        }
+        if (names.length === 0)
+            return "disk0"
+        return names.join(",")
+    }
+
+    function selectedSources() {
+        var sources = []
+        for (var d = 0; d < disksTree.length; ++d) {
+            var vols = disksTree[d].volumes || []
+            for (var v = 0; v < vols.length; ++v) {
+                if (!isVolumeSelectable(d, v) || !isVolumeSelected(d, v)
+                        || !vols[v].sourceId)
+                    continue
+                var letter = vols[v].letter || ""
+                sources.push({
+                    "sourceId": vols[v].sourceId,
+                    "displayName": letter.length > 0 ? letter : (vols[v].name || ("vol" + v))
+                })
+            }
+        }
+        return sources
+    }
+
     function canGoNext() {
-        return selectedDiskIndex >= 0 && selectedLocationIndex >= 0
+        return selectedSources().length > 0 && selectedLocationIndex >= 0
     }
 
     function freqLabel(f) {
@@ -120,62 +189,124 @@ Item {
     }
 
     function createScheduleFromWizard() {
-        var srcName = "disk" + Math.max(0, selectedDiskIndex)
-        if (serviceClient.sources.count > 0 && selectedDiskIndex >= 0
-                && selectedDiskIndex < serviceClient.sources.count) {
-            // keep diskN style for list
-        } else if (selectedDiskIndex >= 0 && selectedDiskIndex < demoDisks.length) {
-            srcName = "disk" + selectedDiskIndex
+        var sources = selectedSources()
+        var connId = serviceClient.defaultConnectionId
+                     ? serviceClient.defaultConnectionId() : ""
+        if (serviceClient.connections.count > 0) {
+            // Prefer default; if wizard selected a specific connection, keep default for now
+            // (location row maps to connections via index when model is live).
+            connId = serviceClient.defaultConnectionId()
         }
-        var destName = "local"
-        var destPath = ""
-        var locs = serviceClient.connections.count > 0
-                   ? null : demoLocations
-        if (locs && selectedLocationIndex >= 0 && selectedLocationIndex < locs.length) {
-            destName = locs[selectedLocationIndex].name
-            destPath = locs[selectedLocationIndex].path
+        if (sources.length === 0 || !connId || connId.length === 0) {
+            //% "Select a backup source and repository connection"
+            serviceClient.showToast(qsTrId("aegra.backup.schedule.missing_target"))
+            return
         }
         var s2 = wizardStep2
-        var nextId = 1
-        for (var i = 0; i < schedules.length; ++i) {
-            if (schedules[i].id >= nextId)
-                nextId = schedules[i].id + 1
+        var frequency = s2 ? s2.frequency : "daily"
+        var timeOfDay = s2 ? s2.timeOfDay : "02:00"
+        if (!serviceClient.createSchedule(sources, connId, frequency, timeOfDay)) {
+            //% "Could not save schedule"
+            serviceClient.showToast(qsTrId("aegra.backup.schedule.save_failed"))
+            return
         }
-        var row = {
-            id: nextId,
-            sourceName: srcName,
-            destinationName: destName,
-            destinationPath: destPath,
-            frequency: s2 ? s2.frequency : "daily",
-            timeOfDay: s2 ? s2.timeOfDay : "02:00",
-            lastRun: "",
-            nextRun: "",
-            enabled: true
-        }
-        var next = schedules.slice()
-        next.push(row)
-        schedules = next
         closeWizard()
     }
 
-    function toggleScheduleEnabled(id) {
-        var next = []
-        for (var i = 0; i < schedules.length; ++i) {
-            var r = Object.assign({}, schedules[i])
-            if (r.id === id)
-                r.enabled = !r.enabled
-            next.push(r)
+    function pad2(n) {
+        return (n < 10 ? "0" : "") + n
+    }
+
+    function formatNowLocal() {
+        var d = new Date()
+        return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate())
+               + " " + pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + ":" + pad2(d.getSeconds())
+    }
+
+    function formatNextRunLocal(timeOfDay) {
+        var parts = (timeOfDay || "02:00").split(":")
+        var h = parseInt(parts[0], 10)
+        var m = parseInt(parts[1], 10)
+        if (isNaN(h)) h = 2
+        if (isNaN(m)) m = 0
+        var d = new Date()
+        d.setSeconds(0, 0)
+        d.setHours(h, m, 0, 0)
+        if (d.getTime() <= Date.now())
+            d.setDate(d.getDate() + 1)
+        return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate())
+               + " " + pad2(d.getHours()) + ":" + pad2(d.getMinutes())
+    }
+
+    property string pendingRunScheduleId: ""
+
+    Connections {
+        target: serviceClient
+        function onBackupStartSucceeded(jobId) {
+            root.pendingRunScheduleId = ""
+            // Old product navigates to Home so the Tasks table shows the new job.
+            root.navigateHomeRequested()
         }
-        schedules = next
+        function onBackupStartFailed(message) {
+            root.pendingRunScheduleId = ""
+        }
+        function onSchedulesChanged() {
+            // Schedules reloaded from Service after create/toggle/delete.
+        }
+    }
+
+    /// Run schedule now (old BackupBackend.runSchedule). Uses Service backup.start when possible.
+    function runSchedule(item) {
+        if (!item || !item.enabled) {
+            //% "Enable the schedule before running it"
+            serviceClient.showToast(qsTrId("aegra.backup.run.disabled"))
+            return
+        }
+        if (serviceClient.connected && serviceClient.hasCapability("backup.start")) {
+            var sourceIds = item.sourceIds || []
+            var connectionId = item.connectionId || ""
+            if (connectionId.length === 0)
+                connectionId = serviceClient.defaultConnectionId()
+            if (sourceIds.length > 0 && connectionId.length > 0) {
+                root.pendingRunScheduleId = item.scheduleId || item.id || ""
+                if (serviceClient.startBackup(sourceIds, connectionId))
+                    return
+                root.pendingRunScheduleId = ""
+                return
+            }
+            //% "No selectable source or repository connection for backup"
+            serviceClient.showToast(qsTrId("aegra.backup.run.missing_target"))
+            return
+        }
+        //% "Service not connected"
+        serviceClient.showToast(qsTrId("aegra.backup.run.not_connected"))
+    }
+
+    function toggleScheduleEnabled(id) {
+        var sid = (id === undefined || id === null) ? "" : ("" + id)
+        if (sid.length === 0)
+            return
+        var enabled = true
+        for (var i = 0; i < schedules.length; ++i) {
+            if (("" + (schedules[i].scheduleId || schedules[i].id)) === sid) {
+                enabled = !schedules[i].enabled
+                break
+            }
+        }
+        if (!serviceClient.setScheduleEnabled(sid, enabled)) {
+            //% "Could not update schedule"
+            serviceClient.showToast(qsTrId("aegra.backup.schedule.update_failed"))
+        }
     }
 
     function deleteSchedule(id) {
-        var next = []
-        for (var i = 0; i < schedules.length; ++i) {
-            if (schedules[i].id !== id)
-                next.push(schedules[i])
+        var sid = (id === undefined || id === null) ? "" : ("" + id)
+        if (sid.length === 0)
+            return
+        if (!serviceClient.deleteSchedule(sid)) {
+            //% "Could not delete schedule"
+            serviceClient.showToast(qsTrId("aegra.backup.schedule.delete_failed"))
         }
-        schedules = next
     }
 
     // ==================== LIST ====================
@@ -484,8 +615,10 @@ Item {
                                             id: runHover
                                             anchors.fill: parent
                                             hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: { /* UI only until Service schedule run */ }
+                                            enabled: modelData.enabled
+                                            cursorShape: modelData.enabled
+                                                         ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                            onClicked: root.runSchedule(modelData)
                                         }
                                     }
                                 }
@@ -587,7 +720,7 @@ Item {
                             Layout.fillHeight: true
                             spacing: 20
 
-                            // -------- SOURCE --------
+                            // -------- SOURCE (old disksTree: disk + expandable volumes) --------
                             Card {
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
@@ -607,171 +740,267 @@ Item {
                                         width: sourceScroll.availableWidth
                                         spacing: 10
 
-                                        // Live Service sources when available
                                         Repeater {
-                                            model: serviceClient.sources
-                                            visible: serviceClient.sources.count > 0
-                                            delegate: sourceDiskDelegate
-                                        }
-
-                                        // Demo disks when Service empty
-                                        Repeater {
-                                            model: serviceClient.sources.count > 0
-                                                   ? [] : root.demoDisks
-                                            delegate: Rectangle {
-                                                required property int index
-                                                required property var modelData
-                                                width: disksColumn.width
-                                                height: 45
-                                                radius: 4
-                                                color: diskHover.containsMouse
-                                                       ? Theme.colorHover : Theme.colorListItem
-
-                                                readonly property bool selected:
-                                                    root.selectedDiskIndex === index
-
-                                                RowLayout {
-                                                    anchors.fill: parent
-                                                    anchors.leftMargin: 10
-                                                    anchors.rightMargin: 10
-                                                    spacing: 10
-
-                                                    Rectangle {
-                                                        width: 18
-                                                        height: 18
-                                                        radius: 3
-                                                        color: selected ? Theme.colorAccentBlue
-                                                                        : "transparent"
-                                                        border.width: 2
-                                                        border.color: selected
-                                                                      ? Theme.colorAccentBlue
-                                                                      : Theme.colorTextGrey
-                                                        Text {
-                                                            anchors.centerIn: parent
-                                                            text: selected ? "\u2713" : ""
-                                                            color: "white"
-                                                            font.pixelSize: 12
-                                                            font.bold: true
-                                                        }
-                                                    }
-
-                                                    Text {
-                                                        text: "\u25B6"
-                                                        color: Theme.colorTextGrey
-                                                        font.pixelSize: 10
-                                                        Layout.preferredWidth: 15
-                                                        rotation: root.isDiskExpanded(index)
-                                                                  ? 90 : 0
-                                                        Behavior on rotation {
-                                                            NumberAnimation { duration: 150 }
-                                                        }
-                                                        MouseArea {
-                                                            anchors.fill: parent
-                                                            cursorShape: Qt.PointingHandCursor
-                                                            onClicked: root.toggleDiskExpanded(index)
-                                                        }
-                                                    }
-
-                                                    DiskIcon {
-                                                        size: 28
-                                                        variant: modelData.isSystem
-                                                                 ? "system" : "hdd"
-                                                    }
-
-                                                    ColumnLayout {
-                                                        Layout.fillWidth: true
-                                                        spacing: 2
-                                                        Text {
-                                                            text: modelData.name
-                                                                  + " (" + modelData.size + ")"
-                                                            color: Theme.colorTextWhite
-                                                            font.pixelSize: 13
-                                                            font.bold: true
-                                                            font.family: Theme.fontFamily
-                                                        }
-                                                        Text {
-                                                            text: modelData.type
-                                                            color: Theme.colorTextGrey
-                                                            font.pixelSize: 11
-                                                            font.family: Theme.fontFamily
-                                                        }
-                                                    }
-                                                    Item { Layout.fillWidth: true }
-                                                }
-
-                                                MouseArea {
-                                                    id: diskHover
-                                                    anchors.fill: parent
-                                                    hoverEnabled: true
-                                                    z: -1
-                                                    onClicked: root.selectedDiskIndex = index
-                                                }
-                                            }
-                                        }
-
-                                        // Expanded volumes for demo disk
-                                        Repeater {
-                                            model: serviceClient.sources.count > 0
-                                                   ? [] : root.demoDisks
+                                            model: root.disksTree
                                             delegate: Column {
+                                                id: diskDelegate
+                                                width: disksColumn.width
+                                                spacing: 0
                                                 required property int index
                                                 required property var modelData
-                                                width: disksColumn.width
-                                                visible: root.isDiskExpanded(index)
-                                                spacing: 2
+                                                readonly property int diskIndex: index
+                                                readonly property bool isExpanded:
+                                                    root.isDiskExpanded(diskIndex)
+                                                readonly property bool isSelectable:
+                                                    modelData.selectable !== false
+                                                readonly property var volumes:
+                                                    modelData.volumes || []
+                                                readonly property bool hasVolumes:
+                                                    volumes.length > 0
 
-                                                Repeater {
-                                                    model: modelData.volumes
-                                                    delegate: Rectangle {
-                                                        required property var modelData
-                                                        width: parent.width
-                                                        height: 55
-                                                        color: Theme.colorListItemAlt
-                                                        radius: 4
-                                                        RowLayout {
-                                                            anchors.fill: parent
-                                                            anchors.leftMargin: 40
-                                                            anchors.rightMargin: 10
-                                                            spacing: 10
-                                                            Rectangle {
-                                                                width: 16
-                                                                height: 16
-                                                                radius: 2
-                                                                color: "transparent"
-                                                                border.width: 1
-                                                                border.color: Theme.colorTextGrey
+                                                Rectangle {
+                                                    width: diskDelegate.width
+                                                    height: 45
+                                                    radius: 4
+                                                    color: diskHover.containsMouse && hasVolumes
+                                                           ? Theme.colorHover : Theme.colorListItem
+                                                    opacity: isSelectable ? 1.0 : 0.55
+
+                                                    RowLayout {
+                                                        anchors.fill: parent
+                                                        anchors.leftMargin: 10
+                                                        anchors.rightMargin: 10
+                                                        spacing: 10
+
+                                                        Rectangle {
+                                                            width: 18
+                                                            height: 18
+                                                            radius: 3
+                                                            visible: isSelectable
+                                                            property bool checked:
+                                                                root.isDiskSelected(diskIndex)
+                                                            color: checked ? Theme.colorAccentBlue
+                                                                           : "transparent"
+                                                            border.width: 2
+                                                            border.color: checked
+                                                                          ? Theme.colorAccentBlue
+                                                                          : Theme.colorTextGrey
+                                                            Text {
+                                                                anchors.centerIn: parent
+                                                                text: parent.checked ? "\u2713" : ""
+                                                                color: "white"
+                                                                font.pixelSize: 12
+                                                                font.bold: true
                                                             }
-                                                            ColumnLayout {
-                                                                Layout.fillWidth: true
-                                                                spacing: 2
-                                                                RowLayout {
-                                                                    spacing: 8
+                                                            MouseArea {
+                                                                anchors.fill: parent
+                                                                cursorShape: Qt.PointingHandCursor
+                                                                onClicked: root.toggleDiskSelected(
+                                                                               diskIndex)
+                                                            }
+                                                        }
+                                                        Item {
+                                                            width: 18
+                                                            height: 18
+                                                            visible: !isSelectable
+                                                        }
+
+                                                        Text {
+                                                            text: hasVolumes ? "\u25B6" : ""
+                                                            color: Theme.colorTextGrey
+                                                            font.pixelSize: 10
+                                                            Layout.preferredWidth: 15
+                                                            rotation: isExpanded ? 90 : 0
+                                                            Behavior on rotation {
+                                                                NumberAnimation { duration: 150 }
+                                                            }
+                                                            MouseArea {
+                                                                anchors.fill: parent
+                                                                enabled: hasVolumes
+                                                                cursorShape: Qt.PointingHandCursor
+                                                                onClicked: root.toggleDiskExpanded(
+                                                                               diskIndex)
+                                                            }
+                                                        }
+
+                                                        DiskIcon {
+                                                            size: 28
+                                                            variant: modelData.isSystemDisk
+                                                                     ? "system" : "hdd"
+                                                        }
+
+                                                        ColumnLayout {
+                                                            Layout.fillWidth: true
+                                                            spacing: 2
+                                                            Text {
+                                                                text: (modelData.name || "")
+                                                                      + (modelData.size
+                                                                         ? (" (" + modelData.size
+                                                                            + ")") : "")
+                                                                color: Theme.colorTextWhite
+                                                                font.pixelSize: 13
+                                                                font.bold: true
+                                                                font.family: Theme.fontFamily
+                                                            }
+                                                            Text {
+                                                                text: modelData.type || "GPT"
+                                                                color: Theme.colorTextGrey
+                                                                font.pixelSize: 11
+                                                                font.family: Theme.fontFamily
+                                                            }
+                                                        }
+                                                        Item { Layout.fillWidth: true }
+                                                    }
+                                                    MouseArea {
+                                                        id: diskHover
+                                                        anchors.fill: parent
+                                                        hoverEnabled: true
+                                                        enabled: hasVolumes
+                                                        cursorShape: hasVolumes
+                                                                     ? Qt.PointingHandCursor
+                                                                     : Qt.ArrowCursor
+                                                        z: -1
+                                                        onClicked: root.toggleDiskExpanded(diskIndex)
+                                                    }
+                                                }
+
+                                                Column {
+                                                    width: diskDelegate.width
+                                                    spacing: 2
+                                                    clip: true
+                                                    height: isExpanded
+                                                            ? (volumes.length * 57) : 0
+                                                    opacity: isExpanded ? 1 : 0
+                                                    Behavior on height {
+                                                        NumberAnimation { duration: 150 }
+                                                    }
+
+                                                    Repeater {
+                                                        model: volumes
+                                                        delegate: Rectangle {
+                                                            id: volumeDelegate
+                                                            required property int index
+                                                            required property var modelData
+                                                            width: diskDelegate.width
+                                                            height: 55
+                                                            radius: 4
+                                                            color: volHover.containsMouse
+                                                                   ? Theme.colorHover
+                                                                   : Theme.colorListItemAlt
+                                                            readonly property int volumeIndex: index
+                                                            readonly property bool isSelectable:
+                                                                modelData.selectable === true
+                                                            opacity: volumeDelegate.isSelectable
+                                                                     ? 1.0 : 0.55
+
+                                                            RowLayout {
+                                                                anchors.fill: parent
+                                                                anchors.leftMargin: 40
+                                                                anchors.rightMargin: 10
+                                                                spacing: 10
+                                                                Rectangle {
+                                                                    width: 16
+                                                                    height: 16
+                                                                    radius: 2
+                                                                    property bool checked:
+                                                                        root.isVolumeSelected(
+                                                                            diskIndex, volumeIndex)
+                                                                    color: checked
+                                                                           ? Theme.colorAccentBlue
+                                                                           : "transparent"
+                                                                    border.width: 1
+                                                                    border.color: checked
+                                                                        ? Theme.colorAccentBlue
+                                                                        : Theme.colorTextGrey
                                                                     Text {
-                                                                        text: modelData.name
-                                                                        color: Theme.colorTextWhite
-                                                                        font.pixelSize: 12
+                                                                        anchors.centerIn: parent
+                                                                        text: parent.checked
+                                                                              ? "\u2713" : ""
+                                                                        color: "white"
+                                                                        font.pixelSize: 10
                                                                         font.bold: true
-                                                                        font.family: Theme.fontFamily
+                                                                    }
+                                                                    MouseArea {
+                                                                        anchors.fill: parent
+                                                                        enabled:
+                                                                            volumeDelegate.isSelectable
+                                                                        cursorShape:
+                                                                            volumeDelegate.isSelectable
+                                                                            ? Qt.PointingHandCursor
+                                                                            : Qt.ArrowCursor
+                                                                        onClicked:
+                                                                            root.toggleVolumeSelected(
+                                                                                diskDelegate.diskIndex,
+                                                                                volumeDelegate.volumeIndex)
+                                                                    }
+                                                                }
+                                                                ColumnLayout {
+                                                                    Layout.fillWidth: true
+                                                                    spacing: 2
+                                                                    RowLayout {
+                                                                        spacing: 8
+                                                                        Text {
+                                                                            text: volumeDelegate.modelData.name
+                                                                                  || ""
+                                                                            color:
+                                                                                Theme.colorTextWhite
+                                                                            font.pixelSize: 12
+                                                                            font.bold: true
+                                                                            font.family:
+                                                                                Theme.fontFamily
+                                                                        }
+                                                                        Text {
+                                                                            text: volumeDelegate.modelData.letter
+                                                                                  || ""
+                                                                            color:
+                                                                                Theme.colorAccentBlue
+                                                                            font.pixelSize: 12
+                                                                            font.family:
+                                                                                Theme.fontFamily
+                                                                            visible:
+                                                                                (volumeDelegate.modelData.letter
+                                                                                 || "").length > 0
+                                                                        }
+                                                                        Text {
+                                                                            text: volumeDelegate.modelData.size
+                                                                                  || ""
+                                                                            color:
+                                                                                Theme.colorTextGrey
+                                                                            font.pixelSize: 11
+                                                                            font.family:
+                                                                                Theme.fontFamily
+                                                                        }
                                                                     }
                                                                     Text {
-                                                                        text: modelData.letter
-                                                                        color: Theme.colorAccentBlue
-                                                                        font.pixelSize: 12
-                                                                        font.family: Theme.fontFamily
-                                                                        visible: modelData.letter
-                                                                                 .length > 0
+                                                                        text: volumeDelegate.modelData.status
+                                                                              || ""
+                                                                        color: Theme.colorTextGrey
+                                                                        font.pixelSize: 10
+                                                                        font.family:
+                                                                            Theme.fontFamily
+                                                                        elide: Text.ElideRight
+                                                                        Layout.fillWidth: true
                                                                     }
                                                                 }
-                                                                Text {
-                                                                    text: modelData.size
-                                                                    color: Theme.colorTextGrey
-                                                                    font.pixelSize: 11
-                                                                    font.family: Theme.fontFamily
-                                                                }
+                                                            }
+                                                            MouseArea {
+                                                                id: volHover
+                                                                anchors.fill: parent
+                                                                hoverEnabled: true
+                                                                enabled: volumeDelegate.isSelectable
+                                                                cursorShape: volumeDelegate.isSelectable
+                                                                             ? Qt.PointingHandCursor
+                                                                             : Qt.ArrowCursor
+                                                                z: -1
+                                                                onClicked:
+                                                                    root.toggleVolumeSelected(
+                                                                        diskDelegate.diskIndex,
+                                                                        volumeDelegate.volumeIndex)
                                                             }
                                                         }
                                                     }
                                                 }
+                                                Item { width: parent.width; height: 5 }
                                             }
                                         }
                                     }
@@ -813,14 +1042,13 @@ Item {
                                             anchors.margins: 4
                                             clip: true
                                             spacing: 2
-                                            model: serviceClient.connections.count > 0
-                                                   ? serviceClient.connections
-                                                   : root.demoLocations
+                                            // Real Service repository.connection list only.
+                                            model: serviceClient.connections
 
                                             delegate: Rectangle {
                                                 id: locRow
-                                                width: locList.width - 8
-                                                height: 46
+                                                width: Math.max(0, locList.width - 8)
+                                                height: 52
                                                 anchors.horizontalCenter: parent
                                                                           ? parent.horizontalCenter
                                                                           : undefined
@@ -828,35 +1056,41 @@ Item {
                                                 color: locHover.containsMouse
                                                        ? Theme.colorHover : "transparent"
 
-                                                readonly property string locName:
-                                                    (typeof displayName !== "undefined"
-                                                     && displayName)
-                                                    ? displayName
-                                                    : (modelData && modelData.name
-                                                       ? modelData.name : "")
-                                                readonly property string locPath:
-                                                    (typeof connectionId !== "undefined"
-                                                     && connectionId)
-                                                    ? connectionId
-                                                    : (modelData && modelData.path
-                                                       ? modelData.path : "")
-                                                readonly property bool locDefault:
-                                                    (typeof isDefault !== "undefined")
-                                                    ? isDefault
-                                                    : (modelData && modelData.isDefault)
+                                                required property int index
+                                                required property var model
+                                                property var modelData
+
+                                                readonly property bool liveModel: true
+                                                readonly property string locName: {
+                                                    if (liveModel)
+                                                        return (model.displayName
+                                                                || model.connectionId || "")
+                                                    return (modelData && modelData.name)
+                                                           ? modelData.name : ""
+                                                }
+                                                readonly property string locPath: {
+                                                    if (liveModel)
+                                                        return model.connectionId || ""
+                                                    return (modelData && modelData.path)
+                                                           ? modelData.path : ""
+                                                }
+                                                readonly property bool locDefault: {
+                                                    if (liveModel)
+                                                        return !!model.isDefault
+                                                    return !!(modelData && modelData.isDefault)
+                                                }
+                                                readonly property string locState: {
+                                                    if (liveModel)
+                                                        return model.stateText || ""
+                                                    return ""
+                                                }
                                                 readonly property bool selected:
                                                     root.selectedLocationIndex === index
 
-                                                required property int index
-                                                property var modelData
-                                                property string displayName
-                                                property string connectionId
-                                                property bool isDefault
-                                                property bool isAvailable
-
                                                 RowLayout {
                                                     anchors.fill: parent
-                                                    anchors.margins: 8
+                                                    anchors.leftMargin: 8
+                                                    anchors.rightMargin: 8
                                                     spacing: 8
 
                                                     Rectangle {
@@ -893,23 +1127,35 @@ Item {
 
                                                     Column {
                                                         Layout.fillWidth: true
+                                                        Layout.minimumWidth: 80
                                                         spacing: 1
                                                         Text {
-                                                            text: locRow.locName
+                                                            width: parent.width
+                                                            text: locRow.locName.length > 0
+                                                                  ? locRow.locName
+                                                                  : qsTrId("aegra.repository.title")
                                                             color: Theme.colorTextWhite
                                                             font.pixelSize: 12
                                                             font.bold: true
                                                             font.family: Theme.fontFamily
                                                             elide: Text.ElideRight
-                                                            width: parent.width
                                                         }
                                                         Text {
+                                                            width: parent.width
                                                             text: locRow.locPath
                                                             color: Theme.colorTextGrey
                                                             font.pixelSize: 11
                                                             font.family: Theme.fontFamily
                                                             elide: Text.ElideMiddle
+                                                            visible: locRow.locPath.length > 0
+                                                        }
+                                                        Text {
                                                             width: parent.width
+                                                            text: locRow.locState
+                                                            color: Theme.colorTextDim
+                                                            font.pixelSize: 10
+                                                            font.family: Theme.fontFamily
+                                                            visible: locRow.locState.length > 0
                                                         }
                                                     }
 
@@ -987,85 +1233,4 @@ Item {
         }
     }
 
-    // Shared delegate for live Service source model
-    Component {
-        id: sourceDiskDelegate
-        Rectangle {
-            required property int index
-            required property string displayName
-            required property string capacityText
-            required property bool isSystem
-            required property bool isSelectable
-            width: disksColumn.width
-            height: 45
-            radius: 4
-            color: hover.containsMouse ? Theme.colorHover : Theme.colorListItem
-            opacity: isSelectable ? 1.0 : 0.55
-            readonly property bool selected: root.selectedDiskIndex === index
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 10
-                anchors.rightMargin: 10
-                spacing: 10
-                Rectangle {
-                    width: 18
-                    height: 18
-                    radius: 3
-                    visible: isSelectable
-                    color: selected ? Theme.colorAccentBlue : "transparent"
-                    border.width: 2
-                    border.color: selected ? Theme.colorAccentBlue : Theme.colorTextGrey
-                    Text {
-                        anchors.centerIn: parent
-                        text: selected ? "\u2713" : ""
-                        color: "white"
-                        font.pixelSize: 12
-                        font.bold: true
-                    }
-                }
-                Text {
-                    text: "\u25B6"
-                    color: Theme.colorTextGrey
-                    font.pixelSize: 10
-                    Layout.preferredWidth: 15
-                }
-                DiskIcon {
-                    size: 28
-                    variant: isSystem ? "system" : "hdd"
-                    iconOpacity: isSelectable ? 1.0 : 0.55
-                }
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: 2
-                    Text {
-                        text: displayName
-                              + (capacityText.length > 0 ? (" (" + capacityText + ")") : "")
-                        color: Theme.colorTextWhite
-                        font.pixelSize: 13
-                        font.bold: true
-                        font.family: Theme.fontFamily
-                        elide: Text.ElideRight
-                        Layout.fillWidth: true
-                    }
-                    Text {
-                        //% "Volume"
-                        text: qsTrId("aegra.backup.source.volume")
-                        color: Theme.colorTextGrey
-                        font.pixelSize: 11
-                        font.family: Theme.fontFamily
-                    }
-                }
-                Item { Layout.fillWidth: true }
-            }
-            MouseArea {
-                id: hover
-                anchors.fill: parent
-                hoverEnabled: true
-                enabled: isSelectable
-                cursorShape: isSelectable ? Qt.PointingHandCursor : Qt.ArrowCursor
-                onClicked: root.selectedDiskIndex = index
-            }
-        }
-    }
 }

@@ -211,10 +211,6 @@
         <source>Test connection</source>
         <translation>Verbindung testen</translation>
     </message>
-    <message id="aegra.repository.display_name"><source>Display name</source><translation>Anzeigename</translation></message>
-    <message id="aegra.repository.location"><source>Repository location</source><translation>Repository-Speicherort</translation></message>
-    <message id="aegra.repository.remove_title"><source>Remove repository connection?</source><translation>Repository-Verbindung entfernen?</translation></message>
-    <message id="aegra.repository.remove_description"><source>Only the saved connection is removed. Backup data is not deleted.</source><translation>Nur die gespeicherte Verbindung wird entfernt. Sicherungsdaten werden nicht gelöscht.</translation></message>
     <message id="aegra.repository.unlock">
         <source>Unlock</source>
         <translation>Entsperren</translation>
@@ -693,6 +689,34 @@ Server: %1</translation>
         <source>Run</source>
         <translation>Ausführen</translation>
     </message>
+    <message id="aegra.backup.run.started">
+        <source>Backup started</source>
+        <translation>Sicherung gestartet</translation>
+    </message>
+    <message id="aegra.backup.run.preview">
+        <source>Backup started (preview — Service not connected)</source>
+        <translation>Sicherung gestartet (Vorschau — Service nicht verbunden)</translation>
+    </message>
+    <message id="aegra.backup.run.disabled">
+        <source>Enable the schedule before running it</source>
+        <translation>Zeitplan vor dem Ausführen aktivieren</translation>
+    </message>
+    <message id="aegra.backup.run.missing_target">
+        <source>No selectable source or repository connection for backup</source>
+        <translation>Keine wählbare Quelle oder Repository-Verbindung</translation>
+    </message>
+    <message id="aegra.backup.run.capability_missing">
+        <source>Service does not support backup.start</source>
+        <translation>Service unterstützt backup.start nicht</translation>
+    </message>
+    <message id="aegra.backup.run.busy">
+        <source>A backup command is already in progress</source>
+        <translation>Ein Sicherungsbefehl läuft bereits</translation>
+    </message>
+    <message id="aegra.backup.run.already_running">
+        <source>A backup job is already running</source>
+        <translation>Ein Sicherungsauftrag läuft bereits</translation>
+    </message>
     <message id="aegra.backup.schedules.hint_add">
         <source>Use Add to open the schedule wizard</source>
         <translation>Mit „Hinzufügen“ den Zeitplan-Assistenten öffnen</translation>
@@ -824,6 +848,30 @@ Server: %1</translation>
     <message id="aegra.error.backup.preflight_failed">
         <source>Backup selection is incomplete or unavailable</source>
         <translation>Sicherungsauswahl ist unvollständig oder nicht verfügbar</translation>
+    </message>
+    <message id="aegra.error.backup.repository_unavailable">
+        <source>Repository is unavailable. Open Repository and test/add a destination first.</source>
+        <translation>Repository ist nicht verfügbar. Bitte zuerst im Repository hinzufügen/testen.</translation>
+    </message>
+    <message id="aegra.error.backup.source_not_selectable">
+        <source>Selected source cannot be backed up (system or unavailable volume).</source>
+        <translation>Die Quelle kann nicht gesichert werden (System- oder nicht verfügbares Volume).</translation>
+    </message>
+    <message id="aegra.error.backup.source_not_found">
+        <source>Backup source was not found. Refresh inventory and try again.</source>
+        <translation>Backup-Quelle nicht gefunden. Inventar aktualisieren und erneut versuchen.</translation>
+    </message>
+    <message id="aegra.error.backup.worker_unavailable">
+        <source>Backup worker is unavailable. Check that aegra_worker is installed next to the Service.</source>
+        <translation>Backup-Worker nicht verfügbar. Prüfen Sie, ob aegra_worker neben dem Service liegt.</translation>
+    </message>
+    <message id="aegra.error.backup.idempotency_conflict">
+        <source>Backup request conflicted with a previous attempt. Try again.</source>
+        <translation>Sicherungskonflikt mit einem vorherigen Versuch. Bitte erneut versuchen.</translation>
+    </message>
+    <message id="aegra.error.service.request_failed">
+        <source>Service rejected the request</source>
+        <translation>Service hat die Anfrage abgelehnt</translation>
     </message>
     <message id="aegra.error.job.cancel_failed">
         <source>Unable to cancel the job</source>

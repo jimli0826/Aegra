@@ -250,20 +250,20 @@ parse_recovery_point_request(const Json& payload) {
 
 [[nodiscard]] Json encode_start_backup(const contracts::StartBackupCommand& command) {
     return Json{
-        {"source_id", command.source_id},
+        {"source_ids", command.source_ids},
         {"repository_connection_id", command.repository_connection_id},
         {"backup_type", static_cast<std::uint8_t>(command.backup_type)},
         {"parent_recovery_point_id", optional_string_json(command.parent_recovery_point_id)}};
 }
 
 [[nodiscard]] contracts::StartBackupCommand parse_start_backup(const Json& payload) {
-    constexpr std::array<std::string_view, 4> keys{"source_id", "repository_connection_id",
+    constexpr std::array<std::string_view, 4> keys{"source_ids", "repository_connection_id",
                                                    "backup_type", "parent_recovery_point_id"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("start backup fields are invalid");
     }
     contracts::StartBackupCommand command;
-    command.source_id = payload.at("source_id").get<std::string>();
+    command.source_ids = payload.at("source_ids").get<std::vector<std::string>>();
     command.repository_connection_id = payload.at("repository_connection_id").get<std::string>();
     command.backup_type =
         static_cast<contracts::BackupType>(unsigned_value<std::uint8_t>(payload, "backup_type"));
@@ -343,7 +343,7 @@ encode_mount_recovery_point(const contracts::MountRecoveryPointCommand& command)
     return Json{{"schedule_id", optional_string_json(command.schedule_id)},
                 {"display_name", command.display_name},
                 {"enabled", command.enabled},
-                {"source_id", command.source_id},
+                {"source_ids", command.source_ids},
                 {"repository_connection_id", command.repository_connection_id},
                 {"backup_type", static_cast<std::uint8_t>(command.backup_type)},
                 {"trigger", encode_schedule_trigger(command.trigger)}};
@@ -351,7 +351,7 @@ encode_mount_recovery_point(const contracts::MountRecoveryPointCommand& command)
 
 [[nodiscard]] contracts::UpsertScheduleCommand parse_upsert_schedule(const Json& payload) {
     constexpr std::array<std::string_view, 7> keys{
-        "schedule_id", "display_name", "enabled", "source_id", "repository_connection_id",
+        "schedule_id", "display_name", "enabled", "source_ids", "repository_connection_id",
         "backup_type", "trigger"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("upsert schedule fields are invalid");
@@ -360,7 +360,7 @@ encode_mount_recovery_point(const contracts::MountRecoveryPointCommand& command)
     command.schedule_id = optional_string(payload.at("schedule_id"));
     command.display_name = payload.at("display_name").get<std::string>();
     command.enabled = payload.at("enabled").get<bool>();
-    command.source_id = payload.at("source_id").get<std::string>();
+    command.source_ids = payload.at("source_ids").get<std::vector<std::string>>();
     command.repository_connection_id = payload.at("repository_connection_id").get<std::string>();
     command.backup_type =
         static_cast<contracts::BackupType>(unsigned_value<std::uint8_t>(payload, "backup_type"));

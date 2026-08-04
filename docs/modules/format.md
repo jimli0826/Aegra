@@ -32,13 +32,11 @@
 - Repository Pack 足以通过 Footer 重建 Local Index。
 - Commit Object 是 Recovery Point 可见性的唯一提交标记。
 
-## 测试
+## 验证
 
-- Golden files、roundtrip、最大/最小边界和跨分卷顺序读取。
-- 截断、越界、重叠、重复 ID、非法 key 和损坏校验值。
-- 缺卷、乱序、重复卷、卷间 UUID 不一致和末卷 Footer 缺失。
-- Fuzz 入口覆盖每个外部解析器。
-- 固定结构大小常量、字段 offset 和 endianness 的 golden-byte 测试。
+- 格式审查覆盖 Golden bytes、roundtrip、最大/最小边界和跨分卷顺序读取规则。
+- 人工构造的非生产样本验证截断、越界、重叠、重复 ID、非法 key、损坏校验值、缺卷和乱序拒绝。
+- 固定结构大小常量、字段 offset 和 endianness 必须与权威格式文档逐项核对。
 
 ## 当前状态
 
@@ -48,8 +46,8 @@
 - `BackupHeader`、`CborMetadataEnvelopeHeader`、`ChunkHeader`、`BlockEntry`、`BackupFooter` 的显式小端编解码；
 - 整数 CBOR Map key、非法 magic/版本/尺寸、未加密 metadata envelope 和非法 BlockEntry 的拒绝路径。
 
-当前实现不使用 packed C++ struct 直接映射外部字节。`.bhx` Sidecar 采用固定 96 字节头和显式小端 payload codec；DATA 使用 SHA-256，ZERO/SKIP hash 全零。V6 Header codec 区分非分卷、首卷和续卷规则，并校验全量/增量 `parent_uuid`。ChunkHeader 固定为 96 字节，保存独立 XChaCha20-Poly1305 nonce/tag；tag 清零的 Header 和全部 BlockEntry 作为 AAD。Adapter 已实现 Chunk Payload 认证加密、完整 chunk 边界分卷、末卷 Footer、稀疏增量层和链式覆盖读取。DEDUP 写入、差异备份和多 volume Archive 仍是后续工作。
+当前实现不使用 packed C++ struct 直接映射外部字节。`.bhx` Sidecar 采用固定 96 字节头和显式小端 payload codec；DATA 使用 SHA-256，ZERO/SKIP hash 全零。V6 Header codec 区分非分卷、首卷和续卷规则，并校验全量/增量 `parent_uuid`。ChunkHeader 固定为 96 字节，保存独立 XChaCha20-Poly1305 nonce/tag；tag 清零的 Header 和全部 BlockEntry 作为 AAD。Adapter 已实现 Chunk Payload 认证加密、完整 chunk 边界分卷、末卷 Footer、多 Volume 全量 Archive、稀疏单 Volume 增量层和链式覆盖读取。DEDUP 写入、差异备份和多 Volume 增量仍是后续工作。
 
 ## 完成标准
 
-格式库可在没有文件系统、数据库、Windows SDK 和网络的单元测试中运行。
+格式库可在没有文件系统、数据库、Windows SDK 和网络的生产 Target 中独立构建。

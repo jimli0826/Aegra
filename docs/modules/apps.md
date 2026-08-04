@@ -40,6 +40,12 @@ Worker 发送 Progress 事件并最终发送一个 Result。Windows Composition 
 `WindowsNamedPipeChannel`，状态机只依赖 `IMessageChannel`。传输与 ACL 决策见
 [ADR-0008](../adr/0008-worker-session-named-pipe-protocol.md)。
 
+个人版 Service 在提交备份前生成 `file_uuid`、全量 `backup_set_uuid` 和 `created_utc_ms`，并把目标固定为
+`archives/YYYY/MM/<file_uuid>.bkf`。Worker 成功提交 Archive 后，Service 的 Catalog Registrar 读取固定
+Header、连续分卷、末卷 Footer 和 Sidecar Header，确认任务身份与 Archive 一致，再以 create-only 语义
+发布 `catalog/recovery-points/<file_uuid>.entry`。Catalog 发布失败只记录错误并保留已提交 Archive，后续
+Repository 扫描负责补建。
+
 ## WinPE 离线恢复
 
 从旧 WinPE 设计保留以下安全需求：
@@ -67,9 +73,9 @@ Online Prepare -> Validate -> Build/Cache WinRE -> Write Pending Job
 
 Mount Host 只读打开 Recovery Point，组合 Reader、虚拟磁盘呈现 Adapter 和 Dokan。每个挂载会话具有独立生命周期、取消和临时 overlay；Shell Extension 不加载这些实现。
 
-## 测试
+## 验证
 
-- 每个 Composition Root 有装配测试和缺配置测试。
-- 进程边界覆盖异常、退出码、取消和崩溃恢复。
-- WinPE 在 UEFI/BIOS 虚拟机覆盖盘号变化、源位于目标盘、缺链、错误密钥和还原后启动。
-- Mount Host 覆盖并发读、强制卸载、overlay 清理和损坏 Recovery Point。
+- 每个 Composition Root 必须可独立构建，并人工核对正常装配与缺配置行为。
+- 进程边界必须审查异常、退出码、取消和崩溃恢复。
+- WinPE 的人工验收覆盖 UEFI/BIOS、盘号变化、源位于目标盘、缺链、错误密钥和还原后启动。
+- Mount Host 的人工验收覆盖并发读、强制卸载、overlay 清理和损坏 Recovery Point。

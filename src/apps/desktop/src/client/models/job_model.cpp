@@ -19,6 +19,30 @@ constexpr std::int64_t kStateFailed = 5;
 constexpr std::int64_t kStateCancelled = 6;
 constexpr std::int64_t kStateInterrupted = 7;
 
+[[nodiscard]] bool row_is_active(const std::int64_t state) noexcept {
+    return state == kStateQueued || state == kStateRunning || state == kStateCancelling;
+}
+
+void recompute_counts(const QVector<JobRow>& rows, int& running, int& failed, int& succeeded,
+                      int& active) {
+    running = 0;
+    failed = 0;
+    succeeded = 0;
+    active = 0;
+    for (const auto& row : rows) {
+        if (row.state == kStateRunning) {
+            ++running;
+        } else if (row.state == kStateFailed) {
+            ++failed;
+        } else if (row.state == kStateSucceeded) {
+            ++succeeded;
+        }
+        if (row_is_active(row.state)) {
+            ++active;
+        }
+    }
+}
+
 } // namespace
 
 JobModel::JobModel(QObject* parent) : QAbstractListModel(parent) {}
@@ -28,23 +52,27 @@ void JobModel::set_locale_format(LocaleFormat* format) { format_ = format; }
 void JobModel::set_rows(QVector<JobRow> rows) {
     beginResetModel();
     rows_ = std::move(rows);
-    running_count_ = 0;
-    failed_count_ = 0;
-    succeeded_count_ = 0;
-    active_count_ = 0;
-    for (const auto& row : rows_) {
-        if (row.state == kStateRunning) {
-            ++running_count_;
-        } else if (row.state == kStateFailed) {
-            ++failed_count_;
-        } else if (row.state == kStateSucceeded) {
-            ++succeeded_count_;
-        }
-        if (is_active_state(row.state)) {
-            ++active_count_;
+    recompute_counts(rows_, running_count_, failed_count_, succeeded_count_, active_count_);
+    endResetModel();
+    emit countChanged();
+    emit countsChanged();
+}
+
+void JobModel::upsert_job(JobRow row) {
+    for (int i = 0; i < rows_.size(); ++i) {
+        if (rows_[i].job_id == row.job_id) {
+            rows_[i] = std::move(row);
+            const auto idx = index(i, 0);
+            emit dataChanged(idx, idx);
+            recompute_counts(rows_, running_count_, failed_count_, succeeded_count_, active_count_);
+            emit countsChanged();
+            return;
         }
     }
-    endResetModel();
+    beginInsertRows(QModelIndex(), 0, 0);
+    rows_.prepend(std::move(row));
+    endInsertRows();
+    recompute_counts(rows_, running_count_, failed_count_, succeeded_count_, active_count_);
     emit countChanged();
     emit countsChanged();
 }
@@ -110,19 +138,32 @@ QVariant JobModel::data(const QModelIndex& index, const int role) const {
         return static_cast<qint64>(row.state);
     case StateTextRole:
         return state_text(row.state);
+    case StateColorRole:
+        return state_color(row.state);
     case CreatedTextRole:
         return format_ != nullptr ? format_->format_date_time_utc_ms(row.created_utc_ms)
                                   : QString::number(row.created_utc_ms);
     case ProgressPercentRole:
         return progress_percent(row);
     case ProgressVisibleRole:
-        return is_active_state(row.state) && row.progress_processed_bytes.has_value();
+        return progress_visible(row);
     case MessageTextRole:
         return row.message_code.isEmpty() ? QString{} : localize_message_code(row.message_code);
     case IsTerminalRole:
         return is_terminal_state(row.state);
     case IsActiveRole:
         return is_active_state(row.state);
+    case SourceNameRole:
+        return row.source_name.isEmpty()
+                   ? (row.source_ids.isEmpty() ? operation_text(row.operation)
+                                               : row.source_ids.join(QStringLiteral(", ")))
+                   : row.source_name;
+    case DestinationNameRole:
+        return row.destination_name.isEmpty()
+                   ? (row.connection_id.isEmpty() ? row.job_id : row.connection_id)
+                   : row.destination_name;
+    case DestinationPathRole:
+        return row.destination_path;
     default:
         return {};
     }
@@ -134,12 +175,16 @@ QHash<int, QByteArray> JobModel::roleNames() const {
             {OperationTextRole, "operationText"},
             {StateValueRole, "stateValue"},
             {StateTextRole, "stateText"},
+            {StateColorRole, "stateColor"},
             {CreatedTextRole, "createdText"},
             {ProgressPercentRole, "progressPercent"},
             {ProgressVisibleRole, "progressVisible"},
             {MessageTextRole, "messageText"},
             {IsTerminalRole, "isTerminal"},
-            {IsActiveRole, "isActive"}};
+            {IsActiveRole, "isActive"},
+            {SourceNameRole, "sourceName"},
+            {DestinationNameRole, "destinationName"},
+            {DestinationPathRole, "destinationPath"}};
 }
 
 QString JobModel::operation_text(const std::int64_t operation) const {
@@ -191,6 +236,23 @@ QString JobModel::state_text(const std::int64_t state) const {
     }
 }
 
+QString JobModel::state_color(const std::int64_t state) noexcept {
+    switch (state) {
+    case kStateSucceeded:
+        return QStringLiteral("#3dd68c");
+    case kStateFailed:
+        return QStringLiteral("#e5534b");
+    case kStateCancelled:
+    case kStateInterrupted:
+        return QStringLiteral("#e6a817");
+    case kStateRunning:
+    case kStateCancelling:
+        return QStringLiteral("#33b8ff");
+    default:
+        return QStringLiteral("#e8eef7");
+    }
+}
+
 bool JobModel::is_terminal_state(const std::int64_t state) noexcept {
     return state == kStateSucceeded || state == kStateFailed || state == kStateCancelled ||
            state == kStateInterrupted;
@@ -201,6 +263,9 @@ bool JobModel::is_active_state(const std::int64_t state) noexcept {
 }
 
 int JobModel::progress_percent(const JobRow& row) noexcept {
+    if (row.state == kStateSucceeded) {
+        return 100;
+    }
     if (!row.progress_logical_bytes || !row.progress_processed_bytes) {
         return 0;
     }
@@ -212,8 +277,7 @@ int JobModel::progress_percent(const JobRow& row) noexcept {
     if (processed == logical) {
         return 100;
     }
-    // Overflow-safe percent in [0, 100]. Never multiply processed by 100 when it may exceed
-    // int64_t::max / 100; scale the denominator instead when values are large.
+    // Overflow-safe percent in [0, 100].
     std::int64_t percent = 0;
     constexpr auto kMax = (std::numeric_limits<std::int64_t>::max)();
     if (processed <= kMax / 100) {
@@ -221,8 +285,6 @@ int JobModel::progress_percent(const JobRow& row) noexcept {
     } else if (logical >= 100) {
         percent = processed / (logical / 100);
     } else {
-        // logical in [1, 99] and processed is huge but still <= logical — impossible for
-        // processed > kMax/100 with logical < 100. Keep a defensive fallback.
         percent = (processed * 100) / logical;
     }
     if (percent < 0) {
@@ -232,6 +294,16 @@ int JobModel::progress_percent(const JobRow& row) noexcept {
         return 100;
     }
     return static_cast<int>(percent);
+}
+
+bool JobModel::progress_visible(const JobRow& row) noexcept {
+    if (row.state == kStateSucceeded) {
+        return true;
+    }
+    if (is_active_state(row.state)) {
+        return true;
+    }
+    return row.progress_processed_bytes.has_value();
 }
 
 QVector<JobRow> jobs_from_variant_list(const QVariantList& items) {
@@ -273,6 +345,13 @@ QVector<JobRow> jobs_from_variant_list(const QVariantList& items) {
                 map.value(QStringLiteral("progressStoredBytes")).toLongLong();
         }
         row.message_code = map.value(QStringLiteral("messageCode")).toString();
+        for (const auto& source_id : map.value(QStringLiteral("sourceIds")).toList()) {
+            row.source_ids.push_back(source_id.toString());
+        }
+        row.connection_id = map.value(QStringLiteral("connectionId")).toString();
+        row.source_name = map.value(QStringLiteral("sourceName")).toString();
+        row.destination_name = map.value(QStringLiteral("destinationName")).toString();
+        row.destination_path = map.value(QStringLiteral("destinationPath")).toString();
         rows.push_back(std::move(row));
     }
     return rows;

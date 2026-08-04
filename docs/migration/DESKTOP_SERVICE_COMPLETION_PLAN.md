@@ -1,5 +1,10 @@
 # Desktop 迁移与个人版 Service 完成计划
 
+> 2026-08-04 验证策略更新：根据 [ADR-0015](../adr/0015-no-project-test-suite.md)，本文所有要求新增、维护或
+> 运行测试源码、测试 Target、CTest、E2E 脚本或测试证据的条目均已废止，不再构成工作包门禁。后续工作以
+> 生产 Target 构建、静态/架构检查和必要的人工运行或 UI 验证为准。Repository connection 的 `Test` 命令是
+> 产品业务能力，不属于测试用例。
+
 ## 1. 文档目的
 
 本文把旧项目 `backup/src/gui` 中仍有价值的 Desktop 体验迁移到 Aegra，并收敛个人版 Service 剩余控制面工作。
@@ -12,7 +17,7 @@ Verify/Restore/Mount Service 编排与对应 Desktop 页面仍待后续工作包
 
 工作包状态最后更新于 2026-08-04。状态定义如下：
 
-- `已完成`：满足本工作包 Definition of Done，并已同步实现、测试和文档；
+- `已完成`：满足本工作包 Definition of Done，并已同步实现、验证和文档；
 - `进行中`：已有 owner 领取并产生实现工作，尚未完成全部验收；
 - `可开始`：全部前置工作包已完成，可以立即领取；
 - `等待前置`：至少一个前置工作包尚未完成；
@@ -34,7 +39,7 @@ Verify/Restore/Mount Service 编排与对应 Desktop 页面仍待后续工作包
 - Desktop 首批支持 `en_US`、`zh_CN`、`zh_TW`、`ja_JP` 和 `de_DE`，并可在运行时切换语言。
 - Service 成为个人版唯一控制面，负责 Repository 连接、任务、计划、事件和 Worker 生命周期。
 - 形成 Backup、Verify、Restore 和 Mount 的 `Desktop -> Service -> Worker/Mount Host -> Repository` 闭环。
-- 每个工作包有独立文件边界、前置条件、测试和 Definition of Done，可由不同 agent 顺序或并行完成。
+- 每个工作包有独立文件边界、前置条件、验证和 Definition of Done，可由不同 agent 顺序或并行完成。
 
 ### 2.2 硬边界
 
@@ -536,9 +541,9 @@ Volume GUID、链数组、SecretRef 或任意设备路径。
 - Debug/Release 受影响 target、全部非管理员 `ctest`、`architecture.source_limits`、clang-format、秘密扫描和
   `git diff --check` 必须通过；管理员 Restore 集成测试未执行时 S6 不得标记完成。
 
-**文件所有权：** S6 agent 独占新增 Restore Application use case、preflight port/store、专属 SQLite 文件、
-Restore Service handler 与专属测试。公共 Contracts/codec、`service_main.cpp`、Service/Worker 顶层 CMake、SQLite schema
-registry 和 `tests/CMakeLists.txt` 由 integration owner 统一接线；不得修改 Desktop QML，也不得覆盖 D2/D3/S5 的
+**文件所有权：** S6 agent 独占新增 Restore Application use case、preflight port/store、专属 SQLite 文件和
+Restore Service handler。公共 Contracts/codec、`service_main.cpp`、Service/Worker 顶层 CMake 和 SQLite schema
+registry 由 integration owner 统一接线；不得修改 Desktop QML，也不得覆盖 D2/D3/S5 的
 并行改动。
 
 **实施顺序是强制的：** entry gate/S5 验收 -> contract/ADR -> preflight port + SQLite -> Application fake-port
@@ -626,7 +631,7 @@ composition/capability；未跑 Release、全套测试或管理员 Restore 门�
 
 - 先用旧 UI 截图/运行结果确认视觉基线，再按新组件边界重写；显示效果必须对齐旧 UI，不逐文件复制巨大 QML。
 - 每个页面先完成静态视觉、responsive layout、键盘/无障碍和 i18n，再连接 Service model。
-- 单个 QML/CPP 文件不接近 800 行上限；复杂表单、抽屉、表格和对话框拆成有领域名称的组件。
+- 单个 QML/CPP 文件不接近 1500 行上限；复杂表单、抽屉、表格和对话框拆成有领域名称的组件。
 - 不引入假的成功数据来补 Service 缺口；使用 capability、loading、empty、error 和 disabled 状态。
 - 页面完成时附旧/新并排的 900x600、1080x720、150% DPI、五种 locale 截图或自动化证据。
 
@@ -670,8 +675,8 @@ contract test，Desktop agent 才开始真实接入。
 - Verify 的 `WorkerJobService` 接线、真实 Supervisor/Worker 进程测试和 SQLite Job/Command/Audit 持久化；
 - Service Host dispatch、capability、composition root、CMake、模块文档和计划状态更新。
 
-**文件所有权：** Agent A 独占新增 S5 Application、personal_repository、Service handler、Storage Port 扩展和专属测试。
-协议公共文件、`service_main.cpp`、Service 顶层 CMake、SQLite schema registry 与 `tests/CMakeLists.txt` 属 integration
+**文件所有权：** Agent A 独占新增 S5 Application、personal_repository、Service handler 和 Storage Port 扩展。
+协议公共文件、`service_main.cpp`、Service 顶层 CMake 与 SQLite schema registry 属 integration
 owner；Agent A 可以准备 patch，但合并前必须统一接线，不能复制一套旁路 composition。不得修改 Desktop QML。
 
 **实施顺序是强制的：** contract/port -> 核心 chain/delete-plan -> Application -> fake integration -> Service/Worker

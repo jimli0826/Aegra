@@ -23,7 +23,7 @@ base::Result<void> JobStore::insert(const ports::JobRecord& record,
     auto statement = SqliteStatement::prepare(
         state_.db,
         "INSERT INTO jobs(job_id, trace_id, operation, state, created_utc_ms, started_utc_ms, "
-        "completed_utc_ms, source_id, repository_connection_id, target_source_id, backup_type, "
+        "completed_utc_ms, source_ids, repository_connection_id, target_source_id, backup_type, "
         "parent_recovery_point_id, preflight_token, message_code, idempotency_key, "
         "result_error_code, result_outcome, result_message_code) "
         "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
@@ -52,7 +52,7 @@ base::Result<void> JobStore::insert(const ports::JobRecord& record,
     if (auto bound = stmt.bind_int64_nullable(7, record.completed_utc_ms); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_text_nullable(8, record.source_id); !bound) {
+    if (auto bound = stmt.bind_text(8, encode_string_list(record.source_ids)); !bound) {
         return bound;
     }
     if (auto bound = stmt.bind_text_nullable(9, record.repository_connection_id); !bound) {
@@ -158,7 +158,7 @@ base::Result<contracts::JobPage> JobStore::list(const contracts::JobListRequest&
     std::string sql =
         "SELECT job_id, trace_id, operation, state, created_utc_ms, started_utc_ms, "
         "completed_utc_ms, "
-        "source_id, repository_connection_id, target_source_id, backup_type, "
+        "source_ids, repository_connection_id, target_source_id, backup_type, "
         "parent_recovery_point_id, "
         "preflight_token, message_code, idempotency_key, result_error_code, result_outcome, "
         "result_message_code FROM jobs WHERE 1=1";

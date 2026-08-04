@@ -19,8 +19,18 @@ struct SourceInventoryRecord final {
     contracts::SourceKind kind{contracts::SourceKind::kVolume};
     contracts::SourceAvailability availability{contracts::SourceAvailability::kUnavailable};
     std::uint64_t capacity_bytes{0};
+    // Free bytes on the volume when known (GetDiskFreeSpaceEx); 0 if unknown/unmounted.
+    std::uint64_t free_bytes{0};
+    std::uint64_t disk_capacity_bytes{0};
     bool is_system{false};
     bool is_read_only{false};
+    std::uint32_t disk_number{0};
+    std::string mount_letter;
+    std::string volume_label;
+    std::string health_status;
+    std::string partition_style;
+    // Physical media hint for Home charts (SSD/HDD/USB/Virtual/Unknown).
+    std::string media_type;
 };
 
 class ISourceInventory {

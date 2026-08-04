@@ -210,77 +210,7 @@ Window {
                     Layout.rightMargin: 4
                 }
 
-                // Language (D0) — compact chrome matching buttons
-                ComboBox {
-                    id: languageCombo
-                    Layout.preferredHeight: 22
-                    Layout.preferredWidth: 108
-                    Layout.alignment: Qt.AlignVCenter
-                    model: localeController.availableLanguages
-                    textRole: "label"
-                    currentIndex: {
-                        const tags = localeController.availableLanguages
-                        for (let i = 0; i < tags.length; ++i) {
-                            if (tags[i].tag === localeController.language)
-                                return i
-                        }
-                        return 0
-                    }
-                    onActivated: function(index) {
-                        const languages = localeController.availableLanguages
-                        if (index >= 0 && index < languages.length)
-                            localeController.setLanguage(languages[index].tag)
-                    }
-                    background: Rectangle {
-                        color: languageCombo.hovered ? Theme.colorButtonHover : Theme.colorButton
-                        border.width: 1
-                        border.color: Theme.colorBorder
-                        radius: 3
-                    }
-                    contentItem: Text {
-                        leftPadding: 6
-                        rightPadding: 16
-                        text: languageCombo.displayText
-                        color: Theme.colorTextWhite
-                        font.family: Theme.fontFamily
-                        font.pixelSize: 11
-                        verticalAlignment: Text.AlignVCenter
-                        elide: Text.ElideRight
-                    }
-                    popup: Popup {
-                        y: languageCombo.height
-                        width: languageCombo.width
-                        implicitHeight: contentItem.implicitHeight
-                        padding: 1
-                        contentItem: ListView {
-                            clip: true
-                            implicitHeight: contentHeight
-                            model: languageCombo.popup.visible ? languageCombo.delegateModel : null
-                            currentIndex: languageCombo.highlightedIndex
-                        }
-                        background: Rectangle {
-                            color: Theme.colorPopup
-                            border.color: Theme.colorBorder
-                            radius: 3
-                        }
-                    }
-                    delegate: ItemDelegate {
-                        width: languageCombo.width
-                        height: 28
-                        contentItem: Text {
-                            text: modelData.label
-                            color: Theme.colorTextWhite
-                            font.family: Theme.fontFamily
-                            font.pixelSize: 11
-                            elide: Text.ElideRight
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            color: parent.highlighted ? Theme.colorHover : "transparent"
-                        }
-                    }
-                }
-
+                // Language switch lives in Settings only (not title bar).
                 Row {
                     spacing: 0
                     Layout.alignment: Qt.AlignVCenter
@@ -402,7 +332,12 @@ Window {
                             }
                         }
                     }
-                    Component { id: backupPageComp; BackupPage { } }
+                    Component {
+                        id: backupPageComp
+                        BackupPage {
+                            onNavigateHomeRequested: pageContainer.switchPage(0)
+                        }
+                    }
                     Component { id: restorePageComp; RestorePage { } }
                     Component { id: mountPageComp; MountPage { } }
                     Component { id: repositoryPageComp; RepositoryPage { } }

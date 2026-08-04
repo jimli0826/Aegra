@@ -70,8 +70,8 @@ base::Result<std::string> make_random_uuid(ports::IRandomSource& random,
 }
 
 bool is_source_selectable(const ports::SourceInventoryRecord& record) noexcept {
-    return record.availability == contracts::SourceAvailability::kAvailable && !record.is_system &&
-           !record.is_read_only && record.capacity_bytes > 0 &&
+    return record.availability == contracts::SourceAvailability::kAvailable &&
+           record.capacity_bytes > 0 &&
            record.capacity_bytes <=
                static_cast<std::uint64_t>((std::numeric_limits<std::int64_t>::max)());
 }

@@ -54,6 +54,9 @@ encode_supervisor_job_request(const contracts::JobRequest& request) {
             if (!request.backup->parent_credential_ref.value.empty()) {
                 backup["parent_credential_ref"] = request.backup->parent_credential_ref.value;
             }
+            backup["file_uuid"] = request.backup->file_uuid;
+            backup["backup_set_uuid"] = request.backup->backup_set_uuid;
+            backup["created_utc_ms"] = request.backup->created_utc_ms;
             root["backup"] = backup;
         }
 

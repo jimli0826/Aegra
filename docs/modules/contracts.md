@@ -27,9 +27,11 @@
 
 ## 当前状态
 
-`JobRequest` schema 2 是当前 Worker 的版本化任务信封，拥有 job、tenant、operation、source/target、
-`SecretRef`、trace 和 deadline。Backup Job 还必须拥有 `BackupOptions`：显式 `type`，增量时同时拥有
-`parent_source_ref` 与 `parent_credential_ref`。`SecretRef` 只保存凭据定位符，禁止保存明文 Secret。
+`JobRequest` schema 3 是当前 Worker 的版本化任务信封，拥有 job、tenant、operation、source/target、
+`SecretRef`、trace 和 deadline。Backup Job 还必须拥有 `BackupOptions`：显式 `type`、`file_uuid`、
+`created_utc_ms`，全量必须拥有不同于 `file_uuid` 的 `backup_set_uuid`，增量时同时拥有
+`parent_source_ref` 与 `parent_credential_ref`。Service 在提交 Worker 前分配持久化身份和创建时间，Worker
+不得重新生成 Archive 身份。`SecretRef` 只保存凭据定位符，禁止保存明文 Secret。
 
 `TaskProgress` 同时携带 `job_id` 与 `trace_id`，用于跨线程和跨进程关联。`TaskResult` 使用稳定的
 `TaskOutcome`、`ErrorCode`、message code、warning code 和容量指标；不得复制 Adapter 的原始错误文本。
@@ -52,21 +54,23 @@ Session 和 task event DTO。列表每页最多 100 项，event 未确认窗口�
 有符号 64 位范围。Catalog 状态仍不表达 Archive 已认证或 Restore Ready。完整 wire 决策见
 [ADR-0013](../adr/0013-service-control-protocol-v3.md)。
 
+Backup Start、Schedule 与 Backup Job 使用有序 `source_ids[]`，包含 1 至 100 个稳定且无重复的 Source ID。
+该数组是一个 Job 的原子 Source 集合；协议层不得只保留第一个 ID，也不得拆成多个命令。Worker
+`JobRequest.source_refs[]` 按相同顺序保存解析后的稳定 Volume 引用。
+
 S6 修正了 Restore V3 DTO：Prepare 必须携带 Repository connection、Recovery Point 和 opaque target source ID；
 成功 preflight 返回相同资源归属、逻辑大小、目标容量、链深、过期 UTC、eligibility 与稳定 message code；Start
 只接受 opaque preflight token 且必须显式 `confirmed=true`。协议不接受 Archive path、对象 key、链数组、
 SecretRef、Volume GUID 或任意设备路径。
 
-## 测试
+## 验证
 
-- 每个消息的必填字段、版本和枚举验证。
-- Outcome、ErrorCode 与 warning 集合的组合不变量。
-- 编码 roundtrip、未知可选字段和损坏输入。
-- Secret 不出现在日志/调试输出。
-- Golden message 固定字段名和数值。
+- 审查每个消息的必填字段、版本、枚举和组合不变量。
+- 对编码 roundtrip、未知可选字段、损坏输入和 Golden message 执行聚焦的人工协议验证。
+- 检查日志和调试输出不包含 Secret。
 
 ## 完成标准
 
 - 契约不泄漏传输、平台或持久化实现。
-- 版本行为和拒绝规则有测试与文档。
+- 版本行为和拒绝规则有完整文档，并与所有消费者保持一致。
 - 所有消费者只依赖稳定 DTO，不解析另一进程的内部结构。

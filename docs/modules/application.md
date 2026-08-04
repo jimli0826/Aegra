@@ -35,9 +35,9 @@
 - 密钥字段使用 `SecretRef`，由入口或 Adapter 解析。
 - 取消和 deadline 必须贯穿到 Pipeline、Connector 和 Repository Client。
 
-## 测试
+## 验证
 
-使用 Fake Port 验证权限、调用顺序、幂等、取消、超时、错误映射和 Outbox。Controller/API 测试与 Use Case 单元测试分离。
+构建 Application 及其直接消费者，并审查权限、调用顺序、幂等、取消、超时、错误映射和 Outbox 边界；高风险流程按需执行聚焦的人工运行验证。
 
 ## 当前状态
 

@@ -10,7 +10,8 @@
 namespace aegra::desktop {
 namespace {
 
-constexpr std::array<const char*, 5> kByteUnits{"B", "KiB", "MiB", "GiB", "TiB"};
+// Match old StorageManager::FormatSize labels (binary steps, decimal unit names).
+constexpr std::array<const char*, 5> kByteUnits{"B", "KB", "MB", "GB", "TB"};
 
 } // namespace
 

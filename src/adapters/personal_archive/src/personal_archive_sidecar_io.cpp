@@ -192,10 +192,7 @@ decode_sidecar_file(std::ifstream& input, const ArchiveKeyContext& archive_conte
 namespace detail {
 
 base::Result<void> write_sidecar(const SidecarWriteRequest& request) {
-    archive::SidecarPayload payload;
-    payload.volumes.push_back(
-        {request.volume_index, {request.records.begin(), request.records.end()}});
-    auto encoded_payload = archive::encode_sidecar_payload(payload);
+    auto encoded_payload = archive::encode_sidecar_payload(request.payload);
     if (!encoded_payload) {
         return base::Result<void>::failure(encoded_payload.error());
     }
@@ -210,7 +207,11 @@ base::Result<void> write_sidecar(const SidecarWriteRequest& request) {
     archive::SidecarHeader header;
     header.block_size = request.block_size;
     header.file_uuid = request.file_uuid;
-    header.volume_count = 1;
+    if (request.payload.volumes.size() > (std::numeric_limits<std::uint32_t>::max)()) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kInsufficientSpace, "sidecar has too many volumes"));
+    }
+    header.volume_count = static_cast<std::uint32_t>(request.payload.volumes.size());
     header.payload_uncompressed_size = encoded_payload.value().size();
     header.payload_stored_size = compressed.value().size();
     header.nonce = protection.value().nonce;

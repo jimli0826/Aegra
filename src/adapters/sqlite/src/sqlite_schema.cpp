@@ -1,7 +1,7 @@
 #include "sqlite_internal.h"
 
 namespace aegra::adapters::sqlite::detail {
-base::Result<void> apply_schema_v2(sqlite3* const db) {
+base::Result<void> apply_schema_v3(sqlite3* const db) {
     static constexpr char kSchema[] = R"sql(
 PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     created_utc_ms INTEGER NOT NULL CHECK (created_utc_ms >= 0),
     started_utc_ms INTEGER CHECK (started_utc_ms IS NULL OR started_utc_ms >= 0),
     completed_utc_ms INTEGER CHECK (completed_utc_ms IS NULL OR completed_utc_ms >= 0),
-    source_id TEXT,
+    source_ids TEXT NOT NULL,
     repository_connection_id TEXT,
     target_source_id TEXT,
     backup_type INTEGER CHECK (backup_type IS NULL OR backup_type BETWEEN 1 AND 3),
@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS schedules (
     schedule_id TEXT PRIMARY KEY NOT NULL,
     display_name TEXT NOT NULL,
     enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
-    source_id TEXT NOT NULL,
+    source_ids TEXT NOT NULL,
     repository_connection_id TEXT NOT NULL,
     backup_type INTEGER NOT NULL CHECK (backup_type BETWEEN 1 AND 3),
     trigger_kind INTEGER NOT NULL CHECK (trigger_kind IN (1, 2)),

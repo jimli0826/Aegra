@@ -1,8 +1,11 @@
 #include "aegra/apps/worker/windows_personal_backup_task.h"
 
 #include "windows_personal_backup_task_backend.h"
+#include "worker_task_log.h"
 
 #include "aegra/apps/worker/windows_personal_backup.h"
+#include "aegra/base/uuid.h"
+#include "aegra/contracts/service_control.h"
 
 #include <array>
 #include <cstddef>
@@ -11,6 +14,7 @@
 #include <ctime>
 #include <filesystem>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -21,6 +25,19 @@ namespace detail {
 namespace {
 
 using BackupIds = std::pair<std::array<std::byte, 16>, std::array<std::byte, 16>>;
+
+// Personal edition allows jobs without wincred:// credentials; archive crypto still needs a
+// non-empty password material (personal_archive_session rejects empty passwords).
+constexpr std::string_view kDefaultLocalArchivePassword = "aegra-local";
+
+class FixedPasswordSecret final : public ports::IResolvedSecret {
+  public:
+    explicit FixedPasswordSecret(const std::string_view password) noexcept : password_(password) {}
+    [[nodiscard]] std::string_view view() const noexcept override { return password_; }
+
+  private:
+    std::string_view password_;
+};
 
 struct ResolvedBackupSecrets final {
     std::unique_ptr<ports::IResolvedSecret> archive;
@@ -37,9 +54,10 @@ base::Result<void> validate_task(const contracts::JobRequest& job,
     if (!valid_job) {
         return valid_job;
     }
-    if (job.operation != contracts::JobOperation::kBackup || job.source_refs.size() != 1 ||
-        job.credential_refs.size() != 1) {
-        return invalid("personal backup task requires one source and one credential");
+    // Credential refs are optional for personal local backup (no wincred required).
+    if (job.operation != contracts::JobOperation::kBackup || job.source_refs.empty() ||
+        job.source_refs.size() > contracts::kMaximumBackupSources) {
+        return invalid("personal backup task source count is invalid");
     }
     if (!job.backup || job.backup->type == contracts::BackupType::kDifferential) {
         return invalid("personal backup task supports full and incremental backup types");
@@ -95,7 +113,7 @@ contracts::TaskResult failed_result(const contracts::JobRequest& job, const base
 }
 
 contracts::TaskResult completed_result(const contracts::JobRequest& job,
-                                       const WindowsPersonalVolumeBackupResult& backup) {
+                                       const WindowsPersonalBackupResult& backup) {
     const bool has_warning = backup.snapshot_cleanup_error.has_value();
     std::vector<std::string> warnings;
     if (has_warning) {
@@ -163,58 +181,20 @@ base::Result<std::string> format_utc(const std::int64_t utc_ms) {
     return base::Result<std::string>::success(std::string(buffer.data()));
 }
 
-void normalize_uuid(std::array<std::byte, 16>& uuid) noexcept {
-    uuid[6] = (uuid[6] & std::byte{0x0F}) | std::byte{0x40};
-    uuid[8] = (uuid[8] & std::byte{0x3F}) | std::byte{0x80};
-}
-
-base::Result<BackupIds> make_backup_ids(ports::IRandomSource& random,
-                                        const base::CancellationToken& cancellation) {
-    constexpr std::size_t kMaximumAttempts = 4;
-    for (std::size_t attempt = 0; attempt < kMaximumAttempts; ++attempt) {
-        BackupIds ids;
-        auto file_random = random.fill(ids.first, cancellation);
-        if (!file_random) {
-            return base::Result<BackupIds>::failure(file_random.error());
+base::Result<BackupIds> requested_ids(const contracts::BackupOptions& options) {
+    auto file_uuid = base::parse_uuid(options.file_uuid);
+    if (!file_uuid) {
+        return base::Result<BackupIds>::failure(file_uuid.error());
+    }
+    std::array<std::byte, 16> backup_set_uuid{};
+    if (options.type == contracts::BackupType::kFull) {
+        auto parsed_set = base::parse_uuid(options.backup_set_uuid);
+        if (!parsed_set) {
+            return base::Result<BackupIds>::failure(parsed_set.error());
         }
-        auto set_random = random.fill(ids.second, cancellation);
-        if (!set_random) {
-            return base::Result<BackupIds>::failure(set_random.error());
-        }
-        normalize_uuid(ids.first);
-        normalize_uuid(ids.second);
-        if (ids.first != ids.second) {
-            return base::Result<BackupIds>::success(ids);
-        }
+        backup_set_uuid = parsed_set.value();
     }
-    return base::Result<BackupIds>::failure(base::Error{
-        base::ErrorCode::kInternal,
-        "random source returned repeated backup identifiers",
-    });
-}
-
-base::Result<std::array<std::byte, 16>>
-make_file_id(ports::IRandomSource& random, const base::CancellationToken& cancellation) {
-    std::array<std::byte, 16> result{};
-    auto filled = random.fill(result, cancellation);
-    if (!filled) {
-        return base::Result<std::array<std::byte, 16>>::failure(filled.error());
-    }
-    normalize_uuid(result);
-    return base::Result<std::array<std::byte, 16>>::success(result);
-}
-
-base::Result<BackupIds> make_requested_ids(const contracts::BackupType type,
-                                           ports::IRandomSource& random,
-                                           const base::CancellationToken& cancellation) {
-    if (type == contracts::BackupType::kFull) {
-        return make_backup_ids(random, cancellation);
-    }
-    auto file_id = make_file_id(random, cancellation);
-    if (!file_id) {
-        return base::Result<BackupIds>::failure(file_id.error());
-    }
-    return base::Result<BackupIds>::success({file_id.value(), {}});
+    return base::Result<BackupIds>::success({file_uuid.value(), backup_set_uuid});
 }
 
 std::filesystem::path path_from_utf8(const std::string& value) {
@@ -226,13 +206,16 @@ std::filesystem::path path_from_utf8(const std::string& value) {
     return std::filesystem::path(encoded);
 }
 
-WindowsPersonalVolumeBackupRequest make_backup_request(
+WindowsPersonalBackupRequest make_backup_request(
     const contracts::JobRequest& job, const WindowsPersonalBackupTaskOptions& options,
     const ResolvedBackupSecrets& secrets, const BackupIds& ids, std::string created_utc) {
-    WindowsPersonalVolumeBackupRequest request;
+    WindowsPersonalBackupRequest request;
     request.job_id = job.job_id;
     request.trace_id = job.trace_id;
-    request.volume_guid_path = path_from_utf8(job.source_refs.front());
+    request.volume_guid_paths.reserve(job.source_refs.size());
+    for (const auto& source_ref : job.source_refs) {
+        request.volume_guid_paths.push_back(path_from_utf8(source_ref));
+    }
     request.destination = path_from_utf8(job.target_ref);
     request.password = secrets.archive->view();
     request.backup_type = job.backup->type == contracts::BackupType::kFull
@@ -259,23 +242,99 @@ WindowsPersonalVolumeBackupRequest make_backup_request(
 base::Result<ResolvedBackupSecrets>
 resolve_backup_secrets(const contracts::JobRequest& job, ports::ICredentialResolver& credentials,
                        const base::CancellationToken& cancellation) {
-    auto archive = credentials.resolve(job.credential_refs.front(), cancellation);
-    if (!archive || archive.value() == nullptr || archive.value()->view().empty()) {
-        const auto code = !archive ? archive.error().code : base::ErrorCode::kUnauthorized;
-        return base::Result<ResolvedBackupSecrets>::failure({code, "archive credential failed"});
-    }
     ResolvedBackupSecrets result;
-    result.archive = std::move(archive).value();
+    if (!job.credential_refs.empty() && !job.credential_refs.front().value.empty()) {
+        auto archive = credentials.resolve(job.credential_refs.front(), cancellation);
+        if (!archive || archive.value() == nullptr || archive.value()->view().empty()) {
+            const auto code = !archive ? archive.error().code : base::ErrorCode::kUnauthorized;
+            return base::Result<ResolvedBackupSecrets>::failure({code, "archive credential failed"});
+        }
+        result.archive = std::move(archive).value();
+    } else {
+        // No credential on the job: use the fixed personal-local password material.
+        result.archive = std::make_unique<FixedPasswordSecret>(kDefaultLocalArchivePassword);
+    }
     if (job.backup->type == contracts::BackupType::kFull) {
         return base::Result<ResolvedBackupSecrets>::success(std::move(result));
     }
-    auto parent = credentials.resolve(job.backup->parent_credential_ref, cancellation);
-    if (!parent || parent.value() == nullptr || parent.value()->view().empty()) {
-        const auto code = !parent ? parent.error().code : base::ErrorCode::kUnauthorized;
-        return base::Result<ResolvedBackupSecrets>::failure({code, "parent credential failed"});
+    // Incremental: parent credential optional; fall back to the same local password.
+    if (!job.backup->parent_credential_ref.value.empty()) {
+        auto parent = credentials.resolve(job.backup->parent_credential_ref, cancellation);
+        if (!parent || parent.value() == nullptr || parent.value()->view().empty()) {
+            const auto code = !parent ? parent.error().code : base::ErrorCode::kUnauthorized;
+            return base::Result<ResolvedBackupSecrets>::failure({code, "parent credential failed"});
+        }
+        result.parent = std::move(parent).value();
+    } else {
+        result.parent = std::make_unique<FixedPasswordSecret>(kDefaultLocalArchivePassword);
     }
-    result.parent = std::move(parent).value();
     return base::Result<ResolvedBackupSecrets>::success(std::move(result));
+}
+
+void log_backup_start(WorkerTaskLog* log, const contracts::JobRequest& job,
+                      const WindowsPersonalBackupRequest& request) {
+    if (log == nullptr) {
+        return;
+    }
+    log->info("=== Backup Starting ===");
+    log->info(std::string("job_id=") + job.job_id);
+    log->info(std::string("trace_id=") + job.trace_id);
+    log->info(std::string("backup_type=") +
+              (request.backup_type == WindowsPersonalBackupType::kFull ? "full" : "incremental"));
+    for (const auto& source_ref : job.source_refs) {
+        log->info(std::string("Volume path: ") + source_ref);
+    }
+    log->info(std::string("Backup file: ") + job.target_ref);
+    if (!request.parent_source.empty()) {
+        log->info(std::string("Parent archive: ") +
+                  [&request] {
+                      const auto encoded = request.parent_source.generic_u8string();
+                      std::string text;
+                      text.reserve(encoded.size());
+                      for (const auto value : encoded) {
+                          text.push_back(static_cast<char>(value));
+                      }
+                      return text;
+                  }());
+    }
+    {
+        std::ostringstream geometry;
+        geometry << "Geometry: block=" << request.block_size_bytes
+                 << " chunk=" << request.chunk_size_bytes
+                 << " memory_budget=" << request.memory_budget_bytes;
+        log->info(geometry.str());
+    }
+}
+
+void log_backup_result(WorkerTaskLog* log, const contracts::TaskResult& result) {
+    if (log == nullptr) {
+        return;
+    }
+    if (result.outcome == contracts::TaskOutcome::kSucceeded ||
+        result.outcome == contracts::TaskOutcome::kSucceededWithWarning) {
+        log->info("=== Backup Complete ===");
+        std::ostringstream stats;
+        stats << "logical_bytes=" << result.logical_bytes << " stored_bytes=" << result.stored_bytes
+              << " chunks=" << result.chunk_count << " message=" << result.message_code;
+        log->info(stats.str());
+        for (const auto& warning : result.warning_codes) {
+            log->warn(std::string("warning=") + warning);
+        }
+        return;
+    }
+    if (result.outcome == contracts::TaskOutcome::kCancelled) {
+        log->warn(std::string("=== Backup Cancelled === message=") + result.message_code);
+        return;
+    }
+    log->error(std::string("=== Backup Failed === message=") + result.message_code);
+}
+
+base::Result<contracts::TaskResult> finish_logged(WorkerTaskLog* log,
+                                                  base::Result<contracts::TaskResult> result) {
+    if (result) {
+        log_backup_result(log, result.value());
+    }
+    return result;
 }
 
 base::Result<contracts::TaskResult>
@@ -283,34 +342,41 @@ run_accepted_task(const contracts::JobRequest& job, const WindowsPersonalBackupT
                   const WindowsPersonalBackupTaskContext& context,
                   const base::CancellationToken& cancellation,
                   IWindowsPersonalBackupTaskBackend& backend) {
+    auto task_log = WorkerTaskLog::open("backup");
+    WorkerTaskLogScope log_scope(task_log.get());
+    WorkerTaskLog* log = task_log.get();
     publish_preparing(job, context.progress);
     if (cancellation.stop_requested()) {
-        return validated_task_result(failed_result(job, base::ErrorCode::kCancelled));
+        return finish_logged(log, validated_task_result(failed_result(job, base::ErrorCode::kCancelled)));
     }
     const auto now_utc_ms = context.clock.now_utc_ms();
     if (job.deadline_utc_ms > 0 && now_utc_ms >= job.deadline_utc_ms) {
-        return validated_task_result(failed_result(job, base::ErrorCode::kCancelled));
+        return finish_logged(log, validated_task_result(failed_result(job, base::ErrorCode::kCancelled)));
     }
-    auto created_utc = format_utc(now_utc_ms);
+    auto created_utc = format_utc(job.backup->created_utc_ms);
     if (!created_utc) {
-        return validated_task_result(failed_result(job, created_utc.error().code));
+        return finish_logged(log, validated_task_result(failed_result(job, created_utc.error().code)));
     }
-    auto ids = make_requested_ids(job.backup->type, context.random, cancellation);
+    auto ids = requested_ids(*job.backup);
     if (!ids) {
-        return validated_task_result(failed_result(job, ids.error().code));
+        return finish_logged(log, validated_task_result(failed_result(job, ids.error().code)));
     }
     auto secrets = resolve_backup_secrets(job, context.credentials, cancellation);
     if (!secrets) {
-        return validated_task_result(
-            failed_result(job, credential_error_code(secrets.error().code)));
+        return finish_logged(
+            log, validated_task_result(failed_result(job, credential_error_code(secrets.error().code))));
     }
     const auto request = make_backup_request(job, options, secrets.value(), ids.value(),
                                              std::move(created_utc).value());
+    log_backup_start(log, job, request);
+    if (log != nullptr) {
+        log->info("Opening volume / creating VSS snapshot");
+    }
     auto backup = backend.run(request, cancellation, context.progress);
     if (!backup) {
-        return validated_task_result(failed_result(job, backup.error().code));
+        return finish_logged(log, validated_task_result(failed_result(job, backup.error().code)));
     }
-    return validated_task_result(completed_result(job, backup.value()));
+    return finish_logged(log, validated_task_result(completed_result(job, backup.value())));
 }
 
 } // namespace

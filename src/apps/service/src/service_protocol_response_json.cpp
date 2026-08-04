@@ -144,15 +144,25 @@ parse_repository_connection(const Json& payload) {
                 {"kind", static_cast<std::uint8_t>(item.kind)},
                 {"availability", static_cast<std::uint8_t>(item.availability)},
                 {"capacity_bytes", item.capacity_bytes},
+                {"free_bytes", item.free_bytes},
+                {"disk_capacity_bytes", item.disk_capacity_bytes},
                 {"is_system", item.is_system},
                 {"is_read_only", item.is_read_only},
-                {"is_selectable", item.is_selectable}};
+                {"is_selectable", item.is_selectable},
+                {"disk_number", item.disk_number},
+                {"mount_letter", item.mount_letter},
+                {"volume_label", item.volume_label},
+                {"health_status", item.health_status},
+                {"partition_style", item.partition_style},
+                {"media_type", item.media_type}};
 }
 
 [[nodiscard]] contracts::SourceInventoryItem parse_source(const Json& payload) {
-    constexpr std::array<std::string_view, 8> keys{"source_id",    "display_name",   "kind",
-                                                   "availability", "capacity_bytes", "is_system",
-                                                   "is_read_only", "is_selectable"};
+    constexpr std::array<std::string_view, 16> keys{
+        "source_id",     "display_name", "kind",           "availability", "capacity_bytes",
+        "free_bytes",    "disk_capacity_bytes", "is_system", "is_read_only", "is_selectable",
+        "disk_number",   "mount_letter", "volume_label",   "health_status", "partition_style",
+        "media_type"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("source inventory fields are invalid");
     }
@@ -163,9 +173,17 @@ parse_repository_connection(const Json& payload) {
     item.availability = static_cast<contracts::SourceAvailability>(
         unsigned_value<std::uint8_t>(payload, "availability"));
     item.capacity_bytes = unsigned_value<std::uint64_t>(payload, "capacity_bytes");
+    item.free_bytes = unsigned_value<std::uint64_t>(payload, "free_bytes");
+    item.disk_capacity_bytes = unsigned_value<std::uint64_t>(payload, "disk_capacity_bytes");
     item.is_system = payload.at("is_system").get<bool>();
     item.is_read_only = payload.at("is_read_only").get<bool>();
     item.is_selectable = payload.at("is_selectable").get<bool>();
+    item.disk_number = unsigned_value<std::uint32_t>(payload, "disk_number");
+    item.mount_letter = payload.at("mount_letter").get<std::string>();
+    item.volume_label = payload.at("volume_label").get<std::string>();
+    item.health_status = payload.at("health_status").get<std::string>();
+    item.partition_style = payload.at("partition_style").get<std::string>();
+    item.media_type = payload.at("media_type").get<std::string>();
     return item;
 }
 
@@ -210,13 +228,17 @@ parse_repository_connection(const Json& payload) {
         {"started_utc_ms", optional_uint64_json(summary.started_utc_ms)},
         {"completed_utc_ms", optional_uint64_json(summary.completed_utc_ms)},
         {"progress", summary.progress ? encode_task_progress(*summary.progress) : Json(nullptr)},
-        {"message_code", summary.message_code}};
+        {"message_code", summary.message_code},
+        {"source_ids", summary.source_ids},
+        {"repository_connection_id", optional_string_json(summary.repository_connection_id)}};
 }
 
 [[nodiscard]] contracts::JobSummary parse_job(const Json& payload) {
-    constexpr std::array<std::string_view, 9> keys{
-        "job_id",         "trace_id",         "operation", "state",       "created_utc_ms",
-        "started_utc_ms", "completed_utc_ms", "progress",  "message_code"};
+    constexpr std::array<std::string_view, 11> keys{
+        "job_id",         "trace_id",         "operation",
+        "state",          "created_utc_ms",   "started_utc_ms",
+        "completed_utc_ms", "progress",       "message_code",
+        "source_ids",     "repository_connection_id"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("job summary fields are invalid");
     }
@@ -234,6 +256,8 @@ parse_repository_connection(const Json& payload) {
         summary.progress = parse_task_progress(payload.at("progress"));
     }
     summary.message_code = payload.at("message_code").get<std::string>();
+    summary.source_ids = payload.at("source_ids").get<std::vector<std::string>>();
+    summary.repository_connection_id = optional_string(payload.at("repository_connection_id"));
     return summary;
 }
 
@@ -261,7 +285,7 @@ parse_repository_connection(const Json& payload) {
     return Json{{"schedule_id", summary.schedule_id},
                 {"display_name", summary.display_name},
                 {"enabled", summary.enabled},
-                {"source_id", summary.source_id},
+                {"source_ids", summary.source_ids},
                 {"repository_connection_id", summary.repository_connection_id},
                 {"backup_type", static_cast<std::uint8_t>(summary.backup_type)},
                 {"trigger", encode_schedule_trigger(summary.trigger)},
@@ -270,7 +294,7 @@ parse_repository_connection(const Json& payload) {
 
 [[nodiscard]] contracts::ScheduleSummary parse_schedule(const Json& payload) {
     constexpr std::array<std::string_view, 8> keys{
-        "schedule_id", "display_name", "enabled",        "source_id", "repository_connection_id",
+        "schedule_id", "display_name", "enabled",       "source_ids", "repository_connection_id",
         "backup_type", "trigger",      "next_run_utc_ms"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("schedule summary fields are invalid");
@@ -279,7 +303,7 @@ parse_repository_connection(const Json& payload) {
     summary.schedule_id = payload.at("schedule_id").get<std::string>();
     summary.display_name = payload.at("display_name").get<std::string>();
     summary.enabled = payload.at("enabled").get<bool>();
-    summary.source_id = payload.at("source_id").get<std::string>();
+    summary.source_ids = payload.at("source_ids").get<std::vector<std::string>>();
     summary.repository_connection_id = payload.at("repository_connection_id").get<std::string>();
     summary.backup_type =
         static_cast<contracts::BackupType>(unsigned_value<std::uint8_t>(payload, "backup_type"));

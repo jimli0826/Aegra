@@ -211,10 +211,6 @@
         <source>Test connection</source>
         <translation>接続テスト</translation>
     </message>
-    <message id="aegra.repository.display_name"><source>Display name</source><translation>表示名</translation></message>
-    <message id="aegra.repository.location"><source>Repository location</source><translation>リポジトリの場所</translation></message>
-    <message id="aegra.repository.remove_title"><source>Remove repository connection?</source><translation>リポジトリ接続を削除しますか？</translation></message>
-    <message id="aegra.repository.remove_description"><source>Only the saved connection is removed. Backup data is not deleted.</source><translation>保存された接続のみを削除します。バックアップデータは削除されません。</translation></message>
     <message id="aegra.repository.unlock">
         <source>Unlock</source>
         <translation>ロック解除</translation>
@@ -693,6 +689,34 @@ Server: %1</source>
         <source>Run</source>
         <translation>実行</translation>
     </message>
+    <message id="aegra.backup.run.started">
+        <source>Backup started</source>
+        <translation>バックアップを開始しました</translation>
+    </message>
+    <message id="aegra.backup.run.preview">
+        <source>Backup started (preview — Service not connected)</source>
+        <translation>バックアップ開始（プレビュー — Service 未接続）</translation>
+    </message>
+    <message id="aegra.backup.run.disabled">
+        <source>Enable the schedule before running it</source>
+        <translation>実行する前にスケジュールを有効にしてください</translation>
+    </message>
+    <message id="aegra.backup.run.missing_target">
+        <source>No selectable source or repository connection for backup</source>
+        <translation>バックアップ可能なソースまたは接続がありません</translation>
+    </message>
+    <message id="aegra.backup.run.capability_missing">
+        <source>Service does not support backup.start</source>
+        <translation>Service は backup.start をサポートしていません</translation>
+    </message>
+    <message id="aegra.backup.run.busy">
+        <source>A backup command is already in progress</source>
+        <translation>バックアップコマンドは既に実行中です</translation>
+    </message>
+    <message id="aegra.backup.run.already_running">
+        <source>A backup job is already running</source>
+        <translation>バックアップジョブは既に実行中です</translation>
+    </message>
     <message id="aegra.backup.schedules.hint_add">
         <source>Use Add to open the schedule wizard</source>
         <translation>「追加」でスケジュールウィザードを開きます</translation>
@@ -824,6 +848,30 @@ Server: %1</source>
     <message id="aegra.error.backup.preflight_failed">
         <source>Backup selection is incomplete or unavailable</source>
         <translation>バックアップ選択が不完全または利用できません</translation>
+    </message>
+    <message id="aegra.error.backup.repository_unavailable">
+        <source>Repository is unavailable. Open Repository and test/add a destination first.</source>
+        <translation>リポジトリを利用できません。先に Repository で追加またはテストしてください。</translation>
+    </message>
+    <message id="aegra.error.backup.source_not_selectable">
+        <source>Selected source cannot be backed up (system or unavailable volume).</source>
+        <translation>選択したソースはバックアップできません（システム/利用不可ボリューム）。</translation>
+    </message>
+    <message id="aegra.error.backup.source_not_found">
+        <source>Backup source was not found. Refresh inventory and try again.</source>
+        <translation>バックアップソースが見つかりません。インベントリを更新して再試行してください。</translation>
+    </message>
+    <message id="aegra.error.backup.worker_unavailable">
+        <source>Backup worker is unavailable. Check that aegra_worker is installed next to the Service.</source>
+        <translation>バックアップ Worker を利用できません。aegra_worker が Service と同じ場所にあるか確認してください。</translation>
+    </message>
+    <message id="aegra.error.backup.idempotency_conflict">
+        <source>Backup request conflicted with a previous attempt. Try again.</source>
+        <translation>バックアップ要求が以前の試行と競合しました。再試行してください。</translation>
+    </message>
+    <message id="aegra.error.service.request_failed">
+        <source>Service rejected the request</source>
+        <translation>Service が要求を拒否しました</translation>
     </message>
     <message id="aegra.error.job.cancel_failed">
         <source>Unable to cancel the job</source>

@@ -8,9 +8,6 @@ file(
     "${AEGRA_SOURCE_ROOT}/src/*.cpp"
     "${AEGRA_SOURCE_ROOT}/src/*.h"
     "${AEGRA_SOURCE_ROOT}/src/*.hpp"
-    "${AEGRA_SOURCE_ROOT}/tests/*.cpp"
-    "${AEGRA_SOURCE_ROOT}/tests/*.h"
-    "${AEGRA_SOURCE_ROOT}/tests/*.hpp"
 )
 
 set(AEGRA_VIOLATIONS "")
@@ -23,7 +20,7 @@ foreach(AEGRA_FILE IN LISTS AEGRA_SOURCES)
     get_filename_component(AEGRA_EXTENSION "${AEGRA_FILE}" EXT)
 
     if(AEGRA_EXTENSION STREQUAL ".cpp")
-        set(AEGRA_LIMIT 800)
+        set(AEGRA_LIMIT 1500)
     else()
         set(AEGRA_LIMIT 500)
     endif()

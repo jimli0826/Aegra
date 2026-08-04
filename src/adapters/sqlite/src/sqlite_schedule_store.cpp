@@ -22,12 +22,12 @@ base::Result<void> ScheduleStore::upsert(const ports::ScheduleRecord& record,
     }
     auto statement = SqliteStatement::prepare(
         state_.db,
-        "INSERT INTO schedules(schedule_id, display_name, enabled, source_id, "
+        "INSERT INTO schedules(schedule_id, display_name, enabled, source_ids, "
         "repository_connection_id, backup_type, trigger_kind, local_minute_of_day, weekday_mask, "
         "timezone_id, next_run_utc_ms, created_utc_ms, updated_utc_ms) "
         "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(schedule_id) DO UPDATE SET "
-        "display_name=excluded.display_name, enabled=excluded.enabled, source_id=excluded.source_id, "
+        "display_name=excluded.display_name, enabled=excluded.enabled, source_ids=excluded.source_ids, "
         "repository_connection_id=excluded.repository_connection_id, "
         "backup_type=excluded.backup_type, trigger_kind=excluded.trigger_kind, "
         "local_minute_of_day=excluded.local_minute_of_day, weekday_mask=excluded.weekday_mask, "
@@ -46,7 +46,7 @@ base::Result<void> ScheduleStore::upsert(const ports::ScheduleRecord& record,
     if (auto bound = stmt.bind_int64(3, record.enabled ? 1 : 0); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_text(4, record.source_id); !bound) {
+    if (auto bound = stmt.bind_text(4, encode_string_list(record.source_ids)); !bound) {
         return bound;
     }
     if (auto bound = stmt.bind_text(5, record.repository_connection_id); !bound) {
@@ -133,7 +133,7 @@ ScheduleStore::list(const contracts::ScheduleListRequest& request,
         return base::Result<contracts::SchedulePage>::failure(token.error());
     }
     std::string sql =
-        "SELECT schedule_id, display_name, enabled, source_id, repository_connection_id, "
+        "SELECT schedule_id, display_name, enabled, source_ids, repository_connection_id, "
         "backup_type, trigger_kind, local_minute_of_day, weekday_mask, timezone_id, "
         "next_run_utc_ms, created_utc_ms, updated_utc_ms FROM schedules WHERE 1=1";
     if (request.enabled) {

@@ -1,6 +1,7 @@
 #include "aegra/apps/worker/personal_archive_restore_task.h"
 
 #include "personal_archive_restore_task_backend.h"
+#include "worker_task_log.h"
 
 #include "aegra/base/error.h"
 #include "aegra/contracts/progress.h"
@@ -151,9 +152,21 @@ run_accepted_task(const contracts::JobRequest& job,
                   const WindowsPersonalBackupTaskContext& context,
                   const base::CancellationToken& cancellation,
                   IPersonalArchiveRestoreTaskBackend& backend) {
+    auto task_log = WorkerTaskLog::open("restore");
+    WorkerTaskLogScope log_scope(task_log.get());
+    if (task_log) {
+        task_log->info("=== Restore Starting ===");
+        task_log->info(std::string("job_id=") + job.job_id);
+        task_log->info(std::string("trace_id=") + job.trace_id);
+        task_log->info(std::string("layers=") + std::to_string(job.source_refs.size()));
+        task_log->info(std::string("target=") + job.target_ref);
+    }
     publish_preparing(job, context.progress);
     if (cancellation.stop_requested() ||
         (job.deadline_utc_ms > 0 && context.clock.now_utc_ms() >= job.deadline_utc_ms)) {
+        if (task_log) {
+            task_log->warn("=== Restore Cancelled ===");
+        }
         return validated_result(failed_result(job, base::ErrorCode::kCancelled));
     }
     auto secrets = resolve_secrets(job, context.credentials, cancellation);
@@ -161,14 +174,31 @@ run_accepted_task(const contracts::JobRequest& job,
         const auto code = secrets.error().code == base::ErrorCode::kCancelled
                               ? base::ErrorCode::kCancelled
                               : base::ErrorCode::kUnauthorized;
+        if (task_log) {
+            task_log->error(std::string("=== Restore Failed === message=") +
+                            (code == base::ErrorCode::kCancelled ? "restore.cancelled"
+                                                                 : "restore.credential_unavailable"));
+        }
         return validated_result(failed_result(job, code));
     }
     auto request = make_backend_request(job, options, context, secrets.value());
     auto restored = backend.run(request, cancellation);
     if (!restored) {
-        return validated_result(failed_result(job, restored.error().code));
+        auto result = validated_result(failed_result(job, restored.error().code));
+        if (task_log && result) {
+            task_log->error(std::string("=== Restore Failed === message=") +
+                            result.value().message_code);
+        }
+        return result;
     }
-    return validated_result(completed_result(job, restored.value()));
+    auto result = validated_result(completed_result(job, restored.value()));
+    if (task_log && result) {
+        task_log->info(std::string("=== Restore Complete === message=") +
+                       result.value().message_code);
+        task_log->info(std::string("logical_bytes=") +
+                       std::to_string(result.value().logical_bytes));
+    }
+    return result;
 }
 
 } // namespace

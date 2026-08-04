@@ -38,6 +38,9 @@ struct SessionDependencies final {
     ports::IClock* clock{nullptr};
     SupervisorProgressCallback on_progress;
     SupervisorCompletionCallback on_completion;
+    // Shared with Impl for list_jobs progress merge.
+    std::mutex* progress_mutex{nullptr};
+    std::unordered_map<std::string, contracts::TaskProgress>* last_progress{nullptr};
 };
 
 struct WorkerSessionState final {
@@ -137,7 +140,8 @@ persist_transition(ports::IControlPlaneDatabase& database, ports::IClock& clock,
 [[nodiscard]] contracts::ServiceJobState
 terminal_state_for(const contracts::WorkerResponse& response) noexcept {
     if (response.task_result &&
-        response.task_result->outcome == contracts::TaskOutcome::kSucceeded) {
+        (response.task_result->outcome == contracts::TaskOutcome::kSucceeded ||
+         response.task_result->outcome == contracts::TaskOutcome::kSucceededWithWarning)) {
         return contracts::ServiceJobState::kSucceeded;
     }
     if (response.task_result &&
@@ -196,14 +200,20 @@ persist_missing_result(const SessionDependencies& dependencies,
                               message);
 }
 
-void publish_completion(const std::shared_ptr<WorkerSessionState>& session,
+void publish_completion(const WorkerJobRequest& request,
+                        const std::shared_ptr<WorkerSessionState>& session,
                         const std::shared_ptr<SessionDependencies>& dependencies,
-                        const base::Result<contracts::ServiceJobState>& persisted) noexcept {
+                        const base::Result<contracts::ServiceJobState>& persisted,
+                        const contracts::WorkerResponse* response) noexcept {
     session->completed = true;
+    if (dependencies->progress_mutex != nullptr && dependencies->last_progress != nullptr) {
+        std::lock_guard lock(*dependencies->progress_mutex);
+        dependencies->last_progress->erase(session->job_id);
+    }
     if (!persisted || !dependencies->on_completion)
         return;
     try {
-        dependencies->on_completion(session->job_id, persisted.value());
+        dependencies->on_completion(request, persisted.value(), response);
     } catch (...) {
         // Observer failures cannot roll back an already persisted terminal state.
     }
@@ -256,37 +266,43 @@ receive_worker_result(const std::shared_ptr<WorkerSessionState>& session,
         if (event.kind == contracts::WorkerEventKind::kResult && event.response) {
             return *event.response;
         }
-        if (event.kind == contracts::WorkerEventKind::kProgress && event.progress &&
-            dependencies->on_progress) {
-            try {
-                dependencies->on_progress(session->job_id, *event.progress);
-            } catch (...) {
-                // Progress observers are best-effort and never own Worker session lifetime.
+        if (event.kind == contracts::WorkerEventKind::kProgress && event.progress) {
+            if (dependencies->progress_mutex != nullptr &&
+                dependencies->last_progress != nullptr) {
+                std::lock_guard lock(*dependencies->progress_mutex);
+                (*dependencies->last_progress)[session->job_id] = *event.progress;
+            }
+            if (dependencies->on_progress) {
+                try {
+                    dependencies->on_progress(session->job_id, *event.progress);
+                } catch (...) {
+                    // Progress observers are best-effort and never own Worker session lifetime.
+                }
             }
         }
     }
 }
 
 void run_session(const std::shared_ptr<WorkerSessionState>& session,
-                 const std::shared_ptr<SessionDependencies>& dependencies,
-                 std::unique_ptr<WindowsNamedPipeListener> listener,
-                 const contracts::JobRequest& job_request) noexcept {
+                  const std::shared_ptr<SessionDependencies>& dependencies,
+                  std::unique_ptr<WindowsNamedPipeListener> listener,
+                  const WorkerJobRequest& request) noexcept {
     try {
         auto channel = listener->accept(session->receive_cancel.get_token());
         if (!channel) {
             terminate_and_wait(session, *dependencies);
-            publish_completion(session, dependencies,
-                               persist_missing_result(*dependencies, session));
+            publish_completion(request, session, dependencies,
+                               persist_missing_result(*dependencies, session), nullptr);
             return;
         }
-        auto encoded = encode_supervisor_job_request(job_request);
+        auto encoded = encode_supervisor_job_request(request.worker_request);
         if (!encoded ||
             !channel.value()->send(encoded.value(), session->receive_cancel.get_token())) {
             request_session_stop(session, SessionStopReason::kTransportFailure);
             send_cancel(session, *channel.value());
             (void)dependencies->launcher->wait(session->worker_pid, {});
-            publish_completion(session, dependencies,
-                               persist_missing_result(*dependencies, session));
+            publish_completion(request, session, dependencies,
+                               persist_missing_result(*dependencies, session), nullptr);
             return;
         }
         auto response = receive_worker_result(session, dependencies, *channel.value());
@@ -295,11 +311,13 @@ void run_session(const std::shared_ptr<WorkerSessionState>& session,
         (void)dependencies->launcher->wait(session->worker_pid, {});
         auto persisted = response ? persist_worker_result(*dependencies, session->job_id, *response)
                                   : persist_missing_result(*dependencies, session);
-        publish_completion(session, dependencies, persisted);
+        publish_completion(request, session, dependencies, persisted,
+                           response ? &*response : nullptr);
     } catch (...) {
         request_session_stop(session, SessionStopReason::kTransportFailure);
         terminate_and_wait(session, *dependencies);
-        publish_completion(session, dependencies, persist_missing_result(*dependencies, session));
+        publish_completion(request, session, dependencies,
+                           persist_missing_result(*dependencies, session), nullptr);
     }
 }
 
@@ -314,6 +332,8 @@ struct WorkerSupervisor::Impl final {
     std::shared_ptr<SessionDependencies> dependencies;
     std::mutex lifecycle_mutex;
     mutable std::mutex sessions_mutex;
+    mutable std::mutex progress_mutex;
+    std::unordered_map<std::string, contracts::TaskProgress> last_progress;
     std::unordered_map<std::string, std::unique_ptr<OwnedSession>> sessions;
     std::atomic<bool> shutting_down{false};
     std::jthread monitor_thread;
@@ -330,6 +350,8 @@ struct WorkerSupervisor::Impl final {
         dependencies->clock = &clock;
         dependencies->on_progress = std::move(progress);
         dependencies->on_completion = std::move(completion);
+        dependencies->progress_mutex = &progress_mutex;
+        dependencies->last_progress = &last_progress;
         monitor_thread = std::jthread([this](const std::stop_token stop) { monitor(stop); });
     }
 
@@ -345,8 +367,8 @@ struct WorkerSupervisor::Impl final {
                                                    base::CancellationToken cancellation);
     [[nodiscard]] base::Result<void>
     start_session_thread(const std::shared_ptr<WorkerSessionState>& state,
-                         std::unique_ptr<WindowsNamedPipeListener> listener,
-                         contracts::JobRequest worker_request) noexcept;
+                          std::unique_ptr<WindowsNamedPipeListener> listener,
+                          WorkerJobRequest request) noexcept;
 };
 
 void WorkerSupervisor::Impl::reap_completed() {
@@ -427,7 +449,7 @@ base::Result<void> WorkerSupervisor::Impl::launch_worker(
     record.operation = worker_request.operation;
     record.state = contracts::ServiceJobState::kQueued;
     record.created_utc_ms = utc_now_ms(clock);
-    record.source_id = request.source_id;
+    record.source_ids = request.source_ids;
     record.repository_connection_id = request.repository_connection_id;
     record.backup_type =
         worker_request.backup ? std::optional(worker_request.backup->type) : std::nullopt;
@@ -470,15 +492,15 @@ base::Result<void> WorkerSupervisor::Impl::launch_worker(
 
 base::Result<void>
 WorkerSupervisor::Impl::start_session_thread(const std::shared_ptr<WorkerSessionState>& state,
-                                             std::unique_ptr<WindowsNamedPipeListener> listener,
-                                             contracts::JobRequest worker_request) noexcept {
+                                              std::unique_ptr<WindowsNamedPipeListener> listener,
+                                              WorkerJobRequest request) noexcept {
     try {
         std::lock_guard lock(sessions_mutex);
         auto& owner = sessions.at(state->job_id);
         owner->thread =
             std::jthread([state, dependencies = dependencies, listener = std::move(listener),
-                          worker_request = std::move(worker_request)](std::stop_token) mutable {
-                run_session(state, dependencies, std::move(listener), worker_request);
+                          request = std::move(request)](std::stop_token) mutable {
+                run_session(state, dependencies, std::move(listener), request);
             });
         return base::Result<void>::success();
     } catch (...) {
@@ -505,7 +527,7 @@ base::Result<void> WorkerSupervisor::submit(const WorkerJobRequest& request,
                                             const base::CancellationToken cancel) {
     std::unique_lock lifecycle_lock(impl_->lifecycle_mutex);
     if (impl_->shutting_down || impl_->config.worker_executable_path.empty() ||
-        impl_->config.max_concurrent_workers == 0 || request.source_id.empty() ||
+        impl_->config.max_concurrent_workers == 0 || request.source_ids.empty() ||
         request.repository_connection_id.empty() || request.idempotency_key.empty()) {
         return base::Result<void>::failure(
             {base::ErrorCode::kInvalidArgument, "worker submission is invalid"});
@@ -542,8 +564,10 @@ base::Result<void> WorkerSupervisor::submit(const WorkerJobRequest& request,
         impl_->erase_session(state->job_id);
         return launched;
     }
-    auto started =
-        impl_->start_session_thread(state, std::move(listener).value(), std::move(worker_request));
+    auto session_request = request;
+    session_request.worker_request = std::move(worker_request);
+    auto started = impl_->start_session_thread(state, std::move(listener).value(),
+                                               std::move(session_request));
     if (!started)
         impl_->erase_session(state->job_id);
     return started;
@@ -612,6 +636,16 @@ std::uint32_t WorkerSupervisor::active_count() const noexcept {
             ++count;
     }
     return count;
+}
+
+std::optional<contracts::TaskProgress>
+WorkerSupervisor::last_progress(const std::string_view job_id) const {
+    std::lock_guard lock(impl_->progress_mutex);
+    const auto found = impl_->last_progress.find(std::string(job_id));
+    if (found == impl_->last_progress.end()) {
+        return std::nullopt;
+    }
+    return found->second;
 }
 
 } // namespace aegra::apps::service

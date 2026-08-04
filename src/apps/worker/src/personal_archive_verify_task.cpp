@@ -1,6 +1,7 @@
 #include "aegra/apps/worker/personal_archive_verify_task.h"
 
 #include "personal_archive_verify_task_backend.h"
+#include "worker_task_log.h"
 
 #include "aegra/base/error.h"
 #include "aegra/contracts/progress.h"
@@ -104,9 +105,20 @@ run_accepted_task(const contracts::JobRequest& job,
                   const WindowsPersonalBackupTaskContext& context,
                   const base::CancellationToken& cancellation,
                   IPersonalArchiveVerifyTaskBackend& backend) {
+    auto task_log = WorkerTaskLog::open("verify");
+    WorkerTaskLogScope log_scope(task_log.get());
+    if (task_log) {
+        task_log->info("=== Verify Starting ===");
+        task_log->info(std::string("job_id=") + job.job_id);
+        task_log->info(std::string("trace_id=") + job.trace_id);
+        task_log->info(std::string("source=") + job.source_refs.front());
+    }
     publish_preparing(job, context.progress);
     if (cancellation.stop_requested() ||
         (job.deadline_utc_ms > 0 && context.clock.now_utc_ms() >= job.deadline_utc_ms)) {
+        if (task_log) {
+            task_log->warn("=== Verify Cancelled ===");
+        }
         return validated_result(failed_result(job, base::ErrorCode::kCancelled));
     }
     auto secret = context.credentials.resolve(job.credential_refs.front(), cancellation);
@@ -114,14 +126,29 @@ run_accepted_task(const contracts::JobRequest& job,
         const auto code = !secret && secret.error().code == base::ErrorCode::kCancelled
                               ? base::ErrorCode::kCancelled
                               : base::ErrorCode::kUnauthorized;
+        if (task_log) {
+            task_log->error("=== Verify Failed === credential unavailable");
+        }
         return validated_result(failed_result(job, code));
     }
     auto result = backend.run(path_from_utf8(job.source_refs.front()), secret.value()->view(),
                               {job.job_id, job.trace_id}, options, cancellation, context.progress);
     if (!result) {
-        return validated_result(failed_result(job, result.error().code));
+        auto failed = validated_result(failed_result(job, result.error().code));
+        if (task_log && failed) {
+            task_log->error(std::string("=== Verify Failed === message=") +
+                            failed.value().message_code);
+        }
+        return failed;
     }
-    return validated_result(completed_result(job, result.value()));
+    auto completed = validated_result(completed_result(job, result.value()));
+    if (task_log && completed) {
+        task_log->info(std::string("=== Verify Complete === message=") +
+                       completed.value().message_code);
+        task_log->info(std::string("logical_bytes=") +
+                       std::to_string(completed.value().logical_bytes));
+    }
+    return completed;
 }
 
 } // namespace

@@ -211,10 +211,6 @@
         <source>Test connection</source>
         <translation>连接测试</translation>
     </message>
-    <message id="aegra.repository.display_name"><source>Display name</source><translation>显示名称</translation></message>
-    <message id="aegra.repository.location"><source>Repository location</source><translation>存储库位置</translation></message>
-    <message id="aegra.repository.remove_title"><source>Remove repository connection?</source><translation>移除存储库连接？</translation></message>
-    <message id="aegra.repository.remove_description"><source>Only the saved connection is removed. Backup data is not deleted.</source><translation>仅移除保存的连接，不会删除备份数据。</translation></message>
     <message id="aegra.repository.unlock">
         <source>Unlock</source>
         <translation>解锁</translation>
@@ -693,6 +689,34 @@ Server: %1</source>
         <source>Run</source>
         <translation>运行</translation>
     </message>
+    <message id="aegra.backup.run.started">
+        <source>Backup started</source>
+        <translation>备份已开始</translation>
+    </message>
+    <message id="aegra.backup.run.preview">
+        <source>Backup started (preview — Service not connected)</source>
+        <translation>备份已开始（预览 — 未连接 Service）</translation>
+    </message>
+    <message id="aegra.backup.run.disabled">
+        <source>Enable the schedule before running it</source>
+        <translation>请先启用计划再运行</translation>
+    </message>
+    <message id="aegra.backup.run.missing_target">
+        <source>No selectable source or repository connection for backup</source>
+        <translation>没有可用于备份的源或 Repository 连接</translation>
+    </message>
+    <message id="aegra.backup.run.capability_missing">
+        <source>Service does not support backup.start</source>
+        <translation>Service 不支持 backup.start</translation>
+    </message>
+    <message id="aegra.backup.run.busy">
+        <source>A backup command is already in progress</source>
+        <translation>已有备份命令正在进行</translation>
+    </message>
+    <message id="aegra.backup.run.already_running">
+        <source>A backup job is already running</source>
+        <translation>已有备份任务正在运行</translation>
+    </message>
     <message id="aegra.backup.schedules.hint_add">
         <source>Use Add to open the schedule wizard</source>
         <translation>点击“添加”打开计划向导</translation>
@@ -824,6 +848,30 @@ Server: %1</source>
     <message id="aegra.error.backup.preflight_failed">
         <source>Backup selection is incomplete or unavailable</source>
         <translation>备份选择不完整或不可用</translation>
+    </message>
+    <message id="aegra.error.backup.repository_unavailable">
+        <source>Repository is unavailable. Open Repository and test/add a destination first.</source>
+        <translation>仓库不可用。请先在 Repository 中添加或测试目标。</translation>
+    </message>
+    <message id="aegra.error.backup.source_not_selectable">
+        <source>Selected source cannot be backed up (system or unavailable volume).</source>
+        <translation>所选源不可备份（系统卷或不可用卷）。</translation>
+    </message>
+    <message id="aegra.error.backup.source_not_found">
+        <source>Backup source was not found. Refresh inventory and try again.</source>
+        <translation>未找到备份源。请刷新清单后重试。</translation>
+    </message>
+    <message id="aegra.error.backup.worker_unavailable">
+        <source>Backup worker is unavailable. Check that aegra_worker is installed next to the Service.</source>
+        <translation>备份 Worker 不可用。请确认 aegra_worker 与 Service 同目录。</translation>
+    </message>
+    <message id="aegra.error.backup.idempotency_conflict">
+        <source>Backup request conflicted with a previous attempt. Try again.</source>
+        <translation>备份请求与先前尝试冲突，请重试。</translation>
+    </message>
+    <message id="aegra.error.service.request_failed">
+        <source>Service rejected the request</source>
+        <translation>Service 拒绝了该请求</translation>
     </message>
     <message id="aegra.error.job.cancel_failed">
         <source>Unable to cancel the job</source>

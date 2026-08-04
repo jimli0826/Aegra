@@ -48,10 +48,10 @@ Validate Verify Job
 - 取消在打开 Reader 后逐 Chunk 检查，并贯穿读取、认证和解压；
 - Verify 只读打开 Archive，不创建 partial、Sidecar 或临时恢复目标。
 
-## 测试与完成标准
+## 验证与完成标准
 
-- Pipeline 覆盖成功、空 Archive、descriptor 越界/重叠、读取后 descriptor 变化、payload 大小不符和取消；
-- Worker Task 覆盖请求拒绝、Credential 生命周期、成功指标、错误脱敏和取消；
-- Personal Archive 集成测试覆盖正确口令、错误口令、payload 篡改、截断和分卷缺失；
+- 审查成功、空 Archive、descriptor 越界/重叠、读取后变化、payload 大小不符和取消路径；
+- 审查请求拒绝、Credential 生命周期、成功指标、错误脱敏和取消边界；
+- 使用隔离的非生产 Archive 人工验证正确/错误口令、payload 篡改、截断和分卷缺失；
 - stdin 与 Named Pipe Worker 对 Verify 使用与 Backup 相同的 Host、deadline、Progress 和退出码边界；
 - 受影响 Target、静态检查、源码规模和文档检查通过。

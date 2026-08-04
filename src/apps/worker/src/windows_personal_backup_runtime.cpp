@@ -28,7 +28,7 @@ std::wstring normalized_path(const std::filesystem::path& path) {
 
 base::Result<windows_disk::WindowsVolumeInfo>
 resolve_volume(const std::filesystem::path& volume_guid_path) {
-    if (!windows_vss::WindowsVssSnapshotSession::is_canonical_volume_guid_path(volume_guid_path)) {
+    if (!windows_disk::WindowsBlockSource::is_canonical_volume_guid_path(volume_guid_path)) {
         return base::Result<windows_disk::WindowsVolumeInfo>::failure(base::Error{
             base::ErrorCode::kInvalidArgument,
             "backup source is not a canonical Windows Volume GUID path",
@@ -55,10 +55,11 @@ resolve_volume(const std::filesystem::path& volume_guid_path) {
     return base::Result<windows_disk::WindowsVolumeInfo>::success(*selected);
 }
 
-PreparedVolumeMetadata make_metadata(const windows_disk::WindowsVolumeInfo& volume) {
+PreparedVolumeMetadata make_metadata(const windows_disk::WindowsVolumeInfo& volume,
+                                     const bool vss_used) {
     return PreparedVolumeMetadata{
         volume.volume_guid_path, volume.mount_points,       volume.filesystem, volume.label,
-        volume.total_size_bytes, volume.cluster_size_bytes,
+        volume.total_size_bytes, volume.cluster_size_bytes, vss_used,
     };
 }
 
@@ -73,54 +74,102 @@ class WindowsSnapshotLease final : public ISnapshotLease {
     std::unique_ptr<windows_vss::WindowsVssSnapshotSession> session_;
 };
 
-base::Result<PreparedVolumeSource> snapshot_volume(const windows_disk::WindowsVolumeInfo& volume,
-                                                   const base::CancellationToken& cancellation) {
-    const windows_vss::WindowsVssSnapshotRequest snapshot_request{
-        volume.volume_guid_path,
-        volume.total_size_bytes,
-    };
-    auto session = windows_vss::WindowsVssSnapshotSession::create(
-        std::span<const windows_vss::WindowsVssSnapshotRequest>(&snapshot_request, 1),
-        cancellation);
-    if (!session) {
-        return base::Result<PreparedVolumeSource>::failure(session.error());
+std::vector<std::size_t>
+vss_volume_indices(const std::vector<windows_disk::WindowsVolumeInfo>& volumes) {
+    std::vector<std::size_t> result;
+    for (std::size_t index = 0; index < volumes.size(); ++index) {
+        if (windows_disk::supports_vss_snapshot(volumes[index])) {
+            result.push_back(index);
+        }
     }
-    const auto snapshots = session.value()->snapshots();
-    if (snapshots.size() != 1) {
-        return base::Result<PreparedVolumeSource>::failure(
+    return result;
+}
+
+base::Result<std::unique_ptr<windows_vss::WindowsVssSnapshotSession>>
+create_vss_session(const std::vector<windows_disk::WindowsVolumeInfo>& volumes,
+                   const std::span<const std::size_t> indices,
+                   const base::CancellationToken& cancellation) {
+    if (indices.empty()) {
+        return base::Result<std::unique_ptr<windows_vss::WindowsVssSnapshotSession>>::success({});
+    }
+    std::vector<windows_vss::WindowsVssSnapshotRequest> requests;
+    requests.reserve(indices.size());
+    for (const auto index : indices) {
+        const auto& volume = volumes[index];
+        requests.push_back({volume.volume_guid_path, volume.total_size_bytes});
+    }
+    return windows_vss::WindowsVssSnapshotSession::create(requests, cancellation);
+}
+
+base::Result<std::unique_ptr<ports::IBlockSource>>
+open_volume_source(const windows_disk::WindowsVolumeInfo& volume,
+                   const windows_vss::WindowsVssSnapshot* snapshot) {
+    const bool use_vss = snapshot != nullptr;
+    const auto path = use_vss ? snapshot->snapshot_device_path : volume.volume_guid_path;
+    const auto kind = use_vss ? windows_disk::WindowsBlockSourceKind::kVssSnapshot
+                              : windows_disk::WindowsBlockSourceKind::kRawVolume;
+    const auto size = use_vss ? snapshot->logical_size_bytes : volume.total_size_bytes;
+    auto source = windows_disk::WindowsBlockSource::open({path, kind, size});
+    if (!source) {
+        return base::Result<std::unique_ptr<ports::IBlockSource>>::failure(source.error());
+    }
+    std::unique_ptr<ports::IBlockSource> result = std::move(source).value();
+    return base::Result<std::unique_ptr<ports::IBlockSource>>::success(std::move(result));
+}
+
+base::Result<PreparedVolumeSources>
+prepare_volume_sources(const std::vector<windows_disk::WindowsVolumeInfo>& volumes,
+                       const base::CancellationToken& cancellation) {
+    const auto vss_indices = vss_volume_indices(volumes);
+    auto session = create_vss_session(volumes, vss_indices, cancellation);
+    if (!session) {
+        return base::Result<PreparedVolumeSources>::failure(session.error());
+    }
+    const auto snapshots = session.value() ? session.value()->snapshots()
+                                           : std::span<const windows_vss::WindowsVssSnapshot>{};
+    if (snapshots.size() != vss_indices.size()) {
+        return base::Result<PreparedVolumeSources>::failure(
             base::Error{base::ErrorCode::kInternal, "VSS returned an invalid source count"});
     }
-
-    auto source =
-        windows_disk::WindowsBlockSource::open(windows_disk::WindowsBlockSourceOpenRequest{
-            snapshots.front().snapshot_device_path,
-            windows_disk::WindowsBlockSourceKind::kVssSnapshot,
-            snapshots.front().logical_size_bytes,
-        });
-    if (!source) {
-        return base::Result<PreparedVolumeSource>::failure(source.error());
+    PreparedVolumeSources result;
+    result.metadata.reserve(volumes.size());
+    result.sources.resize(volumes.size());
+    std::size_t snapshot_index = 0;
+    for (std::size_t index = 0; index < volumes.size(); ++index) {
+        const bool use_vss = windows_disk::supports_vss_snapshot(volumes[index]);
+        const auto* snapshot = use_vss ? &snapshots[snapshot_index++] : nullptr;
+        auto source = open_volume_source(volumes[index], snapshot);
+        if (!source) {
+            return base::Result<PreparedVolumeSources>::failure(source.error());
+        }
+        result.metadata.push_back(make_metadata(volumes[index], use_vss));
+        result.sources[index] = std::move(source).value();
     }
-    std::unique_ptr<ISnapshotLease> lease =
-        std::make_unique<WindowsSnapshotLease>(std::move(session).value());
-    std::unique_ptr<ports::IBlockSource> block_source = std::move(source).value();
-    return base::Result<PreparedVolumeSource>::success(
-        PreparedVolumeSource{make_metadata(volume), std::move(lease), std::move(block_source)});
+    if (session.value()) {
+        result.snapshot = std::make_unique<WindowsSnapshotLease>(std::move(session).value());
+    }
+    return base::Result<PreparedVolumeSources>::success(std::move(result));
 }
 
 class WindowsPersonalBackupRuntime final : public IWindowsPersonalBackupRuntime {
   public:
-    [[nodiscard]] base::Result<PreparedVolumeSource>
-    prepare_source(const std::filesystem::path& volume_guid_path,
-                   const base::CancellationToken& cancellation) override {
-        auto volume = resolve_volume(volume_guid_path);
-        if (!volume) {
-            return base::Result<PreparedVolumeSource>::failure(volume.error());
+    [[nodiscard]] base::Result<PreparedVolumeSources>
+    prepare_sources(const std::vector<std::filesystem::path>& volume_guid_paths,
+                    const base::CancellationToken& cancellation) override {
+        std::vector<windows_disk::WindowsVolumeInfo> volumes;
+        volumes.reserve(volume_guid_paths.size());
+        for (const auto& path : volume_guid_paths) {
+            auto volume = resolve_volume(path);
+            if (!volume) {
+                return base::Result<PreparedVolumeSources>::failure(volume.error());
+            }
+            volumes.push_back(std::move(volume).value());
         }
-        return snapshot_volume(volume.value(), cancellation);
+        return prepare_volume_sources(volumes, cancellation);
     }
 
     [[nodiscard]] base::Result<std::unique_ptr<ports::IBackupSession>>
-    create_archive(const WindowsPersonalVolumeBackupRequest& request,
+    create_archive(const WindowsPersonalBackupRequest& request,
                    const format::Manifest& manifest) override {
         personal_archive::ArchiveCreateRequest archive_request{
             request.destination,
@@ -131,7 +180,6 @@ class WindowsPersonalBackupRuntime final : public IWindowsPersonalBackupRuntime 
         archive_request.backup_set_uuid = request.backup_set_uuid;
         archive_request.block_size = request.block_size_bytes;
         archive_request.chunk_size = request.chunk_size_bytes;
-        archive_request.source_index = 0;
         archive_request.split_size_bytes = request.split_size_bytes;
         archive_request.kdf_parameters = {request.kdf_opslimit, request.kdf_memlimit_bytes};
         archive_request.parent_source = request.parent_source;

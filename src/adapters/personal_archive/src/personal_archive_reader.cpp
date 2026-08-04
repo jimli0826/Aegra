@@ -2,6 +2,7 @@
 
 #include "personal_archive_payload.h"
 #include "personal_archive_preamble.h"
+#include "personal_archive_shape_validation.h"
 
 #include "aegra/adapters/compression_zstd/zstd_codec.h"
 #include "aegra/adapters/crypto_sodium/payload_crypto.h"
@@ -293,11 +294,18 @@ validate_chunk_sequence(const ChunkRecord& record, const ScanResult& scan, const
     if (scan.records.empty()) {
         return base::Result<void>::success();
     }
-    if (record.source_index != scan.records.front().source_index) {
-        return base::Result<void>::failure(
-            error(base::ErrorCode::kCorruptData, "archive chunk source changes unexpectedly"));
+    const auto& previous_record = scan.records.back();
+    if (record.source_index != previous_record.source_index) {
+        const bool source_seen = std::ranges::any_of(scan.records, [&record](const auto& prior) {
+            return prior.source_index == record.source_index;
+        });
+        if (source_seen || record.descriptor.logical_offset != 0) {
+            return base::Result<void>::failure(
+                error(base::ErrorCode::kCorruptData, "archive chunk source order is invalid"));
+        }
+        return base::Result<void>::success();
     }
-    const auto& previous = scan.records.back().descriptor;
+    const auto& previous = previous_record.descriptor;
     const auto previous_end = previous.logical_offset + previous.logical_size;
     if (record.descriptor.logical_offset < previous_end ||
         (!sparse && record.descriptor.logical_offset != previous_end)) {
@@ -326,12 +334,15 @@ validate_chunk_sequence(const ChunkRecord& record, const ScanResult& scan, const
         return base::Result<void>::failure(
             error(base::ErrorCode::kCorruptData, "archive chunk count does not match footer"));
     }
-    if (preamble.manifest.volumes.size() != 1) {
-        return base::Result<void>::failure(
-            error(base::ErrorCode::kCorruptData, "reader currently requires one volume"));
+    std::uint64_t expected_blocks = 0;
+    for (const auto& volume : preamble.manifest.volumes) {
+        const auto volume_blocks = 1 + (volume.total_size - 1) / preamble.header.block_size;
+        if (volume_blocks > (std::numeric_limits<std::uint64_t>::max)() - expected_blocks) {
+            return base::Result<void>::failure(
+                error(base::ErrorCode::kCorruptData, "archive block count overflows"));
+        }
+        expected_blocks += volume_blocks;
     }
-    const auto logical_size = preamble.manifest.volumes.front().total_size;
-    const auto expected_blocks = 1 + (logical_size - 1) / preamble.header.block_size;
     if (expected_blocks != footer.total_block_count ||
         statistics.payload_size != footer.total_payload_size) {
         return base::Result<void>::failure(
@@ -413,6 +424,7 @@ read_chunk_record(std::ifstream& input, const std::uint64_t offset, const Parsed
         return base::Result<ChunkRecord>::failure(
             error(base::ErrorCode::kCorruptData, "archive chunk logical size exceeds limit"));
     }
+    descriptor.value().source_index = chunk.value().source_index;
     return base::Result<ChunkRecord>::success(
         {chunk.value(), descriptor.value(), payload_offset, chunk.value().payload_size,
          chunk.value().source_index, std::move(entries).value(), part.path});
@@ -650,36 +662,6 @@ read_record_payload(const ChunkRecord& record, const std::uint32_t block_size,
     return base::Result<std::vector<std::byte>>::success(std::move(result));
 }
 
-[[nodiscard]] base::Result<void> validate_layer_shape(const ParsedPreamble& preamble,
-                                                      const ScanResult& scan) {
-    if (preamble.manifest.volumes.size() != 1) {
-        return base::Result<void>::failure(
-            error(base::ErrorCode::kCorruptData, "reader currently requires one volume"));
-    }
-    if (scan.records.empty()) {
-        if (archive_backup_type(preamble.header) == format::BackupType::kFull) {
-            return base::Result<void>::failure(
-                error(base::ErrorCode::kCorruptData, "full archive contains no chunks"));
-        }
-        return base::Result<void>::success();
-    }
-    const auto& volume = preamble.manifest.volumes.front();
-    if (scan.records.front().source_index != volume.volume_index) {
-        return base::Result<void>::failure(
-            error(base::ErrorCode::kCorruptData, "archive chunk source does not match volume"));
-    }
-    if (archive_backup_type(preamble.header) != format::BackupType::kFull) {
-        return base::Result<void>::success();
-    }
-    const auto& first = scan.records.front().descriptor;
-    const auto& last = scan.records.back().descriptor;
-    if (first.logical_offset != 0 || last.logical_offset + last.logical_size != volume.total_size) {
-        return base::Result<void>::failure(
-            error(base::ErrorCode::kCorruptData, "full archive does not cover the volume"));
-    }
-    return base::Result<void>::success();
-}
-
 } // namespace
 
 struct PersonalArchiveReader::Impl final {
@@ -723,7 +705,14 @@ PersonalArchiveReader::open(const ArchiveOpenRequest& request) {
     if (!scan) {
         return base::Result<std::unique_ptr<PersonalArchiveReader>>::failure(scan.error());
     }
-    auto shape = validate_layer_shape(preamble.value(), scan.value());
+    std::vector<detail::ArchiveChunkShape> chunk_shapes;
+    chunk_shapes.reserve(scan.value().records.size());
+    for (const auto& record : scan.value().records) {
+        chunk_shapes.push_back({record.source_index, record.descriptor.logical_offset,
+                                record.descriptor.logical_size});
+    }
+    auto shape = detail::validate_archive_layer_shape(
+        archive_backup_type(preamble.value().header), preamble.value().manifest, chunk_shapes);
     if (!shape) {
         return base::Result<std::unique_ptr<PersonalArchiveReader>>::failure(shape.error());
     }
@@ -741,7 +730,14 @@ PersonalArchiveReader::open(const ArchiveOpenRequest& request) {
                                 parsed.header.parent_uuid, archive_backup_type(parsed.header),
                                 parsed.header.block_size};
     implementation->block_size = parsed.header.block_size;
-    implementation->logical_size = implementation->manifest.volumes.front().total_size;
+    for (const auto& volume : implementation->manifest.volumes) {
+        if (volume.total_size >
+            (std::numeric_limits<std::uint64_t>::max)() - implementation->logical_size) {
+            return base::Result<std::unique_ptr<PersonalArchiveReader>>::failure(
+                error(base::ErrorCode::kCorruptData, "archive logical size overflows"));
+        }
+        implementation->logical_size += volume.total_size;
+    }
     implementation->records = std::move(scanned.records);
     implementation->payload_cipher = std::move(payload_cipher).value();
     return base::Result<std::unique_ptr<PersonalArchiveReader>>::success(
@@ -783,9 +779,13 @@ PersonalArchiveReader::read_chunk(const std::uint64_t chunk_index,
         return base::Result<ports::ChunkData>::failure(descriptor.error());
     }
     const auto& record = implementation_->records[static_cast<std::size_t>(chunk_index)];
-    auto payload =
-        read_record_payload(record, implementation_->block_size, implementation_->logical_size,
-                            cancellation, *implementation_->payload_cipher);
+    const auto* volume = find_volume(implementation_->manifest, record.source_index);
+    if (volume == nullptr) {
+        return base::Result<ports::ChunkData>::failure(
+            error(base::ErrorCode::kCorruptData, "archive chunk references an unknown volume"));
+    }
+    auto payload = read_record_payload(record, implementation_->block_size, volume->total_size,
+                                       cancellation, *implementation_->payload_cipher);
     if (!payload) {
         return base::Result<ports::ChunkData>::failure(payload.error());
     }

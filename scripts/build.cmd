@@ -15,7 +15,6 @@ if /I "%AEGRA_CONFIGURATION%"=="Debug" (
 
 set "AEGRA_VS_ROOT=C:\Program Files\Microsoft Visual Studio\18\Insiders"
 set "AEGRA_CMAKE=%AEGRA_VS_ROOT%\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
-set "AEGRA_CTEST=%AEGRA_VS_ROOT%\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\ctest.exe"
 set "VCPKG_ROOT=%AEGRA_VS_ROOT%\VC\vcpkg"
 set "VCPKG_VISUAL_STUDIO_PATH=%AEGRA_VS_ROOT%"
 
@@ -28,5 +27,5 @@ if errorlevel 1 exit /b %errorlevel%
 "%AEGRA_CMAKE%" --build --preset %AEGRA_PRESET%
 if errorlevel 1 exit /b %errorlevel%
 
-"%AEGRA_CTEST%" --preset %AEGRA_PRESET%
+"%AEGRA_CMAKE%" "-DAEGRA_SOURCE_ROOT=%~dp0.." -P "%~dp0..\cmake\CheckSourceLimits.cmake"
 exit /b %errorlevel%

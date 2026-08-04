@@ -39,6 +39,21 @@ constexpr std::size_t kMaximumTokenBytes = 1'024;
            std::ranges::all_of(value, valid_stable_character);
 }
 
+[[nodiscard]] bool valid_source_ids(const std::vector<std::string>& source_ids,
+                                    const bool allow_empty) {
+    if ((!allow_empty && source_ids.empty()) || source_ids.size() > kMaximumBackupSources) {
+        return false;
+    }
+    std::set<std::string_view> seen;
+    for (const auto& source_id : source_ids) {
+        if (!valid_stable_value(source_id, kMaximumIdentifierBytes) ||
+            !seen.insert(source_id).second) {
+            return false;
+        }
+    }
+    return true;
+}
+
 [[nodiscard]] bool valid_text(const std::string_view value,
                               const std::size_t maximum_bytes) noexcept {
     return !value.empty() && value.size() <= maximum_bytes &&
@@ -200,8 +215,16 @@ base::Result<void> validate_source_inventory_item(const SourceInventoryItem& ite
                              item.availability == SourceAvailability::kUnavailable;
     if (!valid_stable_value(item.source_id, kMaximumIdentifierBytes) ||
         !valid_text(item.display_name, kMaximumDisplayNameBytes) || !known_kind || !known_state ||
-        !valid_wire_integer(item.capacity_bytes) ||
-        (item.is_selectable && item.availability != SourceAvailability::kAvailable)) {
+        !valid_wire_integer(item.capacity_bytes) || !valid_wire_integer(item.free_bytes) ||
+        item.free_bytes > item.capacity_bytes || !valid_wire_integer(item.disk_capacity_bytes) ||
+        (item.is_selectable && item.availability != SourceAvailability::kAvailable) ||
+        !valid_wire_integer(static_cast<std::uint64_t>(item.disk_number)) ||
+        item.mount_letter.size() > 16 ||
+        (!item.mount_letter.empty() && !valid_text(item.mount_letter, 16)) ||
+        item.volume_label.size() > kMaximumDisplayNameBytes ||
+        (!item.volume_label.empty() && !valid_text(item.volume_label, kMaximumDisplayNameBytes)) ||
+        !valid_text(item.health_status, kMaximumDisplayNameBytes) ||
+        !valid_text(item.partition_style, 32) || !valid_text(item.media_type, 32)) {
         return invalid("source inventory item is invalid");
     }
     return base::Result<void>::success();
@@ -240,6 +263,11 @@ base::Result<void> validate_job_summary(const JobSummary& summary) {
             return invalid("job summary progress is invalid");
         }
     }
+    if (!valid_source_ids(summary.source_ids, true) ||
+        (summary.repository_connection_id &&
+         !valid_stable_value(*summary.repository_connection_id, kMaximumIdentifierBytes))) {
+        return invalid("job summary source or repository connection is invalid");
+    }
     return base::Result<void>::success();
 }
 
@@ -262,7 +290,7 @@ base::Result<void> validate_schedule_summary(const ScheduleSummary& summary) {
     auto valid_trigger = validate_schedule_trigger(summary.trigger);
     if (!valid_stable_value(summary.schedule_id, kMaximumIdentifierBytes) ||
         !valid_text(summary.display_name, kMaximumDisplayNameBytes) ||
-        !valid_stable_value(summary.source_id, kMaximumIdentifierBytes) ||
+        !valid_source_ids(summary.source_ids, false) ||
         !valid_stable_value(summary.repository_connection_id, kMaximumIdentifierBytes) ||
         !known_backup_type(summary.backup_type) || !valid_trigger ||
         !valid_optional_wire_integer(summary.next_run_utc_ms)) {
@@ -345,7 +373,7 @@ base::Result<void> validate_recovery_point_ref(const RecoveryPointRef& reference
 
 base::Result<void> validate_start_backup_command(const StartBackupCommand& command) {
     const auto parent_required = command.backup_type == BackupType::kIncremental;
-    if (!valid_stable_value(command.source_id, kMaximumIdentifierBytes) ||
+    if (!valid_source_ids(command.source_ids, false) ||
         !valid_stable_value(command.repository_connection_id, kMaximumIdentifierBytes) ||
         !known_backup_type(command.backup_type) ||
         parent_required != command.parent_recovery_point_id.has_value() ||
@@ -411,7 +439,7 @@ base::Result<void> validate_upsert_schedule_command(const UpsertScheduleCommand&
     if ((command.schedule_id &&
          !valid_stable_value(*command.schedule_id, kMaximumIdentifierBytes)) ||
         !valid_text(command.display_name, kMaximumDisplayNameBytes) ||
-        !valid_stable_value(command.source_id, kMaximumIdentifierBytes) ||
+        !valid_source_ids(command.source_ids, false) ||
         !valid_stable_value(command.repository_connection_id, kMaximumIdentifierBytes) ||
         !known_backup_type(command.backup_type)) {
         return invalid("upsert schedule command is invalid");

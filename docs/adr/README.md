@@ -17,6 +17,9 @@ ADR 用于记录会长期约束多个模块、持久化格式、外部协议或�
 Windows Service SCM 边界、显式 Named Pipe ACL 与调用方身份校验见
 [ADR-0014](0014-windows-service-ipc-security.md)。
 
+项目不维护自动化测试用例的仓库级决策见
+[ADR-0015](0015-no-project-test-suite.md)。该决策取代早期 ADR 中的自动化测试要求。
+
 ## 状态
 
 - `Proposed`：讨论中，不构成实现依据。
@@ -60,7 +63,7 @@ Windows Service SCM 边界、显式 Named Pipe ACL 与调用方身份校验见
 
 ## 影响
 
-说明收益、代价、迁移、测试和运维影响。
+说明收益、代价、迁移、验证和运维影响。
 
 ## 验证
 

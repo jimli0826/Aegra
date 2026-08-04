@@ -18,36 +18,33 @@ Column {
 
     spacing: 6
     
-    // 组件加载完成后启动动画
-    Component.onCompleted: {
-        if (animationEnabled) {
-            animationTimer.start()
-        } else {
+    function playUsageAnimation() {
+        if (!animationEnabled) {
             animatedPercent = percent
             animatedValue = targetValue
+            return
         }
+        // Restart from zero so the used-space arc is visible (old Home).
+        animatedPercent = 0
+        animatedValue = 0
+        animationTimer.restart()
     }
 
+    // 组件加载完成后启动动画
+    Component.onCompleted: playUsageAnimation()
+
     // When bound data arrives asynchronously (API), re-apply targets
-    onPercentChanged: {
-        if (!animationEnabled) {
-            animatedPercent = percent
-            return
-        }
-        animationTimer.restart()
+    onPercentChanged: playUsageAnimation()
+    onTargetValueChanged: playUsageAnimation()
+    onVisibleChanged: {
+        if (visible)
+            playUsageAnimation()
     }
-    onTargetValueChanged: {
-        if (!animationEnabled) {
-            animatedValue = targetValue
-            return
-        }
-        animationTimer.restart()
-    }
-    
+
     // 延迟启动动画，让UI先渲染
     Timer {
         id: animationTimer
-        interval: 100
+        interval: 120
         onTriggered: {
             animatedPercent = percent
             animatedValue = targetValue

@@ -9,12 +9,17 @@
 #include "aegra/application/recovery_point_operations.h"
 #include "aegra/application/repository_connection_service.h"
 #include "aegra/application/source_inventory_query.h"
+#include "aegra/apps/service/backup_catalog_registrar.h"
+#include "aegra/apps/service/schedule_service.h"
 #include "aegra/apps/service/service_host.h"
 #include "aegra/apps/service/service_protocol.h"
 #include "aegra/apps/service/service_security_host.h"
 #include "aegra/apps/service/windows_service_scm_host.h"
 #include "aegra/apps/service/worker_job_service.h"
 #include "aegra/apps/service/worker_supervisor.h"
+
+#include <spdlog/sinks/rotating_file_sink.h>
+#include <spdlog/spdlog.h>
 
 #include <Windows.h>
 #include <shellapi.h>
@@ -50,6 +55,41 @@ enum class ServiceExitCode : int {
     kHostFailure = 21,
 };
 
+[[nodiscard]] spdlog::level::level_enum log_level(const service::ServiceLogLevel level) noexcept {
+    switch (level) {
+    case service::ServiceLogLevel::kInfo:
+        return spdlog::level::info;
+    case service::ServiceLogLevel::kWarning:
+        return spdlog::level::warn;
+    case service::ServiceLogLevel::kError:
+        return spdlog::level::err;
+    }
+    return spdlog::level::info;
+}
+
+class SpdlogServiceLog final : public service::IServiceLog {
+  public:
+    explicit SpdlogServiceLog(std::shared_ptr<spdlog::logger> logger) : logger_(std::move(logger)) {
+        logger_->info("service.log_started");
+    }
+
+    ~SpdlogServiceLog() override {
+        logger_->info("service.log_stopped");
+        logger_->flush();
+    }
+
+    void write(const service::ServiceLogLevel level, const std::string_view message_code,
+               const std::string_view detail) noexcept override {
+        try {
+            logger_->log(log_level(level), "{} {}", message_code, detail);
+        } catch (...) {
+        }
+    }
+
+  private:
+    std::shared_ptr<spdlog::logger> logger_;
+};
+
 struct ServiceArguments final {
     bool once{false};
     bool service_mode{false};
@@ -60,6 +100,7 @@ struct ServiceArguments final {
 };
 
 struct RuntimeComponents final {
+    std::unique_ptr<service::IServiceLog> logger;
     std::unique_ptr<windows_system::WindowsSystemClock> clock;
     std::unique_ptr<windows_system::WindowsCryptographicRandom> random;
     std::unique_ptr<windows_disk::WindowsSourceInventory> source_inventory;
@@ -72,8 +113,10 @@ struct RuntimeComponents final {
     std::unique_ptr<aegra::application::RepositoryConnectionService> connection_service;
     std::unique_ptr<aegra::application::ConnectedRepositoryQuery> connected_query;
     std::unique_ptr<aegra::application::RecoveryPointOperations> recovery_point_operations;
+    std::shared_ptr<service::BackupCatalogRegistrar> backup_catalog_registrar;
     std::unique_ptr<service::WorkerSupervisor> supervisor;
     std::unique_ptr<service::WorkerJobService> worker_jobs;
+    std::unique_ptr<service::ScheduleService> schedules;
     service::ServiceRuntimeInfo runtime;
 };
 
@@ -221,6 +264,37 @@ resolve_worker_path(const ServiceArguments& arguments) {
     return aegra::base::Result<std::string>::success(std::move(output));
 }
 
+[[nodiscard]] aegra::base::Result<std::unique_ptr<service::IServiceLog>>
+create_service_log(const std::filesystem::path& data_dir, const bool service_mode) {
+    std::error_code error;
+    const auto log_dir = data_dir / L"logs";
+    std::filesystem::create_directories(log_dir, error);
+    if (error) {
+        return aegra::base::Result<std::unique_ptr<service::IServiceLog>>::failure(
+            {aegra::base::ErrorCode::kIoFailure, "failed to create Service log directory"});
+    }
+    auto log_path = path_to_utf8(log_dir / L"service.log");
+    if (!log_path) {
+        return aegra::base::Result<std::unique_ptr<service::IServiceLog>>::failure(
+            log_path.error());
+    }
+    try {
+        // File-only logging (no console). Rotating: 10 MiB × 5 files under data_dir/logs.
+        auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+            log_path.value(), 10U * 1024U * 1024U, 5U);
+        auto logger = std::make_shared<spdlog::logger>("aegra_service", std::move(file_sink));
+        logger->set_level(spdlog::level::info);
+        logger->flush_on(spdlog::level::info);
+        logger->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] %v");
+        (void)service_mode; // retained for future SCM-specific log policy
+        return aegra::base::Result<std::unique_ptr<service::IServiceLog>>::success(
+            std::make_unique<SpdlogServiceLog>(std::move(logger)));
+    } catch (const spdlog::spdlog_ex&) {
+        return aegra::base::Result<std::unique_ptr<service::IServiceLog>>::failure(
+            {aegra::base::ErrorCode::kIoFailure, "failed to initialize Service logger"});
+    }
+}
+
 [[nodiscard]] aegra::base::Result<void> open_control_plane(const std::filesystem::path& data_dir,
                                                            RuntimeComponents& components) {
     std::error_code error;
@@ -266,7 +340,7 @@ resolve_worker_path(const ServiceArguments& arguments) {
     // mapping, and real Verify Worker E2E all meet the package Definition of Done.
     std::vector<std::string> capabilities{
         "backup.start",    "job.cancel",   "job.list",         "repository.connection",
-        "repository.list", "service.info", "source.inventory",
+        "repository.list", "schedule",     "service.info",     "source.inventory",
     };
     std::ranges::sort(capabilities);
     return capabilities;
@@ -287,6 +361,18 @@ create_runtime(const ServiceArguments& arguments) {
         return aegra::base::Result<RuntimeComponents>::failure(!data_dir ? data_dir.error()
                                                                          : worker_path.error());
     }
+    // Worker inherits this environment and writes per-task logs under <data_dir>/logs/<op>/.
+    if (!::SetEnvironmentVariableW(L"AEGRA_DATA_DIR", data_dir.value().c_str())) {
+        return aegra::base::Result<RuntimeComponents>::failure(
+            {aegra::base::ErrorCode::kInternal, "failed to publish AEGRA_DATA_DIR for Worker"});
+    }
+    auto logger = create_service_log(data_dir.value(), arguments.service_mode);
+    if (!logger) {
+        return aegra::base::Result<RuntimeComponents>::failure(logger.error());
+    }
+    components.logger = std::move(logger).value();
+    components.logger->write(service::ServiceLogLevel::kInfo, "service.runtime_starting",
+                             "status=starting");
     auto worker_path_utf8 = path_to_utf8(worker_path.value());
     if (!worker_path_utf8) {
         return aegra::base::Result<RuntimeComponents>::failure(worker_path_utf8.error());
@@ -310,26 +396,78 @@ create_runtime(const ServiceArguments& arguments) {
         std::make_unique<aegra::application::RecoveryPointOperations>(
             *components.control_plane, *components.storage_factory, *components.clock,
             *components.random);
+    components.backup_catalog_registrar = std::make_shared<service::BackupCatalogRegistrar>(
+        *components.control_plane, *components.storage_factory);
     service::WorkerSupervisorConfig supervisor_config;
     supervisor_config.worker_executable_path = std::move(worker_path_utf8).value();
+    // Job lifecycle runs async after backup.start is accepted — log terminal outcomes to file.
+    auto* log = components.logger.get();
+    auto* jobs_db = components.control_plane.get();
+    auto catalog_registrar = components.backup_catalog_registrar;
     components.supervisor = std::make_unique<service::WorkerSupervisor>(
         std::move(supervisor_config), *components.process_launcher, *components.control_plane,
         *components.clock, *components.random, service::SupervisorProgressCallback{},
-        service::SupervisorCompletionCallback{});
+        [log, jobs_db, catalog_registrar](const service::WorkerJobRequest& request,
+                                         const aegra::contracts::ServiceJobState final_state,
+                                         const aegra::contracts::WorkerResponse* response) {
+            const auto& job_id = request.worker_request.job_id;
+            if (response != nullptr && catalog_registrar != nullptr) {
+                auto registered = catalog_registrar->publish(request, *response, {});
+                if (!registered && log != nullptr) {
+                    std::string failure = "job_id=" + job_id + " error=";
+                    failure += registered.error().message;
+                    log->write(service::ServiceLogLevel::kError,
+                               "repository.catalog_publish_failed", failure);
+                }
+            }
+            if (log == nullptr) {
+                return;
+            }
+            std::string detail = "job_id=";
+            detail += job_id;
+            detail += " state=";
+            detail += std::to_string(static_cast<int>(final_state));
+            if (jobs_db != nullptr) {
+                auto job = jobs_db->get_job(job_id, {});
+                if (job && job.value()) {
+                    detail += " message_code=";
+                    detail += job.value()->message_code;
+                    if (job.value()->result_message_code) {
+                        detail += " result_message_code=";
+                        detail += *job.value()->result_message_code;
+                    }
+                    if (job.value()->result_error_code) {
+                        detail += " result_error_code=";
+                        detail += std::to_string(*job.value()->result_error_code);
+                    }
+                }
+            }
+            const auto level = final_state == aegra::contracts::ServiceJobState::kSucceeded
+                                   ? service::ServiceLogLevel::kInfo
+                                   : service::ServiceLogLevel::kWarning;
+            log->write(level, "job.terminal", detail);
+        });
     components.worker_jobs = std::make_unique<service::WorkerJobService>(
         *components.source_query, *components.control_plane, *components.storage_factory,
         *components.supervisor, *components.clock, *components.random);
+    components.schedules = std::make_unique<service::ScheduleService>(
+        *components.control_plane, *components.clock, *components.random);
     components.runtime = {
         .service_version = AEGRA_APPLICATION_VERSION,
         .capabilities = runtime_capabilities(),
+        .logger = components.logger.get(),
         .repository_query = components.repository_query.get(),
         .connected_repository_query = components.connected_query.get(),
         .repository_connections = components.connection_service.get(),
         .source_inventory = components.source_query.get(),
         .recovery_point_operations = components.recovery_point_operations.get(),
         .worker_jobs = components.worker_jobs.get(),
+        .schedules = components.schedules.get(),
+        .worker_supervisor = components.supervisor.get(),
         .control_plane = components.control_plane.get(),
     };
+    components.logger->write(service::ServiceLogLevel::kInfo, "service.runtime_ready",
+                             "status=ready");
     return aegra::base::Result<RuntimeComponents>::success(std::move(components));
 }
 
@@ -345,7 +483,17 @@ create_listener(const ServiceArguments& arguments) {
     auto channel = listener.accept({});
     if (!channel)
         return ServiceExitCode::kHostFailure;
+    if (runtime.logger != nullptr) {
+        runtime.logger->write(service::ServiceLogLevel::kInfo, "service.session_started",
+                              "mode=once");
+    }
     auto result = service::run_service_session(*channel.value(), runtime, {}, 1);
+    if (runtime.logger != nullptr) {
+        runtime.logger->write(result ? service::ServiceLogLevel::kInfo
+                                     : service::ServiceLogLevel::kError,
+                              result ? "service.session_completed" : "service.session_failed",
+                              "mode=once");
+    }
     return result ? ServiceExitCode::kSucceeded : ServiceExitCode::kHostFailure;
 }
 
@@ -353,9 +501,24 @@ create_listener(const ServiceArguments& arguments) {
                                           const service::ServiceRuntimeInfo& runtime) {
     for (;;) {
         auto channel = listener.accept({});
-        if (!channel)
+        if (!channel) {
+            if (runtime.logger != nullptr) {
+                runtime.logger->write(service::ServiceLogLevel::kError, "service.accept_failed",
+                                      "mode=forever");
+            }
             return ServiceExitCode::kHostFailure;
-        (void)service::run_service_session(*channel.value(), runtime, {});
+        }
+        if (runtime.logger != nullptr) {
+            runtime.logger->write(service::ServiceLogLevel::kInfo, "service.session_started",
+                                  "mode=forever");
+        }
+        auto result = service::run_service_session(*channel.value(), runtime, {});
+        if (runtime.logger != nullptr) {
+            runtime.logger->write(result ? service::ServiceLogLevel::kInfo
+                                         : service::ServiceLogLevel::kWarning,
+                                  result ? "service.session_completed" : "service.session_failed",
+                                  "mode=forever");
+        }
     }
 }
 
@@ -410,6 +573,11 @@ VOID WINAPI service_main_entry(DWORD, LPWSTR*) noexcept {
             auto listener = create_listener(parsed);
             if (!listener)
                 return aegra::base::Result<void>::failure(listener.error());
+            if (runtime.value().runtime.logger != nullptr) {
+                runtime.value().runtime.logger->write(service::ServiceLogLevel::kInfo,
+                                                      "service.listener_started",
+                                                      "status=listening mode=service");
+            }
             service::ServiceSecurityHostOptions options;
             options.once = parsed.once;
             return service::run_authorized_service_host(*listener.value(), runtime.value().runtime,
@@ -436,6 +604,10 @@ VOID WINAPI service_main_entry(DWORD, LPWSTR*) noexcept {
     auto listener = create_listener(parsed);
     if (!listener)
         return ServiceExitCode::kHostFailure;
+    if (runtime.value().runtime.logger != nullptr) {
+        runtime.value().runtime.logger->write(service::ServiceLogLevel::kInfo,
+                                              "service.listener_started", "status=listening");
+    }
     return parsed.once ? run_once(*listener.value(), runtime.value().runtime)
                        : run_forever(*listener.value(), runtime.value().runtime);
 }

@@ -21,6 +21,7 @@ struct PreparedVolumeMetadata final {
     std::string label;
     std::uint64_t logical_size_bytes{0};
     std::uint32_t cluster_size_bytes{0};
+    bool vss_used{false};
 };
 
 class ISnapshotLease {
@@ -35,10 +36,10 @@ class ISnapshotLease {
     [[nodiscard]] virtual base::Result<void> close() = 0;
 };
 
-struct PreparedVolumeSource final {
-    PreparedVolumeMetadata metadata;
+struct PreparedVolumeSources final {
+    std::vector<PreparedVolumeMetadata> metadata;
     std::unique_ptr<ISnapshotLease> snapshot;
-    std::unique_ptr<ports::IBlockSource> source;
+    std::vector<std::unique_ptr<ports::IBlockSource>> sources;
 };
 
 class IWindowsPersonalBackupRuntime {
@@ -50,19 +51,19 @@ class IWindowsPersonalBackupRuntime {
     IWindowsPersonalBackupRuntime(IWindowsPersonalBackupRuntime&&) = delete;
     IWindowsPersonalBackupRuntime& operator=(IWindowsPersonalBackupRuntime&&) = delete;
 
-    [[nodiscard]] virtual base::Result<PreparedVolumeSource>
-    prepare_source(const std::filesystem::path& volume_guid_path,
-                   const base::CancellationToken& cancellation) = 0;
+    [[nodiscard]] virtual base::Result<PreparedVolumeSources>
+    prepare_sources(const std::vector<std::filesystem::path>& volume_guid_paths,
+                    const base::CancellationToken& cancellation) = 0;
     [[nodiscard]] virtual base::Result<std::unique_ptr<ports::IBackupSession>>
-    create_archive(const WindowsPersonalVolumeBackupRequest& request,
+    create_archive(const WindowsPersonalBackupRequest& request,
                    const format::Manifest& manifest) = 0;
 };
 
-[[nodiscard]] base::Result<WindowsPersonalVolumeBackupResult>
-backup_windows_personal_volume_with_runtime(const WindowsPersonalVolumeBackupRequest& request,
-                                            const base::CancellationToken& cancellation,
-                                            ports::IProgressSink* progress,
-                                            IWindowsPersonalBackupRuntime& runtime);
+[[nodiscard]] base::Result<WindowsPersonalBackupResult>
+backup_windows_personal_volumes_with_runtime(const WindowsPersonalBackupRequest& request,
+                                             const base::CancellationToken& cancellation,
+                                             ports::IProgressSink* progress,
+                                             IWindowsPersonalBackupRuntime& runtime);
 
 [[nodiscard]] std::unique_ptr<IWindowsPersonalBackupRuntime> make_windows_personal_backup_runtime();
 

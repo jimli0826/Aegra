@@ -1,6 +1,8 @@
 find_package(nlohmann_json CONFIG REQUIRED)
 
 add_library(aegra_app_service STATIC
+    src/backup_catalog_registrar.cpp
+    src/schedule_service.cpp
     src/service_host.cpp
     src/service_protocol.cpp
     src/service_protocol_request_json.cpp
@@ -46,6 +48,6 @@ target_link_libraries(
     aegra_service
     PRIVATE Aegra::AppService Aegra::AdapterStorageLocal Aegra::AdapterWindowsIpc
             Aegra::AdapterSqlite Aegra::AdapterWindowsDisk Aegra::AdapterWindowsProcess
-            Aegra::AdapterWindowsSystem Shell32
+            Aegra::AdapterWindowsSystem Aegra::ThirdPartySpdlog Shell32
 )
 aegra_configure_target(aegra_service)

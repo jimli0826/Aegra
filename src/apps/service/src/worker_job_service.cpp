@@ -2,6 +2,7 @@
 
 #include "aegra/application/source_inventory_query.h"
 #include "aegra/apps/service/worker_supervisor.h"
+#include "aegra/base/uuid.h"
 #include "aegra/personal_repository/catalog_scanner.h"
 #include "aegra/ports/clock.h"
 #include "aegra/ports/control_plane.h"
@@ -10,6 +11,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
+#include <ctime>
 #include <exception>
 #include <filesystem>
 #include <optional>
@@ -36,6 +39,40 @@ namespace {
         id.push_back(kHex[value & 0x0FU]);
     }
     return base::Result<std::string>::success(std::move(id));
+}
+
+[[nodiscard]] base::Result<std::string>
+random_uuid(ports::IRandomSource& random, const base::CancellationToken cancellation) {
+    std::array<std::byte, 16> bytes{};
+    if (auto filled = random.fill(bytes, cancellation); !filled) {
+        return base::Result<std::string>::failure(filled.error());
+    }
+    bytes[6] = static_cast<std::byte>((std::to_integer<unsigned>(bytes[6]) & 0x0FU) | 0x40U);
+    bytes[8] = static_cast<std::byte>((std::to_integer<unsigned>(bytes[8]) & 0x3FU) | 0x80U);
+    return base::Result<std::string>::success(base::format_uuid(bytes));
+}
+
+[[nodiscard]] base::Result<std::string> archive_key(const std::string_view file_uuid,
+                                                    const std::int64_t created_utc_ms) {
+    if (created_utc_ms <= 0) {
+        return base::Result<std::string>::failure(
+            {base::ErrorCode::kInternal, "service clock returned invalid time"});
+    }
+    const auto seconds = static_cast<std::time_t>(created_utc_ms / 1000);
+    std::tm utc{};
+    if (::gmtime_s(&utc, &seconds) != 0) {
+        return base::Result<std::string>::failure(
+            {base::ErrorCode::kInternal, "service clock time is out of range"});
+    }
+    std::array<char, 96> buffer{};
+    const auto count = std::snprintf(buffer.data(), buffer.size(), "archives/%04d/%02d/%.*s.bkf",
+                                     utc.tm_year + 1900, utc.tm_mon + 1,
+                                     static_cast<int>(file_uuid.size()), file_uuid.data());
+    if (count <= 0 || static_cast<std::size_t>(count) >= buffer.size()) {
+        return base::Result<std::string>::failure(
+            {base::ErrorCode::kInternal, "archive object key formatting failed"});
+    }
+    return base::Result<std::string>::success(std::string(buffer.data()));
 }
 
 [[nodiscard]] base::Result<std::filesystem::path> path_from_utf8(const std::string_view value) {
@@ -67,7 +104,7 @@ acknowledgement(std::string command_id, const contracts::CommandDisposition disp
 [[nodiscard]] bool same_backup(const ports::JobRecord& record,
                                const contracts::StartBackupCommand& command) noexcept {
     return record.operation == contracts::JobOperation::kBackup &&
-           record.source_id == command.source_id &&
+           record.source_ids == command.source_ids &&
            record.repository_connection_id == command.repository_connection_id &&
            record.backup_type == command.backup_type &&
            record.parent_recovery_point_id == command.parent_recovery_point_id;
@@ -120,31 +157,49 @@ struct PreparedBackup final {
 
 [[nodiscard]] base::Result<PreparedBackup>
 prepare_backup(const contracts::StartBackupCommand& command,
-               application::ISourceInventoryQuery& source_inventory,
-               ports::IControlPlaneDatabase& control_plane, ports::IRandomSource& random,
-               const base::CancellationToken cancellation) {
-    auto source = source_inventory.resolve_source(command.source_id, cancellation);
-    if (!source)
-        return base::Result<PreparedBackup>::failure(source.error());
+                application::ISourceInventoryQuery& source_inventory,
+                ports::IControlPlaneDatabase& control_plane, ports::IClock& clock,
+                ports::IRandomSource& random,
+                const base::CancellationToken cancellation) {
+    std::vector<std::string> stable_source_refs;
+    stable_source_refs.reserve(command.source_ids.size());
+    for (const auto& source_id : command.source_ids) {
+        auto source = source_inventory.resolve_source(source_id, cancellation);
+        if (!source) {
+            return base::Result<PreparedBackup>::failure(source.error());
+        }
+        stable_source_refs.push_back(std::move(source).value().stable_key);
+    }
     auto repository =
         control_plane.get_repository_connection(command.repository_connection_id, cancellation);
     if (!repository)
         return base::Result<PreparedBackup>::failure(repository.error());
+    // Personal local repositories often have no credential_ref; only require Available state.
     if (!repository.value() ||
-        repository.value()->state != contracts::RepositoryConnectionState::kAvailable ||
-        !repository.value()->credential_ref) {
+        repository.value()->state != contracts::RepositoryConnectionState::kAvailable) {
         return base::Result<PreparedBackup>::failure(
-            {base::ErrorCode::kConflict, "repository is unavailable or has no credential"});
+            {base::ErrorCode::kConflict, "repository is unavailable"});
     }
     auto root = path_from_utf8(repository.value()->locator);
     auto job_id = random_id("job-", random, cancellation);
     auto trace_id = random_id("trace-", random, cancellation);
-    if (!root || !job_id || !trace_id) {
+    auto file_uuid = random_uuid(random, cancellation);
+    auto backup_set_uuid = random_uuid(random, cancellation);
+    const auto created_utc_ms = clock.now_utc_ms();
+    auto key = file_uuid ? archive_key(file_uuid.value(), created_utc_ms)
+                         : base::Result<std::string>::failure(file_uuid.error());
+    if (!root || !job_id || !trace_id || !file_uuid || !backup_set_uuid || !key) {
         if (!root)
             return base::Result<PreparedBackup>::failure(root.error());
-        return base::Result<PreparedBackup>::failure(!job_id ? job_id.error() : trace_id.error());
+        if (!job_id || !trace_id)
+            return base::Result<PreparedBackup>::failure(!job_id ? job_id.error() : trace_id.error());
+        if (!file_uuid || !backup_set_uuid)
+            return base::Result<PreparedBackup>::failure(!file_uuid ? file_uuid.error()
+                                                                    : backup_set_uuid.error());
+        return base::Result<PreparedBackup>::failure(key.error());
     }
-    const auto archive_directory = root.value() / L"archives";
+    const auto archive_path = root.value() / std::filesystem::path(key.value());
+    const auto archive_directory = archive_path.parent_path();
     std::error_code error_code;
     std::filesystem::create_directories(archive_directory, error_code);
     if (error_code) {
@@ -155,16 +210,24 @@ prepare_backup(const contracts::StartBackupCommand& command,
     worker.job_id = job_id.value();
     worker.tenant_id = "personal";
     worker.operation = contracts::JobOperation::kBackup;
-    worker.source_refs = {source.value().stable_key};
-    worker.target_ref = path_to_utf8(archive_directory / (job_id.value() + ".bkf"));
-    worker.credential_refs = {*repository.value()->credential_ref};
-    worker.backup = contracts::BackupOptions{contracts::BackupType::kFull, {}, {}};
+    worker.source_refs = std::move(stable_source_refs);
+    worker.target_ref = path_to_utf8(archive_path);
+    if (repository.value()->credential_ref && !repository.value()->credential_ref->value.empty()) {
+        worker.credential_refs = {*repository.value()->credential_ref};
+    }
+    contracts::BackupOptions backup;
+    backup.type = contracts::BackupType::kFull;
+    backup.file_uuid = file_uuid.value();
+    backup.backup_set_uuid = backup_set_uuid.value();
+    backup.created_utc_ms = created_utc_ms;
+    worker.backup = std::move(backup);
     worker.trace_id = trace_id.value();
     WorkerJobRequest request{std::move(worker),
-                             command.source_id,
+                             command.source_ids,
                              command.repository_connection_id,
                              std::nullopt,
                              {},
+                             key.value(),
                              {}};
     return base::Result<PreparedBackup>::success({std::move(request), std::move(job_id).value()});
 }
@@ -209,7 +272,7 @@ persist_cancel_command(ports::IControlPlaneDatabase& control_plane, ports::ICloc
 [[nodiscard]] bool same_verify(const ports::JobRecord& record,
                                const contracts::StartVerifyCommand& command) noexcept {
     return record.operation == contracts::JobOperation::kVerify &&
-           record.source_id == command.recovery_point_id &&
+           record.source_ids == std::vector<std::string>{command.recovery_point_id} &&
            record.repository_connection_id == command.repository_connection_id &&
            !record.parent_recovery_point_id;
 }
@@ -341,7 +404,7 @@ prepare_verify(const contracts::StartVerifyCommand& command,
     worker.trace_id = trace_id.value();
     WorkerJobRequest request;
     request.worker_request = std::move(worker);
-    request.source_id = command.recovery_point_id;
+    request.source_ids = {command.recovery_point_id};
     request.repository_connection_id = command.repository_connection_id;
     return base::Result<PreparedBackup>::success({std::move(request), std::move(job_id).value()});
 }
@@ -376,7 +439,7 @@ WorkerJobService::start_backup(const contracts::StartBackupCommand& command,
                             existing.value()->job_id));
     }
     auto prepared =
-        prepare_backup(command, source_inventory_, control_plane_, random_, cancellation);
+        prepare_backup(command, source_inventory_, control_plane_, clock_, random_, cancellation);
     if (!prepared) {
         return base::Result<contracts::CommandAcknowledgement>::failure(prepared.error());
     }

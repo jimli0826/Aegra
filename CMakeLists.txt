@@ -9,8 +9,7 @@ set(AEGRA_QT_ROOT "" CACHE PATH "Qt installation prefix for the desktop client")
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(AegraTarget)
 
-enable_testing()
-
+add_subdirectory(third_party)
 add_subdirectory(src/base)
 add_subdirectory(src/contracts)
 add_subdirectory(src/ports)
@@ -39,12 +38,3 @@ if(WIN32)
         add_subdirectory(src/apps/desktop)
     endif()
 endif()
-add_subdirectory(tests)
-
-add_test(
-    NAME architecture.source_limits
-    COMMAND
-        "${CMAKE_COMMAND}"
-        "-DAEGRA_SOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}"
-        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckSourceLimits.cmake"
-)

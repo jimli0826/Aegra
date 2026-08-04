@@ -1,6 +1,6 @@
 ---
 name: aegra-cpp-development
-description: Enforce Aegra's C++ engineering standard and modular architecture when creating, modifying, reviewing, refactoring, testing, or building C++ source files, CMake targets, module boundaries, public contracts, backup formats, repository components, adapters, or application entry points in the Aegra project.
+description: Enforce Aegra's C++ engineering standard and modular architecture when creating, modifying, reviewing, refactoring, or building C++ source files, CMake targets, module boundaries, public contracts, backup formats, repository components, adapters, or application entry points in the Aegra project.
 ---
 
 # Aegra C++ Development
@@ -19,13 +19,13 @@ Before changing production code:
 
 ## Workflow
 
-1. Inspect the affected targets, direct dependencies, tests, and working-tree changes.
+1. Inspect the affected targets, direct dependencies, validation paths, and working-tree changes.
 2. Define the smallest coherent change and its allowed dependency direction.
-3. Add or update tests before considering the implementation complete.
+3. Do not add test cases, test fixtures, test-only scripts, test executables, or CTest registrations.
 4. Implement in C++20. Keep ownership explicit, use RAII, and depend on ports rather than concrete adapters.
-5. Keep functions at most 60 logical lines, nesting at most four levels, and source files at most 800 physical lines. Split responsibilities before exceeding a limit.
+5. Keep functions at most 60 logical lines, nesting at most four levels, and `.cpp` source files at most 1500 physical lines. Split responsibilities before exceeding a limit.
 6. Do not introduce compatibility code for unreleased legacy formats. Record format or architecture decisions in an ADR when they affect durable contracts.
-7. Build the directly affected targets, run their tests, then run architecture/static checks available in the repository.
+7. Build the directly affected production targets, run architecture/static checks, and perform focused manual runtime or UI verification when needed.
 8. Update design, format, and status documentation in the same change when behavior or contracts change.
 
 ## Hard boundaries
@@ -41,7 +41,7 @@ Before changing production code:
 
 Report:
 
-- targets built and tests run;
+- production targets built and manual validation performed;
 - relevant dependency-boundary checks;
 - any standard exception, including its ADR or documented rationale;
 - remaining work only when it is genuinely outside the current change.

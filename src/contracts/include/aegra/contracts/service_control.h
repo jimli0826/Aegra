@@ -16,6 +16,7 @@ namespace aegra::contracts {
 
 inline constexpr std::uint32_t kMaximumServicePageResults = 100;
 inline constexpr std::uint32_t kMaximumUnacknowledgedServiceEvents = 128;
+inline constexpr std::uint32_t kMaximumBackupSources = 100;
 
 struct MessageArgument final {
     std::string name;
@@ -77,9 +78,25 @@ struct SourceInventoryItem final {
     SourceKind kind{SourceKind::kVolume};
     SourceAvailability availability{SourceAvailability::kUnavailable};
     std::uint64_t capacity_bytes{0};
+    // Free space on the volume when known; 0 if unknown or unmounted.
+    std::uint64_t free_bytes{0};
+    // Physical disk total size when known; 0 means unavailable.
+    std::uint64_t disk_capacity_bytes{0};
     bool is_system{false};
     bool is_read_only{false};
     bool is_selectable{false};
+    // Physical disk index for Backup wizard disk/volume tree (old GUI disksTree).
+    std::uint32_t disk_number{0};
+    // Mount letter like "C:" or empty when none.
+    std::string mount_letter;
+    // Volume label / friendly name (may equal display_name).
+    std::string volume_label;
+    // Short health line for wizard, e.g. "Healthy" / "Healthy (Boot, System)".
+    std::string health_status;
+    // Disk partition style shown on the disk row, e.g. "GPT".
+    std::string partition_style;
+    // Physical media type for Home disk charts, e.g. "SSD".
+    std::string media_type;
 };
 
 struct SourceInventoryListRequest final {
@@ -107,6 +124,9 @@ struct JobSummary final {
     std::optional<std::uint64_t> completed_utc_ms;
     std::optional<TaskProgress> progress;
     std::string message_code;
+    // Present for backup/restore jobs when the control plane stored them.
+    std::vector<std::string> source_ids;
+    std::optional<std::string> repository_connection_id;
 };
 
 struct JobListRequest final {
@@ -131,7 +151,7 @@ struct ScheduleSummary final {
     std::string schedule_id;
     std::string display_name;
     bool enabled{false};
-    std::string source_id;
+    std::vector<std::string> source_ids;
     std::string repository_connection_id;
     BackupType backup_type{BackupType::kFull};
     ScheduleTrigger trigger;
@@ -218,7 +238,7 @@ struct RecoveryPointRef final {
 };
 
 struct StartBackupCommand final {
-    std::string source_id;
+    std::vector<std::string> source_ids;
     std::string repository_connection_id;
     BackupType backup_type{BackupType::kFull};
     std::optional<std::string> parent_recovery_point_id;
@@ -321,7 +341,7 @@ struct UpsertScheduleCommand final {
     std::optional<std::string> schedule_id;
     std::string display_name;
     bool enabled{false};
-    std::string source_id;
+    std::vector<std::string> source_ids;
     std::string repository_connection_id;
     BackupType backup_type{BackupType::kFull};
     ScheduleTrigger trigger;

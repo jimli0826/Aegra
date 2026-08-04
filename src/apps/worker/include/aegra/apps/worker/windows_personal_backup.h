@@ -13,6 +13,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace aegra::apps::worker {
 
@@ -21,10 +22,10 @@ enum class WindowsPersonalBackupType : std::uint8_t {
     kIncremental = 2,
 };
 
-struct WindowsPersonalVolumeBackupRequest final {
+struct WindowsPersonalBackupRequest final {
     std::string job_id;
     std::string trace_id;
-    std::filesystem::path volume_guid_path;
+    std::vector<std::filesystem::path> volume_guid_paths;
     std::filesystem::path destination;
     std::string_view password;
     WindowsPersonalBackupType backup_type{WindowsPersonalBackupType::kFull};
@@ -43,14 +44,14 @@ struct WindowsPersonalVolumeBackupRequest final {
     std::string hostname;
 };
 
-struct WindowsPersonalVolumeBackupResult final {
+struct WindowsPersonalBackupResult final {
     pipeline::BackupSummary backup;
     std::optional<base::Error> snapshot_cleanup_error;
 };
 
-[[nodiscard]] base::Result<WindowsPersonalVolumeBackupResult>
-backup_windows_personal_volume(const WindowsPersonalVolumeBackupRequest& request,
-                               const base::CancellationToken& cancellation,
-                               ports::IProgressSink* progress = nullptr);
+[[nodiscard]] base::Result<WindowsPersonalBackupResult>
+backup_windows_personal_volumes(const WindowsPersonalBackupRequest& request,
+                                const base::CancellationToken& cancellation,
+                                ports::IProgressSink* progress = nullptr);
 
 } // namespace aegra::apps::worker

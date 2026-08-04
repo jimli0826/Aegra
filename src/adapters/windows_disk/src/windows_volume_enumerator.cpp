@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstring>
 #include <limits>
+#include <map>
 #include <span>
 #include <string>
 #include <string_view>
@@ -103,8 +104,12 @@ bool load_filesystem_metadata(const wchar_t* volume_name, WindowsVolumeInfo& inf
     DWORD bytes_per_sector = 0;
     DWORD free_clusters = 0;
     DWORD total_clusters = 0;
+    ULARGE_INTEGER free_bytes_available{};
+    ULARGE_INTEGER total_bytes{};
+    ULARGE_INTEGER total_free_bytes{};
     if (!GetDiskFreeSpaceW(volume_name, &sectors_per_cluster, &bytes_per_sector, &free_clusters,
-                           &total_clusters)) {
+                           &total_clusters) ||
+        !GetDiskFreeSpaceExW(volume_name, &free_bytes_available, &total_bytes, &total_free_bytes)) {
         return false;
     }
 
@@ -118,10 +123,141 @@ bool load_filesystem_metadata(const wchar_t* volume_name, WindowsVolumeInfo& inf
 
     info.label = std::move(utf8_label).value();
     info.filesystem = std::move(utf8_filesystem).value();
+    info.total_size_bytes = total_bytes.QuadPart;
+    info.free_size_bytes = total_free_bytes.QuadPart;
+    if (info.free_size_bytes > info.total_size_bytes) {
+        info.free_size_bytes = info.total_size_bytes;
+    }
     info.cluster_size_bytes = static_cast<std::uint32_t>(cluster_size);
     info.filesystem_metadata_available = true;
+    info.volume_size_available = true;
     info.is_read_only = (flags & FILE_READ_ONLY_VOLUME) != 0;
     return true;
+}
+
+struct PhysicalDiskInfo final {
+    std::uint32_t disk_number{0};
+    std::uint64_t capacity_bytes{0};
+    std::string partition_style{"Unknown"};
+    std::string media_type{"Unknown"};
+};
+
+[[nodiscard]] detail::UniqueHandle open_physical_drive(const std::uint32_t disk_number) {
+    const auto path = std::wstring(LR"(\\.\PhysicalDrive)") + std::to_wstring(disk_number);
+    // Prefer query-only access; fall back to GENERIC_READ (old StorageManager path).
+    detail::UniqueHandle handle(CreateFileW(path.c_str(), 0,
+                                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                            nullptr, OPEN_EXISTING, 0, nullptr));
+    if (handle.valid()) {
+        return handle;
+    }
+    return detail::UniqueHandle(CreateFileW(path.c_str(), GENERIC_READ,
+                                            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                                            OPEN_EXISTING, 0, nullptr));
+}
+
+[[nodiscard]] std::string partition_style_name(const DWORD style) {
+    switch (style) {
+    case PARTITION_STYLE_MBR:
+        return "MBR";
+    case PARTITION_STYLE_GPT:
+        return "GPT";
+    case PARTITION_STYLE_RAW:
+        return "RAW";
+    default:
+        return "Unknown";
+    }
+}
+
+[[nodiscard]] std::optional<PhysicalDiskInfo> inspect_physical_disk(const std::uint32_t disk_number) {
+    auto handle = open_physical_drive(disk_number);
+    if (!handle.valid()) {
+        return std::nullopt;
+    }
+    PhysicalDiskInfo info;
+    info.disk_number = disk_number;
+
+    GET_LENGTH_INFORMATION length{};
+    DWORD bytes_returned = 0;
+    if (DeviceIoControl(handle.get(), IOCTL_DISK_GET_LENGTH_INFO, nullptr, 0, &length,
+                        sizeof(length), &bytes_returned, nullptr) &&
+        bytes_returned >= sizeof(length) && length.Length.QuadPart >= 0) {
+        info.capacity_bytes = static_cast<std::uint64_t>(length.Length.QuadPart);
+    } else {
+        DISK_GEOMETRY_EX geometry{};
+        if (DeviceIoControl(handle.get(), IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, nullptr, 0, &geometry,
+                            sizeof(geometry), &bytes_returned, nullptr) &&
+            bytes_returned >= sizeof(geometry) && geometry.DiskSize.QuadPart >= 0) {
+            info.capacity_bytes = static_cast<std::uint64_t>(geometry.DiskSize.QuadPart);
+        }
+    }
+
+    // Drive layout needs room for many partitions (old StorageManager used 128).
+    constexpr DWORD kMaxPartitions = 128;
+    const auto layout_bytes =
+        sizeof(DRIVE_LAYOUT_INFORMATION_EX) + sizeof(PARTITION_INFORMATION_EX) * kMaxPartitions;
+    std::vector<std::byte> layout_buffer(layout_bytes);
+    if (DeviceIoControl(handle.get(), IOCTL_DISK_GET_DRIVE_LAYOUT_EX, nullptr, 0,
+                        layout_buffer.data(), static_cast<DWORD>(layout_buffer.size()),
+                        &bytes_returned, nullptr) &&
+        bytes_returned >= sizeof(DRIVE_LAYOUT_INFORMATION_EX)) {
+        DRIVE_LAYOUT_INFORMATION_EX layout{};
+        std::memcpy(&layout, layout_buffer.data(), sizeof(layout));
+        info.partition_style = partition_style_name(layout.PartitionStyle);
+    }
+
+    // Media type (old StorageManager GetDiskInfo): bus type + seek penalty.
+    STORAGE_PROPERTY_QUERY query{};
+    query.QueryType = PropertyStandardQuery;
+    query.PropertyId = StorageDeviceProperty;
+    std::array<std::byte, 1024> property_buffer{};
+    if (DeviceIoControl(handle.get(), IOCTL_STORAGE_QUERY_PROPERTY, &query, sizeof(query),
+                        property_buffer.data(), static_cast<DWORD>(property_buffer.size()),
+                        &bytes_returned, nullptr) &&
+        bytes_returned >= sizeof(STORAGE_DEVICE_DESCRIPTOR)) {
+        STORAGE_DEVICE_DESCRIPTOR descriptor{};
+        std::memcpy(&descriptor, property_buffer.data(), sizeof(descriptor));
+        switch (descriptor.BusType) {
+        case BusTypeNvme:
+            info.media_type = "SSD";
+            break;
+        case BusTypeSata:
+        case BusTypeAta:
+            info.media_type = "HDD";
+            break;
+        case BusTypeUsb:
+            info.media_type = "USB";
+            break;
+        case BusTypeVirtual:
+        case BusTypeFileBackedVirtual:
+            info.media_type = "Virtual";
+            break;
+        default:
+            info.media_type = "Unknown";
+            break;
+        }
+        query.PropertyId = StorageDeviceSeekPenaltyProperty;
+        DEVICE_SEEK_PENALTY_DESCRIPTOR seek_penalty{};
+        if (DeviceIoControl(handle.get(), IOCTL_STORAGE_QUERY_PROPERTY, &query, sizeof(query),
+                            &seek_penalty, sizeof(seek_penalty), &bytes_returned, nullptr) &&
+            bytes_returned >= sizeof(seek_penalty) && !seek_penalty.IncursSeekPenalty) {
+            info.media_type = "SSD";
+        }
+    }
+    return info;
+}
+
+// Enumerate physical disks first (old GetAllDisks): probe PhysicalDrive0..31.
+[[nodiscard]] std::vector<PhysicalDiskInfo> enumerate_physical_disks() {
+    constexpr std::uint32_t kMaxPhysicalDisks = 32;
+    std::vector<PhysicalDiskInfo> disks;
+    disks.reserve(8);
+    for (std::uint32_t index = 0; index < kMaxPhysicalDisks; ++index) {
+        if (auto disk = inspect_physical_disk(index)) {
+            disks.push_back(std::move(*disk));
+        }
+    }
+    return disks;
 }
 
 [[nodiscard]] std::optional<std::wstring> system_volume_root() {
@@ -156,18 +292,18 @@ bool load_filesystem_metadata(const wchar_t* volume_name, WindowsVolumeInfo& inf
     return id;
 }
 
-[[nodiscard]] std::string display_name_for(const WindowsVolumeInfo& volume,
-                                           const std::string_view source_id) {
+// Friendly volume titles aligned with old StorageManager::GetAllVolumes.
+[[nodiscard]] std::string display_name_for(const WindowsVolumeInfo& volume, const bool is_system) {
     if (!volume.label.empty()) {
         return volume.label;
     }
-    if (!volume.mount_points.empty()) {
-        auto mount = to_utf8(volume.mount_points.front().wstring());
-        if (mount && !mount.value().empty()) {
-            return std::move(mount).value();
-        }
+    if (is_system) {
+        return "System";
     }
-    return std::string(source_id);
+    if (!volume.mount_points.empty()) {
+        return "Local Disk";
+    }
+    return "Hidden Partition";
 }
 
 std::wstring volume_device_path(const std::wstring_view volume_name) {
@@ -193,6 +329,7 @@ bool parse_extents(const std::vector<std::byte>& buffer, const DWORD bytes_retur
 
     std::vector<WindowsVolumeExtent> extents;
     extents.reserve(extent_count);
+    std::uint64_t extent_size_bytes = 0;
     const auto returned_data = std::span<const std::byte>(buffer).first(bytes_returned);
     for (DWORD index = 0; index < extent_count; ++index) {
         DISK_EXTENT extent{};
@@ -202,14 +339,23 @@ bool parse_extents(const std::vector<std::byte>& buffer, const DWORD bytes_retur
         if (extent.StartingOffset.QuadPart < 0 || extent.ExtentLength.QuadPart < 0) {
             return false;
         }
+        const auto extent_length = static_cast<std::uint64_t>(extent.ExtentLength.QuadPart);
+        if (extent_length > (std::numeric_limits<std::uint64_t>::max)() - extent_size_bytes) {
+            return false;
+        }
+        extent_size_bytes += extent_length;
         extents.push_back(WindowsVolumeExtent{
             extent.DiskNumber,
             static_cast<std::uint64_t>(extent.StartingOffset.QuadPart),
-            static_cast<std::uint64_t>(extent.ExtentLength.QuadPart),
+            extent_length,
         });
     }
     info.extents = std::move(extents);
     info.disk_extents_available = true;
+    if (!info.volume_size_available && extent_size_bytes > 0) {
+        info.total_size_bytes = extent_size_bytes;
+        info.volume_size_available = true;
+    }
     return true;
 }
 
@@ -225,11 +371,22 @@ void load_volume_size(const HANDLE handle, WindowsVolumeInfo& info) {
     info.volume_size_available = true;
 }
 
-bool load_disk_extents(const wchar_t* volume_name, WindowsVolumeInfo& info) {
-    const auto device_path = volume_device_path(volume_name);
+[[nodiscard]] detail::UniqueHandle open_volume_device(const std::wstring& device_path) {
     detail::UniqueHandle handle(CreateFileW(device_path.c_str(), 0,
                                             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                                             nullptr, OPEN_EXISTING, 0, nullptr));
+    if (handle.valid()) {
+        return handle;
+    }
+    // Match old StorageManager: GENERIC_READ when query-only open is denied.
+    return detail::UniqueHandle(CreateFileW(device_path.c_str(), GENERIC_READ,
+                                            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                                            OPEN_EXISTING, 0, nullptr));
+}
+
+bool load_disk_extents(const wchar_t* volume_name, WindowsVolumeInfo& info) {
+    const auto device_path = volume_device_path(volume_name);
+    auto handle = open_volume_device(device_path);
     if (!handle.valid()) {
         return false;
     }
@@ -252,12 +409,70 @@ bool load_disk_extents(const wchar_t* volume_name, WindowsVolumeInfo& info) {
     return false;
 }
 
+[[nodiscard]] bool guid_equal(const GUID& left, const GUID& right) noexcept {
+    return std::memcmp(&left, &right, sizeof(GUID)) == 0;
+}
+
+// Hidden / unmounted partitions: name from GPT type (old EFI/MSR/Recovery mapping).
+void load_partition_identity(const wchar_t* volume_name, WindowsVolumeInfo& info) {
+    const auto device_path = volume_device_path(volume_name);
+    auto handle = open_volume_device(device_path);
+    if (!handle.valid()) {
+        return;
+    }
+    PARTITION_INFORMATION_EX part{};
+    DWORD bytes_returned = 0;
+    if (!DeviceIoControl(handle.get(), IOCTL_DISK_GET_PARTITION_INFO_EX, nullptr, 0, &part,
+                         sizeof(part), &bytes_returned, nullptr) ||
+        bytes_returned < sizeof(part) || part.PartitionLength.QuadPart < 0) {
+        return;
+    }
+    if (!info.volume_size_available && part.PartitionLength.QuadPart > 0) {
+        info.total_size_bytes = static_cast<std::uint64_t>(part.PartitionLength.QuadPart);
+        info.volume_size_available = true;
+    }
+    // Only invent titles for volumes without a filesystem label / mount letter.
+    if (!info.label.empty() || !info.mount_points.empty()) {
+        return;
+    }
+    // GPT partition type GUIDs (same as old storage_manager.cpp).
+    static constexpr GUID kEfiSystemPartition = {
+        0xC12A7328, 0xF81F, 0x11D2, {0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B}};
+    static constexpr GUID kMicrosoftReserved = {
+        0xE3C9E316, 0x0B5C, 0x4DB8, {0x81, 0x7D, 0xF9, 0x2D, 0xF0, 0x02, 0x15, 0xAE}};
+    static constexpr GUID kWindowsRecovery = {
+        0xDE94BBA4, 0x06D1, 0x4D40, {0xA1, 0x6A, 0xBF, 0xD5, 0x01, 0x79, 0xD6, 0xAC}};
+    if (part.PartitionStyle == PARTITION_STYLE_GPT) {
+        if (guid_equal(part.Gpt.PartitionType, kEfiSystemPartition)) {
+            info.label = "EFI System Partition";
+            if (info.filesystem.empty()) {
+                info.filesystem = "FAT32";
+            }
+        } else if (guid_equal(part.Gpt.PartitionType, kMicrosoftReserved)) {
+            info.label = "Microsoft Reserved Partition";
+            if (info.filesystem.empty()) {
+                info.filesystem = "RAW";
+            }
+        } else if (guid_equal(part.Gpt.PartitionType, kWindowsRecovery)) {
+            info.label = "Recovery Partition";
+            if (info.filesystem.empty()) {
+                info.filesystem = "NTFS";
+            }
+        } else {
+            info.label = "Hidden Partition";
+        }
+    } else {
+        info.label = "Hidden Partition";
+    }
+}
+
 WindowsVolumeInfo inspect_volume(const wchar_t* volume_name) {
     WindowsVolumeInfo info;
     info.volume_guid_path = volume_name;
     info.mount_points = mount_points(volume_name);
     load_filesystem_metadata(volume_name, info);
     load_disk_extents(volume_name, info);
+    load_partition_identity(volume_name, info);
     return info;
 }
 
@@ -289,50 +504,169 @@ base::Result<std::vector<WindowsVolumeInfo>> WindowsVolumeEnumerator::enumerate(
     return base::Result<std::vector<WindowsVolumeInfo>>::success(std::move(volumes));
 }
 
+[[nodiscard]] std::string normalize_mount_letter(const WindowsVolumeInfo& volume) {
+    if (volume.mount_points.empty()) {
+        return {};
+    }
+    auto mount = to_utf8(volume.mount_points.front().wstring());
+    if (!mount) {
+        return {};
+    }
+    auto path = std::move(mount).value();
+    while (!path.empty() && (path.back() == '\\' || path.back() == '/')) {
+        path.pop_back();
+    }
+    return path;
+}
+
+bool supports_vss_snapshot(const WindowsVolumeInfo& volume) noexcept {
+    std::string normalized(volume.filesystem);
+    std::ranges::transform(normalized, normalized.begin(), [](const unsigned char character) {
+        return static_cast<char>(std::toupper(character));
+    });
+    return normalized == "NTFS" || normalized == "REFS";
+}
+
+[[nodiscard]] ports::SourceInventoryRecord
+make_disk_shell_record(const PhysicalDiskInfo& disk, const bool is_system_disk) {
+    return ports::SourceInventoryRecord{
+        .source_id = "disk." + std::to_string(disk.disk_number),
+        .stable_key = std::string(R"(\\.\PhysicalDrive)") + std::to_string(disk.disk_number),
+        .display_name = "Disk " + std::to_string(disk.disk_number),
+        .kind = contracts::SourceKind::kVolume,
+        .availability = contracts::SourceAvailability::kAvailable,
+        .capacity_bytes = 0,
+        .free_bytes = 0,
+        .disk_capacity_bytes = disk.capacity_bytes,
+        .is_system = is_system_disk,
+        .is_read_only = true,
+        .disk_number = disk.disk_number,
+        .mount_letter = {},
+        .volume_label = {},
+        .health_status = "Unallocated",
+        .partition_style = disk.partition_style,
+        .media_type = disk.media_type,
+    };
+}
+
+[[nodiscard]] base::Result<ports::SourceInventoryRecord>
+make_volume_record(const WindowsVolumeInfo& volume, const PhysicalDiskInfo& disk,
+                   const std::optional<std::wstring>& system_root) {
+    auto stable_key = to_utf8(volume.volume_guid_path.wstring());
+    if (!stable_key) {
+        return base::Result<ports::SourceInventoryRecord>::failure(stable_key.error());
+    }
+    auto source_id = source_id_for(stable_key.value());
+    if (source_id.empty()) {
+        return base::Result<ports::SourceInventoryRecord>::failure(
+            {base::ErrorCode::kInvalidArgument, "volume stable key is not a volume GUID path"});
+    }
+    const bool is_system =
+        system_root && std::ranges::any_of(volume.mount_points, [&](const auto& mount) {
+            return equal_path(mount, *system_root);
+        });
+    auto mount_letter = normalize_mount_letter(volume);
+    std::string health = "Healthy";
+    if (is_system) {
+        health = "Healthy (Boot, System)";
+    } else if (mount_letter.empty()) {
+        health = "Healthy (Hidden)";
+    }
+    if (!volume.volume_size_available) {
+        health = "Unavailable";
+    } else if (!supports_vss_snapshot(volume)) {
+        health += " - Raw backup";
+    }
+    auto display_name = display_name_for(volume, is_system);
+    // Prefer the friendly title for both fields so Desktop name binding matches old UI.
+    const auto volume_label = display_name;
+    auto free_bytes = volume.free_size_bytes;
+    if (free_bytes > volume.total_size_bytes) {
+        free_bytes = volume.total_size_bytes;
+    }
+    return base::Result<ports::SourceInventoryRecord>::success(ports::SourceInventoryRecord{
+        .source_id = std::move(source_id),
+        .stable_key = std::move(stable_key).value(),
+        .display_name = std::move(display_name),
+        .kind = contracts::SourceKind::kVolume,
+        .availability = volume.volume_size_available
+                            ? contracts::SourceAvailability::kAvailable
+                            : contracts::SourceAvailability::kUnavailable,
+        .capacity_bytes = volume.total_size_bytes,
+        .free_bytes = free_bytes,
+        .disk_capacity_bytes = disk.capacity_bytes,
+        .is_system = is_system,
+        .is_read_only = volume.is_read_only,
+        .disk_number = disk.disk_number,
+        .mount_letter = std::move(mount_letter),
+        .volume_label = volume_label,
+        .health_status = std::move(health),
+        .partition_style = disk.partition_style,
+        .media_type = disk.media_type.empty() ? "Unknown" : disk.media_type,
+    });
+}
+
 base::Result<std::vector<ports::SourceInventoryRecord>>
 WindowsSourceInventory::list_sources(const base::CancellationToken cancellation) {
     if (cancellation.stop_requested()) {
         return base::Result<std::vector<ports::SourceInventoryRecord>>::failure(
             {base::ErrorCode::kCancelled, "volume inventory cancelled"});
     }
+    // Disk-first inventory (old GetDisksWithVolumes): physical drives are the tree roots.
+    const auto disks = enumerate_physical_disks();
+    std::map<std::uint32_t, PhysicalDiskInfo> disk_by_number;
+    for (const auto& disk : disks) {
+        disk_by_number.emplace(disk.disk_number, disk);
+    }
+
     auto volumes = WindowsVolumeEnumerator::enumerate();
     if (!volumes) {
         return base::Result<std::vector<ports::SourceInventoryRecord>>::failure(volumes.error());
     }
     const auto system_root = system_volume_root();
+    std::map<std::uint32_t, std::size_t> volume_count_by_disk;
     std::vector<ports::SourceInventoryRecord> records;
-    records.reserve(volumes.value().size());
+    records.reserve(volumes.value().size() + disks.size());
+
     for (const auto& volume : volumes.value()) {
         if (cancellation.stop_requested()) {
             return base::Result<std::vector<ports::SourceInventoryRecord>>::failure(
                 {base::ErrorCode::kCancelled, "volume inventory cancelled"});
         }
-        auto stable_key = to_utf8(volume.volume_guid_path.wstring());
-        if (!stable_key) {
-            return base::Result<std::vector<ports::SourceInventoryRecord>>::failure(
-                stable_key.error());
-        }
-        auto source_id = source_id_for(stable_key.value());
-        if (source_id.empty()) {
+        // Old GetAllVolumes: skip volumes without a resolvable disk number (never default to 0).
+        if (!volume.disk_extents_available || volume.extents.empty()) {
             continue;
         }
-        const bool is_system =
-            system_root && std::ranges::any_of(volume.mount_points, [&](const auto& mount) {
-                return equal_path(mount, *system_root);
-            });
-        records.push_back({
-            .source_id = source_id,
-            .stable_key = std::move(stable_key).value(),
-            .display_name = display_name_for(volume, source_id),
-            .kind = contracts::SourceKind::kVolume,
-            .availability = volume.volume_size_available
-                                ? contracts::SourceAvailability::kAvailable
-                                : contracts::SourceAvailability::kUnavailable,
-            .capacity_bytes = volume.total_size_bytes,
-            .is_system = is_system,
-            .is_read_only = volume.is_read_only,
-        });
+        const auto disk_number = volume.extents.front().disk_number;
+        auto disk_it = disk_by_number.find(disk_number);
+        PhysicalDiskInfo disk_info;
+        if (disk_it != disk_by_number.end()) {
+            disk_info = disk_it->second;
+        } else {
+            // Volume maps to a drive we could not open as PhysicalDriveN — still publish the volume.
+            disk_info.disk_number = disk_number;
+            disk_info.partition_style = "Unknown";
+        }
+        auto record = make_volume_record(volume, disk_info, system_root);
+        if (!record) {
+            // Skip unusable GUID identities; do not fail the whole inventory.
+            if (record.error().code == base::ErrorCode::kInvalidArgument) {
+                continue;
+            }
+            return base::Result<std::vector<ports::SourceInventoryRecord>>::failure(record.error());
+        }
+        ++volume_count_by_disk[disk_number];
+        records.push_back(std::move(record).value());
     }
+
+    // Disk shells for physical drives with no attached volumes (old disksTree empty-disk rows).
+    for (const auto& disk : disks) {
+        if (volume_count_by_disk.contains(disk.disk_number)) {
+            continue;
+        }
+        records.push_back(make_disk_shell_record(disk, false));
+    }
+
     std::ranges::sort(records, {}, &ports::SourceInventoryRecord::source_id);
     return base::Result<std::vector<ports::SourceInventoryRecord>>::success(std::move(records));
 }

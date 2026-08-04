@@ -116,25 +116,17 @@ consistency；该声明以单一受管 Repository 根和 Adapter 协调写入为
 `kOutcomeUnknown`，不得伪报取消。Windows 错误映射到稳定 Aegra 错误码；消息只包含操作名和原生数值错误
 码，不包含 Repository 路径或客户对象名。
 
-## 测试
+## 验证
 
-`aegra_storage_local_tests` 必须复用 `tests/ports/object_storage_contract.h`，并额外覆盖：
-
-- open-existing、create-if-missing 和 Adapter 重开；
-- 完成 staging 后重开再发布、未完成 Session 析构清理；
-- generation 跨重开稳定及外部文件修改后变化；
-- `..`、内部保留前缀和 reparse-point 父目录拒绝；
-- 只读文件删除失败且原文件保留。
-
-符号链接测试仅在当前 Windows 环境允许创建 symlink 时执行断言；不具备 Developer Mode 或相应权限的 CI
-必须由管理员安全集成测试补充 reparse-point 场景。空间不足、ACL 拒绝和进程崩溃注入属于后续 Windows
-集成套件，不得宣称已由单元测试覆盖。
+构建 Local Storage 生产 Target，按公共 Object Storage 契约审查 open/create/reopen、staging、generation、
+路径拒绝、reparse point 和只读删除语义。涉及符号链接、空间不足、ACL 拒绝或进程崩溃时，仅在隔离的
+非生产目录执行管理员人工验证。
 
 ## Definition of Done
 
-- Windows Debug/Release 使用 VS 2026 Insiders 构建并通过公共 Storage Contract。
+- Windows Debug/Release 使用 VS 2026 Insiders 构建并遵循公共 Storage Contract。
 - root/key/reparse-point/扩展路径边界与本文件一致。
-- staging、发布、generation、删除、取消和 unknown outcome 语义有测试。
+- staging、发布、generation、删除、取消和 unknown outcome 语义有完整文档与验证记录。
 - Target 只依赖 Ports 和 Windows SDK，公共头不泄漏 Windows 类型。
 - 函数、文件、格式、静态检查和秘密扫描通过。
 

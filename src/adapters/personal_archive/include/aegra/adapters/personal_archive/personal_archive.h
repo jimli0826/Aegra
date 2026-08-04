@@ -28,7 +28,6 @@ struct ArchiveCreateRequest final {
     std::array<std::byte, 16> backup_set_uuid{};
     std::uint32_t block_size{0};
     std::uint32_t chunk_size{0};
-    std::uint32_t source_index{0};
     std::uint64_t split_size_bytes{0};
     ArchiveKdfParameters kdf_parameters;
     std::filesystem::path parent_source;

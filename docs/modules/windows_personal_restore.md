@@ -50,12 +50,11 @@ Validate Restore Job and trusted chain-depth limit
 - 成功以 `FlushFileBuffers` 完成为界；析构始终 best-effort 解锁句柄；
 - Worker 不在结果中输出口令、SecretRef、Archive 路径、Volume GUID 或底层 Win32 错误文本。
 
-## 测试与完成标准
+## 验证与完成标准
 
-- Windows Sink 普通文件模式覆盖 Port 行为和故障边界；
-- Restore Task Fake Backend 覆盖多层顺序、凭据一一对应、全部 Secret 生命周期、中途解析失败、链深度、
-  取消和错误脱敏；
-- Personal Archive 集成测试使用 full + incremental Chain Reader 通过通用 Restore Pipeline 验证最终内容；
-- 现有 Restore Pipeline 覆盖容量、连续映射、写入、flush、取消和背压；
+- 审查 Windows Sink 的 Port 行为和故障边界；
+- 审查多层顺序、凭据一一对应、全部 Secret 生命周期、中途解析失败、链深度、取消和错误脱敏；
+- 使用隔离的非生产 full + incremental Archive 链人工验证最终内容；
+- 审查 Restore Pipeline 的容量、连续映射、写入、flush、取消和背压路径；
 - Worker stdin/Named Pipe 共用同一 Restore 分发与 deadline；
 - Debug/Release、源码规模、依赖检查和秘密扫描通过。

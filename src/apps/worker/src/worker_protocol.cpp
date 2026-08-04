@@ -72,6 +72,9 @@ std::optional<contracts::BackupOptions> optional_backup(const Json& root) {
     result.parent_source_ref = iterator->value("parent_source_ref", std::string{});
     result.parent_credential_ref.value =
         iterator->value("parent_credential_ref", std::string{});
+    result.file_uuid = required<std::string>(*iterator, "file_uuid");
+    result.backup_set_uuid = required<std::string>(*iterator, "backup_set_uuid");
+    result.created_utc_ms = required<std::int64_t>(*iterator, "created_utc_ms");
     return result;
 }
 

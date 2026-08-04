@@ -12,11 +12,18 @@
 
 namespace aegra::pipeline {
 
+enum class BackupCommitMode : std::uint8_t {
+    kDefer = 1,
+    kCommit = 2,
+};
+
 struct BackupPlan final {
     std::string job_id;
     std::string trace_id;
     std::uint64_t chunk_size_bytes{0};
     std::size_t memory_budget_bytes{0};
+    std::uint32_t source_index{0};
+    BackupCommitMode commit_mode{BackupCommitMode::kCommit};
 };
 
 struct BackupSummary final {

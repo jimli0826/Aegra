@@ -139,7 +139,8 @@ bool test_tombstone_hides_target() {
     tombstone.targets.push_back({target.file_uuid,
                                  target.catalog_generation,
                                  target.archive_main_key,
-                                 {target.archive_main_key + ".bhx", target.archive_main_key}});
+                                 {{target.archive_main_key + ".bhx", std::nullopt},
+                                  {target.archive_main_key, std::nullopt}}});
     auto encoded = repository::encode_deletion_tombstone_json(tombstone);
     const auto key = std::string("catalog/deletions/") + kOperationUuid + ".tombstone";
     if (!expect(encoded && publish(storage, key, encoded.value()), "tombstone fixture publishes")) {

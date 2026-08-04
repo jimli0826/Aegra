@@ -1,6 +1,8 @@
 #include "aegra/apps/service/service_host.h"
 #include "aegra/apps/service/service_protocol.h"
+#include "aegra/apps/service/worker_job_service.h"
 
+#include "aegra/application/recovery_point_operations.h"
 #include "aegra/base/error.h"
 #include "aegra/contracts/service.h"
 #include "aegra/ports/message_channel.h"
@@ -32,6 +34,55 @@ bool expect(const bool condition, const char* message) {
 app::ServiceRuntimeInfo runtime_info() {
     return {.service_version = "0.1.0", .capabilities = {"repository.list", "service.info"}};
 }
+
+class ObservedRecoveryPointOperations final : public aegra::application::IRecoveryPointOperations {
+  public:
+    [[nodiscard]] base::Result<contracts::RecoveryPointChainResult>
+    resolve_chain(const contracts::RecoveryPointRef&, base::CancellationToken) override {
+        ++calls;
+        return base::Result<contracts::RecoveryPointChainResult>::success({});
+    }
+
+    [[nodiscard]] base::Result<contracts::DeletePlanSummary>
+    plan_delete(const contracts::RecoveryPointRef&, base::CancellationToken) override {
+        ++calls;
+        return base::Result<contracts::DeletePlanSummary>::success({});
+    }
+
+    [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
+    execute_delete(const contracts::ExecuteDeletePlanCommand&, std::string_view,
+                   base::CancellationToken) override {
+        ++calls;
+        return base::Result<contracts::CommandAcknowledgement>::success({});
+    }
+
+    std::size_t calls{0};
+};
+
+class ObservedWorkerJobService final : public app::IWorkerJobService {
+  public:
+    [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
+    start_backup(const contracts::StartBackupCommand&, std::string_view,
+                 base::CancellationToken) override {
+        ++calls;
+        return base::Result<contracts::CommandAcknowledgement>::success({});
+    }
+
+    [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
+    start_verify(const contracts::StartVerifyCommand&, std::string_view,
+                 base::CancellationToken) override {
+        ++calls;
+        return base::Result<contracts::CommandAcknowledgement>::success({});
+    }
+
+    [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
+    cancel_job(const contracts::ResourceRef&, std::string_view, base::CancellationToken) override {
+        ++calls;
+        return base::Result<contracts::CommandAcknowledgement>::success({});
+    }
+
+    std::size_t calls{0};
+};
 
 contracts::ServiceRequest service_request() {
     contracts::ServiceRequest request;
@@ -150,6 +201,47 @@ bool test_command_codec_and_unavailable_dispatch() {
                   "known but unavailable command is rejected without side effects");
 }
 
+bool test_disabled_s5_capabilities_block_injected_handlers() {
+    ObservedRecoveryPointOperations recovery_operations;
+    ObservedWorkerJobService worker_jobs;
+    auto runtime = runtime_info();
+    runtime.recovery_point_operations = &recovery_operations;
+    runtime.worker_jobs = &worker_jobs;
+
+    const std::array requests{
+        contracts::ServiceRequest{.request_id = "chain-request",
+                                  .kind = contracts::ServiceRequestKind::kResolveRecoveryPointChain,
+                                  .payload =
+                                      contracts::RecoveryPointRef{"repository:1", "recovery:1"}},
+        contracts::ServiceRequest{.request_id = "plan-request",
+                                  .kind = contracts::ServiceRequestKind::kPlanDeleteRecoveryPoints,
+                                  .payload =
+                                      contracts::RecoveryPointRef{"repository:1", "recovery:1"}},
+        contracts::ServiceRequest{.request_id = "verify-request",
+                                  .kind = contracts::ServiceRequestKind::kStartVerify,
+                                  .idempotency_key = "verify-command",
+                                  .payload =
+                                      contracts::StartVerifyCommand{"repository:1", "recovery:1"}},
+        contracts::ServiceRequest{.request_id = "delete-request",
+                                  .kind = contracts::ServiceRequestKind::kExecuteDeletePlan,
+                                  .idempotency_key = "delete-command",
+                                  .payload =
+                                      contracts::ExecuteDeletePlanCommand{"plan-token", true}},
+    };
+
+    bool passed = true;
+    for (const auto& request : requests) {
+        const auto response = app::dispatch_service_request(request, runtime);
+        passed &= expect(
+            response && response.value().kind == contracts::ServiceResponseKind::kRequestFailed &&
+                response.value().boundary_error_code == base::ErrorCode::kConflict &&
+                response.value().message_code == "service.capability_unavailable",
+            "disabled S5 capability blocks its injected handler");
+    }
+    return passed && expect(recovery_operations.calls == 0 && worker_jobs.calls == 0,
+                            "disabled S5 requests produce no handler side effects");
+}
+
 bool request_roundtrips(const contracts::ServiceRequestKind kind,
                         contracts::ServiceRequestPayload payload, const bool command) {
     contracts::ServiceRequest request;
@@ -190,6 +282,11 @@ bool test_planned_request_payload_codecs() {
     passed &= request_roundtrips(
         contracts::ServiceRequestKind::kPrepareRestore,
         contracts::RestorePreflightRequest{"recovery:1", "source:target-1"}, false);
+    const contracts::RecoveryPointRef recovery_ref{"repository:1", "recovery:1"};
+    passed &= request_roundtrips(contracts::ServiceRequestKind::kResolveRecoveryPointChain,
+                                 recovery_ref, false);
+    passed &= request_roundtrips(contracts::ServiceRequestKind::kPlanDeleteRecoveryPoints,
+                                 recovery_ref, false);
 
     const contracts::RepositoryConnectionInput repository_input{.display_name = "Local Repository",
                                                                 .locator = "repository:local",
@@ -204,13 +301,16 @@ bool test_planned_request_payload_codecs() {
         contracts::ServiceRequestKind::kSetDefaultRepository,
         contracts::ServiceRequestKind::kRemoveRepositoryConnection,
         contracts::ServiceRequestKind::kCancelJob,
-        contracts::ServiceRequestKind::kStartVerify,
         contracts::ServiceRequestKind::kUnmountSession,
         contracts::ServiceRequestKind::kDeleteSchedule,
     };
     for (const auto kind : reference_commands) {
         passed &= request_roundtrips(kind, contracts::ResourceRef{"resource:1"}, true);
     }
+    passed &= request_roundtrips(contracts::ServiceRequestKind::kStartVerify,
+                                 contracts::StartVerifyCommand{"repository:1", "recovery:1"}, true);
+    passed &= request_roundtrips(contracts::ServiceRequestKind::kExecuteDeletePlan,
+                                 contracts::ExecuteDeletePlanCommand{"plan-token-1", true}, true);
     passed &= request_roundtrips(contracts::ServiceRequestKind::kStartRestore,
                                  contracts::StartRestoreCommand{"preflight-token"}, true);
     passed &= request_roundtrips(
@@ -265,6 +365,27 @@ bool test_planned_response_payload_codecs() {
                                         contracts::AuditEventPage{});
     passed &= query_response_roundtrips(contracts::ServiceRequestKind::kListMountSessions,
                                         contracts::MountSessionPage{});
+    passed &= query_response_roundtrips(
+        contracts::ServiceRequestKind::kResolveRecoveryPointChain,
+        contracts::RecoveryPointChainResult{
+            .repository_connection_id = "repository:1",
+            .recovery_point_id = "recovery:1",
+            .layers = {{"recovery:1", contracts::BackupType::kFull, std::nullopt,
+                        contracts::RecoveryPointStructuralState::kComplete,
+                        contracts::RecoveryPointAuthenticationState::kNotAttempted,
+                        contracts::RecoveryPointChainCompleteness::kComplete}},
+            .restore_eligible = false,
+            .mount_eligible = false,
+            .verify_eligible = true,
+            .message_code = "recovery_point.chain_ready"});
+    passed &= query_response_roundtrips(
+        contracts::ServiceRequestKind::kPlanDeleteRecoveryPoints,
+        contracts::DeletePlanSummary{.plan_token = "plan-token-1",
+                                     .operation_id = "del-1",
+                                     .repository_connection_id = "repository:1",
+                                     .root_recovery_point_id = "recovery:1",
+                                     .targets = {{"recovery:1", 1, 1}},
+                                     .expires_utc_ms = 1});
     passed &= query_response_roundtrips(contracts::ServiceRequestKind::kPrepareRestore,
                                         contracts::RestorePreflight{"preflight-token", "recovery:1",
                                                                     "source:target-1", 100, 1,
@@ -412,6 +533,7 @@ int run_tests() {
     return test_request_codec() && test_response_codec_and_dispatch() &&
                    test_repository_list_codec_and_dispatch() &&
                    test_command_codec_and_unavailable_dispatch() &&
+                   test_disabled_s5_capabilities_block_injected_handlers() &&
                    test_planned_request_payload_codecs() &&
                    test_planned_response_payload_codecs() && test_command_acknowledgement_codec() &&
                    test_event_codec() && test_structured_rejections() && test_session()

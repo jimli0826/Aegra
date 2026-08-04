@@ -4,8 +4,7 @@
 #include <utility>
 
 namespace aegra::adapters::sqlite::detail {
-JobStore::JobStore(SqliteControlPlaneState& state,
-                   const bool* const unit_of_work_active) noexcept
+JobStore::JobStore(SqliteControlPlaneState& state, const bool* const unit_of_work_active) noexcept
     : state_(state), unit_of_work_active_(unit_of_work_active) {}
 
 base::Result<void> JobStore::insert(const ports::JobRecord& record,
@@ -157,8 +156,10 @@ base::Result<contracts::JobPage> JobStore::list(const contracts::JobListRequest&
         return base::Result<contracts::JobPage>::failure(token.error());
     }
     std::string sql =
-        "SELECT job_id, trace_id, operation, state, created_utc_ms, started_utc_ms, completed_utc_ms, "
-        "source_id, repository_connection_id, target_source_id, backup_type, parent_recovery_point_id, "
+        "SELECT job_id, trace_id, operation, state, created_utc_ms, started_utc_ms, "
+        "completed_utc_ms, "
+        "source_id, repository_connection_id, target_source_id, backup_type, "
+        "parent_recovery_point_id, "
         "preflight_token, message_code, idempotency_key, result_error_code, result_outcome, "
         "result_message_code FROM jobs WHERE 1=1";
     if (request.operation) {
@@ -184,8 +185,8 @@ base::Result<contracts::JobPage> JobStore::list(const contracts::JobListRequest&
         }
     }
     if (request.state) {
-        if (auto bound =
-                statement.value().bind_int64(bind_index++, static_cast<std::int64_t>(*request.state));
+        if (auto bound = statement.value().bind_int64(bind_index++,
+                                                      static_cast<std::int64_t>(*request.state));
             !bound) {
             return base::Result<contracts::JobPage>::failure(bound.error());
         }
@@ -214,8 +215,8 @@ base::Result<contracts::JobPage> JobStore::list(const contracts::JobListRequest&
             return base::Result<contracts::JobPage>::failure(record.error());
         }
         if (page.items.size() >= request.page.maximum_results) {
-            page.continuation_token = encode_page_token(kPageScopeJobs, filter,
-                                                        last_full->created_utc_ms, last_full->job_id);
+            page.continuation_token = encode_page_token(
+                kPageScopeJobs, filter, last_full->created_utc_ms, last_full->job_id);
             break;
         }
         last_full = record.value();
@@ -224,9 +225,8 @@ base::Result<contracts::JobPage> JobStore::list(const contracts::JobListRequest&
     return base::Result<contracts::JobPage>::success(std::move(page));
 }
 
-base::Result<ports::JobRecord>
-JobStore::transition(const ports::JobStateTransition& transition,
-                     const base::CancellationToken cancellation) {
+base::Result<ports::JobRecord> JobStore::transition(const ports::JobStateTransition& transition,
+                                                    const base::CancellationToken cancellation) {
     if (auto active = check_unit_of_work_active(unit_of_work_active_); !active) {
         return base::Result<ports::JobRecord>::failure(active.error());
     }
@@ -364,14 +364,13 @@ JobStore::mark_active_as_interrupted(const std::uint64_t interrupted_utc_ms,
         return base::Result<std::uint64_t>::failure(
             make_error(base::ErrorCode::kInvalidArgument, "interrupt timestamp is invalid"));
     }
-    auto statement = SqliteStatement::prepare(
-        state_.db,
-        "UPDATE jobs SET state = ?, "
-        "started_utc_ms = COALESCE(started_utc_ms, ?), "
-        "completed_utc_ms = ?, "
-        "message_code = 'job.interrupted', "
-        "result_message_code = 'job.interrupted' "
-        "WHERE state IN (?, ?)");
+    auto statement =
+        SqliteStatement::prepare(state_.db, "UPDATE jobs SET state = ?, "
+                                            "started_utc_ms = COALESCE(started_utc_ms, ?), "
+                                            "completed_utc_ms = ?, "
+                                            "message_code = 'job.interrupted', "
+                                            "result_message_code = 'job.interrupted' "
+                                            "WHERE state IN (?, ?, ?)");
     if (!statement) {
         return base::Result<std::uint64_t>::failure(statement.error());
     }
@@ -388,12 +387,17 @@ JobStore::mark_active_as_interrupted(const std::uint64_t interrupted_utc_ms,
         return base::Result<std::uint64_t>::failure(bound.error());
     }
     if (auto bound =
-            stmt.bind_int64(4, static_cast<std::int64_t>(contracts::ServiceJobState::kRunning));
+            stmt.bind_int64(4, static_cast<std::int64_t>(contracts::ServiceJobState::kQueued));
         !bound) {
         return base::Result<std::uint64_t>::failure(bound.error());
     }
     if (auto bound =
-            stmt.bind_int64(5, static_cast<std::int64_t>(contracts::ServiceJobState::kCancelling));
+            stmt.bind_int64(5, static_cast<std::int64_t>(contracts::ServiceJobState::kRunning));
+        !bound) {
+        return base::Result<std::uint64_t>::failure(bound.error());
+    }
+    if (auto bound =
+            stmt.bind_int64(6, static_cast<std::int64_t>(contracts::ServiceJobState::kCancelling));
         !bound) {
         return base::Result<std::uint64_t>::failure(bound.error());
     }
@@ -406,4 +410,3 @@ JobStore::mark_active_as_interrupted(const std::uint64_t interrupted_utc_ms,
 }
 
 } // namespace aegra::adapters::sqlite::detail
-

@@ -208,6 +208,47 @@ parse_recovery_point_request(const Json& payload) {
     return {payload.at("resource_id").get<std::string>()};
 }
 
+[[nodiscard]] Json encode_recovery_point_ref(const contracts::RecoveryPointRef& reference) {
+    return Json{{"repository_connection_id", reference.repository_connection_id},
+                {"recovery_point_id", reference.recovery_point_id}};
+}
+
+[[nodiscard]] contracts::RecoveryPointRef parse_recovery_point_ref(const Json& payload) {
+    constexpr std::array<std::string_view, 2> keys{"repository_connection_id", "recovery_point_id"};
+    if (!exact_keys(payload, keys)) {
+        throw std::invalid_argument("recovery point reference fields are invalid");
+    }
+    return {payload.at("repository_connection_id").get<std::string>(),
+            payload.at("recovery_point_id").get<std::string>()};
+}
+
+[[nodiscard]] Json encode_start_verify(const contracts::StartVerifyCommand& command) {
+    return Json{{"repository_connection_id", command.repository_connection_id},
+                {"recovery_point_id", command.recovery_point_id}};
+}
+
+[[nodiscard]] contracts::StartVerifyCommand parse_start_verify(const Json& payload) {
+    constexpr std::array<std::string_view, 2> keys{"repository_connection_id", "recovery_point_id"};
+    if (!exact_keys(payload, keys)) {
+        throw std::invalid_argument("start verify fields are invalid");
+    }
+    return {payload.at("repository_connection_id").get<std::string>(),
+            payload.at("recovery_point_id").get<std::string>()};
+}
+
+[[nodiscard]] Json
+encode_execute_delete_plan(const contracts::ExecuteDeletePlanCommand& command) {
+    return Json{{"plan_token", command.plan_token}, {"confirmed", command.confirmed}};
+}
+
+[[nodiscard]] contracts::ExecuteDeletePlanCommand parse_execute_delete_plan(const Json& payload) {
+    constexpr std::array<std::string_view, 2> keys{"plan_token", "confirmed"};
+    if (!exact_keys(payload, keys)) {
+        throw std::invalid_argument("execute delete plan fields are invalid");
+    }
+    return {payload.at("plan_token").get<std::string>(), payload.at("confirmed").get<bool>()};
+}
+
 [[nodiscard]] Json encode_start_backup(const contracts::StartBackupCommand& command) {
     return Json{
         {"source_id", command.source_id},
@@ -441,6 +482,9 @@ Json encode_request_payload(const contracts::ServiceRequest& request) {
     case contracts::ServiceRequestKind::kPrepareRestore:
         return encode_restore_preflight_request(
             std::get<contracts::RestorePreflightRequest>(request.payload));
+    case contracts::ServiceRequestKind::kResolveRecoveryPointChain:
+    case contracts::ServiceRequestKind::kPlanDeleteRecoveryPoints:
+        return encode_recovery_point_ref(std::get<contracts::RecoveryPointRef>(request.payload));
     case contracts::ServiceRequestKind::kAddRepositoryConnection:
     case contracts::ServiceRequestKind::kImportRepositoryConnection:
         return encode_repository_input(
@@ -449,12 +493,13 @@ Json encode_request_payload(const contracts::ServiceRequest& request) {
     case contracts::ServiceRequestKind::kSetDefaultRepository:
     case contracts::ServiceRequestKind::kRemoveRepositoryConnection:
     case contracts::ServiceRequestKind::kCancelJob:
-    case contracts::ServiceRequestKind::kStartVerify:
     case contracts::ServiceRequestKind::kUnmountSession:
     case contracts::ServiceRequestKind::kDeleteSchedule:
         return encode_resource_ref(std::get<contracts::ResourceRef>(request.payload));
     case contracts::ServiceRequestKind::kStartBackup:
         return encode_start_backup(std::get<contracts::StartBackupCommand>(request.payload));
+    case contracts::ServiceRequestKind::kStartVerify:
+        return encode_start_verify(std::get<contracts::StartVerifyCommand>(request.payload));
     case contracts::ServiceRequestKind::kStartRestore:
         return encode_start_restore(std::get<contracts::StartRestoreCommand>(request.payload));
     case contracts::ServiceRequestKind::kMountRecoveryPoint:
@@ -468,6 +513,9 @@ Json encode_request_payload(const contracts::ServiceRequest& request) {
     case contracts::ServiceRequestKind::kAcknowledgeEvents:
         return encode_event_acknowledgement(
             std::get<contracts::EventAcknowledgement>(request.payload));
+    case contracts::ServiceRequestKind::kExecuteDeletePlan:
+        return encode_execute_delete_plan(
+            std::get<contracts::ExecuteDeletePlanCommand>(request.payload));
     }
     throw std::invalid_argument("service request kind is invalid");
 }
@@ -501,6 +549,9 @@ contracts::ServiceRequestPayload parse_request_payload(const contracts::ServiceR
         return parse_mount_list_request(payload);
     case contracts::ServiceRequestKind::kPrepareRestore:
         return parse_restore_preflight_request(payload);
+    case contracts::ServiceRequestKind::kResolveRecoveryPointChain:
+    case contracts::ServiceRequestKind::kPlanDeleteRecoveryPoints:
+        return parse_recovery_point_ref(payload);
     case contracts::ServiceRequestKind::kAddRepositoryConnection:
     case contracts::ServiceRequestKind::kImportRepositoryConnection:
         return parse_repository_input(payload);
@@ -508,12 +559,13 @@ contracts::ServiceRequestPayload parse_request_payload(const contracts::ServiceR
     case contracts::ServiceRequestKind::kSetDefaultRepository:
     case contracts::ServiceRequestKind::kRemoveRepositoryConnection:
     case contracts::ServiceRequestKind::kCancelJob:
-    case contracts::ServiceRequestKind::kStartVerify:
     case contracts::ServiceRequestKind::kUnmountSession:
     case contracts::ServiceRequestKind::kDeleteSchedule:
         return parse_resource_ref(payload);
     case contracts::ServiceRequestKind::kStartBackup:
         return parse_start_backup(payload);
+    case contracts::ServiceRequestKind::kStartVerify:
+        return parse_start_verify(payload);
     case contracts::ServiceRequestKind::kStartRestore:
         return parse_start_restore(payload);
     case contracts::ServiceRequestKind::kMountRecoveryPoint:
@@ -524,6 +576,8 @@ contracts::ServiceRequestPayload parse_request_payload(const contracts::ServiceR
         return parse_event_subscription(payload);
     case contracts::ServiceRequestKind::kAcknowledgeEvents:
         return parse_event_acknowledgement(payload);
+    case contracts::ServiceRequestKind::kExecuteDeletePlan:
+        return parse_execute_delete_plan(payload);
     }
     throw std::invalid_argument("service request kind is invalid");
 }

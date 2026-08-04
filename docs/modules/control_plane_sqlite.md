@@ -46,7 +46,8 @@ src/adapters/sqlite/
 - `IControlPlaneDatabase`：schema version、begin unit of work、只读查询快照。
 
 Job 状态机为纯函数：`queued/running/cancelling/succeeded/failed/cancelled/interrupted`。
-Service 启动应对 `running` 与 `cancelling` 调用 `mark_active_as_interrupted`。
+Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_as_interrupted`；
+`queued` 也必须收敛，因为 Worker 启动前已先提交 durable Job intent。
 
 ## Schema 与不变量
 

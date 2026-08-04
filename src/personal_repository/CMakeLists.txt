@@ -5,6 +5,7 @@ add_library(aegra_personal_repository STATIC
     src/catalog_scanner.cpp
     src/catalog_validation.cpp
     src/chain_graph.cpp
+    src/delete_plan.cpp
     src/deletion_codec.cpp
     src/json_codec.cpp
 )

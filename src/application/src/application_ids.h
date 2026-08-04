@@ -14,6 +14,9 @@ namespace aegra::application::detail {
 [[nodiscard]] base::Result<std::string> make_random_id(std::string_view prefix,
                                                        ports::IRandomSource& random,
                                                        const base::CancellationToken& cancellation);
+// Lowercase RFC 4122 text UUID (version 4 bits set).
+[[nodiscard]] base::Result<std::string>
+make_random_uuid(ports::IRandomSource& random, const base::CancellationToken& cancellation);
 [[nodiscard]] bool is_source_selectable(const ports::SourceInventoryRecord& record) noexcept;
 
 } // namespace aegra::application::detail

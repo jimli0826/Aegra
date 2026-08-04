@@ -2,9 +2,11 @@
 
 #include "aegra/application/source_inventory_query.h"
 #include "aegra/apps/service/worker_supervisor.h"
+#include "aegra/personal_repository/catalog_scanner.h"
 #include "aegra/ports/clock.h"
 #include "aegra/ports/control_plane.h"
 #include "aegra/ports/random.h"
+#include "aegra/ports/repository_storage.h"
 
 #include <algorithm>
 #include <array>
@@ -13,6 +15,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace aegra::apps::service {
 namespace {
@@ -68,6 +71,31 @@ acknowledgement(std::string command_id, const contracts::CommandDisposition disp
            record.repository_connection_id == command.repository_connection_id &&
            record.backup_type == command.backup_type &&
            record.parent_recovery_point_id == command.parent_recovery_point_id;
+}
+
+template <typename Command, typename Matcher>
+[[nodiscard]] base::Result<contracts::CommandAcknowledgement>
+reconcile_submission_conflict(ports::IControlPlaneDatabase& control_plane,
+                              const std::string_view idempotency_key, const Command& command,
+                              Matcher&& matches, const base::Error& submission_error,
+                              const base::CancellationToken cancellation) {
+    if (submission_error.code != base::ErrorCode::kConflict) {
+        return base::Result<contracts::CommandAcknowledgement>::failure(submission_error);
+    }
+    auto existing = control_plane.get_job_by_idempotency_key(idempotency_key, cancellation);
+    if (!existing) {
+        return base::Result<contracts::CommandAcknowledgement>::failure(existing.error());
+    }
+    if (!existing.value()) {
+        return base::Result<contracts::CommandAcknowledgement>::failure(submission_error);
+    }
+    if (!std::forward<Matcher>(matches)(*existing.value(), command)) {
+        return base::Result<contracts::CommandAcknowledgement>::failure(
+            {base::ErrorCode::kConflict, "idempotency key request mismatch"});
+    }
+    return base::Result<contracts::CommandAcknowledgement>::success(
+        acknowledgement(existing.value()->job_id, contracts::CommandDisposition::kReplayed,
+                        existing.value()->job_id));
 }
 
 [[nodiscard]] std::string cancel_fingerprint(const std::string_view job_id) {
@@ -178,12 +206,153 @@ persist_cancel_command(ports::IControlPlaneDatabase& control_plane, ports::ICloc
 
 } // namespace
 
+[[nodiscard]] bool same_verify(const ports::JobRecord& record,
+                               const contracts::StartVerifyCommand& command) noexcept {
+    return record.operation == contracts::JobOperation::kVerify &&
+           record.source_id == command.recovery_point_id &&
+           record.repository_connection_id == command.repository_connection_id &&
+           !record.parent_recovery_point_id;
+}
+
+[[nodiscard]] base::Result<std::string>
+resolve_archive_absolute_path(const std::string& locator, const std::string& archive_main_key) {
+    auto root = path_from_utf8(locator);
+    if (!root) {
+        return base::Result<std::string>::failure(root.error());
+    }
+    if (!archive_main_key.starts_with("archives/") ||
+        archive_main_key.find('\\') != std::string::npos ||
+        archive_main_key.find(':') != std::string::npos ||
+        archive_main_key.find("..") != std::string::npos) {
+        return base::Result<std::string>::failure(
+            {base::ErrorCode::kInvalidArgument, "archive key is outside the archive root"});
+    }
+    std::filesystem::path relative;
+    try {
+        relative = std::filesystem::path(std::u8string(
+            reinterpret_cast<const char8_t*>(archive_main_key.data()), archive_main_key.size()));
+    } catch (const std::exception&) {
+        return base::Result<std::string>::failure(
+            {base::ErrorCode::kInvalidArgument, "archive key is invalid"});
+    }
+    std::error_code error_code;
+    const auto canonical_root = std::filesystem::weakly_canonical(root.value(), error_code);
+    if (error_code) {
+        return base::Result<std::string>::failure(
+            {base::ErrorCode::kIoFailure, "repository root cannot be resolved"});
+    }
+    const auto canonical_archive =
+        std::filesystem::weakly_canonical(canonical_root / relative, error_code);
+    if (error_code) {
+        return base::Result<std::string>::failure(
+            {base::ErrorCode::kIoFailure, "archive path cannot be resolved"});
+    }
+    const auto relative_to_root = canonical_archive.lexically_relative(canonical_root);
+    if (relative_to_root.empty() || relative_to_root == L".." ||
+        relative_to_root.native().starts_with(
+            L".." + std::wstring(1, std::filesystem::path::preferred_separator))) {
+        return base::Result<std::string>::failure(
+            {base::ErrorCode::kConflict, "archive path escapes repository root"});
+    }
+    return base::Result<std::string>::success(path_to_utf8(canonical_archive));
+}
+
+[[nodiscard]] base::Result<PreparedBackup>
+prepare_verify(const contracts::StartVerifyCommand& command,
+               ports::IControlPlaneDatabase& control_plane,
+               ports::IRepositoryStorageFactory& storage_factory, ports::IRandomSource& random,
+               const base::CancellationToken cancellation) {
+    auto repository =
+        control_plane.get_repository_connection(command.repository_connection_id, cancellation);
+    if (!repository) {
+        return base::Result<PreparedBackup>::failure(repository.error());
+    }
+    if (!repository.value() ||
+        repository.value()->state != contracts::RepositoryConnectionState::kAvailable) {
+        return base::Result<PreparedBackup>::failure(
+            {base::ErrorCode::kConflict, "repository connection is unavailable"});
+    }
+    auto storage = storage_factory.open(repository.value()->locator, cancellation);
+    if (!storage) {
+        return base::Result<PreparedBackup>::failure(storage.error());
+    }
+    personal_repository::RepositoryCatalogScanner scanner(storage.value()->reader(),
+                                                          storage.value()->enumerator());
+    std::optional<std::string> token;
+    std::optional<personal_repository::CatalogEntry> found;
+    for (;;) {
+        personal_repository::CatalogScanRequest request;
+        request.continuation_token = token;
+        request.maximum_results = 100;
+        auto page = scanner.scan(request, cancellation);
+        if (!page) {
+            return base::Result<PreparedBackup>::failure(page.error());
+        }
+        for (const auto& point : page.value().recovery_points) {
+            if (point.entry.file_uuid == command.recovery_point_id) {
+                found = point.entry;
+                break;
+            }
+        }
+        if (found || !page.value().continuation_token) {
+            break;
+        }
+        token = std::move(page.value().continuation_token);
+    }
+    if (!found) {
+        return base::Result<PreparedBackup>::failure(
+            {base::ErrorCode::kNotFound, "recovery point was not found"});
+    }
+    // Archive credential selection: never reuse a connection SecretRef without an explicit
+    // repository_uuid+file_uuid mapping. Mapping store is not yet durable; refuse with
+    // credential_required rather than guessing with the repository connection credential.
+    static_cast<void>(found->repository_uuid);
+    if (!repository.value()->credential_ref) {
+        return base::Result<PreparedBackup>::failure(
+            {base::ErrorCode::kUnauthorized, "archive.credential_required"});
+    }
+    // Explicit mapping table is not available yet. Connection credential is only valid when the
+    // connection advertises archive.default_credential (Service-managed single-secret repos).
+    // Import/connections without that capability must register a per-file mapping (future S5+).
+    const auto& capabilities = repository.value()->capabilities;
+    const bool allows_connection_secret =
+        std::find(capabilities.begin(), capabilities.end(), "archive.default_credential") !=
+        capabilities.end();
+    if (!allows_connection_secret) {
+        return base::Result<PreparedBackup>::failure(
+            {base::ErrorCode::kUnauthorized, "archive.credential_required"});
+    }
+    auto archive_path =
+        resolve_archive_absolute_path(repository.value()->locator, found->archive_main_key);
+    auto job_id = random_id("job-", random, cancellation);
+    auto trace_id = random_id("trace-", random, cancellation);
+    if (!archive_path || !job_id || !trace_id) {
+        if (!archive_path)
+            return base::Result<PreparedBackup>::failure(archive_path.error());
+        return base::Result<PreparedBackup>::failure(!job_id ? job_id.error() : trace_id.error());
+    }
+    contracts::JobRequest worker;
+    worker.job_id = job_id.value();
+    worker.tenant_id = "personal";
+    worker.operation = contracts::JobOperation::kVerify;
+    worker.source_refs = {archive_path.value()};
+    worker.target_ref.clear();
+    worker.credential_refs = {*repository.value()->credential_ref};
+    worker.trace_id = trace_id.value();
+    WorkerJobRequest request;
+    request.worker_request = std::move(worker);
+    request.source_id = command.recovery_point_id;
+    request.repository_connection_id = command.repository_connection_id;
+    return base::Result<PreparedBackup>::success({std::move(request), std::move(job_id).value()});
+}
+
 WorkerJobService::WorkerJobService(application::ISourceInventoryQuery& source_inventory,
                                    ports::IControlPlaneDatabase& control_plane,
+                                   ports::IRepositoryStorageFactory& storage_factory,
                                    WorkerSupervisor& supervisor, ports::IClock& clock,
                                    ports::IRandomSource& random) noexcept
-    : source_inventory_(source_inventory), control_plane_(control_plane), supervisor_(supervisor),
-      clock_(clock), random_(random) {}
+    : source_inventory_(source_inventory), control_plane_(control_plane),
+      storage_factory_(storage_factory), supervisor_(supervisor), clock_(clock), random_(random) {}
 
 base::Result<contracts::CommandAcknowledgement>
 WorkerJobService::start_backup(const contracts::StartBackupCommand& command,
@@ -214,7 +383,45 @@ WorkerJobService::start_backup(const contracts::StartBackupCommand& command,
     prepared.value().request.idempotency_key = std::string(idempotency_key);
     auto submitted = supervisor_.submit(prepared.value().request, cancellation);
     if (!submitted) {
-        return base::Result<contracts::CommandAcknowledgement>::failure(submitted.error());
+        return reconcile_submission_conflict(control_plane_, idempotency_key, command, same_backup,
+                                             submitted.error(), cancellation);
+    }
+    return base::Result<contracts::CommandAcknowledgement>::success(
+        acknowledgement(prepared.value().job_id, contracts::CommandDisposition::kAccepted,
+                        prepared.value().job_id));
+}
+
+base::Result<contracts::CommandAcknowledgement>
+WorkerJobService::start_verify(const contracts::StartVerifyCommand& command,
+                               const std::string_view idempotency_key,
+                               const base::CancellationToken cancellation) {
+    auto valid = contracts::validate_start_verify_command(command);
+    if (!valid) {
+        return base::Result<contracts::CommandAcknowledgement>::failure(valid.error());
+    }
+    auto existing = control_plane_.get_job_by_idempotency_key(idempotency_key, cancellation);
+    if (!existing) {
+        return base::Result<contracts::CommandAcknowledgement>::failure(existing.error());
+    }
+    if (existing.value()) {
+        if (!same_verify(*existing.value(), command)) {
+            return base::Result<contracts::CommandAcknowledgement>::failure(
+                {base::ErrorCode::kConflict, "idempotency key request mismatch"});
+        }
+        return base::Result<contracts::CommandAcknowledgement>::success(
+            acknowledgement(existing.value()->job_id, contracts::CommandDisposition::kReplayed,
+                            existing.value()->job_id));
+    }
+    auto prepared =
+        prepare_verify(command, control_plane_, storage_factory_, random_, cancellation);
+    if (!prepared) {
+        return base::Result<contracts::CommandAcknowledgement>::failure(prepared.error());
+    }
+    prepared.value().request.idempotency_key = std::string(idempotency_key);
+    auto submitted = supervisor_.submit(prepared.value().request, cancellation);
+    if (!submitted) {
+        return reconcile_submission_conflict(control_plane_, idempotency_key, command, same_verify,
+                                             submitted.error(), cancellation);
     }
     return base::Result<contracts::CommandAcknowledgement>::success(
         acknowledgement(prepared.value().job_id, contracts::CommandDisposition::kAccepted,

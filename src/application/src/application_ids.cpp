@@ -46,6 +46,29 @@ base::Result<std::string> make_random_id(const std::string_view prefix,
     return base::Result<std::string>::success(std::move(id));
 }
 
+base::Result<std::string> make_random_uuid(ports::IRandomSource& random,
+                                           const base::CancellationToken& cancellation) {
+    std::array<std::byte, 16> bytes{};
+    if (auto filled = random.fill(bytes, cancellation); !filled) {
+        return base::Result<std::string>::failure(filled.error());
+    }
+    // RFC 4122 version 4 / variant 10xx.
+    bytes[6] = static_cast<std::byte>((std::to_integer<unsigned>(bytes[6]) & 0x0FU) | 0x40U);
+    bytes[8] = static_cast<std::byte>((std::to_integer<unsigned>(bytes[8]) & 0x3FU) | 0x80U);
+    constexpr char kHex[] = "0123456789abcdef";
+    std::string id;
+    id.reserve(36);
+    for (std::size_t index = 0; index < bytes.size(); ++index) {
+        if (index == 4 || index == 6 || index == 8 || index == 10) {
+            id.push_back('-');
+        }
+        const auto value = std::to_integer<unsigned>(bytes[index]);
+        id.push_back(kHex[value >> 4U]);
+        id.push_back(kHex[value & 0x0FU]);
+    }
+    return base::Result<std::string>::success(std::move(id));
+}
+
 bool is_source_selectable(const ports::SourceInventoryRecord& record) noexcept {
     return record.availability == contracts::SourceAvailability::kAvailable && !record.is_system &&
            !record.is_read_only && record.capacity_bytes > 0 &&

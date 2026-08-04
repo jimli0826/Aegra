@@ -210,11 +210,82 @@ struct ResourceRef final {
     std::string resource_id;
 };
 
+// Trusted Service-side identity for a Recovery Point inside one Repository connection.
+// Desktop never supplies Archive paths, object keys, or chain arrays.
+struct RecoveryPointRef final {
+    std::string repository_connection_id;
+    std::string recovery_point_id;
+};
+
 struct StartBackupCommand final {
     std::string source_id;
     std::string repository_connection_id;
     BackupType backup_type{BackupType::kFull};
     std::optional<std::string> parent_recovery_point_id;
+};
+
+struct StartVerifyCommand final {
+    std::string repository_connection_id;
+    std::string recovery_point_id;
+};
+
+enum class RecoveryPointStructuralState : std::uint8_t {
+    kComplete = 1,
+    kIncomplete = 2,
+    kCorrupt = 3,
+};
+
+enum class RecoveryPointAuthenticationState : std::uint8_t {
+    kNotAttempted = 1,
+    kAuthenticated = 2,
+    kFailed = 3,
+    kCredentialRequired = 4,
+};
+
+enum class RecoveryPointChainCompleteness : std::uint8_t {
+    kComplete = 1,
+    kIncomplete = 2,
+    kInvalid = 3,
+};
+
+struct RecoveryPointChainLayer final {
+    std::string recovery_point_id;
+    BackupType backup_type{BackupType::kFull};
+    std::optional<std::string> parent_recovery_point_id;
+    RecoveryPointStructuralState structural_state{RecoveryPointStructuralState::kComplete};
+    RecoveryPointAuthenticationState authentication_state{
+        RecoveryPointAuthenticationState::kNotAttempted};
+    RecoveryPointChainCompleteness chain_state{RecoveryPointChainCompleteness::kIncomplete};
+};
+
+struct RecoveryPointChainResult final {
+    std::string repository_connection_id;
+    std::string recovery_point_id;
+    std::vector<RecoveryPointChainLayer> layers;
+    bool restore_eligible{false};
+    bool mount_eligible{false};
+    bool verify_eligible{false};
+    std::string message_code{"recovery_point.chain_ready"};
+};
+
+struct DeletePlanTargetSummary final {
+    std::string recovery_point_id;
+    std::uint64_t catalog_generation{0};
+    std::uint32_t member_count{0};
+};
+
+struct DeletePlanSummary final {
+    std::string plan_token;
+    std::string operation_id;
+    std::string repository_connection_id;
+    std::string root_recovery_point_id;
+    std::vector<DeletePlanTargetSummary> targets;
+    std::uint64_t expires_utc_ms{0};
+};
+
+struct ExecuteDeletePlanCommand final {
+    std::string plan_token;
+    bool confirmed{false};
 };
 
 struct RestorePreflightRequest final {
@@ -308,7 +379,9 @@ validate_mount_session_list_request(const MountSessionListRequest& request);
 [[nodiscard]] base::Result<void>
 validate_repository_connection_input(const RepositoryConnectionInput& input);
 [[nodiscard]] base::Result<void> validate_resource_ref(const ResourceRef& reference);
+[[nodiscard]] base::Result<void> validate_recovery_point_ref(const RecoveryPointRef& reference);
 [[nodiscard]] base::Result<void> validate_start_backup_command(const StartBackupCommand& command);
+[[nodiscard]] base::Result<void> validate_start_verify_command(const StartVerifyCommand& command);
 [[nodiscard]] base::Result<void>
 validate_restore_preflight_request(const RestorePreflightRequest& request);
 [[nodiscard]] base::Result<void> validate_restore_preflight(const RestorePreflight& preflight);
@@ -323,6 +396,11 @@ validate_event_subscription_request(const EventSubscriptionRequest& request);
 validate_event_acknowledgement(const EventAcknowledgement& acknowledgement);
 [[nodiscard]] base::Result<void>
 validate_command_acknowledgement(const CommandAcknowledgement& acknowledgement);
+[[nodiscard]] base::Result<void>
+validate_recovery_point_chain_result(const RecoveryPointChainResult& result);
+[[nodiscard]] base::Result<void> validate_delete_plan_summary(const DeletePlanSummary& summary);
+[[nodiscard]] base::Result<void>
+validate_execute_delete_plan_command(const ExecuteDeletePlanCommand& command);
 
 [[nodiscard]] base::Result<void>
 validate_repository_connection_page(const RepositoryConnectionPage& page);

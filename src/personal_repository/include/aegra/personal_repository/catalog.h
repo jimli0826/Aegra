@@ -55,11 +55,18 @@ struct CatalogEntry final {
     bool operator==(const CatalogEntry&) const = default;
 };
 
+struct DeletionMember final {
+    std::string key;
+    std::optional<std::string> generation;
+
+    bool operator==(const DeletionMember&) const = default;
+};
+
 struct DeletionTarget final {
     std::string file_uuid;
     std::uint64_t catalog_generation{0};
     std::string archive_main_key;
-    std::vector<std::string> member_keys;
+    std::vector<DeletionMember> members;
 
     bool operator==(const DeletionTarget&) const = default;
 };

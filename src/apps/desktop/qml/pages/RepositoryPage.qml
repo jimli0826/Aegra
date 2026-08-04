@@ -22,6 +22,7 @@ Item {
         anchors.margins: 20
         spacing: 12
 
+        // Title row matches old RepositoryPage (22px title, no accent bar)
         RowLayout {
             Layout.fillWidth: true
             spacing: 10
@@ -96,7 +97,7 @@ Item {
                 width: repositoryList.width
                 height: 96
                 radius: 4
-                color: root.repositorySelected ? Theme.colorHover : Theme.colorCard
+                color: Theme.colorCard
                 border.width: 1
                 border.color: root.repositorySelected
                               ? Theme.colorAccentBlue : Theme.colorBorder

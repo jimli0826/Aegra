@@ -118,18 +118,29 @@ SQLite 投影可以表达 `discovered`、`unavailable`、`corrupt`、`metadata_a
       "file_uuid": "11111111-2222-4333-8444-555555555555",
       "catalog_generation": 1,
       "archive_main_key": "archives/2026/08/11111111-2222-4333-8444-555555555555.bkf",
-      "member_keys": [
-        "archives/2026/08/11111111-2222-4333-8444-555555555555.bkf.bhx",
-        "archives/2026/08/11111111-2222-4333-8444-555555555555.bkf.001",
-        "archives/2026/08/11111111-2222-4333-8444-555555555555.bkf"
+      "members": [
+        {
+          "key": "archives/2026/08/11111111-2222-4333-8444-555555555555.bkf.bhx",
+          "generation": "storage-generation-3"
+        },
+        {
+          "key": "archives/2026/08/11111111-2222-4333-8444-555555555555.bkf.001",
+          "generation": "storage-generation-2"
+        },
+        {
+          "key": "archives/2026/08/11111111-2222-4333-8444-555555555555.bkf",
+          "generation": "storage-generation-1"
+        }
       ]
     }
   ]
 }
 ```
 
-`targets` 按后代到祖先排序；每个 `member_keys` 固定按 Sidecar、续卷从后向前、首卷的顺序保存。首卷
-必须是最后一个 member，且所有 key 必须位于 `archives/` 并与目标 `file_uuid` 的 Archive Group 一致。
+`targets` 按后代到祖先排序；每个 `members` 固定按 Sidecar、续卷从后向前、首卷的顺序保存。首卷
+必须是最后一个 member，且所有 key 必须位于 `archives/` 并与目标 `file_uuid` 的 Archive Group 一致。每个
+member 保存计划时观察到的 Storage generation；计划时对象已不存在则为 `null`。执行时已有 generation
+必须条件匹配，`null` member 必须仍不存在，防止重启续作删除同 key 的新对象。
 Tombstone 使用条件创建，同一 operation UUID 的不同内容是冲突。存在有效 Tombstone 的目标不得出现在
 可恢复列表中；执行完成后先删除 Catalog Entry，最后删除 Tombstone。Tombstone 不保存 SecretRef。
 

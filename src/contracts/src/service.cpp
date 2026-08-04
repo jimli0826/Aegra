@@ -85,6 +85,9 @@ template <typename Payload, typename Validator>
     case ServiceRequestKind::kPrepareRestore:
         return validate_payload<RestorePreflightRequest>(request,
                                                          validate_restore_preflight_request);
+    case ServiceRequestKind::kResolveRecoveryPointChain:
+    case ServiceRequestKind::kPlanDeleteRecoveryPoints:
+        return validate_payload<RecoveryPointRef>(request, validate_recovery_point_ref);
     default:
         return invalid("service query kind is invalid");
     }
@@ -100,12 +103,13 @@ template <typename Payload, typename Validator>
     case ServiceRequestKind::kSetDefaultRepository:
     case ServiceRequestKind::kRemoveRepositoryConnection:
     case ServiceRequestKind::kCancelJob:
-    case ServiceRequestKind::kStartVerify:
     case ServiceRequestKind::kUnmountSession:
     case ServiceRequestKind::kDeleteSchedule:
         return validate_resource_payload(request);
     case ServiceRequestKind::kStartBackup:
         return validate_payload<StartBackupCommand>(request, validate_start_backup_command);
+    case ServiceRequestKind::kStartVerify:
+        return validate_payload<StartVerifyCommand>(request, validate_start_verify_command);
     case ServiceRequestKind::kStartRestore:
         return validate_payload<StartRestoreCommand>(request, validate_start_restore_command);
     case ServiceRequestKind::kMountRecoveryPoint:
@@ -118,6 +122,9 @@ template <typename Payload, typename Validator>
                                                           validate_event_subscription_request);
     case ServiceRequestKind::kAcknowledgeEvents:
         return validate_payload<EventAcknowledgement>(request, validate_event_acknowledgement);
+    case ServiceRequestKind::kExecuteDeletePlan:
+        return validate_payload<ExecuteDeletePlanCommand>(request,
+                                                          validate_execute_delete_plan_command);
     default:
         return invalid("service command kind is invalid");
     }
@@ -153,6 +160,11 @@ template <typename Payload, typename Validator>
         return validate_response_payload<MountSessionPage>(response, validate_mount_session_page);
     case ServiceRequestKind::kPrepareRestore:
         return validate_response_payload<RestorePreflight>(response, validate_restore_preflight);
+    case ServiceRequestKind::kResolveRecoveryPointChain:
+        return validate_response_payload<RecoveryPointChainResult>(
+            response, validate_recovery_point_chain_result);
+    case ServiceRequestKind::kPlanDeleteRecoveryPoints:
+        return validate_response_payload<DeletePlanSummary>(response, validate_delete_plan_summary);
     default:
         return invalid("service query response kind is invalid");
     }
@@ -183,12 +195,12 @@ template <typename Payload, typename Validator>
 
 bool is_service_query_kind(const ServiceRequestKind kind) noexcept {
     return kind >= ServiceRequestKind::kGetServiceInfo &&
-           kind <= ServiceRequestKind::kPrepareRestore;
+           kind <= ServiceRequestKind::kPlanDeleteRecoveryPoints;
 }
 
 bool is_service_command_kind(const ServiceRequestKind kind) noexcept {
     return kind >= ServiceRequestKind::kAddRepositoryConnection &&
-           kind <= ServiceRequestKind::kAcknowledgeEvents;
+           kind <= ServiceRequestKind::kExecuteDeletePlan;
 }
 
 base::Result<void> validate_service_request(const ServiceRequest& request) {

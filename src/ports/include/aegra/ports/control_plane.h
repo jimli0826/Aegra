@@ -109,6 +109,7 @@ is_valid_job_state_transition(const contracts::ServiceJobState from,
     switch (from) {
     case contracts::ServiceJobState::kQueued:
         return to == contracts::ServiceJobState::kRunning ||
+               to == contracts::ServiceJobState::kFailed ||
                to == contracts::ServiceJobState::kCancelled ||
                to == contracts::ServiceJobState::kInterrupted;
     case contracts::ServiceJobState::kRunning:
@@ -196,8 +197,8 @@ class IJobStore {
     [[nodiscard]] virtual base::Result<JobRecord>
     transition(const JobStateTransition& transition, base::CancellationToken cancellation) = 0;
 
-    // Startup recovery: every running/cancelling job becomes interrupted with completed_utc_ms set.
-    // Returns the number of rows updated.
+    // Startup recovery: every queued/running/cancelling job becomes interrupted with
+    // completed_utc_ms set. Returns the number of rows updated.
     [[nodiscard]] virtual base::Result<std::uint64_t>
     mark_active_as_interrupted(std::uint64_t interrupted_utc_ms,
                                base::CancellationToken cancellation) = 0;

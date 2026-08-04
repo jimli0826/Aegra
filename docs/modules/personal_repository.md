@@ -197,5 +197,7 @@ generation、发布和删除语义见 [Local Storage 模块文档](storage_local
 
 阶段 13B 已实现 `RepositoryCatalogScanner`：先验证 Descriptor，再分页读取 Catalog Entry 与 Deletion
 Tombstone，隐藏删除中的 Recovery Point，验证 Repository/UUID/链图不变量，并按 `file_uuid` 稳定分页。
-读取具有短读、取消、对象数量、单文档和总字节上限，扫描期间 generation 变化会使查询失败。Scanner 不读取
-`.bkf`，不执行 KDF，也不修复 Catalog。Catalog Reconcile、Delete Plan 生成和 Tombstone 执行仍属后续阶段。
+
+S5 已增加 `delete_plan`：descendant-first 计划、带 Storage generation 的 `members`
+（sidecar → 续卷 → 主卷）、strict revalidation、Tombstone 发布与条件/幂等成员及 Catalog 删除执行。
+Catalog Reconcile（从 Archive 结构补建 Entry）仍属后续工作。

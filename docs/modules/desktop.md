@@ -5,13 +5,27 @@
 `apps/desktop` 是普通用户 Qt/QML 客户端，只通过版本化 Service IPC 获取状态和发起用例。阶段 13B 在连接、
 握手和重连骨架上增加个人版 Repository 与 Recovery Point 列表。
 
-旧 `backup/src/gui` 是 Desktop 的视觉和交互基线。迁移品牌 PNG/ICO、默认 `blueExtra` 调色板、无边框标题栏、
-可折叠侧栏、页面间距、卡片、表格和右侧抽屉结构。允许按新模块边界拆分和重写 QML，但同一页面已存在的
-布局与状态表达必须保持一致。
+旧 `D:\Work\OpenSource\backup\src\gui` 是 Desktop 的强制显示基线。迁移品牌 PNG/ICO、默认
+`blueExtra` 调色板、无边框标题栏、可折叠侧栏、页面间距、卡片、表格、右侧抽屉、toast/loading/splash
+和页面主要交互路径。允许按新模块边界拆分和重写 QML，但同一页面已存在的布局、视觉密度、颜色、控件尺寸、
+状态表达和动画节奏必须保持一致；旧 UI 不是“灵感参考”，而是新 Desktop 的视觉验收标准。
 
 不迁移 qmake 生成物、构建产物、超过源码限制的 Backend、HTTP/WebSocket 通信、TLS 校验豁免或让 GUI
 直接执行备份、恢复、挂载和 Repository I/O 的代码。旧 Backend 的所有数据访问改写为版本化 Service IPC；
 旧 UI 需要但 Service 尚未提供的操作保持禁用，不用本地直连临时补齐。不迁移旧 `I18n.qml` JavaScript 字典。
+
+## 旧 UI 显示一致性
+
+- 开发或返工任何 Desktop 页面前，必须运行或检查旧 `D:\Work\OpenSource\backup\src\gui` 对应页面，并保存旧 UI
+  基线截图。提交时提供旧/新并排证据；没有并排证据不能把页面标记为完成。
+- 新实现必须复刻旧 shell 的 32px 标题栏、产品图标/标题/版本位置、160px/56px 侧栏、40px 菜单项、默认
+  `blueExtra` 深蓝色板、12px 页面边距、3px 标题强调条、Card 标题栏、36px 表头、44px 表行、90% 右侧抽屉、
+  8px 弹窗圆角、按钮/hover/progress/toast/loading/splash 的同类视觉表现。
+- 可变的是数据来源和安全边界：旧 Backend、HTTP/WebSocket、直接路径输入、明文密码和本地 I/O 必须替换为
+  Service IPC、领域 model、capability gate、SecretRef 和 disabled/unavailable/empty/error 状态。不可变的是用户看到的
+  页面层级、密度和主要操作路径。
+- Home 保持旧 This PC + Tasks 两段工作台；Backup 保持旧 schedules list + Add + 90% slide-in wizard；Repository
+  保持旧卡片列表 + Recovery Point 右侧抽屉。Service 暂缺能力时在原位置禁用或显示 unavailable，不得改成新布局。
 
 ## 依赖与 Target
 
@@ -122,3 +136,17 @@ Use Case 接入前显示为禁用。布局必须在 900x600、1080x720 和更大
 - D0：Linguist 五语言、`LocaleController`、message-code 映射、`LocaleFormat`、最小语言切换入口。
 - D1：transport / protocol / coordinator / `RecoveryPointModel` 分层；Repository 行为已接入 Service V3。
 - S0 integration：Desktop 私有 codec 使用 V3 Request/Response envelope，仍只消费已声明 capability。
+- D2（进行中）：Home 页面、Splash/Retry、Toast、Loading overlay、`JobModel` + `job.list` 分页与有界轮询；
+  `ServiceRequestCoordinator` 支持并发 Repository/Job 请求；Home↔Repository 导航可用；
+  Backup/Restore/Mount 在 D3/D4/D6 接线前强制禁用（不得仅凭 capability 呈现无操作按钮）；
+  进度协议严格校验与溢出安全百分比；首次 Job 快照 toast 基线与可重启 Toast 定时器；
+  后台 Job 轮询不触发全屏 Loading overlay，Service Job 状态码映射到五语言稳定文案；
+  Repository/Job 客户端测试拆分为独立 Target，并生成多 viewport/locale 视觉证据
+  （`docs/migration/evidence/d2/`）。仍缺：按旧 `backup/src/gui` 对齐 Home/Splash/Toast/Loading/Shell 的
+  显示效果，并提交旧/新并排视觉证据。
+- D3（进行中）：Backup 页面与 Inventory/Connection model/codec、`StartBackup`/`CancelJob` 门面；
+  Source 仅绑定 Service Inventory 稳定 ID；Target 仅绑定 Repository connection；全量备份真实启动；
+  增量/差异/Schedule 禁用；凭据仅 SecretRef/Service 侧，QML 无明文密码；页面进度复用 D2 Job 观察；
+  五语言翻译与 `aegra_desktop_backup_client_tests`；Home↔Backup↔Repository 导航已接线。
+  仍缺：按旧 `backup/src/gui` 对齐 Backup list + Add + 90% slide-in wizard 的显示效果、多 viewport/locale
+  旧/新并排视觉证据矩阵、真实 Service/SQLite Job E2E 证据、Debug/Release 全量 `ctest` 门禁闭环。

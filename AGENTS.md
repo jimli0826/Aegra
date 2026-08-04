@@ -11,3 +11,5 @@ Before modifying production code, read:
 This product has not been released. Do not add compatibility paths, migration logic, aliases, or format fallbacks for code and artifacts from the previous repository unless an approved ADR explicitly requires them.
 
 Use Visual Studio 2026 Insiders from `C:\Program Files\Microsoft Visual Studio\18\Insiders` for Windows builds.
+
+Use QT 6.8.3 from C:\Qt6\6.8.3\msvc2022_64 for UI build.

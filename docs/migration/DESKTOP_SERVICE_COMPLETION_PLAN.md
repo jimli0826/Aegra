@@ -10,7 +10,7 @@
 SQLite 控制面、Inventory、Repository connection/query API 和单任务 Worker Supervisor；计划触发、完整事件查询、
 Verify/Restore/Mount Service 编排与对应 Desktop 页面仍待后续工作包完成。
 
-工作包状态最后更新于 2026-08-03。状态定义如下：
+工作包状态最后更新于 2026-08-04。状态定义如下：
 
 - `已完成`：满足本工作包 Definition of Done，并已同步实现、测试和文档；
 - `进行中`：已有 owner 领取并产生实现工作，尚未完成全部验收；
@@ -21,13 +21,16 @@ Verify/Restore/Mount Service 编排与对应 Desktop 页面仍待后续工作包
 第 5 节总览表是工作包状态的唯一权威来源。Agent 开始或完成工作时必须同步更新该表；不能仅根据代码文件
 存在就把工作包标记为已完成。
 
-本计划不要求兼容未发布旧项目的 UI Backend、通信协议、配置或数据。旧 UI 只作为视觉和工作流参考。
+本计划不要求兼容未发布旧项目的 UI Backend、通信协议、配置或数据。旧 `backup/src/gui` 的 UI 显示效果、
+页面结构、视觉密度和主要交互路径是 Desktop 的强制基线，不是可选参考；只有数据来源、后端调用和安全边界改为
+新版 Service IPC。
 
 ## 2. 目标与边界
 
 ### 2.1 目标
 
-- Desktop 保持旧项目的页面结构、主要操作路径和视觉密度，同时完全改用新版 Service IPC。
+- Desktop 显示效果必须与旧项目 `D:\Work\OpenSource\backup\src\gui` 保持一致，包括窗口 shell、侧栏、
+  页面结构、视觉密度、卡片/表格/抽屉样式和主要操作路径，同时完全改用新版 Service IPC。
 - Desktop 首批支持 `en_US`、`zh_CN`、`zh_TW`、`ja_JP` 和 `de_DE`，并可在运行时切换语言。
 - Service 成为个人版唯一控制面，负责 Repository 连接、任务、计划、事件和 Worker 生命周期。
 - 形成 Backup、Verify、Restore 和 Mount 的 `Desktop -> Service -> Worker/Mount Host -> Repository` 闭环。
@@ -125,6 +128,21 @@ aegra.error.repository.not_configured
 Service capability 经过单独设计后才能加入计划。旧 C++ Backend、`TaskWebSocket`、`I18n.qml`、qmake 文件、
 Makefile、`release/` 生成物和 `.bak` 文件全部禁止迁移。
 
+### 4.5 旧 UI 显示一致性强制门禁
+
+- 每个 Desktop 页面和共享 shell 开工前必须运行或检查旧 `D:\Work\OpenSource\backup\src\gui`，保存旧页面基线截图；
+  不能只阅读旧 QML 后凭印象重做。旧截图必须覆盖 900x600、1080x720、150% DPI 和默认 `blueExtra` 主题。
+- 新 Desktop 的首屏显示必须与旧 UI 对齐：32px 无边框标题栏、产品图标/标题/版本位置、160px/56px 可折叠侧栏、
+  深蓝 `blueExtra` 色板、12px 页面边距、3px 蓝色标题强调条、旧 Card 标题栏、36px 表头、44px 表行、
+  90% 右侧抽屉、8px 弹窗圆角、按钮高度/颜色/hover、toast/loading/splash 的位置和动画节奏都必须保持同类表现。
+- 允许为了新版 Service 边界替换数据源、禁用未接入操作、隐藏敏感路径/Secret、使用翻译 ID 和拆分组件；不允许因为
+  重写 QML 而改成新的仪表盘风格、营销式布局、大块空白、不同配色、不同导航层级或不同卡片/表格密度。
+- 旧 UI 有对应页面时，新页面必须按旧页面的视觉层级落位。Backup 仍是 schedules list + Add 按钮 + 右侧 90%
+  slide-in wizard；Home 仍是 This PC / Tasks 两段密集工作台；Repository 仍是卡片列表 + 右侧 Recovery Point 抽屉。
+  Service 暂缺的数据用 unavailable/empty/disabled 表达，但控件位置和视觉层级不得随意重排。
+- 页面交付报告必须同时包含旧 UI 截图、新 UI 截图和差异说明。没有旧/新并排视觉证据，或者肉眼明显不像旧
+  `backup/src/gui`，对应 Desktop 工作包不得标记为已完成，即使后端功能和测试已经通过。
+
 ## 5. 工作包总览
 
 | ID | 状态 | 优先级 | 工作包 | 主要产物 | 前置 |
@@ -136,9 +154,9 @@ Makefile、`release/` 生成物和 `.bak` 文件全部禁止迁移。
 | S2 | 已完成 | P1 | SQLite 控制面 | schema、repository connection、job/schedule/event stores | S0 |
 | S3 | 已完成 | P1 | Worker Supervisor | 启动、进度、取消、崩溃回收、结果持久化 | S0, S2 |
 | S4 | 已完成 | P1 | Inventory 与 Repository API | source inventory、connection/test、recovery point queries | S0, S2 |
-| D2 | 可开始 | P1 | Home 与全局任务体验 | Home、Splash、toast、task model | D0, D1, S0 |
-| D3 | 可开始 | P1 | Backup 页面 | source/target/options、启动/取消/进度 | D0, D1, S3, S4 |
-| S5 | 可开始 | P2 | Archive 深度操作 | authenticate、verify、显式链解析、删除计划 | S2, S3, S4 |
+| D2 | 进行中 | P1 | Home 与全局任务体验 | Home、Splash、toast、task model、旧 UI 视觉返工 | D0, D1, S0 |
+| D3 | 进行中 | P1 | Backup 页面 | source/target/options、启动/取消/进度 | D0, D1, S3, S4 |
+| S5 | 进行中 | P2 | Archive 深度操作 | authenticate、verify、显式链解析、删除计划 | S2, S3, S4 |
 | S6 | 等待前置 | P2 | Restore 编排 | preflight、目标检查、任务监督、结果查询 | S3, S5 |
 | D4 | 等待前置 | P2 | Restore 页面 | recovery point、链、目标、确认、进度 | D0, D1, S6 |
 | D5 | 等待前置 | P2 | Repository 管理 | add/import/test/default/delete/verify actions | D0, D1, S4, S5 |
@@ -220,7 +238,8 @@ V3 codec 只在 S0 contract 合并后由 integration owner 接入。
 - 使用迁移事务、外键、唯一约束和显式 UTC 时间；Service 单写者，读操作有一致快照语义。
 - Job 状态机至少包含 queued/running/cancelling/succeeded/failed/cancelled/interrupted。
 - command store 持久化幂等键、请求指纹、command/resource ID；同键同请求返回 replay，不同请求返回冲突。
-- Service 启动时把遗留 running/cancelling 任务收敛为 interrupted（`mark_active_as_interrupted`），
+- Service 启动时把遗留 queued/running/cancelling 任务收敛为 interrupted
+  （`mark_active_as_interrupted`），
   并由上层策略决定是否允许重新提交。
 - 数据库删除后可由 Repository 与配置重新建立索引；不得把 DB 当作 `.bkf` 或 Recovery Point 的权威来源。
 - 不保存密码、Chunk Index、Manifest、完整 Archive metadata 或用户块数据。
@@ -257,34 +276,177 @@ Service composition root 已接入。
 
 ### D2：Home、Splash 与全局任务体验
 
-**状态：可开始。**
+**状态：进行中。** 功能接线与 Review 指出的协议/任务缺口已闭环：Backup/Restore/Mount 在 D3/D4/D6 接线前强制禁用；
+进度 payload 校验 schema_version / job_id / trace_id / message_code 与 `processed_bytes <= logical_bytes`；
+进度百分比溢出安全；首次 Job 快照仅建立 toast 基线；Toast 使用可重启单一定时器；
+`aegra_desktop_service_client_tests` 覆盖空页、重复 ID、token 不前进、累计上限、malformed progress、
+超时、断线重查、轮询无重叠、Splash Retry、toast 去重；视觉证据见
+`docs/migration/evidence/d2/`（`aegra_desktop_visual_smoke_tests`）。但当前 UI 显示未满足旧
+`D:\Work\OpenSource\backup\src\gui` parity 要求，必须先返工 Home/Splash/Toast/Loading/Shell 的视觉层级、
+密度、颜色、卡片、表格和交互，再恢复完成状态。
 
-- 迁移 Home 的状态摘要、近期任务、Repository 容量摘要和常用动作，不复制旧 Backend 数据源。
-- Splash 只覆盖 Desktop 启动和首次 Service handshake；Service 不可用时进入可恢复错误页面，不能无限阻塞。
-- 建立全局 task list/progress、toast 和 loading overlay 组件；消息全部来自翻译 ID。
-- Home 不伪造缺失指标；Service capability 不存在时隐藏或禁用对应动作。
+**必须完成的范围：**
+
+- 必须新增真实 `JobModel`，通过 Service V3 `job.list` 分页读取 SQLite 中的权威 Job 摘要；必须支持
+  continuation token、去重、最大结果数、断线清理和整批原子发布。QML 不得解析 JSON、message code 或枚举值。
+- 必须让 `ServiceClient` 同时管理 Repository query 与 Job query，不得因单个 pending request 假设导致刷新互相
+  阻塞、响应串线或丢失。请求 ID、deadline、取消、断线和重连行为必须继续由 coordinator 管理。
+- 必须实现可用的 Home 页面，不是占位页，并且显示结构必须对齐旧 `HomePage.qml`：上半部保持 This PC
+  信息/磁盘摘要卡片，下半部保持 Tasks 表格卡片，沿用旧 Card、表头、表行、进度条、More 链接和取消确认样式。
+  Service 没有系统/磁盘容量数据时必须在旧布局位置显示 unavailable/empty/error，禁止改成新的 dashboard
+  卡片网格、硬编码 `0`、静态数字或假数据伪装成功。
+- 必须实现启动 Splash/遮罩状态机：只覆盖首次 handshake；成功后自动退出；超时、Service 未启动、协议拒绝或
+  连接失败时进入带 Retry 的可恢复错误状态。禁止无限 loading、固定延时后假装成功或在后台错误时保持 Ready。
+- 必须提供全局任务入口、任务列表、确定尺寸的 progress 展示、toast 和 loading overlay。当前 Service 尚未实现
+  task event subscription，因此必须以 `job.list` 为权威，并对 queued/running/cancelling Job 做无重叠的有界轮询；
+  不得伪造 event、在 QML 自行推进进度或宣称已接入 subscription。
+- 必须对 terminal Job toast 做 `job_id + terminal state` 去重；重连和刷新不得重复弹出同一完成通知。所有 toast、
+  状态、按钮和空态文本必须使用翻译 ID，并补齐五种 locale。
+- 必须完成 Home 与 Repository 的真实导航切换；当前 `Main.qml` 不能继续固定只渲染 Repository 页面。缺少后端
+  capability 的 Backup/Restore/Mount 等入口必须禁用或隐藏，但现有 Repository 页面不得回归。
+- 必须满足第 4.5 节旧 UI 显示一致性门禁、键盘焦点、可读 accessible name、900x600 最小窗口、1080x720、
+  150% DPI 和五种 locale 下无重叠、截断或不可操作控件，并提交旧/新并排截图或自动化视觉证据。
+
+**必须覆盖的测试：**
+
+- Job codec/model：空页、单页、多页、重复 Job ID、token 不前进、超过累计上限、乱序响应和错误 payload。
+- ServiceClient：Repository 与 Job 请求调度、刷新去重、deadline、断线、重连重查、Service unavailable 与 Retry。
+- UI 状态：首次启动成功/失败、loading/empty/error/ready、running/cancelling/terminal Job、toast 去重、
+  capability gate，以及旧 Home/Tasks/Splash/Toast/Loading/Shell 显示一致性。
+- Desktop Debug/Release target、Desktop 客户端测试、locale 测试和全套 `ctest` 必须通过。
+
+**以下情况一律不算完成：** 只有静态 QML；使用硬编码演示数据；只测试 fake model 而没有真实 Service frame；
+只支持成功路径；只在 1080x720/中文下验证；绕过 Service 读取 SQLite；留下无法工作的按钮/导航；或视觉上不像旧
+`backup/src/gui` 的 Home/Splash/Toast/Loading/Shell。
 
 ### D3：Backup 页面
 
-**状态：可开始。**
+**状态：进行中。** 已落地：Desktop Inventory/Connection codec 与 model、StartBackup/CancelJob
+ServiceClient 门面（幂等 key、active job 观察、断线保留 job_id）、`BackupPage.qml` 表单分区
+（source/target/options/schedule 禁用/credential 说明/confirm/progress）、五语言翻译、
+`aegra_desktop_backup_client_tests`、Main/Sidebar/Home 导航。尚未关闭：完整多 viewport/locale
+Backup 视觉证据、旧 `backup/src/gui` BackupPage 显示一致性返工、真实 Service→SQLite Job E2E、全量
+Debug/Release `ctest`。
 
-- 将旧 2480 行页面拆为 source selector、repository selector、backup options、schedule editor、confirmation 和 progress。
-- source 只来自 Service Inventory model；target 只来自 Repository connection model。
-- 提交 command 后按 job ID 观察进度；重复点击使用幂等 key，取消必须显示 cancelling 过渡态。
-- 密码通过受控 Credential/SecretRef 流程登记，不进入 QML model、日志或 command body。
-- 全量备份先完成；增量只在 Service 返回可用 parent capability 时启用；差异备份保持禁用。
+**必须完成的范围：**
+
+- 必须把旧 Backup 页面按新 Desktop 边界重写为可维护组件，但显示结构必须与旧 `BackupPage.qml` 一致：
+  主视图保持 schedules Card/table + 右上 Add 按钮，Add 打开 90% 宽右侧 slide-in wizard，wizard 保持
+  source/destination、schedule/options、add location 的旧视觉层级、标题栏、scrim、按钮和表单密度。不得迁移旧
+  Backend、HTTP/WebSocket、磁盘/VSS 直连、巨型 QML 或硬编码演示数据；不得改成全新的多卡片向导或营销式页面。
+  单个 QML/C++ 文件仍受源码规模门禁约束。
+- 必须新增或扩展真实 Desktop model/codec 来消费 Service V3 Inventory、Repository connection、Job 和 Backup
+  command 响应。QML 只绑定领域 model 角色，不解析 JSON、枚举数值、message code、SecretRef、设备路径或
+  Repository locator。
+- Source 只能来自 Service Inventory model 的稳定 source ID，并展示 label、容量、可选/只读/系统等 Service
+  已授权摘要。Desktop 不得让用户输入任意 Windows 路径、Volume GUID path、盘符或设备名来启动备份；无法备份的
+  source 必须禁用并给出本地化原因。
+- Target 只能来自 Repository connection model。未配置、离线、测试失败或 capability 不足时必须禁用 Start，
+  并保留 Add/Import/Test 等尚未接线操作的禁用状态；不得直接读取本地目录或 SQLite。
+- Backup options 必须支持全量备份的真实启动路径，并把 chunk、压缩、加密、deadline、trace 等受信任运行参数留在
+  Service/Worker 配置中，不从 QML 提交。差异备份必须保持禁用；增量备份只有在 Service 返回明确的 eligible
+  parent/capability 且 parent 属于同一 repository connection 与 source 时才能启用。
+- Eligible parent 选择必须由 Service/Application 返回的受信任摘要驱动。Desktop 不得自行用 Recovery Point 列表拼链、
+  猜测父 Archive path、提交对象 key、提交 Archive path 或把 Catalog 摘要成功解释为父点已认证成功；缺少能力时
+  增量入口显示为 unavailable/disabled。
+- 密码、口令创建和凭据选择必须通过受控 Credential/SecretRef 流程。QML model、Service command body、日志、
+  toast、错误文本和测试 golden data 都不得包含明文 Secret；SecretRef 也不得作为可见 UI 文本展示。
+- Start 必须发送 Service command，携带稳定幂等 key，并以 Service 返回的 `job_id` 进入观察状态。重复点击、重连或
+  command replay 不得创建重复 Job；同一幂等 key 对不同请求必须形成冲突而不是静默覆盖。
+- Backup 进度必须复用 D2 的全局 Job/Toast/Loading 规则，并在页面内展示 queued/running/cancelling/succeeded/
+  failed/cancelled。页面内百分比、字节数和阶段文本只来自 validated Job/Progress model；不得用 QML 定时器自行推进。
+- Cancel 必须调用 Service cancel command，并在收到 accepted 后进入 cancelling 过渡态；cancel 失败、job 已终止、
+  Service 断线和 deadline 触发必须有稳定本地化状态。按钮状态不能出现 Start 与 Cancel 同时可用或 terminal 后仍可取消。
+- Confirmation 必须展示 source、target、backup type、parent 摘要、估算/未知容量、credential 状态和不可逆提示；
+  对缺失字段、能力不可用、credential required、repository offline、source disappeared、parent stale 等 preflight
+  失败必须阻止提交。
+- Schedule panel 在 S8 schedule engine 接入前必须保留旧 Backup wizard 中的 schedule/options 视觉位置，但只能作为
+  disabled/unavailable 区域或本地草稿 UI，不得写入 Service、QSettings 或 SQLite，不得宣称已创建计划任务；
+  若 Service capability 提前提供 schedule preview，也只能消费其只读状态。
+- 所有可见文本、状态、按钮、错误、空态和 accessible name 必须使用翻译 ID，补齐 `en_US`、`zh_CN`、`zh_TW`、
+  `ja_JP`、`de_DE`；容量、时间和百分比必须通过现有 locale 格式化能力。
+- 必须满足第 4.5 节旧 UI 显示一致性门禁、键盘焦点顺序、可读 accessible name、900x600 最小窗口、1080x720、
+  150% DPI 和五种 locale 下无重叠、截断、遮挡或不可操作控件，并提交旧/新并排截图或自动化视觉证据。
+  Backup/Repository/Home 导航不得回归。
+
+**必须覆盖的测试：**
+
+- Contract/codec/model：Inventory 空页/多 source、不可备份 source、Repository 未配置/离线、eligible parent
+  空/多项/stale、Backup command accepted/replayed/conflict、Start failure、Cancel accepted/failure 和 malformed
+  payload 拒绝。
+- ServiceClient：StartBackup 与 CancelJob 的 request ID、deadline、幂等 key、断线清理、重连后 Job 观察、与
+  Repository/Job 轮询并发时不串线、不丢响应、不重复提交。
+- UI 状态：无 source、无 repository、credential required、full ready、incremental unavailable/ready、schedule
+  disabled、confirmation blocked/ready、queued/running/cancelling/terminal、重试、toast 去重、capability gate，
+  以及旧 Backup list/wizard 显示一致性。
+- 安全与日志：明文 password/secret 字段拒绝；日志、model role、toast、message code mapping 和测试 golden
+  输出不包含明文 Secret、Archive path、对象 key、设备路径或原始异常文本。
+- 真实路径：至少一个测试必须经过真实 Service frame/command dispatch 并形成 SQLite Job 摘要，另一个覆盖真实
+  cancel 到 Supervisor/Worker 边界或明确记录受环境限制的替代证据。
+- Desktop Debug/Release target、Desktop 客户端测试、locale 测试、视觉 smoke、直接 affected Service command 测试和
+  全套 `ctest` 必须通过。
+
+**以下情况一律不算完成：** 只有静态 QML；source/target 使用手写路径或假 model；Start 只在 UI 里切状态；
+只支持成功提交不支持 replay/conflict/cancel；QML 接触 Secret 或解析 wire JSON；增量由 Desktop 自行拼父链；
+schedule 看起来可用但没有 Service 能力；只在中文/1080x720 验证；留下可点击但无效的按钮；或视觉上不像旧
+`backup/src/gui` 的 BackupPage。
 
 ## 8. P2 恢复闭环工作包
 
 ### S5：Archive 深度扫描、Verify 与删除计划
 
-**状态：可开始。**
+**状态：进行中。** Review P1 已修复：删除 tombstone 权威续跑、command intent 先于副作用、tombstone
+内容冲突校验、Archive member generation 条件删除、pre-launch queued Job 启动收敛、Verify 不复用无映射
+连接凭据，以及未完成 S5 capability 的 dispatch gate。仍缺：真实 Verify Worker E2E、per-file Archive
+Credential 持久化映射表和 Local Storage 故障恢复门禁；完成前 capability 继续关闭。
 
-- 区分 Catalog 摘要扫描与需要凭据的 Archive 认证；列表成功不代表可恢复。
-- 由 `personal_repository` 解析显式 base-first 链、缺层、循环、parent mismatch 和 credential mapping。
-- Verify 作为受监督 Worker job 暴露，进度和结果进入统一任务模型。
-- 删除先生成影响计划，列出依赖恢复点和将删除的对象；执行必须携带计划 token、幂等 key 和用户确认。
-- 失败不得让 catalog 宣称对象已删除；tombstone、对象删除和 catalog 重建语义遵循 personal repository 文档。
+**必须完成的范围：**
+
+- 必须先补齐最小、版本化的 S5 Service contract，至少包含：受信任的 `repository_connection_id +
+  recovery_point_id` 引用、链解析/可恢复性查询、`start verify`、删除计划查询和按 plan token 执行删除。Desktop
+  不得提交 Archive path、对象 key、链数组或 Secret。现有 `StartVerify = ResourceRef` 如果无法表达连接归属，必须在
+  未发布协议中直接更正并同步 codec、validator、contract test 和 ADR/协议文档，禁止增加兼容 payload。
+- 必须实现 Application 用例，而不是把业务逻辑写进 `service_host.cpp`：按 connection 打开 Repository、扫描并定位
+  Recovery Point、构建 `RecoveryPointGraph`、返回 base-first 显式链，并稳定区分 not found、offline、corrupt、
+  incomplete、credential required、cancelled 和 internal。
+- 必须验证重复 UUID、自环、环、跨 Backup Set、缺父、parent mismatch、非法 backup type 和最大链深度；Catalog
+  摘要成功不能把 authentication 或 verification 标为成功。Restore/Mount eligibility 只能由 structural、
+  authentication 与 chain 三个独立状态共同决定。
+- 必须真正打通 `Service request -> Application resolution -> WorkerJobService -> WorkerSupervisor ->
+  aegra_personal_worker Verify task -> SQLite terminal Job`。不得只返回 command accepted、只写一条 Job 或使用 fake
+  Worker 代替 composition。Worker source 必须由 Service/Adapter 从受信任 locator 和已验证 Repository-relative key
+  构造，Application 不得手工拼接 Windows 路径。
+- 必须定义 Archive CredentialRef 选择规则并实现测试。当前 Service 创建的 Archive 可以使用持久化的 Repository
+  credential；导入 Archive 若没有明确映射必须返回 `credential_required`，禁止尝试空口令、复用无关连接凭据或把
+  SecretRef/明文放进响应、日志、Job message 和错误文本。
+- 必须实现 `personal_repository` 删除计划核心：选择一个 Recovery Point 后计算所有受影响后代、后代优先顺序、
+  Catalog generation、Archive 主卷/分卷/Sidecar 成员和稳定 operation UUID。计划结果必须由 Service 返回可展示摘要，
+  不能让 Desktop 自己推导影响范围。
+- 必须实现 plan token 的持久化或等价的可重放验证。执行删除时必须重新扫描并校验 repository UUID、目标集合、
+  generation 和链图；任何变化必须返回 conflict 并要求重新计划。执行命令必须同时要求 plan token、幂等 key 和
+  显式确认字段，缺一不可。
+- 必须按 personal repository 规则执行删除：先发布 Deletion Tombstone，再按后代优先删除 Archive members 和
+  Catalog entry；对象不存在视为幂等成功，单对象 `kOutcomeUnknown` 必须通过属性查询对账，部分失败必须可用同一
+  operation 继续。失败或重启后 Catalog 查询不得把已 tombstone 的点继续显示为可恢复。
+- 必须扩展最小 Storage Port/Factory 能力以支持 staged tombstone、conditional publish 和 idempotent delete；
+  `personal_repository` 不得依赖 Local Storage/Windows/SQLite，实现层不得把万能 Storage Backend 引入 Application。
+- 必须接入 Service composition、capability、Host dispatch、SQLite command/job/audit 投影和模块文档。Service
+  重启后必须能看到 Verify terminal state，并能继续未完成的删除 operation；不得依赖进程内 map 作为唯一状态。
+
+**必须覆盖的测试：**
+
+- Contract/codec：所有新增 request/response、错误 payload、幂等 replay、同 key 不同请求冲突和未知字段拒绝。
+- Chain：full/incremental、分叉、断链、环、跨 set、重复 UUID、parent mismatch、最大深度和取消。
+- Verify：正确/错误 credential、offline、损坏 Header/Footer/payload、缺卷、取消、deadline、Worker crash、无 Result、
+  Service 重启后的 terminal Job 查询，以及至少一个真实 Service -> Worker 进程测试。
+- Delete plan/execute：叶子、带后代、整链、generation 变化、重复执行、对象不存在、tombstone publish 失败、成员
+  部分删除、`kOutcomeUnknown` 对账、重启继续和 Catalog 重建后隐藏 deleting/deleted 点。
+- 受影响 target 的 Debug/Release 构建、全套 `ctest`、`architecture.source_limits`、格式与 `git diff --check`
+  必须全部通过。
+
+**以下情况一律不算完成：** 只实现 chain helper；只让 `StartVerify` 返回 accepted；只做 fake-process 测试；
+删除时直接 `Remove-Item`；Desktop 可传路径/key；删除计划不校验 generation；失败后留下可恢复假象；未接
+composition/capability；或只跑 Debug/单个测试。
 
 ### S6：Restore 编排
 
@@ -364,11 +526,11 @@ Service composition root 已接入。
 
 ### 11.2 页面迁移规则
 
-- 先用旧 UI 截图/运行结果确认视觉基线，再按新组件边界重写；不逐文件复制巨大 QML。
+- 先用旧 UI 截图/运行结果确认视觉基线，再按新组件边界重写；显示效果必须对齐旧 UI，不逐文件复制巨大 QML。
 - 每个页面先完成静态视觉、responsive layout、键盘/无障碍和 i18n，再连接 Service model。
 - 单个 QML/CPP 文件不接近 800 行上限；复杂表单、抽屉、表格和对话框拆成有领域名称的组件。
 - 不引入假的成功数据来补 Service 缺口；使用 capability、loading、empty、error 和 disabled 状态。
-- 页面完成时附 900x600、1080x720、150% DPI、五种 locale 的截图或自动化证据。
+- 页面完成时附旧/新并排的 900x600、1080x720、150% DPI、五种 locale 截图或自动化证据。
 
 ### 11.3 推荐并行波次
 
@@ -385,20 +547,150 @@ Wave 6: R0 发布门禁与全链路回归
 同一 wave 表示允许并行，不表示可以忽略表中前置依赖。每个 Service API 先合并 contract 和 fake-backed
 contract test，Desktop agent 才开始真实接入。
 
-### 11.4 下一轮双 Agent 安排
+### 11.4 下一轮与后续 Agent 安排
 
 **Agent A：S5 Archive 深度操作**
 
-- 实现 Archive authenticate、显式链解析、Verify job 和删除影响计划，复用现有 Worker Supervisor。
-- 独占 S5 Application/Service handler 与专属测试；需要扩展公共协议时先由 protocol owner 合入 contract。
+**任务目标：** 完整交付第 8 节 S5，不是提交一个局部 helper。最终必须让 Service 可以按
+`repository_connection_id + recovery_point_id` 解析链、启动真实 Verify Worker、生成删除影响计划并安全执行删除。
+
+**开始前必须完成：**
+
+1. 完整阅读 `CPP_ENGINEERING_STANDARD.md`、`MODULAR_ARCHITECTURE.md`、`personal_repository.md`、
+   `personal_archive_verify.md`、`application.md`、`service_host.md`、`ports.md`、`adapters.md`、
+   `control_plane_sqlite.md`、ADR-0010、ADR-0013 和个人版 Repository V1 格式文档。
+2. 先列出现有可复用能力和缺口：`RecoveryPointGraph`、Catalog Scanner、Verify Worker Task、Supervisor、
+   SQLite stores、Storage Port。禁止复制已有实现或在 Service Host 中重新实现 Pipeline。
+3. 在编码前给 integration owner 提交 contract/port 变更清单。新增 durable delete-plan 结构或协议语义时必须同步
+   ADR/格式文档；产品未发布，直接修正 schema，不加 legacy fallback。
+
+**必须交付的代码：**
+
+- S5 Contracts、validator、JSON codec 和 contract tests；
+- Application chain/eligibility/verify/delete-plan use case 与纯 fake-port 测试；
+- `personal_repository` 删除计划与执行核心，以及 Memory/Local Storage contract/integration tests；
+- Verify 的 `WorkerJobService` 接线、真实 Supervisor/Worker 进程测试和 SQLite Job/Command/Audit 持久化；
+- Service Host dispatch、capability、composition root、CMake、模块文档和计划状态更新。
+
+**文件所有权：** Agent A 独占新增 S5 Application、personal_repository、Service handler、Storage Port 扩展和专属测试。
+协议公共文件、`service_main.cpp`、Service 顶层 CMake、SQLite schema registry 与 `tests/CMakeLists.txt` 属 integration
+owner；Agent A 可以准备 patch，但合并前必须统一接线，不能复制一套旁路 composition。不得修改 Desktop QML。
+
+**实施顺序是强制的：** contract/port -> 核心 chain/delete-plan -> Application -> fake integration -> Service/Worker
+真实接线 -> Local Storage 故障恢复 -> Debug/Release 全量验证 -> 文档。禁止先把 capability 宣告为可用，再补实现。
+
+**交付报告必须包含：** 修改文件清单、每个 durable/IPC 语义、全部测试命令与结果、真实进程测试证明、失败恢复
+说明、仍未完成项。第 8 节 S5 任一“必须”条目缺失时，状态必须保持进行中，不得标记已完成。
 
 **Agent B：D2 Home 与全局任务体验**
 
-- 实现 Home、Splash、全局 task model、toast 和 loading/error 状态，复用现有 D0/D1 Desktop 分层。
-- 独占 Home/Task 领域 QML、models 和专属测试；不修改 S5 Service 领域实现。
+**任务目标：** 完整交付第 7 节 D2，形成可日常使用的 Home、首次连接恢复流程和全局 Job 体验；不是只画一个页面。
+
+**开始前必须完成：**
+
+1. 完整阅读 `CPP_ENGINEERING_STANDARD.md`、`MODULAR_ARCHITECTURE.md`、`desktop.md`、`service_host.md`、
+   ADR-0011、ADR-0013，以及现有 `ServiceClient`、request coordinator、Repository model 和五语言实现。
+2. 运行旧 `D:\Work\OpenSource\backup\src\gui` 和当前 Desktop，记录 Home、Splash、Toast、Loading、Repository
+   页和窗口 shell 的旧/新截图。旧 UI 的显示效果、视觉密度和主要交互必须复刻；不得复制旧 Backend、
+   HTTP/WebSocket、巨大 QML 或硬编码数据。
+3. 明确当前后端边界：可用的是 `service.info`、capabilities、`job.list` 和 Repository query；task event subscription
+   尚不可用。设计必须基于此事实，并保留将来切换事件订阅的扩展点。
+
+**必须交付的代码：**
+
+- Desktop 私有 `job.list` codec、分页 coordinator 接线、`JobModel` 与确定性 C++ 测试；
+- 与旧 UI 显示一致的 Home page、Splash/error/retry、全局 task surface、toast/loading 组件和实际导航；
+- ServiceClient 对 Job 刷新/有界轮询/重连/terminal 去重的实现，不破坏 Repository query；
+- 五语言翻译、message-code 映射、资源/qmldir/CMake 接线和 Desktop 模块文档；
+- 旧/新并排的 900x600、1080x720、150% DPI、五语言截图或自动化视觉证明。
+
+**文件所有权：** Agent B 独占新增 Home/Task QML、Desktop Job model/codec 和专属测试。`Main.qml`、共享导航、
+`resources.qrc`、`qmldir`、翻译目录与 Desktop 顶层 CMake 属 Desktop integration owner；需要修改时必须集中接线，
+不得复制 Sidebar、ServiceClient 或翻译目录规避冲突。不得修改 Service/Application/SQLite 生产代码。
+
+**实施顺序是强制的：** 旧 UI 基线截图 -> codec/model tests -> ServiceClient 多请求调度 ->
+Home/Splash/task components 视觉返工 -> navigation/i18n -> 断线与错误恢复 -> 多 viewport/locale 旧/新并排验证 ->
+Debug/Release 全量验证 -> 文档。禁止先提交静态页面后宣称后端待接。
+
+**交付报告必须包含：** 修改文件清单、UI 状态矩阵、请求/轮询策略、全部测试命令与结果、每个要求 viewport/locale
+的旧/新并排视觉证据、已禁用能力清单。第 7 节 D2 任一“必须”条目或第 4.5 节旧 UI 显示一致性缺失时，状态必须
+保持进行中，不得标记已完成。
+
+**Agent C：D3 Backup 页面**
+
+**任务目标：** 完整交付第 7 节 D3，让用户可以从真实 Service Inventory 与 Repository connection 中选择
+source/target，启动全量 Backup，观察进度并取消任务；增量、差异和 schedule 必须严格受 capability gate 约束。
+
+**开始前必须完成：**
+
+1. 完整阅读 `CPP_ENGINEERING_STANDARD.md`、`MODULAR_ARCHITECTURE.md`、`desktop.md`、`contracts.md`、
+   `service_host.md`、`worker_host.md`、`windows_personal_backup.md`、ADR-0013，以及现有 `ServiceClient`、
+   `JobModel`、Repository/RecoveryPoint model、Inventory/Backup V3 codec 和 D2 全局任务组件。
+2. 运行旧 `D:\Work\OpenSource\backup\src\gui` 和当前 Desktop，记录 Backup、Home、Repository、全局 task/toast
+   和窗口 shell 的旧/新截图。旧 Backup 页面是显示一致性基线，不是可选信息架构参考；不得复制旧 Backend、
+   路径输入、HTTP/WebSocket 或超大 QML。
+3. 明确当前 Service 能力：可用 source inventory、repository connection、job list、start backup、cancel job；
+   eligible parent、schedule 或 SecretRef 注册若未由 Service 明确声明 capability，UI 必须禁用或展示 unavailable。
+
+**必须交付的代码：**
+
+- Desktop 私有 Inventory/Repository/eligible parent/Backup command codec 与 model 接线，以及确定性 C++ 测试；
+- 与旧 BackupPage 显示一致的 Backup page 领域 QML 组件：schedule list、Add、90% slide-in wizard、source selector、
+  repository selector、backup options、schedule panel、confirmation、active progress、completion/error summary；
+- StartBackup/CancelJob 的 ServiceClient 门面、幂等 key、job_id 观察、断线恢复和 D2 全局 Job/Toast 复用；
+- Credential/SecretRef 受控交互入口，明文 Secret 不进入 QML model、command body、日志、toast 或 golden data；
+- 五语言翻译、message-code 映射、资源/qmldir/CMake 接线、Desktop 模块文档和 D3 视觉证据。
+
+**文件所有权：** Agent C 独占新增 Backup 领域 QML、Desktop Backup/Inventory/parent model/codec 和专属测试。
+`Main.qml`、Sidebar、共享 D2 task/toast 组件、`resources.qrc`、`qmldir`、翻译目录、Desktop 顶层 CMake 和 Service
+command/capability 接线属 integration owner；需要修改时集中接线，不得复制公共组件或绕过 Service。不得修改
+Pipeline、Worker 备份算法、Windows Disk/VSS Adapter、Repository 格式或 SQLite schema，除非 D3 发现已合并
+Service contract 存在阻塞性 bug，并由 owner 同意。
+
+**实施顺序是强制的：** 旧 Backup UI 基线截图 -> codec/model tests -> ServiceClient Start/Cancel/observe ->
+Backup list/wizard 静态视觉返工 -> i18n/accessibility -> credential gate -> full backup command path ->
+cancel/error/reconnect -> 多 viewport/locale 旧/新并排视觉验证 -> Debug/Release 全量验证 -> 文档。禁止先把 Start
+按钮做成可点击，再把旧 UI parity、后端、幂等、取消和安全作为后续项。
+
+**交付报告必须包含：** 修改文件清单、UI 状态矩阵、capability gate 清单、Start/Cancel 幂等与重连策略、Secret
+不泄漏检查、全部测试命令与结果、真实 Service/SQLite Job 证据、每个要求 viewport/locale 的旧/新并排视觉证据。
+第 7 节 D3 任一“必须”条目或第 4.5 节旧 UI 显示一致性缺失时，状态必须保持进行中，不得标记已完成。
 
 **集成交接**：Service integration owner 负责 S5 capability/composition 接线，Desktop integration owner 负责
-导航、共享翻译目录和顶层 CMake。两项可并行；S5 合并后再由后续 D3/D5 消费真实 Verify/删除能力。
+导航、共享翻译目录和顶层 CMake。两项可并行，但不得并发修改对方领域文件。S5 的 Service contract 如影响 Desktop，
+Agent B 本轮不得提前接入半成品；S5 合并后再由后续 D3/D5 消费真实 Verify/删除能力。
+
+### 11.5 Agent 共同强制门禁
+
+- “能编译”不等于完成。必须存在 production composition、真实请求路径和与风险匹配的失败测试。
+- 禁止用 hardcoded/fake/demo 数据补齐产品能力；Fake 只用于单元测试，至少一个测试必须经过真实 Adapter/进程边界。
+- 禁止把未实现的 capability 暴露为 available，禁止留可点击但无效的 UI 命令，禁止吞掉错误后返回成功。
+- 禁止把 Desktop 页面做成不同于旧 `backup/src/gui` 的新 UI 风格；没有旧/新并排视觉证据的 Desktop 页面不得完成。
+- 禁止新增旧协议、旧格式、旧 UI Backend 兼容层；确需 durable/IPC 决策必须同步 ADR。
+- 所有 command 必须有幂等、原子性和重启语义；所有长操作必须覆盖取消/deadline；日志和响应不得泄漏 SecretRef、
+  明文凭据、Archive path、对象 key、设备路径或原始异常。
+- 所有生产函数、lambda、文件和依赖方向必须通过工程限制；不得用压缩格式或巨型 `service_host.cpp`/`Main.qml`
+  规避拆分。
+- Windows 必须使用 VS 2026 Insiders。每个 agent 至少运行直接 affected Debug/Release target 和专属测试；integration
+  owner 在两项合并后必须运行 Debug/Release 全量 `ctest`、`architecture.source_limits`、格式和 `git diff --check`。
+- Agent 只有在所有强制条目有代码、测试和文档证据时才能更新状态为已完成。任何“后续再接 composition/test/i18n/
+  Release”的交付都只能标记进行中，并在交接中列出明确剩余项。
+
+**最低验收命令（必须在 VS 2026 Insiders Developer Command Prompt 环境运行）：**
+
+```powershell
+cmake --build --preset vs2026-debug --config Debug --parallel
+ctest --test-dir out/build/vs2026-debug -C Debug --output-on-failure
+cmake --preset vs2026-release
+cmake --build --preset vs2026-release --config Release --parallel
+ctest --test-dir out/build/vs2026-release -C Release --output-on-failure
+ctest --test-dir out/build/vs2026-debug -C Debug -R "architecture\.source_limits" --output-on-failure
+git diff --check
+```
+
+Agent 可以在开发过程中先运行直接 target，但最终交付报告必须包含上述全量结果；若环境原因无法执行某条命令，
+不得写“完成”，必须标记进行中并记录失败命令、完整错误和需要 integration owner 处理的具体条件。格式检查必须对
+所有本次修改/新增 C++ 文件使用仓库 `.clang-format`，不能只格式化已跟踪文件。
 
 ## 12. 测试与发布门禁
 

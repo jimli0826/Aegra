@@ -2,6 +2,7 @@
 
 #include "aegra/application/connected_repository_query.h"
 #include "aegra/application/personal_repository_query.h"
+#include "aegra/application/recovery_point_operations.h"
 #include "aegra/application/repository_connection_service.h"
 #include "aegra/application/source_inventory_query.h"
 #include "aegra/apps/service/service_protocol.h"
@@ -10,6 +11,7 @@
 
 #include <algorithm>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace aegra::apps::service {
@@ -17,6 +19,26 @@ namespace {
 
 [[nodiscard]] base::Result<contracts::ServiceResponse>
 capability_unavailable(const contracts::ServiceRequest& request);
+
+[[nodiscard]] std::string_view required_capability(const contracts::ServiceRequestKind kind) {
+    switch (kind) {
+    case contracts::ServiceRequestKind::kResolveRecoveryPointChain:
+        return "recovery_point.chain";
+    case contracts::ServiceRequestKind::kPlanDeleteRecoveryPoints:
+    case contracts::ServiceRequestKind::kExecuteDeletePlan:
+        return "recovery_point.delete";
+    case contracts::ServiceRequestKind::kStartVerify:
+        return "recovery_point.verify";
+    default:
+        return {};
+    }
+}
+
+[[nodiscard]] bool capability_enabled(const ServiceRuntimeInfo& runtime,
+                                      const contracts::ServiceRequestKind kind) {
+    const auto required = required_capability(kind);
+    return required.empty() || std::ranges::binary_search(runtime.capabilities, required);
+}
 
 [[nodiscard]] contracts::ServiceResponse
 failure(const base::ErrorCode code, std::string request_id = {},
@@ -193,6 +215,18 @@ command_response(const contracts::ServiceRequest& request, const ServiceRuntimeI
             std::get<contracts::StartBackupCommand>(request.payload), *request.idempotency_key,
             cancellation);
     } else if (runtime.worker_jobs && request.idempotency_key &&
+               request.kind == contracts::ServiceRequestKind::kStartVerify) {
+        handled = true;
+        result = runtime.worker_jobs->start_verify(
+            std::get<contracts::StartVerifyCommand>(request.payload), *request.idempotency_key,
+            cancellation);
+    } else if (runtime.recovery_point_operations && request.idempotency_key &&
+               request.kind == contracts::ServiceRequestKind::kExecuteDeletePlan) {
+        handled = true;
+        result = runtime.recovery_point_operations->execute_delete(
+            std::get<contracts::ExecuteDeletePlanCommand>(request.payload),
+            *request.idempotency_key, cancellation);
+    } else if (runtime.worker_jobs && request.idempotency_key &&
                request.kind == contracts::ServiceRequestKind::kCancelJob) {
         handled = true;
         result = runtime.worker_jobs->cancel_job(std::get<contracts::ResourceRef>(request.payload),
@@ -246,6 +280,41 @@ jobs_response(const contracts::ServiceRequest& request, const ServiceRuntimeInfo
     return base::Result<contracts::ServiceResponse>::success(std::move(response));
 }
 
+[[nodiscard]] base::Result<contracts::ServiceResponse>
+recovery_point_ops_response(const contracts::ServiceRequest& request,
+                            const ServiceRuntimeInfo& runtime,
+                            const base::CancellationToken cancellation) {
+    if (!runtime.recovery_point_operations) {
+        return capability_unavailable(request);
+    }
+    contracts::ServiceResponse response;
+    response.request_id = request.request_id;
+    response.kind = contracts::ServiceResponseKind::kQueryResult;
+    response.request_kind = request.kind;
+    response.boundary_error_code = base::ErrorCode::kNone;
+    if (request.kind == contracts::ServiceRequestKind::kResolveRecoveryPointChain) {
+        auto result = runtime.recovery_point_operations->resolve_chain(
+            std::get<contracts::RecoveryPointRef>(request.payload), cancellation);
+        if (!result) {
+            return base::Result<contracts::ServiceResponse>::success(
+                failure(result.error().code, request.request_id, request.kind,
+                        "recovery_point.query_failed"));
+        }
+        response.message_code = result.value().message_code;
+        response.payload = std::move(result).value();
+        return base::Result<contracts::ServiceResponse>::success(std::move(response));
+    }
+    auto result = runtime.recovery_point_operations->plan_delete(
+        std::get<contracts::RecoveryPointRef>(request.payload), cancellation);
+    if (!result) {
+        return base::Result<contracts::ServiceResponse>::success(failure(
+            result.error().code, request.request_id, request.kind, "recovery_point.plan_failed"));
+    }
+    response.message_code = "recovery_point.delete_plan_ready";
+    response.payload = std::move(result).value();
+    return base::Result<contracts::ServiceResponse>::success(std::move(response));
+}
+
 } // namespace
 
 base::Result<contracts::ServiceResponse>
@@ -255,6 +324,9 @@ dispatch_service_request(const contracts::ServiceRequest& request,
     auto valid_request = contracts::validate_service_request(request);
     if (!valid_request) {
         return base::Result<contracts::ServiceResponse>::failure(valid_request.error());
+    }
+    if (!capability_enabled(runtime, request.kind)) {
+        return capability_unavailable(request);
     }
     switch (request.kind) {
     case contracts::ServiceRequestKind::kGetServiceInfo:
@@ -266,19 +338,23 @@ dispatch_service_request(const contracts::ServiceRequest& request,
     case contracts::ServiceRequestKind::kListRepositoryConnections:
     case contracts::ServiceRequestKind::kListSourceInventory:
         return query_response(request, runtime, cancellation);
+    case contracts::ServiceRequestKind::kResolveRecoveryPointChain:
+    case contracts::ServiceRequestKind::kPlanDeleteRecoveryPoints:
+        return recovery_point_ops_response(request, runtime, cancellation);
     case contracts::ServiceRequestKind::kAddRepositoryConnection:
     case contracts::ServiceRequestKind::kImportRepositoryConnection:
     case contracts::ServiceRequestKind::kTestRepositoryConnection:
     case contracts::ServiceRequestKind::kSetDefaultRepository:
     case contracts::ServiceRequestKind::kRemoveRepositoryConnection:
     case contracts::ServiceRequestKind::kStartBackup:
+    case contracts::ServiceRequestKind::kStartVerify:
+    case contracts::ServiceRequestKind::kExecuteDeletePlan:
     case contracts::ServiceRequestKind::kCancelJob:
         return command_response(request, runtime, cancellation);
     case contracts::ServiceRequestKind::kListSchedules:
     case contracts::ServiceRequestKind::kListEvents:
     case contracts::ServiceRequestKind::kListMountSessions:
     case contracts::ServiceRequestKind::kPrepareRestore:
-    case contracts::ServiceRequestKind::kStartVerify:
     case contracts::ServiceRequestKind::kStartRestore:
     case contracts::ServiceRequestKind::kMountRecoveryPoint:
     case contracts::ServiceRequestKind::kUnmountSession:

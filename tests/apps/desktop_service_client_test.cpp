@@ -1,183 +1,20 @@
 #include "client/service_client.h"
+#include "desktop_client_test_support.h"
 
-#include <QByteArray>
 #include <QCoreApplication>
-#include <QElapsedTimer>
 #include <QJsonArray>
-#include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocalServer>
 #include <QLocalSocket>
-#include <QThread>
 
 #include <cstdio>
 #include <cstdlib>
-#include <functional>
 #include <optional>
-#include <utility>
 
 namespace {
 
 using aegra::desktop::ServiceClient;
-
-constexpr auto kPipeName = "aegra-service-control";
-constexpr auto kRepositoryUuid = "01234567-89ab-4cde-8f01-23456789abcd";
-constexpr auto kSetUuid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
-constexpr auto kFirstFileUuid = "11111111-2222-4333-8444-555555555555";
-constexpr auto kSecondFileUuid = "22222222-3333-4444-8555-666666666666";
-constexpr int kShortTimeoutMilliseconds = 3'000;
-
-bool expect(const bool condition, const char* message) {
-    if (condition) {
-        return true;
-    }
-    std::fprintf(stderr, "[FAIL] %s\n", message);
-    return false;
-}
-
-bool wait_until(const std::function<bool()>& predicate, const int timeout_ms) {
-    QElapsedTimer elapsed;
-    elapsed.start();
-    while (elapsed.elapsed() < timeout_ms) {
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
-        if (predicate()) {
-            return true;
-        }
-        QThread::msleep(5);
-    }
-    return predicate();
-}
-
-quint32 decode_length(const QByteArray& input) {
-    return static_cast<quint32>(static_cast<unsigned char>(input[0])) |
-           (static_cast<quint32>(static_cast<unsigned char>(input[1])) << 8U) |
-           (static_cast<quint32>(static_cast<unsigned char>(input[2])) << 16U) |
-           (static_cast<quint32>(static_cast<unsigned char>(input[3])) << 24U);
-}
-
-QByteArray frame(const QByteArray& body) {
-    const auto size = static_cast<quint32>(body.size());
-    QByteArray result;
-    result.reserve(body.size() + 4);
-    result.append(static_cast<char>(size & 0xFFU));
-    result.append(static_cast<char>((size >> 8U) & 0xFFU));
-    result.append(static_cast<char>((size >> 16U) & 0xFFU));
-    result.append(static_cast<char>((size >> 24U) & 0xFFU));
-    result.append(body);
-    return result;
-}
-
-QByteArray receive_frame(QLocalSocket& socket, const int timeout_ms) {
-    QByteArray input;
-    quint32 expected = 0;
-    const auto complete = [&] {
-        input.append(socket.readAll());
-        if (expected == 0 && input.size() >= 4) {
-            expected = decode_length(input);
-            input.remove(0, 4);
-        }
-        return expected > 0 && input.size() >= static_cast<int>(expected);
-    };
-    return wait_until(complete, timeout_ms) ? input.left(static_cast<int>(expected)) : QByteArray{};
-}
-
-QJsonObject receive_object(QLocalSocket& socket, const int timeout_ms) {
-    const auto document = QJsonDocument::fromJson(receive_frame(socket, timeout_ms));
-    return document.isObject() ? document.object() : QJsonObject{};
-}
-
-QLocalSocket* accept_client(QLocalServer& server, const int timeout_ms) {
-    if (!wait_until([&] { return server.hasPendingConnections(); }, timeout_ms)) {
-        return nullptr;
-    }
-    return server.nextPendingConnection();
-}
-
-bool send_object(QLocalSocket& socket, const QJsonObject& object) {
-    const auto encoded = frame(QJsonDocument(object).toJson(QJsonDocument::Compact));
-    return socket.write(encoded) == encoded.size() && socket.waitForBytesWritten(1'000);
-}
-
-QJsonObject response(const QString& request_id, const qint64 kind, const qint64 request_kind,
-                     const qint64 error, QString message_code, QJsonValue payload) {
-    return {{QStringLiteral("schema_version"), 3},
-            {QStringLiteral("message_type"), 2},
-            {QStringLiteral("request_id"), request_id},
-            {QStringLiteral("kind"), kind},
-            {QStringLiteral("request_kind"), request_kind},
-            {QStringLiteral("boundary_error_code"), error},
-            {QStringLiteral("message_code"), std::move(message_code)},
-            {QStringLiteral("message_arguments"), QJsonArray{}},
-            {QStringLiteral("payload"), std::move(payload)}};
-}
-
-bool send_service_info(QLocalSocket& socket, const QString& request_id,
-                       QJsonArray capabilities = {QStringLiteral("repository.list"),
-                                                  QStringLiteral("service.info")}) {
-    const QJsonObject service{{QStringLiteral("minimum_api_version"), 3},
-                              {QStringLiteral("api_version"), 3},
-                              {QStringLiteral("state"), 2},
-                              {QStringLiteral("service_version"), QStringLiteral("0.1.0")},
-                              {QStringLiteral("capabilities"), std::move(capabilities)}};
-    return send_object(socket,
-                       response(request_id, 1, 1, 0, QStringLiteral("service.ready"), service));
-}
-
-QJsonObject recovery_point(const QString& file_uuid, const std::optional<QString>& parent_uuid,
-                           const qint64 backup_type) {
-    return {{QStringLiteral("file_uuid"), file_uuid},
-            {QStringLiteral("backup_set_uuid"), QLatin1String(kSetUuid)},
-            {QStringLiteral("parent_uuid"),
-             parent_uuid ? QJsonValue(*parent_uuid) : QJsonValue(QJsonValue::Null)},
-            {QStringLiteral("backup_type"), backup_type},
-            {QStringLiteral("chain_state"), 1},
-            {QStringLiteral("created_utc_ms"), 1'775'174'400'000LL},
-            {QStringLiteral("logical_size_bytes"), 8'589'934'592LL},
-            {QStringLiteral("stored_size_bytes"), 4'294'967'296LL},
-            {QStringLiteral("source_count"), 1},
-            {QStringLiteral("has_sidecar"), backup_type != 1}};
-}
-
-bool send_catalog_page(QLocalSocket& socket, const QString& request_id, QJsonArray items,
-                       const std::optional<QString>& token) {
-    const QJsonObject catalog{{QStringLiteral("state"), 2},
-                              {QStringLiteral("repository_uuid"), QLatin1String(kRepositoryUuid)},
-                              {QStringLiteral("items"), std::move(items)},
-                              {QStringLiteral("continuation_token"),
-                               token ? QJsonValue(*token) : QJsonValue(QJsonValue::Null)}};
-    const QJsonObject page{
-        {QStringLiteral("repository_connection_id"), QJsonValue(QJsonValue::Null)},
-        {QStringLiteral("catalog"), catalog}};
-    return send_object(
-        socket, response(request_id, 1, 2, 0, QStringLiteral("repository.catalog_ready"), page));
-}
-
-bool send_not_configured(QLocalSocket& socket, const QString& request_id) {
-    const QJsonObject catalog{{QStringLiteral("state"), 1},
-                              {QStringLiteral("repository_uuid"), QString{}},
-                              {QStringLiteral("items"), QJsonArray{}},
-                              {QStringLiteral("continuation_token"), QJsonValue(QJsonValue::Null)}};
-    const QJsonObject page{
-        {QStringLiteral("repository_connection_id"), QJsonValue(QJsonValue::Null)},
-        {QStringLiteral("catalog"), catalog}};
-    return send_object(
-        socket, response(request_id, 1, 2, 0, QStringLiteral("repository.not_configured"), page));
-}
-
-bool send_repository_failure(QLocalSocket& socket, const QString& request_id) {
-    return send_object(socket,
-                       response(request_id, 3, 2, 5, QStringLiteral("repository.query_failed"),
-                                QJsonValue(QJsonValue::Null)));
-}
-
-bool valid_request(const QJsonObject& request, const qint64 kind) {
-    return request.value(QStringLiteral("schema_version")).toInteger() == 3 &&
-           request.value(QStringLiteral("message_type")).toInteger() == 1 &&
-           request.value(QStringLiteral("kind")).toInteger() == kind &&
-           request.value(QStringLiteral("idempotency_key")).isNull() &&
-           request.value(QStringLiteral("payload")).isObject() &&
-           !request.value(QStringLiteral("request_id")).toString().isEmpty();
-}
+using namespace aegra::desktop::test_support;
 
 bool begin_repository_query(QLocalServer& server, ServiceClient& client, QLocalSocket*& socket,
                             QJsonObject& list_request) {
@@ -251,8 +88,10 @@ bool test_pagination_and_reconnect() {
                           {recovery_point(QLatin1String(kFirstFileUuid), std::nullopt, 1)}, token),
         "fake service sends the first page");
     const auto second_request = receive_object(*socket, kShortTimeoutMilliseconds);
-    const auto second_payload = second_request.value(QStringLiteral("payload")).toObject();
-    const auto second_list = second_payload.value(QStringLiteral("page")).toObject();
+    const auto second_list = second_request.value(QStringLiteral("payload"))
+                                 .toObject()
+                                 .value(QStringLiteral("page"))
+                                 .toObject();
     passed &=
         expect(valid_request(second_request, 2) &&
                    second_list.value(QStringLiteral("continuation_token")).toString() == token,
@@ -363,6 +202,74 @@ bool test_cross_page_order_violation() {
     return passed;
 }
 
+void drain_pending_connections(QLocalServer& server) {
+    while (server.hasPendingConnections()) {
+        auto* pending = server.nextPendingConnection();
+        if (pending != nullptr) {
+            pending->abort();
+            pending->deleteLater();
+        }
+    }
+}
+
+bool test_splash_failure_and_retry() {
+    QLocalServer::removeServer(QLatin1String(kPipeName));
+    QLocalServer server;
+    if (!server.listen(QLatin1String(kPipeName))) {
+        return false;
+    }
+    ServiceClient client;
+    bool passed = expect(client.splashVisible(), "splash visible before ready");
+    auto* socket = accept_client(server, kShortTimeoutMilliseconds);
+    if (!expect(socket != nullptr, "initial connection accepted")) {
+        return false;
+    }
+    const auto info = receive_object(*socket, kShortTimeoutMilliseconds);
+    const QJsonArray bad_caps{QStringLiteral("service.info")};
+    passed &=
+        expect(valid_request(info, 1) &&
+                   send_service_info(*socket, info.value(QStringLiteral("request_id")).toString(),
+                                     bad_caps),
+               "invalid capabilities sent");
+    passed &= expect(wait_until([&] { return client.splashVisible() && !client.connected(); },
+                                kShortTimeoutMilliseconds),
+                     "splash remains for failed handshake");
+    socket->abort();
+    if (wait_until([&] { return server.hasPendingConnections(); }, 500)) {
+        drain_pending_connections(server);
+    }
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+    drain_pending_connections(server);
+
+    client.reconnect();
+    auto* retry_socket = accept_client(server, kShortTimeoutMilliseconds);
+    if (!expect(retry_socket != nullptr, "second retry accepted")) {
+        return false;
+    }
+    const auto retry_info = receive_object(*retry_socket, kShortTimeoutMilliseconds);
+    const QJsonArray capabilities{QStringLiteral("repository.list"),
+                                  QStringLiteral("service.info")};
+    passed &=
+        expect(valid_request(retry_info, 1) &&
+                   send_service_info(*retry_socket,
+                                     retry_info.value(QStringLiteral("request_id")).toString(),
+                                     capabilities),
+               "valid capabilities sent on retry");
+    const auto list_request = receive_object(*retry_socket, kShortTimeoutMilliseconds);
+    passed &=
+        expect(valid_request(list_request, 2) &&
+                   send_not_configured(*retry_socket,
+                                       list_request.value(QStringLiteral("request_id")).toString()),
+               "repository response sent after retry");
+    passed &= expect(wait_until([&] { return client.connected() && !client.splashVisible(); },
+                                kShortTimeoutMilliseconds),
+                     "splash exits after successful retry");
+    retry_socket->abort();
+    server.close();
+    QLocalServer::removeServer(QLatin1String(kPipeName));
+    return passed;
+}
+
 bool test_invalid_service_info() {
     QLocalServer::removeServer(QLatin1String(kPipeName));
     QLocalServer server;
@@ -395,11 +302,11 @@ bool test_invalid_service_info() {
 int main(int argument_count, char* arguments[]) noexcept {
     QCoreApplication application(argument_count, arguments);
     try {
-        const auto pagination = test_pagination_and_reconnect();
-        const auto failure = test_repository_failure_keeps_connection();
-        const auto ordering = test_cross_page_order_violation();
-        const auto service_info = test_invalid_service_info();
-        return pagination && failure && ordering && service_info ? EXIT_SUCCESS : EXIT_FAILURE;
+        const bool passed = test_pagination_and_reconnect() &&
+                            test_repository_failure_keeps_connection() &&
+                            test_cross_page_order_violation() && test_splash_failure_and_retry() &&
+                            test_invalid_service_info();
+        return passed ? EXIT_SUCCESS : EXIT_FAILURE;
     } catch (...) {
         std::fputs("[FAIL] unexpected exception\n", stderr);
         return EXIT_FAILURE;

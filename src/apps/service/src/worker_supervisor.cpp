@@ -435,24 +435,37 @@ base::Result<void> WorkerSupervisor::Impl::launch_worker(
     record.message_code = "job.queued";
     record.idempotency_key = request.idempotency_key;
     auto inserted = unit.value()->jobs().insert(record, cancellation);
-    if (!inserted)
+    if (!inserted) {
+        unit.value()->rollback();
         return base::Result<void>::failure(inserted.error());
+    }
+    auto queued_committed = unit.value()->commit(cancellation);
+    if (!queued_committed)
+        return queued_committed;
+
     auto launched =
         launcher.launch({config.worker_executable_path, {"--pipe", std::string(pipe_name)}});
-    if (!launched)
-        return base::Result<void>::failure(launched.error());
+    if (!launched) {
+        auto failed = persist_transition(
+            control_plane, clock, state->job_id, contracts::ServiceJobState::kFailed,
+            "service.worker_launch_failed", static_cast<std::uint32_t>(launched.error().code),
+            std::nullopt, "service.worker_launch_failed");
+        return failed ? base::Result<void>::failure(launched.error())
+                      : base::Result<void>::failure(failed.error());
+    }
     state->worker_pid = launched.value().pid;
-    ports::JobStateTransition running{state->job_id, contracts::ServiceJobState::kQueued,
-                                      contracts::ServiceJobState::kRunning, utc_now_ms(clock),
-                                      "job.running"};
-    auto changed = unit.value()->jobs().transition(running, cancellation);
-    auto committed =
-        changed ? unit.value()->commit(cancellation) : base::Result<void>::failure(changed.error());
-    if (committed)
-        return committed;
-    unit.value()->rollback();
+    auto running = persist_transition(control_plane, clock, state->job_id,
+                                      contracts::ServiceJobState::kRunning, "job.running",
+                                      std::nullopt, std::nullopt, std::nullopt);
+    if (running)
+        return base::Result<void>::success();
+
     terminate_and_wait(state, *dependencies);
-    return base::Result<void>::failure(committed.error());
+    (void)persist_transition(
+        control_plane, clock, state->job_id, contracts::ServiceJobState::kFailed,
+        "service.job_start_persistence_failed", static_cast<std::uint32_t>(running.error().code),
+        std::nullopt, "service.job_start_persistence_failed");
+    return base::Result<void>::failure(running.error());
 }
 
 base::Result<void>

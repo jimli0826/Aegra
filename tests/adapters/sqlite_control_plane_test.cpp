@@ -211,6 +211,23 @@ bool test_job_state_machine_and_interrupt_convergence() {
         {});
     passed &= expect(!illegal && illegal.error().code == aegra::base::ErrorCode::kInvalidArgument,
                      "illegal queued->succeeded rejected");
+    auto queued_failure =
+        make_job("job-launch-fail", contracts::ServiceJobState::kQueued, 201, "conn-1");
+    passed &= expect(unit.value()->jobs().insert(queued_failure, {}).has_value(),
+                     "insert launch-failure job");
+    auto launch_failed = unit.value()->jobs().transition(
+        {"job-launch-fail", contracts::ServiceJobState::kQueued,
+         contracts::ServiceJobState::kFailed, 251, "service.worker_launch_failed", 7, std::nullopt,
+         "service.worker_launch_failed"},
+        {});
+    passed &= expect(launch_failed &&
+                         launch_failed.value().state == contracts::ServiceJobState::kFailed &&
+                         launch_failed.value().started_utc_ms == 251 &&
+                         launch_failed.value().completed_utc_ms == 251,
+                     "queued worker launch failure is terminal and timestamped");
+    auto starting = make_job("job-starting", contracts::ServiceJobState::kQueued, 202, "conn-1");
+    passed &= expect(unit.value()->jobs().insert(starting, {}).has_value(),
+                     "insert durable pre-launch job");
     auto running = unit.value()->jobs().transition(
         {"job-run", contracts::ServiceJobState::kQueued, contracts::ServiceJobState::kRunning, 260,
          "job.running", std::nullopt, std::nullopt, std::nullopt},
@@ -239,13 +256,19 @@ bool test_job_state_machine_and_interrupt_convergence() {
         return false;
     }
     auto interrupted = recovery.value()->jobs().mark_active_as_interrupted(500, {});
-    passed &= expect(interrupted && interrupted.value() == 1, "one active job interrupted");
+    passed &=
+        expect(interrupted && interrupted.value() == 2, "queued and running jobs are interrupted");
     passed &= expect(recovery.value()->commit({}).has_value(), "commit interrupt recovery");
     auto loaded = database.value()->get_job("job-run", {});
     passed &= expect(loaded && loaded.value() &&
                          loaded.value()->state == contracts::ServiceJobState::kInterrupted &&
                          loaded.value()->completed_utc_ms == 500,
                      "running/cancelling converges to interrupted");
+    auto queued_loaded = database.value()->get_job("job-starting", {});
+    passed &= expect(queued_loaded && queued_loaded.value() &&
+                         queued_loaded.value()->state == contracts::ServiceJobState::kInterrupted &&
+                         queued_loaded.value()->completed_utc_ms == 500,
+                     "queued launch intent converges to interrupted after restart");
     return passed;
 }
 

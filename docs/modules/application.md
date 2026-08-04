@@ -57,3 +57,9 @@ S4 已增加：
 上述用例依赖 `IControlPlaneDatabase`、`IRepositoryStorageFactory`、`ISourceInventory` 与 `IClock`，现已由
 Service composition root 注入。Repository command 使用持久化幂等记录；同键同请求 replay，同键不同请求
 返回冲突。连接测试只把可用性写入控制面，不把 Catalog 或 Archive metadata 复制为权威数据。
+
+S5 增加 `RecoveryPointOperations`：按 connection 打开 Repository、扫描 Catalog、构建
+`RecoveryPointGraph`、返回 base-first 链摘要；生成 descendant-first 删除计划（plan token 持久化在
+Repository `staging/delete-plans/`），计划持久化每个 Archive member 的 Storage generation，并按
+tombstone 协议执行条件删除，防止崩溃续作误删同 key 的新对象。Verify 由 Service
+`WorkerJobService::start_verify` 构造受信任 Archive 路径后提交 Supervisor。

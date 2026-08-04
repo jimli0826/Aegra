@@ -22,6 +22,10 @@ class IRepositoryStorageAccess {
 
     [[nodiscard]] virtual IObjectReader& reader() noexcept = 0;
     [[nodiscard]] virtual IPrefixEnumerator& enumerator() noexcept = 0;
+    // Write-side ports for Catalog/tombstone publish and archive member delete (S5).
+    [[nodiscard]] virtual IStagedObjectWriter& writer() noexcept = 0;
+    [[nodiscard]] virtual IObjectPublisher& publisher() noexcept = 0;
+    [[nodiscard]] virtual IObjectDeleter& deleter() noexcept = 0;
 };
 
 class IRepositoryStorageFactory {

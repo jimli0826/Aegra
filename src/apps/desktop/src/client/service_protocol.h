@@ -13,6 +13,20 @@ namespace aegra::desktop {
 inline constexpr quint32 kServiceSchemaVersion = 3;
 inline constexpr quint32 kServiceApiVersion = 3;
 inline constexpr quint32 kRecoveryPointPageSize = 100;
+inline constexpr quint32 kJobPageSize = 100;
+inline constexpr quint32 kInventoryPageSize = 100;
+inline constexpr quint32 kConnectionPageSize = 100;
+inline constexpr int kListRepositoryConnectionsRequestKind = 3;
+inline constexpr int kListSourceInventoryRequestKind = 4;
+inline constexpr int kListJobsRequestKind = 5;
+inline constexpr int kStartBackupRequestKind = 37;
+inline constexpr int kCancelJobRequestKind = 38;
+inline constexpr int kCommandAcceptedResponseKind = 2;
+inline constexpr int kRequestFailedResponseKind = 3;
+inline constexpr int kBackupTypeFull = 1;
+inline constexpr int kBackupTypeIncremental = 2;
+inline constexpr int kCommandDispositionAccepted = 1;
+inline constexpr int kCommandDispositionReplayed = 2;
 
 struct ServiceInfo final {
     QString version;
@@ -26,16 +40,70 @@ struct RecoveryPointPage final {
     std::optional<QString> continuation_token;
 };
 
+struct JobPage final {
+    QVariantList items;
+    std::optional<QString> continuation_token;
+};
+
+struct SourceInventoryPage final {
+    QVariantList items;
+    std::optional<QString> continuation_token;
+};
+
+struct RepositoryConnectionPage final {
+    QVariantList items;
+    std::optional<QString> continuation_token;
+};
+
+struct CommandAck final {
+    QString command_id;
+    qint64 disposition{0};
+    QString resource_id;
+    bool has_resource_id{false};
+    QString message_code;
+};
+
 [[nodiscard]] QByteArray encode_service_info_request(const QString& request_id);
 [[nodiscard]] QByteArray
 encode_recovery_point_request(const QString& request_id,
                               const std::optional<QString>& continuation_token);
+[[nodiscard]] QByteArray encode_job_list_request(const QString& request_id,
+                                                 const std::optional<QString>& continuation_token);
+[[nodiscard]] QByteArray
+encode_source_inventory_request(const QString& request_id,
+                                const std::optional<QString>& continuation_token,
+                                bool include_unavailable = true);
+[[nodiscard]] QByteArray
+encode_repository_connection_list_request(const QString& request_id,
+                                          const std::optional<QString>& continuation_token);
+[[nodiscard]] QByteArray encode_start_backup_request(const QString& request_id,
+                                                     const QString& idempotency_key,
+                                                     const QString& source_id,
+                                                     const QString& repository_connection_id,
+                                                     int backup_type = kBackupTypeFull,
+                                                     const QString& parent_recovery_point_id = {});
+[[nodiscard]] QByteArray encode_cancel_job_request(const QString& request_id,
+                                                   const QString& idempotency_key,
+                                                   const QString& job_id);
 
 [[nodiscard]] bool parse_response_root(const QByteArray& body, const QString& request_id,
                                        QJsonObject& root);
 [[nodiscard]] bool parse_service_info_response(const QJsonObject& root, ServiceInfo& result);
 [[nodiscard]] bool parse_recovery_point_response(const QJsonObject& root,
                                                  RecoveryPointPage& result);
+[[nodiscard]] bool parse_job_list_response(const QJsonObject& root, JobPage& result);
+[[nodiscard]] bool parse_source_inventory_response(const QJsonObject& root,
+                                                   SourceInventoryPage& result);
+[[nodiscard]] bool parse_repository_connection_list_response(const QJsonObject& root,
+                                                             RepositoryConnectionPage& result);
+[[nodiscard]] bool parse_command_ack_response(const QJsonObject& root, int expected_request_kind,
+                                              CommandAck& result);
+// Parses one JobSummary JSON object into the desktop map form used by JobModel.
+[[nodiscard]] bool parse_job_summary_object(const QJsonObject& object, QVariantMap& result);
 [[nodiscard]] bool is_repository_failure_response(const QJsonObject& root);
+[[nodiscard]] bool is_job_failure_response(const QJsonObject& root);
+[[nodiscard]] bool is_inventory_failure_response(const QJsonObject& root);
+[[nodiscard]] bool is_connection_list_failure_response(const QJsonObject& root);
+[[nodiscard]] bool is_command_failure_response(const QJsonObject& root, int expected_request_kind);
 
 } // namespace aegra::desktop

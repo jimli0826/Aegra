@@ -61,8 +61,10 @@ Accept -> Receive Frame -> Decode/Validate -> Dispatch -> Encode -> Send -> Rece
 - schema 3 使用 Request/Response/Event envelope，不兼容未发布的 schema 1/2；详见
   [ADR-0013](../adr/0013-service-control-protocol-v3.md)。
 - `request_id` 用于请求响应对账，不作为权限或幂等凭据；查询不携带幂等键，命令必须携带幂等键。
-- V3 已执行 `service.info`、Inventory、Repository connection/query、Job list、Backup start 和 Job cancel；
-  尚未接入的 Verify/Restore/Mount/Schedule/Event 请求返回 `service.capability_unavailable`。
+- V3 已对外执行 `service.info`、Inventory、Repository connection/query、Job list、Backup start 与 Job
+  cancel。Recovery Point chain、delete plan/execute 与 Verify start 的 handler 已接线，但 S5 完成门禁前不在
+  runtime capability 列表中；dispatcher 必须在调用 handler 前返回 `service.capability_unavailable`。尚未接入的
+  Restore/Mount/Schedule/Event 请求同样返回 capability unavailable。
 - Repository 响应只包含 Repository UUID 和不含客户 Metadata 的 Catalog 摘要，不包含根路径、Archive key、
   主机名、SID、SecretRef 或原始 Adapter 错误。
 - frame 最大 64 KiB，JSON 根必须是 object，整数必须先检查范围。
@@ -108,6 +110,6 @@ Chunk Index、Manifest 或 Archive metadata 的权威副本；Repository 仍是�
 
 ## 当前状态
 
-S0-S4 已完成并接入 `aegra_service` Composition Root：Service V3、安全 Host/SCM `ServiceMain`、SQLite
-控制面、Worker Supervisor、Inventory 与 Repository connection/query API。SCM 安装/卸载 CLI 仍由现有
-Windows Service control 入口承担；发布安装器与完整非管理员 E2E 属 R0。
+S0-S4 已完成；S5 进行中并已部分接入 composition：chain/delete/verify contracts、Application 用例、
+delete-plan 核心和 Host dispatch 已存在，但 capability 保持关闭。完整真实 Verify Worker 进程测试、持久化
+per-file Archive Credential 映射与 Local Storage 故障恢复门禁仍待补齐。

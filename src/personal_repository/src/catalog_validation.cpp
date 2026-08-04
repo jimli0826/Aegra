@@ -58,27 +58,29 @@ namespace {
 }
 
 [[nodiscard]] bool valid_member_sequence(const DeletionTarget& target) noexcept {
-    if (target.member_keys.empty() || target.member_keys.back() != target.archive_main_key) {
+    if (target.members.empty() || target.members.back().key != target.archive_main_key) {
         return false;
     }
     std::size_t index = 0;
-    if (target.member_keys.front() == target.archive_main_key + ".bhx") {
+    if (target.members.front().key == target.archive_main_key + ".bhx") {
         ++index;
     }
     std::uint32_t previous_part = 0;
     bool has_previous_part = false;
-    for (; index + 1 < target.member_keys.size(); ++index) {
+    for (; index + 1 < target.members.size(); ++index) {
         std::uint32_t current_part = 0;
-        if (!parse_part_index(target.member_keys[index], target.archive_main_key, current_part) ||
+        if (!parse_part_index(target.members[index].key, target.archive_main_key, current_part) ||
             (has_previous_part && current_part + 1 != previous_part)) {
             return false;
         }
         previous_part = current_part;
         has_previous_part = true;
     }
-    const std::set<std::string, std::less<>> unique(target.member_keys.begin(),
-                                                    target.member_keys.end());
-    return unique.size() == target.member_keys.size() && (!has_previous_part || previous_part == 1);
+    std::set<std::string, std::less<>> unique;
+    for (const auto& member : target.members) {
+        unique.insert(member.key);
+    }
+    return unique.size() == target.members.size() && (!has_previous_part || previous_part == 1);
 }
 
 } // namespace
@@ -134,10 +136,14 @@ base::Result<void> validate_deletion_tombstone(const DeletionTombstone& tombston
         if (!detail::is_canonical_uuid(target.file_uuid) || target.catalog_generation == 0 ||
             !detail::is_archive_main_key(target.archive_main_key, target.file_uuid) ||
             target.archive_main_key.size() > kMaximumRepositoryKeyBytes ||
-            std::ranges::any_of(
-                target.member_keys,
-                [](const std::string& key) { return key.size() > kMaximumRepositoryKeyBytes; }) ||
-            target.member_keys.size() > limits.maximum_archive_members ||
+            std::ranges::any_of(target.members,
+                                [](const DeletionMember& member) {
+                                    return member.key.size() > kMaximumRepositoryKeyBytes ||
+                                           (member.generation && (member.generation->empty() ||
+                                                                  member.generation->size() >
+                                                                      kMaximumRepositoryKeyBytes));
+                                }) ||
+            target.members.size() > limits.maximum_archive_members ||
             !valid_member_sequence(target) || !target_uuids.insert(target.file_uuid).second) {
             return invalid("deletion tombstone target is invalid");
         }

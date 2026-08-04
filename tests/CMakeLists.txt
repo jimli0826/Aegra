@@ -38,6 +38,21 @@ target_link_libraries(
     PRIVATE Aegra::Application Aegra::AdapterMemory Aegra::AdapterSqlite
 )
 
+aegra_add_test(
+    aegra_s5_recovery_point_operations_tests
+    application/s5_recovery_point_operations_test.cpp
+)
+target_compile_definitions(aegra_s5_recovery_point_operations_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_link_libraries(
+    aegra_s5_recovery_point_operations_tests
+    PRIVATE
+        Aegra::Application
+        Aegra::AppService
+        Aegra::AdapterMemory
+        Aegra::AdapterSqlite
+        Aegra::AdapterWindowsProcess
+)
+
 aegra_add_test(aegra_format_tests format/manifest_codec_test.cpp)
 target_link_libraries(aegra_format_tests PRIVATE Aegra::Format)
 
@@ -49,6 +64,7 @@ aegra_add_test(
     personal_repository/personal_repository_test.cpp
 )
 target_link_libraries(aegra_personal_repository_tests PRIVATE Aegra::PersonalRepository)
+target_link_libraries(aegra_personal_repository_tests PRIVATE Aegra::AdapterMemory)
 
 aegra_add_test(
     aegra_personal_repository_scanner_tests
@@ -162,12 +178,21 @@ if(WIN32)
             "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/ipc_frame_transport.h"
             "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/service_client.cpp"
             "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/service_client.h"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/service_client_backup.cpp"
             "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/service_protocol.cpp"
             "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/service_protocol.h"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/service_protocol_commands.cpp"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/service_protocol_detail.h"
             "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/service_request_coordinator.cpp"
             "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/service_request_coordinator.h"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/models/job_model.cpp"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/models/job_model.h"
             "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/models/recovery_point_model.cpp"
             "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/models/recovery_point_model.h"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/models/source_inventory_model.cpp"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/models/source_inventory_model.h"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/models/repository_connection_model.cpp"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/models/repository_connection_model.h"
             "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/locale/locale_controller.cpp"
             "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/locale/locale_controller.h"
             "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/locale/locale_format.cpp"
@@ -178,12 +203,15 @@ if(WIN32)
         add_executable(
             aegra_desktop_service_client_tests
             apps/desktop_service_client_test.cpp
+            apps/desktop_client_test_support.h
             ${AEGRA_DESKTOP_CLIENT_SOURCES}
         )
         set_target_properties(aegra_desktop_service_client_tests PROPERTIES AUTOMOC ON)
         target_include_directories(
             aegra_desktop_service_client_tests
-            PRIVATE "${PROJECT_SOURCE_DIR}/src/apps/desktop/src"
+            PRIVATE
+                "${PROJECT_SOURCE_DIR}/src/apps/desktop/src"
+                "${PROJECT_SOURCE_DIR}/tests/apps"
         )
         target_link_libraries(
             aegra_desktop_service_client_tests
@@ -193,6 +221,56 @@ if(WIN32)
         add_test(NAME aegra_desktop_service_client_tests COMMAND aegra_desktop_service_client_tests)
         set_tests_properties(
             aegra_desktop_service_client_tests
+            PROPERTIES ENVIRONMENT_MODIFICATION
+                       "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+        )
+
+        add_executable(
+            aegra_desktop_job_client_tests
+            apps/desktop_job_client_test.cpp
+            apps/desktop_client_test_support.h
+            ${AEGRA_DESKTOP_CLIENT_SOURCES}
+        )
+        set_target_properties(aegra_desktop_job_client_tests PROPERTIES AUTOMOC ON)
+        target_include_directories(
+            aegra_desktop_job_client_tests
+            PRIVATE
+                "${PROJECT_SOURCE_DIR}/src/apps/desktop/src"
+                "${PROJECT_SOURCE_DIR}/tests/apps"
+        )
+        target_link_libraries(
+            aegra_desktop_job_client_tests
+            PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml
+        )
+        aegra_configure_target(aegra_desktop_job_client_tests)
+        add_test(NAME aegra_desktop_job_client_tests COMMAND aegra_desktop_job_client_tests)
+        set_tests_properties(
+            aegra_desktop_job_client_tests
+            PROPERTIES ENVIRONMENT_MODIFICATION
+                       "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+        )
+
+        add_executable(
+            aegra_desktop_backup_client_tests
+            apps/desktop_backup_client_test.cpp
+            apps/desktop_client_test_support.h
+            ${AEGRA_DESKTOP_CLIENT_SOURCES}
+        )
+        set_target_properties(aegra_desktop_backup_client_tests PROPERTIES AUTOMOC ON)
+        target_include_directories(
+            aegra_desktop_backup_client_tests
+            PRIVATE
+                "${PROJECT_SOURCE_DIR}/src/apps/desktop/src"
+                "${PROJECT_SOURCE_DIR}/tests/apps"
+        )
+        target_link_libraries(
+            aegra_desktop_backup_client_tests
+            PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml
+        )
+        aegra_configure_target(aegra_desktop_backup_client_tests)
+        add_test(NAME aegra_desktop_backup_client_tests COMMAND aegra_desktop_backup_client_tests)
+        set_tests_properties(
+            aegra_desktop_backup_client_tests
             PROPERTIES ENVIRONMENT_MODIFICATION
                        "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
         )
@@ -227,6 +305,55 @@ if(WIN32)
             aegra_desktop_locale_tests
             PROPERTIES ENVIRONMENT_MODIFICATION
                        "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+        )
+
+        # D2 multi-viewport / multi-locale visual smoke: loads Main.qml, resizes, switches
+        # locales, and writes PNG evidence under docs/migration/evidence/d2/.
+        find_package(Qt6 6.8 REQUIRED COMPONENTS Quick QuickControls2)
+        set(AEGRA_D2_EVIDENCE_DIR
+            "${PROJECT_SOURCE_DIR}/docs/migration/evidence/d2"
+        )
+        add_executable(
+            aegra_desktop_visual_smoke_tests
+            apps/desktop_visual_smoke_test.cpp
+            ${AEGRA_DESKTOP_CLIENT_SOURCES}
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/resources/resources.qrc"
+        )
+        set_target_properties(
+            aegra_desktop_visual_smoke_tests
+            PROPERTIES
+                AUTOMOC ON
+                AUTORCC ON
+        )
+        target_include_directories(
+            aegra_desktop_visual_smoke_tests
+            PRIVATE "${PROJECT_SOURCE_DIR}/src/apps/desktop/src"
+        )
+        target_compile_definitions(
+            aegra_desktop_visual_smoke_tests
+            PRIVATE
+                "AEGRA_D2_EVIDENCE_DIR=\"${AEGRA_D2_EVIDENCE_DIR}\""
+        )
+        target_link_libraries(
+            aegra_desktop_visual_smoke_tests
+            PRIVATE
+                Qt6::Core
+                Qt6::Gui
+                Qt6::Network
+                Qt6::Qml
+                Qt6::Quick
+                Qt6::QuickControls2
+        )
+        aegra_configure_target(aegra_desktop_visual_smoke_tests)
+        add_test(
+            NAME aegra_desktop_visual_smoke_tests
+            COMMAND aegra_desktop_visual_smoke_tests
+        )
+        set_tests_properties(
+            aegra_desktop_visual_smoke_tests
+            PROPERTIES
+                ENVIRONMENT_MODIFICATION
+                    "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
         )
     endif()
 

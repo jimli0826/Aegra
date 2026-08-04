@@ -33,6 +33,8 @@ enum class ServiceRequestKind : std::uint8_t {
     kListEvents = 7,
     kListMountSessions = 8,
     kPrepareRestore = 9,
+    kResolveRecoveryPointChain = 10,
+    kPlanDeleteRecoveryPoints = 11,
     kAddRepositoryConnection = 32,
     kImportRepositoryConnection = 33,
     kTestRepositoryConnection = 34,
@@ -48,6 +50,7 @@ enum class ServiceRequestKind : std::uint8_t {
     kDeleteSchedule = 44,
     kSubscribeTaskEvents = 45,
     kAcknowledgeEvents = 46,
+    kExecuteDeletePlan = 47,
 };
 
 enum class ServiceResponseKind : std::uint8_t {
@@ -74,9 +77,10 @@ using ServiceRequestPayload =
     std::variant<ServiceVersionRange, ServiceRecoveryPointListRequest,
                  RepositoryConnectionListRequest, SourceInventoryListRequest, JobListRequest,
                  ScheduleListRequest, AuditEventListRequest, MountSessionListRequest,
-                 RestorePreflightRequest, RepositoryConnectionInput, ResourceRef,
-                 StartBackupCommand, StartRestoreCommand, MountRecoveryPointCommand,
-                 UpsertScheduleCommand, EventSubscriptionRequest, EventAcknowledgement>;
+                 RestorePreflightRequest, RecoveryPointRef, RepositoryConnectionInput, ResourceRef,
+                 StartBackupCommand, StartVerifyCommand, StartRestoreCommand,
+                 MountRecoveryPointCommand, UpsertScheduleCommand, EventSubscriptionRequest,
+                 EventAcknowledgement, ExecuteDeletePlanCommand>;
 
 struct ServiceRequest final {
     std::uint32_t schema_version{kServiceRequestSchemaVersion};
@@ -90,7 +94,8 @@ struct ServiceRequest final {
 using ServiceResponsePayload =
     std::variant<std::monostate, ServiceInfo, ServiceRecoveryPointPage, RepositoryConnectionPage,
                  SourceInventoryPage, JobPage, SchedulePage, AuditEventPage, MountSessionPage,
-                 RestorePreflight, CommandAcknowledgement>;
+                 RestorePreflight, RecoveryPointChainResult, DeletePlanSummary,
+                 CommandAcknowledgement>;
 
 struct ServiceResponse final {
     std::uint32_t schema_version{kServiceResponseSchemaVersion};

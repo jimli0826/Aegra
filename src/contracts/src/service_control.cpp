@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <limits>
+#include <set>
+#include <string>
 #include <string_view>
 
 namespace aegra::contracts {
@@ -333,6 +335,14 @@ base::Result<void> validate_resource_ref(const ResourceRef& reference) {
                : invalid("resource reference is invalid");
 }
 
+base::Result<void> validate_recovery_point_ref(const RecoveryPointRef& reference) {
+    if (!valid_stable_value(reference.repository_connection_id, kMaximumIdentifierBytes) ||
+        !valid_stable_value(reference.recovery_point_id, kMaximumIdentifierBytes)) {
+        return invalid("recovery point reference is invalid");
+    }
+    return base::Result<void>::success();
+}
+
 base::Result<void> validate_start_backup_command(const StartBackupCommand& command) {
     const auto parent_required = command.backup_type == BackupType::kIncremental;
     if (!valid_stable_value(command.source_id, kMaximumIdentifierBytes) ||
@@ -342,6 +352,14 @@ base::Result<void> validate_start_backup_command(const StartBackupCommand& comma
         (command.parent_recovery_point_id &&
          !valid_stable_value(*command.parent_recovery_point_id, kMaximumIdentifierBytes))) {
         return invalid("start backup command is invalid");
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void> validate_start_verify_command(const StartVerifyCommand& command) {
+    if (!valid_stable_value(command.repository_connection_id, kMaximumIdentifierBytes) ||
+        !valid_stable_value(command.recovery_point_id, kMaximumIdentifierBytes)) {
+        return invalid("start verify command is invalid");
     }
     return base::Result<void>::success();
 }
@@ -457,6 +475,94 @@ base::Result<void> validate_audit_event_page(const AuditEventPage& page) {
 
 base::Result<void> validate_mount_session_page(const MountSessionPage& page) {
     return validate_page(page, validate_mount_session_summary);
+}
+
+base::Result<void> validate_recovery_point_chain_result(const RecoveryPointChainResult& result) {
+    if (!valid_stable_value(result.repository_connection_id, kMaximumIdentifierBytes) ||
+        !valid_stable_value(result.recovery_point_id, kMaximumIdentifierBytes) ||
+        result.layers.empty() || result.layers.size() > 128 ||
+        !valid_stable_value(result.message_code, kMaximumMessageCodeBytes)) {
+        return invalid("recovery point chain result is invalid");
+    }
+    if (result.layers.back().recovery_point_id != result.recovery_point_id) {
+        return invalid("recovery point chain leaf mismatch");
+    }
+    std::set<std::string, std::less<>> seen;
+    for (std::size_t index = 0; index < result.layers.size(); ++index) {
+        const auto& layer = result.layers[index];
+        if (!valid_stable_value(layer.recovery_point_id, kMaximumIdentifierBytes) ||
+            !known_backup_type(layer.backup_type) ||
+            (layer.parent_recovery_point_id &&
+             !valid_stable_value(*layer.parent_recovery_point_id, kMaximumIdentifierBytes)) ||
+            layer.structural_state < RecoveryPointStructuralState::kComplete ||
+            layer.structural_state > RecoveryPointStructuralState::kCorrupt ||
+            layer.authentication_state < RecoveryPointAuthenticationState::kNotAttempted ||
+            layer.authentication_state > RecoveryPointAuthenticationState::kCredentialRequired ||
+            layer.chain_state < RecoveryPointChainCompleteness::kComplete ||
+            layer.chain_state > RecoveryPointChainCompleteness::kInvalid ||
+            !seen.insert(layer.recovery_point_id).second) {
+            return invalid("recovery point chain layer is invalid");
+        }
+        if (index == 0) {
+            if (layer.backup_type != BackupType::kFull || layer.parent_recovery_point_id) {
+                return invalid("recovery point chain base layer is invalid");
+            }
+        } else {
+            const auto& parent = result.layers[index - 1];
+            if (!layer.parent_recovery_point_id ||
+                *layer.parent_recovery_point_id != parent.recovery_point_id) {
+                return invalid("recovery point chain parent link is invalid");
+            }
+        }
+    }
+    const bool structurally_ready = std::ranges::all_of(result.layers, [](const auto& layer) {
+        return layer.structural_state == RecoveryPointStructuralState::kComplete;
+    });
+    const bool chain_ready = std::ranges::all_of(result.layers, [](const auto& layer) {
+        return layer.chain_state == RecoveryPointChainCompleteness::kComplete;
+    });
+    const bool authenticated = std::ranges::all_of(result.layers, [](const auto& layer) {
+        return layer.authentication_state == RecoveryPointAuthenticationState::kAuthenticated;
+    });
+    if (result.restore_eligible &&
+        !(structurally_ready && chain_ready && authenticated)) {
+        return invalid("restore eligibility is inconsistent with chain layer state");
+    }
+    if (result.mount_eligible &&
+        !(structurally_ready && chain_ready && authenticated)) {
+        return invalid("mount eligibility is inconsistent with chain layer state");
+    }
+    if (result.verify_eligible && !structurally_ready) {
+        return invalid("verify eligibility is inconsistent with structural state");
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void> validate_delete_plan_summary(const DeletePlanSummary& summary) {
+    if (!valid_token(summary.plan_token) ||
+        !valid_stable_value(summary.operation_id, kMaximumIdentifierBytes) ||
+        !valid_stable_value(summary.repository_connection_id, kMaximumIdentifierBytes) ||
+        !valid_stable_value(summary.root_recovery_point_id, kMaximumIdentifierBytes) ||
+        summary.targets.empty() || summary.targets.size() > 10'000 || summary.expires_utc_ms == 0 ||
+        !valid_wire_integer(summary.expires_utc_ms)) {
+        return invalid("delete plan summary is invalid");
+    }
+    for (const auto& target : summary.targets) {
+        if (!valid_stable_value(target.recovery_point_id, kMaximumIdentifierBytes) ||
+            target.catalog_generation == 0 || target.member_count == 0 ||
+            !valid_wire_integer(target.catalog_generation) ||
+            !valid_wire_integer(static_cast<std::uint64_t>(target.member_count))) {
+            return invalid("delete plan target is invalid");
+        }
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void> validate_execute_delete_plan_command(const ExecuteDeletePlanCommand& command) {
+    if (!valid_token(command.plan_token) || !command.confirmed) {
+        return invalid("execute delete plan command is invalid");
+    }
+    return base::Result<void>::success();
 }
 
 } // namespace aegra::contracts

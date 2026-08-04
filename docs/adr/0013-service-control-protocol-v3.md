@@ -60,12 +60,16 @@ Named Pipe、4 字节 little-endian 长度前缀、UTF-8 JSON 和 64 KiB 最大 
 | 7 | ListEvents | 38 | CancelJob |
 | 8 | ListMountSessions | 39 | StartVerify |
 | 9 | PrepareRestore | 40 | StartRestore |
-|  |  | 41 | MountRecoveryPoint |
-|  |  | 42 | UnmountSession |
+| 10 | ResolveRecoveryPointChain | 41 | MountRecoveryPoint |
+| 11 | PlanDeleteRecoveryPoints | 42 | UnmountSession |
 |  |  | 43 | UpsertSchedule |
 |  |  | 44 | DeleteSchedule |
 |  |  | 45 | SubscribeTaskEvents |
 |  |  | 46 | AcknowledgeEvents |
+|  |  | 47 | ExecuteDeletePlan |
+
+`StartVerify`（39）payload 为 `StartVerifyCommand{repository_connection_id, recovery_point_id}`，
+不再使用仅含 `resource_id` 的 `ResourceRef`（产品未发布，直接替换）。
 
 相同形状不表示相同权限。Service dispatcher 必须按 request kind 分别检查 capability、身份、资源归属和业务
 前置条件，不能仅按 payload 类型授权。
@@ -152,9 +156,11 @@ Event envelope 固定包含 subscription ID、从 1 开始单调递增的 sequen
 
 ### 7. 当前实现能力
 
-S0 完成时 Service 只声明 `service.info` 和 `repository.list`，并执行对应两个 query。其余 V3 request kind
-已完成 DTO、验证和 codec，但 dispatcher 返回 Conflict 与 `service.capability_unavailable`，不产生副作用。
-后续 S1-S8 每实现一个用例才增加 capability 和真实 handler。
+S0 完成时 Service 只声明 `service.info` 和 `repository.list`。当前 S1-S4 已扩展到 Inventory、Repository
+connection/query、Job list、Backup start 与 Job cancel。S5 的 chain/delete/verify handler 已接线但尚未满足
+完整工作包门禁，因此 runtime 不声明对应 capability；dispatcher 必须按 request kind 在 handler 调用前检查
+capability，返回 Conflict 与 `service.capability_unavailable` 且不产生副作用。后续 S5-S8 只有完成各自用例和
+验收门禁后才能增加 capability。
 
 ## 备选方案
 

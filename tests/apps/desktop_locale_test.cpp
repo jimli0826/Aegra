@@ -27,8 +27,8 @@ bool expect(const bool condition, const char* message) {
 // install translators from the source translations directory and exercise mapping helpers.
 bool install_from_disk(QTranslator& translator, const QString& language_tag) {
     const QString path =
-        QDir(QStringLiteral(AEGRA_DESKTOP_I18N_DIR)).filePath(QStringLiteral("aegra_desktop_") +
-                                                              language_tag + QStringLiteral(".qm"));
+        QDir(QStringLiteral(AEGRA_DESKTOP_I18N_DIR))
+            .filePath(QStringLiteral("aegra_desktop_") + language_tag + QStringLiteral(".qm"));
     if (!QFile::exists(path)) {
         std::fprintf(stderr, "[FAIL] missing translation file %s\n", qPrintable(path));
         return false;
@@ -47,6 +47,14 @@ bool test_message_code_map() {
                          QStringLiteral("repository.query_failed")) ==
                          QLatin1String("aegra.error.repository.query_failed"),
                      "known message code maps to translation id");
+    passed &=
+        expect(aegra::desktop::translation_id_for_message_code(QStringLiteral("job.running")) ==
+                   QLatin1String("aegra.task.state.running"),
+               "job state code maps to task state translation id");
+    passed &= expect(
+        aegra::desktop::translation_id_for_message_code(QStringLiteral("job.deadline_exceeded")) ==
+            QLatin1String("aegra.error.job.deadline_exceeded"),
+        "job deadline code maps to stable translation id");
     passed &= expect(aegra::desktop::translation_id_for_message_code(
                          QStringLiteral("not.a.real.code")) == QLatin1String("aegra.error.unknown"),
                      "unknown message code falls back safely");
@@ -100,7 +108,8 @@ bool test_locale_controller_persistence_and_fallback() {
     const auto before = controller.language();
     passed &= expect(!controller.setLanguage(QStringLiteral("not-a-locale")),
                      "invalid saved-style tag is rejected");
-    passed &= expect(controller.language() == before, "invalid setLanguage leaves language unchanged");
+    passed &=
+        expect(controller.language() == before, "invalid setLanguage leaves language unchanged");
 
     // Persist a valid preference and reload into a new controller.
     QSettings settings;
@@ -116,23 +125,21 @@ bool test_locale_controller_persistence_and_fallback() {
     settings.setValue(QStringLiteral("ui/language"), QStringLiteral("invalid_value"));
     settings.sync();
     aegra::desktop::LocaleController ignored(&engine);
-    passed &= expect(ignored.language() == QLatin1String("en_US") ||
-                         !ignored.language().isEmpty(),
+    passed &= expect(ignored.language() == QLatin1String("en_US") || !ignored.language().isEmpty(),
                      "invalid saved language does not prevent startup");
 
     // Disk-based translator load proves runtime language packs work for all five tags.
     QTranslator translator;
-    for (const auto& tag : {QStringLiteral("en_US"), QStringLiteral("zh_CN"),
-                            QStringLiteral("zh_TW"), QStringLiteral("ja_JP"),
-                            QStringLiteral("de_DE")}) {
+    for (const auto& tag :
+         {QStringLiteral("en_US"), QStringLiteral("zh_CN"), QStringLiteral("zh_TW"),
+          QStringLiteral("ja_JP"), QStringLiteral("de_DE")}) {
         if (!install_from_disk(translator, tag)) {
             passed = false;
             continue;
         }
         const auto home = qtTrId("aegra.nav.home");
         if (home.isEmpty() || home == QLatin1String("aegra.nav.home")) {
-            std::fprintf(stderr, "[FAIL] translated nav home missing for %s\n",
-                         qPrintable(tag));
+            std::fprintf(stderr, "[FAIL] translated nav home missing for %s\n", qPrintable(tag));
             passed = false;
         }
     }

@@ -6,6 +6,7 @@
 #include "aegra/adapters/windows_system/windows_system.h"
 #include "aegra/application/connected_repository_query.h"
 #include "aegra/application/personal_repository_query.h"
+#include "aegra/application/recovery_point_operations.h"
 #include "aegra/application/repository_connection_service.h"
 #include "aegra/application/source_inventory_query.h"
 #include "aegra/apps/service/service_host.h"
@@ -70,6 +71,7 @@ struct RuntimeComponents final {
     std::unique_ptr<aegra::application::SourceInventoryQuery> source_query;
     std::unique_ptr<aegra::application::RepositoryConnectionService> connection_service;
     std::unique_ptr<aegra::application::ConnectedRepositoryQuery> connected_query;
+    std::unique_ptr<aegra::application::RecoveryPointOperations> recovery_point_operations;
     std::unique_ptr<service::WorkerSupervisor> supervisor;
     std::unique_ptr<service::WorkerJobService> worker_jobs;
     service::ServiceRuntimeInfo runtime;
@@ -260,6 +262,8 @@ resolve_worker_path(const ServiceArguments& arguments) {
 }
 
 [[nodiscard]] std::vector<std::string> runtime_capabilities() {
+    // S5 chain/delete/verify capabilities stay off until durable delete resume, archive credential
+    // mapping, and real Verify Worker E2E all meet the package Definition of Done.
     std::vector<std::string> capabilities{
         "backup.start",    "job.cancel",   "job.list",         "repository.connection",
         "repository.list", "service.info", "source.inventory",
@@ -302,6 +306,10 @@ create_runtime(const ServiceArguments& arguments) {
             *components.random);
     components.connected_query = std::make_unique<aegra::application::ConnectedRepositoryQuery>(
         *components.control_plane, *components.storage_factory);
+    components.recovery_point_operations =
+        std::make_unique<aegra::application::RecoveryPointOperations>(
+            *components.control_plane, *components.storage_factory, *components.clock,
+            *components.random);
     service::WorkerSupervisorConfig supervisor_config;
     supervisor_config.worker_executable_path = std::move(worker_path_utf8).value();
     components.supervisor = std::make_unique<service::WorkerSupervisor>(
@@ -309,8 +317,8 @@ create_runtime(const ServiceArguments& arguments) {
         *components.clock, *components.random, service::SupervisorProgressCallback{},
         service::SupervisorCompletionCallback{});
     components.worker_jobs = std::make_unique<service::WorkerJobService>(
-        *components.source_query, *components.control_plane, *components.supervisor,
-        *components.clock, *components.random);
+        *components.source_query, *components.control_plane, *components.storage_factory,
+        *components.supervisor, *components.clock, *components.random);
     components.runtime = {
         .service_version = AEGRA_APPLICATION_VERSION,
         .capabilities = runtime_capabilities(),
@@ -318,6 +326,7 @@ create_runtime(const ServiceArguments& arguments) {
         .connected_repository_query = components.connected_query.get(),
         .repository_connections = components.connection_service.get(),
         .source_inventory = components.source_query.get(),
+        .recovery_point_operations = components.recovery_point_operations.get(),
         .worker_jobs = components.worker_jobs.get(),
         .control_plane = components.control_plane.get(),
     };

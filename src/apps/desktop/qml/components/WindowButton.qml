@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import ".."
 
+// Matches backup/src/gui WindowButton: 36x32 hover chrome.
 Rectangle {
     id: root
     property string icon: ""
@@ -9,20 +10,20 @@ Rectangle {
 
     width: 36
     height: 32
-    color: buttonMouse.containsMouse
-           ? (root.isClose ? Theme.colorHoverClose : Theme.colorHover)
+    color: btnMouse.containsMouse
+           ? (isClose ? Theme.colorHoverClose : Theme.colorHover)
            : "transparent"
 
     Text {
         anchors.centerIn: parent
         text: root.icon
         color: Theme.colorTextWhite
-        font.family: "Segoe MDL2 Assets"
-        font.pixelSize: 11
+        font.pixelSize: 12
+        font.family: Theme.fontFamily
     }
 
     MouseArea {
-        id: buttonMouse
+        id: btnMouse
         anchors.fill: parent
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor

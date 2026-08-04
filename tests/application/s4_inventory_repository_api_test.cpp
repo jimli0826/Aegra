@@ -121,6 +121,9 @@ class MemoryStorageAccess final : public ports::IRepositoryStorageAccess {
         : storage_(std::move(storage)) {}
     [[nodiscard]] ports::IObjectReader& reader() noexcept override { return *storage_; }
     [[nodiscard]] ports::IPrefixEnumerator& enumerator() noexcept override { return *storage_; }
+    [[nodiscard]] ports::IStagedObjectWriter& writer() noexcept override { return *storage_; }
+    [[nodiscard]] ports::IObjectPublisher& publisher() noexcept override { return *storage_; }
+    [[nodiscard]] ports::IObjectDeleter& deleter() noexcept override { return *storage_; }
 
   private:
     std::shared_ptr<memory::MemoryObjectStorage> storage_;
@@ -134,6 +137,9 @@ class ShortReadStorageAccess final : public ports::IRepositoryStorageAccess,
 
     [[nodiscard]] ports::IObjectReader& reader() noexcept override { return *this; }
     [[nodiscard]] ports::IPrefixEnumerator& enumerator() noexcept override { return *storage_; }
+    [[nodiscard]] ports::IStagedObjectWriter& writer() noexcept override { return *storage_; }
+    [[nodiscard]] ports::IObjectPublisher& publisher() noexcept override { return *storage_; }
+    [[nodiscard]] ports::IObjectDeleter& deleter() noexcept override { return *storage_; }
 
   private:
     [[nodiscard]] base::Result<ports::ObjectAttributes>

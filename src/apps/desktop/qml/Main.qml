@@ -6,6 +6,7 @@ import "."
 import "components"
 import "pages"
 
+// Shell chrome aligned with backup/src/gui Main.qml (title bar, sidebar, page fade).
 Window {
     id: window
     visible: true
@@ -18,13 +19,23 @@ Window {
     color: Theme.colorBg
     flags: Qt.Window | Qt.FramelessWindowHint
 
+    readonly property int resizeBorder: 6
     readonly property bool canResize: visibility !== Window.Maximized
                                       && visibility !== Window.FullScreen
+    /// Settings opens as right drawer (old Main.qml pattern)
+    property bool settingsPanelOpen: false
 
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
+        // Dim slightly while splash covers (splash is overlay)
+        opacity: serviceClient.splashVisible ? 0 : 1
+        enabled: !serviceClient.splashVisible
+        Behavior on opacity {
+            NumberAnimation { duration: 380; easing.type: Easing.OutCubic }
+        }
 
+        // ========== Title Bar ==========
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 32
@@ -32,7 +43,7 @@ Window {
 
             MouseArea {
                 anchors.fill: parent
-                anchors.topMargin: window.canResize ? 6 : 0
+                anchors.topMargin: window.canResize ? window.resizeBorder : 0
                 onPressed: window.startSystemMove()
                 onDoubleClicked: {
                     if (window.visibility === Window.Maximized)
@@ -45,7 +56,8 @@ Window {
             RowLayout {
                 anchors.fill: parent
                 anchors.leftMargin: 12
-                spacing: 9
+                anchors.rightMargin: 8
+                spacing: 10
 
                 Image {
                     source: "qrc:/Aegra/icons/product_32.png"
@@ -53,25 +65,29 @@ Window {
                     sourceSize.height: 32
                     Layout.preferredWidth: 18
                     Layout.preferredHeight: 18
+                    Layout.alignment: Qt.AlignVCenter
                     fillMode: Image.PreserveAspectFit
                     smooth: true
+                    mipmap: true
                 }
 
                 Text {
                     //% "Aegra"
                     text: qsTrId("aegra.app.title")
                     color: Theme.colorTextWhite
-                    font.family: Theme.fontFamily
                     font.pixelSize: 12
+                    font.family: Theme.fontFamily
                     font.bold: true
+                    Layout.alignment: Qt.AlignVCenter
                 }
-
                 Text {
                     text: serviceClient.serviceVersion.length > 0
                           ? "V" + serviceClient.serviceVersion : ""
                     color: Theme.colorTextDim
-                    font.family: Theme.fontFamily
                     font.pixelSize: 11
+                    font.family: Theme.fontFamily
+                    Layout.alignment: Qt.AlignVCenter
+                    Layout.leftMargin: 2
                 }
 
                 Item { Layout.fillWidth: true }
@@ -80,23 +96,34 @@ Window {
                     Layout.preferredWidth: 7
                     Layout.preferredHeight: 7
                     radius: 4
+                    Layout.alignment: Qt.AlignVCenter
                     color: serviceClient.connected ? Theme.colorGreen : Theme.colorAccentRed
                 }
-
                 Text {
                     //% "Service %1"
                     text: qsTrId("aegra.shell.service_label").arg(serviceClient.statusText)
                     color: Theme.colorTextGrey
                     font.family: Theme.fontFamily
                     font.pixelSize: 11
+                    Layout.alignment: Qt.AlignVCenter
+                }
+                Text {
+                    visible: serviceClient.jobListAvailable && serviceClient.jobs.activeCount > 0
+                    //% "Tasks %1"
+                    text: qsTrId("aegra.shell.tasks_badge").arg(serviceClient.jobs.activeCount)
+                    color: Theme.colorTextGrey
+                    font.family: Theme.fontFamily
+                    font.pixelSize: 11
+                    Layout.alignment: Qt.AlignVCenter
                     Layout.rightMargin: 4
                 }
 
+                // Language (D0) — compact chrome matching buttons
                 ComboBox {
                     id: languageCombo
-                    Layout.preferredHeight: 24
-                    Layout.preferredWidth: 118
-                    Layout.rightMargin: 8
+                    Layout.preferredHeight: 22
+                    Layout.preferredWidth: 108
+                    Layout.alignment: Qt.AlignVCenter
                     model: localeController.availableLanguages
                     textRole: "label"
                     currentIndex: {
@@ -112,7 +139,6 @@ Window {
                         if (index >= 0 && index < languages.length)
                             localeController.setLanguage(languages[index].tag)
                     }
-
                     background: Rectangle {
                         color: languageCombo.hovered ? Theme.colorButtonHover : Theme.colorButton
                         border.width: 1
@@ -120,8 +146,8 @@ Window {
                         radius: 3
                     }
                     contentItem: Text {
-                        leftPadding: 8
-                        rightPadding: 18
+                        leftPadding: 6
+                        rightPadding: 16
                         text: languageCombo.displayText
                         color: Theme.colorTextWhite
                         font.family: Theme.fontFamily
@@ -141,7 +167,7 @@ Window {
                             currentIndex: languageCombo.highlightedIndex
                         }
                         background: Rectangle {
-                            color: Theme.colorCard
+                            color: Theme.colorPopup
                             border.color: Theme.colorBorder
                             radius: 3
                         }
@@ -165,18 +191,18 @@ Window {
 
                 Row {
                     spacing: 0
-
+                    Layout.alignment: Qt.AlignVCenter
                     WindowButton {
-                        icon: "\uE921"
+                        icon: "\u2500"
                         onClicked: window.showMinimized()
                     }
                     WindowButton {
-                        icon: window.visibility === Window.Maximized ? "\uE923" : "\uE922"
+                        icon: window.visibility === Window.Maximized ? "\u2750" : "\u25A1"
                         onClicked: window.visibility === Window.Maximized
                                    ? window.showNormal() : window.showMaximized()
                     }
                     WindowButton {
-                        icon: "\uE8BB"
+                        icon: "\u2715"
                         isClose: true
                         onClicked: window.close()
                     }
@@ -184,6 +210,7 @@ Window {
             }
         }
 
+        // ========== Main Content ==========
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -191,11 +218,26 @@ Window {
 
             SidebarMenu {
                 id: sideMenu
-                Layout.preferredWidth: sideWidth
-                Layout.minimumWidth: sideWidth
-                Layout.maximumWidth: sideWidth
+                Layout.preferredWidth: sideMenu.sideWidth
+                Layout.minimumWidth: sideMenu.sideWidth
+                Layout.maximumWidth: sideMenu.sideWidth
                 Layout.fillHeight: true
-                currentIndex: 4
+                currentIndex: pageContainer.currentIndex
+                settingsActive: window.settingsPanelOpen
+                homeEnabled: true
+                backupEnabled: true
+                restoreEnabled: true
+                mountEnabled: true
+                repositoryEnabled: true
+                eventLogEnabled: true
+                settingsEnabled: true
+                onMenuClicked: function(index) {
+                    window.settingsPanelOpen = false
+                    pageContainer.switchPage(index)
+                }
+                onSettingsClicked: {
+                    window.settingsPanelOpen = !window.settingsPanelOpen
+                }
             }
 
             Rectangle {
@@ -203,11 +245,136 @@ Window {
                 Layout.fillHeight: true
                 color: Theme.colorBg
 
-                RepositoryPage {
+                Item {
+                    id: pageContainer
                     anchors.fill: parent
+                    clip: true
+                    property int currentIndex: 0
+                    property int previousIndex: 0
+
+                    function switchPage(newIndex) {
+                        if (newIndex === currentIndex)
+                            return
+                        if (newIndex < 0 || newIndex > 5)
+                            return
+                        previousIndex = currentIndex
+                        currentIndex = newIndex
+                        sideMenu.currentIndex = newIndex
+                        if (newIndex === 0)
+                            serviceClient.refreshJobs()
+                        if (newIndex === 1) {
+                            serviceClient.refreshInventory()
+                            serviceClient.refreshConnections()
+                        }
+                        if (newIndex === 4)
+                            serviceClient.refreshRepository()
+                    }
+
+                    // 0 Home, 1 Backup, 2 Restore, 3 Mount, 4 Repository, 5 Event Log
+                    Repeater {
+                        model: 6
+                        Loader {
+                            anchors.fill: parent
+                            opacity: index === pageContainer.currentIndex ? 1 : 0
+                            visible: opacity > 0
+                            scale: index === pageContainer.currentIndex ? 1 : 0.98
+                            active: index === pageContainer.currentIndex
+                                    || index === pageContainer.previousIndex
+
+                            Behavior on opacity {
+                                NumberAnimation { duration: 320; easing.type: Easing.OutCubic }
+                            }
+                            Behavior on scale {
+                                NumberAnimation { duration: 320; easing.type: Easing.OutCubic }
+                            }
+
+                            sourceComponent: {
+                                switch (index) {
+                                case 0: return homePageComp
+                                case 1: return backupPageComp
+                                case 2: return restorePageComp
+                                case 3: return mountPageComp
+                                case 4: return repositoryPageComp
+                                case 5: return eventLogPageComp
+                                default: return null
+                                }
+                            }
+                        }
+                    }
+
+                    Component {
+                        id: homePageComp
+                        HomePage {
+                            onHomeNavigate: function(index) {
+                                pageContainer.switchPage(index)
+                            }
+                        }
+                    }
+                    Component { id: backupPageComp; BackupPage { } }
+                    Component { id: restorePageComp; RestorePage { } }
+                    Component { id: mountPageComp; MountPage { } }
+                    Component { id: repositoryPageComp; RepositoryPage { } }
+                    Component { id: eventLogPageComp; EventLogPage { } }
+                }
+
+                // Settings right drawer (does not replace main page)
+                Item {
+                    id: settingsDrawer
+                    anchors.fill: parent
+                    z: 2500
+
+                    Rectangle {
+                        anchors.fill: parent
+                        color: Theme.colorScrim
+                        opacity: window.settingsPanelOpen ? 1 : 0
+                        visible: opacity > 0.01
+                        Behavior on opacity { NumberAnimation { duration: 250 } }
+                        MouseArea {
+                            anchors.fill: parent
+                            enabled: window.settingsPanelOpen
+                            onClicked: window.settingsPanelOpen = false
+                        }
+                    }
+
+                    Rectangle {
+                        id: settingsPanel
+                        width: Math.max(400, Math.min(parent.width * 0.55, 640))
+                        height: parent.height
+                        property real slideProgress: window.settingsPanelOpen ? 0 : 1
+                        x: parent.width - width + slideProgress * width
+                        visible: slideProgress < 0.999 || window.settingsPanelOpen
+                        color: Theme.colorBg
+                        border.width: 1
+                        border.color: Theme.colorBorder
+                        Behavior on slideProgress {
+                            NumberAnimation {
+                                duration: 280
+                                easing.type: Easing.OutCubic
+                            }
+                        }
+
+                        SettingsPage {
+                            anchors.fill: parent
+                            onCloseRequested: window.settingsPanelOpen = false
+                        }
+                    }
                 }
             }
         }
+    }
+
+    SplashOverlay {
+        anchors.fill: parent
+    }
+
+    LoadingOverlay {
+        anchors.fill: parent
+    }
+
+    ToastBanner {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
     }
 
     ResizeHandle {
@@ -215,7 +382,7 @@ Window {
         edges: Qt.TopEdge
         resizeCursor: Qt.SizeVerCursor
         visible: window.canResize
-        height: 6
+        height: window.resizeBorder
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
@@ -225,7 +392,7 @@ Window {
         edges: Qt.BottomEdge
         resizeCursor: Qt.SizeVerCursor
         visible: window.canResize
-        height: 6
+        height: window.resizeBorder
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
@@ -235,7 +402,7 @@ Window {
         edges: Qt.LeftEdge
         resizeCursor: Qt.SizeHorCursor
         visible: window.canResize
-        width: 6
+        width: window.resizeBorder
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.bottom: parent.bottom
@@ -245,7 +412,7 @@ Window {
         edges: Qt.RightEdge
         resizeCursor: Qt.SizeHorCursor
         visible: window.canResize
-        width: 6
+        width: window.resizeBorder
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.bottom: parent.bottom

@@ -16,9 +16,51 @@ using detail::Json;
 constexpr std::array<std::string_view, 6> kTombstoneKeys = {
     "schema_version", "kind", "repository_uuid", "operation_uuid", "created_utc_ms", "targets"};
 constexpr std::array<std::string_view, 4> kTargetKeys = {"file_uuid", "catalog_generation",
-                                                         "archive_main_key", "member_keys"};
+                                                         "archive_main_key", "members"};
+constexpr std::array<std::string_view, 2> kMemberKeys = {"key", "generation"};
 
-[[nodiscard]] base::Result<DeletionTarget> parse_target(const Json& value) {
+[[nodiscard]] base::Result<DeletionMember> parse_member(const Json& value) {
+    if (!value.is_object()) {
+        return base::Result<DeletionMember>::failure(
+            detail::corrupt("deletion member is not an object"));
+    }
+    auto keys = detail::require_exact_keys(value, kMemberKeys);
+    if (!keys) {
+        return base::Result<DeletionMember>::failure(keys.error());
+    }
+    try {
+        DeletionMember result;
+        result.key = value.at("key").get<std::string>();
+        if (!value.at("generation").is_null()) {
+            result.generation = value.at("generation").get<std::string>();
+        }
+        return base::Result<DeletionMember>::success(std::move(result));
+    } catch (const Json::exception&) {
+        return base::Result<DeletionMember>::failure(
+            detail::corrupt("deletion member field has invalid type"));
+    }
+}
+
+[[nodiscard]] base::Result<std::vector<DeletionMember>>
+parse_members(const Json& value, const CatalogCodecLimits& limits) {
+    if (!value.is_array() || value.empty() || value.size() > limits.maximum_archive_members) {
+        return base::Result<std::vector<DeletionMember>>::failure(
+            detail::corrupt("deletion member count is invalid"));
+    }
+    std::vector<DeletionMember> result;
+    result.reserve(value.size());
+    for (const auto& item : value) {
+        auto member = parse_member(item);
+        if (!member) {
+            return base::Result<std::vector<DeletionMember>>::failure(member.error());
+        }
+        result.push_back(std::move(member).value());
+    }
+    return base::Result<std::vector<DeletionMember>>::success(std::move(result));
+}
+
+[[nodiscard]] base::Result<DeletionTarget> parse_target(const Json& value,
+                                                        const CatalogCodecLimits& limits) {
     if (!value.is_object()) {
         return base::Result<DeletionTarget>::failure(
             detail::corrupt("deletion target is not an object"));
@@ -31,12 +73,16 @@ constexpr std::array<std::string_view, 4> kTargetKeys = {"file_uuid", "catalog_g
     if (!generation) {
         return base::Result<DeletionTarget>::failure(generation.error());
     }
+    auto members = parse_members(value.at("members"), limits);
+    if (!members) {
+        return base::Result<DeletionTarget>::failure(members.error());
+    }
     try {
         DeletionTarget result;
         result.file_uuid = value.at("file_uuid").get<std::string>();
         result.catalog_generation = generation.value();
         result.archive_main_key = value.at("archive_main_key").get<std::string>();
-        result.member_keys = value.at("member_keys").get<std::vector<std::string>>();
+        result.members = std::move(members).value();
         return base::Result<DeletionTarget>::success(std::move(result));
     } catch (const Json::exception&) {
         return base::Result<DeletionTarget>::failure(
@@ -53,7 +99,7 @@ parse_targets(const Json& value, const CatalogCodecLimits& limits) {
     std::vector<DeletionTarget> result;
     result.reserve(value.size());
     for (const auto& item : value) {
-        auto target = parse_target(item);
+        auto target = parse_target(item, limits);
         if (!target) {
             return base::Result<std::vector<DeletionTarget>>::failure(target.error());
         }
@@ -93,10 +139,16 @@ parse_targets(const Json& value, const CatalogCodecLimits& limits) {
 }
 
 [[nodiscard]] Json encode_target(const DeletionTarget& target) {
+    Json members = Json::array();
+    for (const auto& member : target.members) {
+        members.push_back(
+            {{"key", member.key},
+             {"generation", member.generation ? Json(*member.generation) : Json(nullptr)}});
+    }
     return {{"file_uuid", target.file_uuid},
             {"catalog_generation", target.catalog_generation},
             {"archive_main_key", target.archive_main_key},
-            {"member_keys", target.member_keys}};
+            {"members", std::move(members)}};
 }
 
 } // namespace

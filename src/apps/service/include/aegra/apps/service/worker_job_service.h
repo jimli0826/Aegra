@@ -14,6 +14,7 @@ namespace aegra::ports {
 class IClock;
 class IControlPlaneDatabase;
 class IRandomSource;
+class IRepositoryStorageFactory;
 } // namespace aegra::ports
 
 namespace aegra::apps::service {
@@ -31,6 +32,9 @@ class IWorkerJobService {
     start_backup(const contracts::StartBackupCommand& command, std::string_view idempotency_key,
                  base::CancellationToken cancellation) = 0;
     [[nodiscard]] virtual base::Result<contracts::CommandAcknowledgement>
+    start_verify(const contracts::StartVerifyCommand& command, std::string_view idempotency_key,
+                 base::CancellationToken cancellation) = 0;
+    [[nodiscard]] virtual base::Result<contracts::CommandAcknowledgement>
     cancel_job(const contracts::ResourceRef& job, std::string_view idempotency_key,
                base::CancellationToken cancellation) = 0;
 };
@@ -38,11 +42,16 @@ class IWorkerJobService {
 class WorkerJobService final : public IWorkerJobService {
   public:
     WorkerJobService(application::ISourceInventoryQuery& source_inventory,
-                     ports::IControlPlaneDatabase& control_plane, WorkerSupervisor& supervisor,
-                     ports::IClock& clock, ports::IRandomSource& random) noexcept;
+                     ports::IControlPlaneDatabase& control_plane,
+                     ports::IRepositoryStorageFactory& storage_factory,
+                     WorkerSupervisor& supervisor, ports::IClock& clock,
+                     ports::IRandomSource& random) noexcept;
 
     [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
     start_backup(const contracts::StartBackupCommand& command, std::string_view idempotency_key,
+                 base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
+    start_verify(const contracts::StartVerifyCommand& command, std::string_view idempotency_key,
                  base::CancellationToken cancellation) override;
     [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
     cancel_job(const contracts::ResourceRef& job, std::string_view idempotency_key,
@@ -51,6 +60,7 @@ class WorkerJobService final : public IWorkerJobService {
   private:
     application::ISourceInventoryQuery& source_inventory_;
     ports::IControlPlaneDatabase& control_plane_;
+    ports::IRepositoryStorageFactory& storage_factory_;
     WorkerSupervisor& supervisor_;
     ports::IClock& clock_;
     ports::IRandomSource& random_;

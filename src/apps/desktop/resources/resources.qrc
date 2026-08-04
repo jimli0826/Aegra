@@ -13,10 +13,24 @@
         <file alias="qml/Theme.qml">../qml/Theme.qml</file>
         <file alias="qml/qmldir">../qml/qmldir</file>
         <file alias="qml/components/AppButton.qml">../qml/components/AppButton.qml</file>
+        <file alias="qml/components/Card.qml">../qml/components/Card.qml</file>
+        <file alias="qml/components/DiskChart.qml">../qml/components/DiskChart.qml</file>
+        <file alias="qml/components/DiskIcon.qml">../qml/components/DiskIcon.qml</file>
+        <file alias="qml/components/LoadingOverlay.qml">../qml/components/LoadingOverlay.qml</file>
+        <file alias="qml/components/PageHeader.qml">../qml/components/PageHeader.qml</file>
         <file alias="qml/components/ResizeHandle.qml">../qml/components/ResizeHandle.qml</file>
         <file alias="qml/components/SidebarCommand.qml">../qml/components/SidebarCommand.qml</file>
         <file alias="qml/components/SidebarMenu.qml">../qml/components/SidebarMenu.qml</file>
+        <file alias="qml/components/SplashOverlay.qml">../qml/components/SplashOverlay.qml</file>
+        <file alias="qml/components/TaskProgressBar.qml">../qml/components/TaskProgressBar.qml</file>
+        <file alias="qml/components/ToastBanner.qml">../qml/components/ToastBanner.qml</file>
         <file alias="qml/components/WindowButton.qml">../qml/components/WindowButton.qml</file>
+        <file alias="qml/pages/HomePage.qml">../qml/pages/HomePage.qml</file>
+        <file alias="qml/pages/BackupPage.qml">../qml/pages/BackupPage.qml</file>
+        <file alias="qml/pages/RestorePage.qml">../qml/pages/RestorePage.qml</file>
+        <file alias="qml/pages/MountPage.qml">../qml/pages/MountPage.qml</file>
         <file alias="qml/pages/RepositoryPage.qml">../qml/pages/RepositoryPage.qml</file>
+        <file alias="qml/pages/EventLogPage.qml">../qml/pages/EventLogPage.qml</file>
+        <file alias="qml/pages/SettingsPage.qml">../qml/pages/SettingsPage.qml</file>
     </qresource>
 </RCC>

@@ -13,6 +13,7 @@
 namespace aegra::application {
 class IConnectedRepositoryQuery;
 class IPersonalRepositoryQuery;
+class IRecoveryPointOperations;
 class IRepositoryConnectionService;
 class ISourceInventoryQuery;
 } // namespace aegra::application
@@ -32,6 +33,7 @@ struct ServiceRuntimeInfo final {
     application::IConnectedRepositoryQuery* connected_repository_query{nullptr};
     application::IRepositoryConnectionService* repository_connections{nullptr};
     application::ISourceInventoryQuery* source_inventory{nullptr};
+    application::IRecoveryPointOperations* recovery_point_operations{nullptr};
     IWorkerJobService* worker_jobs{nullptr};
     ports::IControlPlaneDatabase* control_plane{nullptr};
 };

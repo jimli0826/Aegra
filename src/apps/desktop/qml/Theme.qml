@@ -1,6 +1,7 @@
 pragma Singleton
 import QtQuick 2.15
 
+// blueExtra palette — visual baseline from backup/src/gui Theme.qml
 QtObject {
     readonly property color colorBg: "#1e3048"
     readonly property color colorCard: "#2a4260"
@@ -10,7 +11,10 @@ QtObject {
     readonly property color colorTableHeader: "#34506e"
     readonly property color colorTableRow: "#2a4260"
     readonly property color colorTableAlt: "#314a6a"
+    readonly property color colorPopup: "#2a4260"
     readonly property color colorInput: "#243a56"
+    readonly property color colorListItem: "#34506e"
+    readonly property color colorListItemAlt: "#2a4260"
     readonly property color colorAccentRed: "#ff5c5c"
     readonly property color colorAccentBlue: "#4fc1ff"
     readonly property color colorGreen: "#57d38c"
@@ -25,6 +29,8 @@ QtObject {
     readonly property color colorButtonDisabled: "#2d4560"
     readonly property color colorButtonDisabledText: "#8aa4c0"
     readonly property color colorProgressTrack: "#3a5574"
+    readonly property color colorToastSuccessBg: "#1e3d32"
+    readonly property color colorToastSuccessBorder: "#57d38c"
     readonly property color colorToastErrorBg: "#3d2428"
     readonly property color colorToastErrorBorder: "#ff5c5c"
     readonly property color colorScrim: "#99000000"

@@ -390,6 +390,119 @@ template <typename Item, typename Parser>
             unsigned_value<std::uint64_t>(payload, "expires_utc_ms")};
 }
 
+[[nodiscard]] Json encode_chain_layer(const contracts::RecoveryPointChainLayer& layer) {
+    return Json{{"recovery_point_id", layer.recovery_point_id},
+                {"backup_type", static_cast<std::uint8_t>(layer.backup_type)},
+                {"parent_recovery_point_id", optional_string_json(layer.parent_recovery_point_id)},
+                {"structural_state", static_cast<std::uint8_t>(layer.structural_state)},
+                {"authentication_state", static_cast<std::uint8_t>(layer.authentication_state)},
+                {"chain_state", static_cast<std::uint8_t>(layer.chain_state)}};
+}
+
+[[nodiscard]] contracts::RecoveryPointChainLayer parse_chain_layer(const Json& payload) {
+    constexpr std::array<std::string_view, 6> keys{
+        "recovery_point_id", "backup_type",         "parent_recovery_point_id",
+        "structural_state",  "authentication_state", "chain_state"};
+    if (!exact_keys(payload, keys)) {
+        throw std::invalid_argument("recovery point chain layer fields are invalid");
+    }
+    contracts::RecoveryPointChainLayer layer;
+    layer.recovery_point_id = payload.at("recovery_point_id").get<std::string>();
+    layer.backup_type =
+        static_cast<contracts::BackupType>(unsigned_value<std::uint8_t>(payload, "backup_type"));
+    layer.parent_recovery_point_id = optional_string(payload.at("parent_recovery_point_id"));
+    layer.structural_state = static_cast<contracts::RecoveryPointStructuralState>(
+        unsigned_value<std::uint8_t>(payload, "structural_state"));
+    layer.authentication_state = static_cast<contracts::RecoveryPointAuthenticationState>(
+        unsigned_value<std::uint8_t>(payload, "authentication_state"));
+    layer.chain_state = static_cast<contracts::RecoveryPointChainCompleteness>(
+        unsigned_value<std::uint8_t>(payload, "chain_state"));
+    return layer;
+}
+
+[[nodiscard]] Json encode_chain_result(const contracts::RecoveryPointChainResult& result) {
+    Json layers = Json::array();
+    for (const auto& layer : result.layers) {
+        layers.push_back(encode_chain_layer(layer));
+    }
+    return Json{{"repository_connection_id", result.repository_connection_id},
+                {"recovery_point_id", result.recovery_point_id},
+                {"layers", std::move(layers)},
+                {"restore_eligible", result.restore_eligible},
+                {"mount_eligible", result.mount_eligible},
+                {"verify_eligible", result.verify_eligible},
+                {"message_code", result.message_code}};
+}
+
+[[nodiscard]] contracts::RecoveryPointChainResult parse_chain_result(const Json& payload) {
+    constexpr std::array<std::string_view, 7> keys{
+        "repository_connection_id", "recovery_point_id", "layers",        "restore_eligible",
+        "mount_eligible",           "verify_eligible",   "message_code"};
+    if (!exact_keys(payload, keys)) {
+        throw std::invalid_argument("recovery point chain result fields are invalid");
+    }
+    contracts::RecoveryPointChainResult result;
+    result.repository_connection_id = payload.at("repository_connection_id").get<std::string>();
+    result.recovery_point_id = payload.at("recovery_point_id").get<std::string>();
+    for (const auto& layer : payload.at("layers")) {
+        result.layers.push_back(parse_chain_layer(layer));
+    }
+    result.restore_eligible = payload.at("restore_eligible").get<bool>();
+    result.mount_eligible = payload.at("mount_eligible").get<bool>();
+    result.verify_eligible = payload.at("verify_eligible").get<bool>();
+    result.message_code = payload.at("message_code").get<std::string>();
+    return result;
+}
+
+[[nodiscard]] Json encode_delete_plan_target(const contracts::DeletePlanTargetSummary& target) {
+    return Json{{"recovery_point_id", target.recovery_point_id},
+                {"catalog_generation", target.catalog_generation},
+                {"member_count", target.member_count}};
+}
+
+[[nodiscard]] contracts::DeletePlanTargetSummary parse_delete_plan_target(const Json& payload) {
+    constexpr std::array<std::string_view, 3> keys{"recovery_point_id", "catalog_generation",
+                                                   "member_count"};
+    if (!exact_keys(payload, keys)) {
+        throw std::invalid_argument("delete plan target fields are invalid");
+    }
+    return {payload.at("recovery_point_id").get<std::string>(),
+            unsigned_value<std::uint64_t>(payload, "catalog_generation"),
+            unsigned_value<std::uint32_t>(payload, "member_count")};
+}
+
+[[nodiscard]] Json encode_delete_plan_summary(const contracts::DeletePlanSummary& summary) {
+    Json targets = Json::array();
+    for (const auto& target : summary.targets) {
+        targets.push_back(encode_delete_plan_target(target));
+    }
+    return Json{{"plan_token", summary.plan_token},
+                {"operation_id", summary.operation_id},
+                {"repository_connection_id", summary.repository_connection_id},
+                {"root_recovery_point_id", summary.root_recovery_point_id},
+                {"targets", std::move(targets)},
+                {"expires_utc_ms", summary.expires_utc_ms}};
+}
+
+[[nodiscard]] contracts::DeletePlanSummary parse_delete_plan_summary(const Json& payload) {
+    constexpr std::array<std::string_view, 6> keys{
+        "plan_token", "operation_id", "repository_connection_id",
+        "root_recovery_point_id", "targets", "expires_utc_ms"};
+    if (!exact_keys(payload, keys)) {
+        throw std::invalid_argument("delete plan summary fields are invalid");
+    }
+    contracts::DeletePlanSummary summary;
+    summary.plan_token = payload.at("plan_token").get<std::string>();
+    summary.operation_id = payload.at("operation_id").get<std::string>();
+    summary.repository_connection_id = payload.at("repository_connection_id").get<std::string>();
+    summary.root_recovery_point_id = payload.at("root_recovery_point_id").get<std::string>();
+    for (const auto& target : payload.at("targets")) {
+        summary.targets.push_back(parse_delete_plan_target(target));
+    }
+    summary.expires_utc_ms = unsigned_value<std::uint64_t>(payload, "expires_utc_ms");
+    return summary;
+}
+
 [[nodiscard]] Json encode_event_lease(const contracts::EventSubscriptionLease& lease) {
     return Json{{"subscription_id", lease.subscription_id},
                 {"resume_token", lease.resume_token},
@@ -504,6 +617,10 @@ Json encode_response_payload(const contracts::ServiceResponse& response) {
                            encode_mount_session);
     case contracts::ServiceRequestKind::kPrepareRestore:
         return encode_restore_preflight(std::get<contracts::RestorePreflight>(response.payload));
+    case contracts::ServiceRequestKind::kResolveRecoveryPointChain:
+        return encode_chain_result(std::get<contracts::RecoveryPointChainResult>(response.payload));
+    case contracts::ServiceRequestKind::kPlanDeleteRecoveryPoints:
+        return encode_delete_plan_summary(std::get<contracts::DeletePlanSummary>(response.payload));
     default:
         throw std::invalid_argument("service query response kind is invalid");
     }
@@ -544,6 +661,10 @@ parse_response_payload(const contracts::ServiceResponseKind response_kind,
         return parse_page<contracts::MountSessionSummary>(payload, parse_mount_session);
     case contracts::ServiceRequestKind::kPrepareRestore:
         return parse_restore_preflight(payload);
+    case contracts::ServiceRequestKind::kResolveRecoveryPointChain:
+        return parse_chain_result(payload);
+    case contracts::ServiceRequestKind::kPlanDeleteRecoveryPoints:
+        return parse_delete_plan_summary(payload);
     default:
         throw std::invalid_argument("service query response kind is invalid");
     }

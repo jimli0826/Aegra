@@ -16,6 +16,9 @@ class LocalRepositoryStorageAccess final : public ports::IRepositoryStorageAcces
 
     [[nodiscard]] ports::IObjectReader& reader() noexcept override { return *storage_; }
     [[nodiscard]] ports::IPrefixEnumerator& enumerator() noexcept override { return *storage_; }
+    [[nodiscard]] ports::IStagedObjectWriter& writer() noexcept override { return *storage_; }
+    [[nodiscard]] ports::IObjectPublisher& publisher() noexcept override { return *storage_; }
+    [[nodiscard]] ports::IObjectDeleter& deleter() noexcept override { return *storage_; }
 
   private:
     std::unique_ptr<LocalObjectStorage> storage_;

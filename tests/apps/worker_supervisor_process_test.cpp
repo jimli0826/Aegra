@@ -169,6 +169,24 @@ bool run_test(const std::filesystem::path& worker_path) {
                      "authoritative Worker result is persisted");
     supervisor.shutdown({});
     passed &= expect(supervisor.active_count() == 0, "completed Worker session is reaped");
+
+    service::WorkerSupervisorConfig failing_config;
+    failing_config.worker_executable_path = path_to_utf8(directory.path() / "missing-worker.exe");
+    service::WorkerSupervisor failing(std::move(failing_config), launcher, *database.value(), clock,
+                                      random, {}, {});
+    auto failed_request = make_request(directory);
+    failed_request.worker_request.job_id = "job-supervisor-launch-failure";
+    failed_request.worker_request.trace_id = "trace-supervisor-launch-failure";
+    failed_request.idempotency_key = "idempotency-supervisor-launch-failure";
+    auto failed_submit = failing.submit(failed_request, {});
+    auto failed_record = database.value()->get_job("job-supervisor-launch-failure", {});
+    passed &= expect(!failed_submit, "missing Worker executable rejects submission");
+    passed &=
+        expect(failed_record && failed_record.value() &&
+                   failed_record.value()->state == aegra::contracts::ServiceJobState::kFailed &&
+                   failed_record.value()->result_message_code == "service.worker_launch_failed",
+               "Worker launch failure remains durably visible");
+    failing.shutdown({});
     return passed;
 }
 

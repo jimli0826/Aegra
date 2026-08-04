@@ -58,9 +58,7 @@ constexpr qsizetype kMaximumConnections = 1'000;
 
 } // namespace
 
-QString ServiceClient::defaultConnectionId() const {
-    return connections_.default_connection_id();
-}
+QString ServiceClient::defaultConnectionId() const { return connections_.default_connection_id(); }
 
 void ServiceClient::startBackup(const QString& source_id, const QString& connection_id) {
     if (state_ != State::kReady || !backup_start_available_ || backup_command_busy_ ||
@@ -91,9 +89,8 @@ void ServiceClient::startBackup(const QString& source_id, const QString& connect
 
     const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     start_backup_request_id_ = request_id;
-    const auto body =
-        encode_start_backup_request(request_id, start_backup_idempotency_key_, source_id,
-                                    connection_id, kBackupTypeFull, {});
+    const auto body = encode_start_backup_request(request_id, start_backup_idempotency_key_,
+                                                  source_id, connection_id, kBackupTypeFull, {});
     const auto started =
         coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
             return handle_start_backup_frame(frame_body);
@@ -132,6 +129,8 @@ void ServiceClient::start_inventory_query() {
     if (!inventory_available_) {
         return;
     }
+    // Do not clear the live sources model until a successful response replaces it —
+    // clearing/pending-only would make Home flash empty / "Loading sources…".
     inventory_error_code_.clear();
     inventory_loading_ = true;
     pending_sources_.clear();
@@ -268,7 +267,19 @@ RequestDisposition ServiceClient::handle_connection_list_frame(const QByteArray&
     connections_loading_ = false;
     connection_request_id_.clear();
     connection_requested_token_.reset();
+    if (!selected_repository_connection_id_.isEmpty() &&
+        !connections_.find(selected_repository_connection_id_)) {
+        selected_repository_connection_id_.clear();
+    }
+    if (selected_repository_connection_id_.isEmpty()) {
+        selected_repository_connection_id_ = connections_.default_connection_id();
+    }
     emit connectionsChanged();
+    if (selected_repository_connection_id_.isEmpty()) {
+        reset_repository();
+    } else if (!repository_loading_) {
+        start_repository_query();
+    }
     return RequestDisposition::kFinished;
 }
 
@@ -382,6 +393,7 @@ void ServiceClient::reset_connections() {
     connections_loading_ = false;
     connections_error_code_.clear();
     connection_request_id_.clear();
+    selected_repository_connection_id_.clear();
     emit connectionsChanged();
 }
 
@@ -410,9 +422,8 @@ void ServiceClient::update_active_backup_observe() {
             message_text =
                 job->message_code.isEmpty() ? QString{} : localize_message_code(job->message_code);
             percent = progress_percent_of(*job);
-            progress_visible =
-                (job->state == 1 || job->state == 2 || job->state == 3) &&
-                job->progress_processed_bytes.has_value();
+            progress_visible = (job->state == 1 || job->state == 2 || job->state == 3) &&
+                               job->progress_processed_bytes.has_value();
             terminal = job->state == 4 || job->state == 5 || job->state == 6 || job->state == 7;
             cancellable = job_cancel_available_ && (job->state == 1 || job->state == 2) &&
                           !cancel_command_busy_ && !backup_command_busy_;
@@ -428,12 +439,11 @@ void ServiceClient::update_active_backup_observe() {
             state_text = qtTrId("aegra.backup.state.waiting_status");
         }
     }
-    const auto changed = active_backup_state_text_ != state_text ||
-                         active_backup_message_text_ != message_text ||
-                         active_backup_progress_percent_ != percent ||
-                         active_backup_progress_visible_ != progress_visible ||
-                         active_backup_terminal_ != terminal ||
-                         active_backup_cancellable_ != cancellable;
+    const auto changed =
+        active_backup_state_text_ != state_text || active_backup_message_text_ != message_text ||
+        active_backup_progress_percent_ != percent ||
+        active_backup_progress_visible_ != progress_visible ||
+        active_backup_terminal_ != terminal || active_backup_cancellable_ != cancellable;
     active_backup_state_text_ = std::move(state_text);
     active_backup_message_text_ = std::move(message_text);
     active_backup_progress_percent_ = percent;

@@ -16,7 +16,6 @@ namespace aegra::desktop {
 namespace {
 
 constexpr auto kServicePipeName = "aegra-service-control";
-constexpr qsizetype kMaximumRecoveryPoints = 10'000;
 constexpr qsizetype kMaximumJobs = 10'000;
 constexpr int kJobPollIntervalMilliseconds = 2'000;
 
@@ -30,13 +29,26 @@ ServiceClient::ServiceClient(QObject* parent)
     : QObject(parent), recovery_points_(this), jobs_(this), sources_(this), connections_(this),
       transport_(std::make_unique<IpcFrameTransport>(QLatin1String(kServicePipeName))),
       coordinator_(std::make_unique<ServiceRequestCoordinator>(*transport_)),
-      job_poll_timer_(new QTimer(this)), toast_timer_(new QTimer(this)) {
+      job_poll_timer_(new QTimer(this)), toast_timer_(new QTimer(this)),
+      reconnect_watchdog_(new QTimer(this)) {
     recovery_points_.set_locale_format(&format_);
     jobs_.set_locale_format(&format_);
     sources_.set_locale_format(&format_);
     job_poll_timer_->setInterval(kJobPollIntervalMilliseconds);
     toast_timer_->setSingleShot(true);
     toast_timer_->setInterval(4'000);
+    // After main UI has been Ready once, keep trying the live Service pipe if we drop offline.
+    reconnect_watchdog_->setInterval(2'500);
+    connect(reconnect_watchdog_, &QTimer::timeout, this, [this]() {
+        if (!first_ready_seen_) {
+            return;
+        }
+        if (state_ == State::kReady || state_ == State::kConnecting) {
+            return;
+        }
+        reconnect();
+    });
+    reconnect_watchdog_->start();
     connect(job_poll_timer_, &QTimer::timeout, this, &ServiceClient::on_job_poll_tick);
     connect(toast_timer_, &QTimer::timeout, this, [this]() {
         if (toast_visible_) {
@@ -159,9 +171,8 @@ bool ServiceClient::backupCommandBusy() const noexcept { return backup_command_b
 bool ServiceClient::cancelCommandBusy() const noexcept { return cancel_command_busy_; }
 
 QString ServiceClient::backupCommandErrorText() const {
-    return backup_command_error_code_.isEmpty()
-               ? QString{}
-               : localize_message_code(backup_command_error_code_);
+    return backup_command_error_code_.isEmpty() ? QString{}
+                                                : localize_message_code(backup_command_error_code_);
 }
 
 QString ServiceClient::activeBackupJobId() const { return active_backup_job_id_; }
@@ -174,9 +185,7 @@ bool ServiceClient::activeBackupProgressVisible() const noexcept {
 }
 QString ServiceClient::activeBackupMessageText() const { return active_backup_message_text_; }
 bool ServiceClient::activeBackupTerminal() const noexcept { return active_backup_terminal_; }
-bool ServiceClient::activeBackupCancellable() const noexcept {
-    return active_backup_cancellable_;
-}
+bool ServiceClient::activeBackupCancellable() const noexcept { return active_backup_cancellable_; }
 
 bool ServiceClient::splashVisible() const noexcept { return !first_ready_seen_; }
 bool ServiceClient::splashBusy() const noexcept {
@@ -200,7 +209,9 @@ QString ServiceClient::splashErrorText() const { return splash_error_ ? errorTex
 bool ServiceClient::toastVisible() const noexcept { return toast_visible_; }
 QString ServiceClient::toastText() const { return toast_text_; }
 bool ServiceClient::globalLoading() const noexcept {
-    return repository_loading_ || state_ == State::kConnecting;
+    // Never cover the main UI for background catalog/inventory queries. Splash owns
+    // first-connect UX; pages update in place (Home keeps demo disks until live data arrives).
+    return false;
 }
 
 bool ServiceClient::hasCapability(const QString& capability) const {
@@ -209,6 +220,13 @@ bool ServiceClient::hasCapability(const QString& capability) const {
 
 void ServiceClient::reconnect() {
     splash_error_ = false;
+    // Pre-ready splash: one attempt (no 2s Loading/Error flicker). After the session has
+    // been Ready once, keep auto-reconnect on so a failed manual retry is not permanent offline.
+    if (!first_ready_seen_) {
+        transport_->set_auto_reconnect_enabled(false);
+    } else {
+        transport_->set_auto_reconnect_enabled(true);
+    }
     set_state(State::kConnecting);
     update_splash_for_state();
     transport_->connect_to_service();
@@ -216,6 +234,7 @@ void ServiceClient::reconnect() {
 
 void ServiceClient::refreshRepository() {
     if (state_ != State::kReady || repository_loading_ ||
+        (connections_available_ && selected_repository_connection_id_.isEmpty()) ||
         (!repository_request_id_.isEmpty() &&
          coordinator_->has_pending_request(repository_request_id_))) {
         return;
@@ -261,8 +280,12 @@ void ServiceClient::dismissToast() {
 void ServiceClient::on_transport_connected() {
     handshake_complete_ = false;
     splash_error_ = false;
+    if (state_ != State::kConnecting) {
+        set_state(State::kConnecting);
+    } else {
+        update_splash_for_state();
+    }
     send_service_info_request();
-    update_splash_for_state();
 }
 
 void ServiceClient::on_transport_disconnected() {
@@ -277,16 +300,47 @@ void ServiceClient::on_transport_error(const QString& message_code) {
 }
 
 void ServiceClient::on_request_failed(const QString& message_code) {
-    if (message_code == QLatin1String("service.protocol_invalid") ||
+    // Handshake-level failures drop the transport. Query failures after Ready must not tear down
+    // the whole Service session (matches desktop.md: catalog errors stay on repository status).
+    if (!handshake_complete_ || message_code == QLatin1String("service.protocol_invalid") ||
         message_code == QLatin1String("service.request_timeout") ||
-        message_code == QLatin1String("service.send_failed")) {
+        message_code == QLatin1String("service.send_failed") ||
+        message_code == QLatin1String("service.disconnected")) {
+        // After Ready, treat query protocol/timeout as soft failures when a catalog/job request
+        // is in flight — keep the socket and mark the domain error instead of full disconnect.
+        if (handshake_complete_ && first_ready_seen_ &&
+            (repository_loading_ || jobs_loading_ || inventory_loading_ || connections_loading_ ||
+             repository_command_busy_ || backup_command_busy_ || cancel_command_busy_) &&
+            message_code == QLatin1String("service.protocol_invalid")) {
+            if (repository_loading_) {
+                finish_repository_failure(QStringLiteral("repository.query_failed"));
+            }
+            if (jobs_loading_) {
+                finish_job_failure(QStringLiteral("job.query_failed"));
+            }
+            if (inventory_loading_) {
+                finish_inventory_failure(QStringLiteral("inventory.query_failed"));
+            }
+            if (connections_loading_) {
+                finish_connection_failure(QStringLiteral("connection.query_failed"));
+            }
+            if (repository_command_busy_) {
+                finish_repository_command_failure(QStringLiteral("service.request_failed"));
+            }
+            if (backup_command_busy_) {
+                finish_backup_command_failure(QStringLiteral("backup.command_failed"));
+            }
+            if (cancel_command_busy_) {
+                finish_cancel_command_failure(QStringLiteral("job.cancel_failed"));
+            }
+            return;
+        }
         set_state(State::kDisconnected, message_code);
         transport_->disconnect_from_service();
-        QTimer::singleShot(0, transport_.get(), &IpcFrameTransport::connect_to_service);
-        return;
-    }
-    if (!handshake_complete_) {
-        set_state(State::kDisconnected, message_code);
+        if (first_ready_seen_) {
+            transport_->set_auto_reconnect_enabled(true);
+            QTimer::singleShot(0, transport_.get(), &IpcFrameTransport::connect_to_service);
+        }
         return;
     }
     if (repository_loading_) {
@@ -300,6 +354,9 @@ void ServiceClient::on_request_failed(const QString& message_code) {
     }
     if (connections_loading_) {
         finish_connection_failure(QStringLiteral("connection.query_failed"));
+    }
+    if (repository_command_busy_) {
+        finish_repository_command_failure(QStringLiteral("service.request_failed"));
     }
     if (backup_command_busy_) {
         finish_backup_command_failure(QStringLiteral("backup.command_failed"));
@@ -321,6 +378,7 @@ void ServiceClient::on_locale_changed() {
     emit jobsChanged();
     emit inventoryChanged();
     emit connectionsChanged();
+    emit repositoryCommandChanged();
     emit backupCommandChanged();
     emit splashChanged();
 }
@@ -347,25 +405,6 @@ void ServiceClient::send_service_info_request() {
         });
     if (!started) {
         set_state(State::kDisconnected, QStringLiteral("service.send_failed"));
-    }
-}
-
-void ServiceClient::start_repository_query() {
-    reset_repository();
-    repository_loading_ = true;
-    emit repositoryChanged();
-    emit loadingChanged();
-
-    const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    repository_request_id_ = request_id;
-    requested_token_.reset();
-    const auto body = encode_recovery_point_request(request_id, std::nullopt);
-    const auto started =
-        coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
-            return handle_recovery_point_frame(frame_body);
-        });
-    if (!started) {
-        finish_repository_failure(QStringLiteral("repository.query_failed"));
     }
 }
 
@@ -419,7 +458,9 @@ RequestDisposition ServiceClient::handle_service_info_frame(const QByteArray& bo
         first_ready_seen_ = true;
         splash_error_ = false;
         update_splash_for_state();
-        start_repository_query();
+        if (!connections_available_) {
+            start_repository_query();
+        }
         if (job_list_available_) {
             start_job_query();
         }
@@ -430,66 +471,6 @@ RequestDisposition ServiceClient::handle_service_info_frame(const QByteArray& bo
             start_connection_query();
         }
     });
-    return RequestDisposition::kFinished;
-}
-
-RequestDisposition ServiceClient::handle_recovery_point_frame(const QByteArray& body) {
-    const auto request_id = extract_response_request_id(body);
-    QJsonObject root;
-    if (!parse_response_root(body, request_id, root)) {
-        return RequestDisposition::kProtocolError;
-    }
-    if (is_repository_failure_response(root)) {
-        finish_repository_failure(QStringLiteral("repository.query_failed"));
-        return RequestDisposition::kFinished;
-    }
-
-    RecoveryPointPage page;
-    if (!parse_recovery_point_response(root, page)) {
-        return RequestDisposition::kProtocolError;
-    }
-    if (!page.configured) {
-        if (requested_token_ || !pending_recovery_points_.isEmpty()) {
-            return RequestDisposition::kProtocolError;
-        }
-        repository_loading_ = false;
-        repository_request_id_.clear();
-        emit repositoryChanged();
-        emit loadingChanged();
-        return RequestDisposition::kFinished;
-    }
-    if ((!repository_uuid_.isEmpty() && page.repository_uuid != repository_uuid_) ||
-        (page.continuation_token && page.continuation_token == requested_token_) ||
-        pending_recovery_points_.size() + page.items.size() > kMaximumRecoveryPoints) {
-        return RequestDisposition::kProtocolError;
-    }
-    repository_uuid_ = page.repository_uuid;
-    for (auto& item : page.items) {
-        const auto file_uuid = item.toMap().value(QStringLiteral("fileUuid")).toString();
-        if (!last_file_uuid_.isEmpty() && file_uuid <= last_file_uuid_) {
-            return RequestDisposition::kProtocolError;
-        }
-        last_file_uuid_ = file_uuid;
-        pending_recovery_points_.push_back(std::move(item));
-    }
-    if (page.continuation_token) {
-        requested_token_ = page.continuation_token;
-        const auto next_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        const auto next_body = encode_recovery_point_request(next_id, requested_token_);
-        if (!coordinator_->continue_request(request_id, next_id, next_body)) {
-            return RequestDisposition::kProtocolError;
-        }
-        repository_request_id_ = next_id;
-        return RequestDisposition::kContinue;
-    }
-    recovery_points_.set_rows(recovery_points_from_variant_list(pending_recovery_points_));
-    pending_recovery_points_.clear();
-    repository_configured_ = true;
-    repository_loading_ = false;
-    repository_request_id_.clear();
-    requested_token_.reset();
-    emit repositoryChanged();
-    emit loadingChanged();
     return RequestDisposition::kFinished;
 }
 
@@ -552,20 +533,6 @@ RequestDisposition ServiceClient::handle_job_list_frame(const QByteArray& body) 
     return RequestDisposition::kFinished;
 }
 
-void ServiceClient::finish_repository_failure(const QString& message_code) {
-    repository_uuid_.clear();
-    pending_recovery_points_.clear();
-    requested_token_.reset();
-    last_file_uuid_.clear();
-    repository_loading_ = false;
-    repository_configured_ = false;
-    repository_request_id_.clear();
-    recovery_points_.clear();
-    repository_error_code_ = message_code;
-    emit repositoryChanged();
-    emit loadingChanged();
-}
-
 void ServiceClient::finish_job_failure(const QString& message_code) {
     pending_jobs_.clear();
     job_requested_token_.reset();
@@ -575,20 +542,6 @@ void ServiceClient::finish_job_failure(const QString& message_code) {
     emit jobsChanged();
     emit loadingChanged();
     update_job_polling();
-}
-
-void ServiceClient::reset_repository() {
-    repository_uuid_.clear();
-    repository_error_code_.clear();
-    recovery_points_.clear();
-    pending_recovery_points_.clear();
-    requested_token_.reset();
-    last_file_uuid_.clear();
-    repository_configured_ = false;
-    repository_loading_ = false;
-    repository_request_id_.clear();
-    emit repositoryChanged();
-    emit loadingChanged();
 }
 
 void ServiceClient::reset_jobs() {
@@ -607,27 +560,61 @@ void ServiceClient::reset_jobs() {
 }
 
 void ServiceClient::set_state(const State state, QString error_code) {
+    const bool same_state = (state_ == state);
+    const bool same_error = (error_code_ == error_code);
+    if (same_state && same_error) {
+        if (!first_ready_seen_ && state == State::kDisconnected && !splash_error_) {
+            splash_error_ = true;
+            transport_->set_auto_reconnect_enabled(false);
+            update_splash_for_state();
+        } else if (first_ready_seen_ && state == State::kDisconnected) {
+            // Keep trying after main UI is up (Service may start later).
+            transport_->ensure_reconnect_scheduled();
+        }
+        return;
+    }
+
+    const State previous = state_;
     state_ = state;
     error_code_ = std::move(error_code);
+
     if (state != State::kReady) {
-        service_version_.clear();
-        api_version_ = 0;
-        capabilities_.clear();
-        job_list_available_ = false;
-        inventory_available_ = false;
-        connections_available_ = false;
-        backup_start_available_ = false;
-        job_cancel_available_ = false;
-        handshake_complete_ = false;
-        reset_repository();
-        reset_jobs();
-        reset_inventory();
-        reset_connections();
-        reset_backup_command();
+        if (previous == State::kReady) {
+            // Dropped after a successful session — clear live models once.
+            service_version_.clear();
+            api_version_ = 0;
+            capabilities_.clear();
+            job_list_available_ = false;
+            inventory_available_ = false;
+            connections_available_ = false;
+            backup_start_available_ = false;
+            job_cancel_available_ = false;
+            handshake_complete_ = false;
+            reset_repository();
+            reset_jobs();
+            reset_inventory();
+            reset_connections();
+            reset_repository_command();
+            reset_backup_command();
+        } else {
+            // Pre-ready connect churn: clear handshake only (avoid model/signal storms).
+            handshake_complete_ = false;
+            service_version_.clear();
+            api_version_ = 0;
+            capabilities_.clear();
+        }
         if (!first_ready_seen_ && state == State::kDisconnected) {
             splash_error_ = true;
+            // Hold splash on error until Retry (matches old AegraImage; stops Loading/Error
+            // flicker).
+            transport_->set_auto_reconnect_enabled(false);
+        } else if (first_ready_seen_ && state == State::kDisconnected) {
+            transport_->ensure_reconnect_scheduled();
         }
+    } else {
+        transport_->set_auto_reconnect_enabled(true);
     }
+
     emit stateChanged();
     update_splash_for_state();
     emit loadingChanged();

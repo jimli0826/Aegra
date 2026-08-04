@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -16,6 +17,7 @@ namespace aegra::application {
 namespace {
 
 constexpr const char* kCapabilityRepositoryList = "repository.list";
+constexpr const char* kRepositoryDescriptorKey = "aegra.repository";
 
 [[nodiscard]] base::Error make_error(const base::ErrorCode code, const char* message) {
     return {code, message};
@@ -110,32 +112,32 @@ make_command_record(const std::string_view idempotency_key, std::string fingerpr
     return detail::make_random_id(prefix, random, cancellation);
 }
 
-[[nodiscard]] base::Result<void>
-probe_repository_descriptor(ports::IRepositoryStorageAccess& storage,
-                            const base::CancellationToken cancellation) {
-    auto attributes = storage.reader().get_attributes("aegra.repository", cancellation);
+[[nodiscard]] base::Result<personal_repository::RepositoryDescriptor>
+read_repository_descriptor(ports::IRepositoryStorageAccess& storage,
+                           const base::CancellationToken cancellation) {
+    auto attributes = storage.reader().get_attributes(kRepositoryDescriptorKey, cancellation);
     if (!attributes) {
-        return base::Result<void>::failure(attributes.error());
+        return base::Result<personal_repository::RepositoryDescriptor>::failure(attributes.error());
     }
     if (attributes.value().size_bytes == 0) {
-        return base::Result<void>::failure(
+        return base::Result<personal_repository::RepositoryDescriptor>::failure(
             make_error(base::ErrorCode::kCorruptData, "repository descriptor is empty"));
     }
     constexpr std::uint64_t kMaximumDescriptorBytes = 1'048'576;
     if (attributes.value().size_bytes > kMaximumDescriptorBytes) {
-        return base::Result<void>::failure(
+        return base::Result<personal_repository::RepositoryDescriptor>::failure(
             make_error(base::ErrorCode::kCorruptData, "repository descriptor is too large"));
     }
     std::vector<std::byte> buffer(static_cast<std::size_t>(attributes.value().size_bytes));
     std::size_t offset = 0;
     while (offset < buffer.size()) {
-        auto read = storage.reader().read_range("aegra.repository", offset,
+        auto read = storage.reader().read_range(kRepositoryDescriptorKey, offset,
                                                 std::span(buffer).subspan(offset), cancellation);
         if (!read) {
-            return base::Result<void>::failure(read.error());
+            return base::Result<personal_repository::RepositoryDescriptor>::failure(read.error());
         }
         if (read.value() == 0) {
-            return base::Result<void>::failure(
+            return base::Result<personal_repository::RepositoryDescriptor>::failure(
                 make_error(base::ErrorCode::kIoFailure, "repository descriptor short read"));
         }
         offset += read.value();
@@ -143,9 +145,73 @@ probe_repository_descriptor(ports::IRepositoryStorageAccess& storage,
     const auto text = std::string_view(reinterpret_cast<const char*>(buffer.data()), buffer.size());
     auto decoded = personal_repository::decode_repository_descriptor_json(text);
     if (!decoded) {
-        return base::Result<void>::failure(decoded.error());
+        return base::Result<personal_repository::RepositoryDescriptor>::failure(decoded.error());
+    }
+    return decoded;
+}
+
+[[nodiscard]] base::Result<void>
+probe_repository_descriptor(ports::IRepositoryStorageAccess& storage,
+                            const base::CancellationToken cancellation) {
+    auto descriptor = read_repository_descriptor(storage, cancellation);
+    return descriptor ? base::Result<void>::success()
+                      : base::Result<void>::failure(descriptor.error());
+}
+
+[[nodiscard]] base::Result<void>
+publish_repository_descriptor(ports::IRepositoryStorageAccess& storage,
+                              const personal_repository::RepositoryDescriptor& descriptor,
+                              const std::string_view encoded,
+                              const base::CancellationToken cancellation) {
+    const auto staging_key =
+        std::string("staging/repository-create/") + descriptor.repository_uuid + ".descriptor";
+    auto writer = storage.writer().begin_staged_write(staging_key, cancellation);
+    if (!writer) {
+        return base::Result<void>::failure(writer.error());
+    }
+    const auto bytes = std::as_bytes(std::span(encoded.data(), encoded.size()));
+    auto written = writer.value()->write(bytes, cancellation);
+    auto completed = written ? writer.value()->complete(cancellation)
+                             : base::Result<void>::failure(written.error());
+    if (!completed) {
+        return base::Result<void>::failure(completed.error());
+    }
+    auto published = storage.publisher().publish(
+        {staging_key, kRepositoryDescriptorKey, ports::PublishCondition::kCreateOnly, std::nullopt},
+        cancellation);
+    if (!published && published.error().code != base::ErrorCode::kOutcomeUnknown) {
+        return base::Result<void>::failure(published.error());
+    }
+    auto actual = read_repository_descriptor(storage, cancellation);
+    if (!actual || actual.value() != descriptor) {
+        return base::Result<void>::failure(
+            !actual ? actual.error()
+                    : make_error(base::ErrorCode::kConflict, "repository descriptor changed"));
     }
     return base::Result<void>::success();
+}
+
+[[nodiscard]] base::Result<void>
+initialize_repository(ports::IRepositoryStorageFactory& storage_factory, ports::IClock& clock,
+                      ports::IRandomSource& random, const std::string_view locator,
+                      const base::CancellationToken cancellation) {
+    auto repository_uuid = detail::make_random_uuid(random, cancellation);
+    if (!repository_uuid) {
+        return base::Result<void>::failure(repository_uuid.error());
+    }
+    personal_repository::RepositoryDescriptor descriptor;
+    descriptor.repository_uuid = std::move(repository_uuid).value();
+    descriptor.created_utc_ms = utc_ms(clock);
+    auto encoded = personal_repository::encode_repository_descriptor_json(descriptor);
+    if (!encoded) {
+        return base::Result<void>::failure(encoded.error());
+    }
+    auto storage = storage_factory.create_empty(locator, cancellation);
+    if (!storage) {
+        return base::Result<void>::failure(storage.error());
+    }
+    return publish_repository_descriptor(*storage.value(), descriptor, encoded.value(),
+                                         cancellation);
 }
 
 [[nodiscard]] base::Result<std::optional<ports::RepositoryConnectionRecord>>
@@ -407,6 +473,17 @@ RepositoryConnectionService::add_connection(const contracts::RepositoryConnectio
     if (existing.value()) {
         if (existing.value()->display_name == input.display_name &&
             existing.value()->credential_ref == input.credential_ref) {
+            if (existing.value()->state == contracts::RepositoryConnectionState::kUnavailable) {
+                auto initialized = initialize_repository(storage_factory_, clock_, random_,
+                                                         input.locator, cancellation);
+                if (!initialized) {
+                    return base::Result<contracts::CommandAcknowledgement>::failure(
+                        initialized.error());
+                }
+                return persist_connection_test({control_plane_, clock_, random_},
+                                               std::move(*existing.value()), true,
+                                               {idempotency_key, fingerprint, cancellation});
+            }
             return persist_existing_connection(control_plane_, clock_, random_,
                                                existing.value()->connection_id, idempotency_key,
                                                fingerprint, cancellation);
@@ -415,8 +492,14 @@ RepositoryConnectionService::add_connection(const contracts::RepositoryConnectio
             make_error(base::ErrorCode::kConflict, "repository locator already registered"));
     }
 
+    auto initialized =
+        initialize_repository(storage_factory_, clock_, random_, input.locator, cancellation);
+    if (!initialized) {
+        return base::Result<contracts::CommandAcknowledgement>::failure(initialized.error());
+    }
     return create_connection(control_plane_, clock_, random_, input, idempotency_key, fingerprint,
-                             contracts::RepositoryConnectionState::kUnavailable, {}, cancellation);
+                             contracts::RepositoryConnectionState::kAvailable,
+                             {kCapabilityRepositoryList}, cancellation);
 }
 
 base::Result<contracts::CommandAcknowledgement>

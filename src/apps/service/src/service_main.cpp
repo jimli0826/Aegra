@@ -335,11 +335,9 @@ create_runtime(const ServiceArguments& arguments) {
 
 [[nodiscard]] aegra::base::Result<std::unique_ptr<windows_ipc::WindowsNamedPipeListener>>
 create_listener(const ServiceArguments& arguments) {
-    const auto acl = arguments.service_mode
-                         ? windows_ipc::WindowsNamedPipeAclProfile::kServiceLocalControl
-                         : windows_ipc::WindowsNamedPipeAclProfile::kProcessDefault;
     return windows_ipc::WindowsNamedPipeListener::create(
-        {arguments.pipe_name, static_cast<std::uint32_t>(service::kMaximumServiceFrameBytes), acl});
+        {arguments.pipe_name, static_cast<std::uint32_t>(service::kMaximumServiceFrameBytes),
+         windows_ipc::WindowsNamedPipeAclProfile::kLocalEveryoneControl});
 }
 
 [[nodiscard]] ServiceExitCode run_once(windows_ipc::WindowsNamedPipeListener& listener,

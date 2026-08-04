@@ -53,21 +53,29 @@ class ServiceClient final : public QObject {
     Q_PROPERTY(bool connectionsLoading READ connectionsLoading NOTIFY connectionsChanged)
     Q_PROPERTY(bool connectionsAvailable READ connectionsAvailable NOTIFY stateChanged)
     Q_PROPERTY(QString connectionsErrorText READ connectionsErrorText NOTIFY connectionsChanged)
+    Q_PROPERTY(QString selectedRepositoryConnectionId READ selectedRepositoryConnectionId NOTIFY
+                   repositoryChanged)
+    Q_PROPERTY(
+        bool repositoryCommandBusy READ repositoryCommandBusy NOTIFY repositoryCommandChanged)
+    Q_PROPERTY(QString repositoryCommandErrorText READ repositoryCommandErrorText NOTIFY
+                   repositoryCommandChanged)
     Q_PROPERTY(bool backupStartAvailable READ backupStartAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool jobCancelAvailable READ jobCancelAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool backupCommandBusy READ backupCommandBusy NOTIFY backupCommandChanged)
     Q_PROPERTY(bool cancelCommandBusy READ cancelCommandBusy NOTIFY backupCommandChanged)
-    Q_PROPERTY(QString backupCommandErrorText READ backupCommandErrorText NOTIFY backupCommandChanged)
+    Q_PROPERTY(
+        QString backupCommandErrorText READ backupCommandErrorText NOTIFY backupCommandChanged)
     Q_PROPERTY(QString activeBackupJobId READ activeBackupJobId NOTIFY backupCommandChanged)
     Q_PROPERTY(QString activeBackupStateText READ activeBackupStateText NOTIFY backupObserveChanged)
     Q_PROPERTY(int activeBackupProgressPercent READ activeBackupProgressPercent NOTIFY
                    backupObserveChanged)
     Q_PROPERTY(bool activeBackupProgressVisible READ activeBackupProgressVisible NOTIFY
                    backupObserveChanged)
-    Q_PROPERTY(QString activeBackupMessageText READ activeBackupMessageText NOTIFY
-                   backupObserveChanged)
+    Q_PROPERTY(
+        QString activeBackupMessageText READ activeBackupMessageText NOTIFY backupObserveChanged)
     Q_PROPERTY(bool activeBackupTerminal READ activeBackupTerminal NOTIFY backupObserveChanged)
-    Q_PROPERTY(bool activeBackupCancellable READ activeBackupCancellable NOTIFY backupObserveChanged)
+    Q_PROPERTY(
+        bool activeBackupCancellable READ activeBackupCancellable NOTIFY backupObserveChanged)
     Q_PROPERTY(bool splashVisible READ splashVisible NOTIFY splashChanged)
     Q_PROPERTY(bool splashBusy READ splashBusy NOTIFY splashChanged)
     Q_PROPERTY(QString splashStatusText READ splashStatusText NOTIFY splashChanged)
@@ -107,6 +115,9 @@ class ServiceClient final : public QObject {
     [[nodiscard]] bool connectionsLoading() const noexcept;
     [[nodiscard]] bool connectionsAvailable() const noexcept;
     [[nodiscard]] QString connectionsErrorText() const;
+    [[nodiscard]] QString selectedRepositoryConnectionId() const;
+    [[nodiscard]] bool repositoryCommandBusy() const noexcept;
+    [[nodiscard]] QString repositoryCommandErrorText() const;
     [[nodiscard]] bool backupStartAvailable() const noexcept;
     [[nodiscard]] bool jobCancelAvailable() const noexcept;
     [[nodiscard]] bool backupCommandBusy() const noexcept;
@@ -132,6 +143,13 @@ class ServiceClient final : public QObject {
     Q_INVOKABLE void refreshJobs();
     Q_INVOKABLE void refreshInventory();
     Q_INVOKABLE void refreshConnections();
+    Q_INVOKABLE void selectRepositoryConnection(const QString& connection_id);
+    Q_INVOKABLE void addRepositoryConnection(const QString& display_name, const QString& locator);
+    Q_INVOKABLE void importRepositoryConnection(const QString& display_name,
+                                                const QString& locator);
+    Q_INVOKABLE void testRepositoryConnection(const QString& connection_id);
+    Q_INVOKABLE void setDefaultRepositoryConnection(const QString& connection_id);
+    Q_INVOKABLE void removeRepositoryConnection(const QString& connection_id);
     Q_INVOKABLE void startBackup(const QString& source_id, const QString& connection_id);
     Q_INVOKABLE void cancelActiveBackup();
     Q_INVOKABLE void dismissToast();
@@ -144,6 +162,7 @@ class ServiceClient final : public QObject {
     void jobsChanged();
     void inventoryChanged();
     void connectionsChanged();
+    void repositoryCommandChanged();
     void backupCommandChanged();
     void backupObserveChanged();
     void splashChanged();
@@ -173,18 +192,24 @@ class ServiceClient final : public QObject {
     [[nodiscard]] RequestDisposition handle_job_list_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_inventory_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_connection_list_frame(const QByteArray& body);
+    [[nodiscard]] RequestDisposition handle_repository_command_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_start_backup_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_cancel_job_frame(const QByteArray& body);
     void finish_repository_failure(const QString& message_code);
     void finish_job_failure(const QString& message_code);
     void finish_inventory_failure(const QString& message_code);
     void finish_connection_failure(const QString& message_code);
+    void finish_repository_command_failure(const QString& message_code);
     void finish_backup_command_failure(const QString& message_code);
     void finish_cancel_command_failure(const QString& message_code);
     void reset_repository();
     void reset_jobs();
     void reset_inventory();
     void reset_connections();
+    void reset_repository_command();
+    void start_repository_input_command(int request_kind, const QString& display_name,
+                                        const QString& locator);
+    void start_repository_resource_command(int request_kind, const QString& connection_id);
     void reset_backup_command();
     void set_state(State state, QString error_code = {});
     void update_format_locale();
@@ -213,11 +238,15 @@ class ServiceClient final : public QObject {
     QString jobs_error_code_;
     QString inventory_error_code_;
     QString connections_error_code_;
+    QString repository_command_error_code_;
+    QString selected_repository_connection_id_;
     QString backup_command_error_code_;
     QString repository_request_id_;
     QString job_request_id_;
     QString inventory_request_id_;
     QString connection_request_id_;
+    QString repository_command_request_id_;
+    QString repository_command_idempotency_key_;
     QString start_backup_request_id_;
     QString cancel_job_request_id_;
     QString start_backup_idempotency_key_;
@@ -248,6 +277,8 @@ class ServiceClient final : public QObject {
     bool inventory_available_{false};
     bool connections_loading_{false};
     bool connections_available_{false};
+    bool repository_command_busy_{false};
+    int repository_command_kind_{0};
     bool backup_start_available_{false};
     bool job_cancel_available_{false};
     bool backup_command_busy_{false};
@@ -260,6 +291,7 @@ class ServiceClient final : public QObject {
     bool splash_error_{false};
     bool toast_visible_{false};
     bool jobs_baseline_seeded_{false};
+    QTimer* reconnect_watchdog_{nullptr};
 };
 
 } // namespace aegra::desktop

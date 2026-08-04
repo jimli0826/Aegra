@@ -103,16 +103,18 @@ ServiceClient (QML 门面)
 
 ## Repository 页面
 
-页面沿用旧版 Repository 交互层级：Repository 卡片列表为主视图，点击恢复点数量打开覆盖主视图 90% 宽度的
-右侧 Recovery Point 抽屉。当前 Service 只配置一个 Repository，因此列表最多一张卡片；不得伪造根路径、
-默认库、锁或密码状态。
+页面沿用旧版 Repository 交互层级：Repository connection 卡片列表为主视图，点击恢复点数量打开覆盖主视图
+90% 宽度的右侧 Recovery Point 抽屉。列表直接绑定 Service V3 `repository.connection` 分页结果，可展示多个
+connection 的显示名、稳定 ID、状态、默认标记与 capabilities；不得在断开、加载或空列表状态回退到演示数据，
+也不得伪造根路径、Repository UUID、锁或密码状态。
 
 Recovery Point 列表展示备份类型、创建时间、逻辑/存储大小和链完整性（展示文本由 model/翻译提供）。
 Catalog-only 数据不表示 Archive 结构或认证完成，因此 Restore、Verify 和 Delete 图标保持禁用。
 
-Refresh 通过当前 Service session 重新分页查询；Repository 查询错误仍留在页面内，不破坏 Service Ready
-状态。Add、Import、Set Default、Test、Lock、Unlock、Rebuild、Export、Password 和 Delete 在对应 Service
-Use Case 接入前显示为禁用。布局必须在 900x600、1080x720 和更大窗口下不重叠。
+Refresh 通过当前 Service session 重新查询 connection 与选中 connection 的 Recovery Point Catalog；查询或命令
+错误仍留在页面内，不破坏 Service Ready 状态。Add、Import、Set Default、Test 与 Remove 调用 Service V3
+命令，成功后自动刷新列表；Remove 只删除控制面连接引用，不删除备份数据。Lock、Unlock、Rebuild、Export 与
+Password 在 Service 没有对应能力时不显示。布局必须在 900x600、1080x720 和更大窗口下不重叠。
 
 ## 测试与完成标准
 

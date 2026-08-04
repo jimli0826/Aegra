@@ -41,6 +41,11 @@ class IRepositoryStorageFactory {
     // Offline, missing, or unauthorized roots return stable ErrorCode failures.
     [[nodiscard]] virtual base::Result<std::unique_ptr<IRepositoryStorageAccess>>
     open(std::string_view locator, base::CancellationToken cancellation) = 0;
+
+    // Opens a missing or empty root for Repository initialization. A non-empty target fails with
+    // kConflict; this operation never adopts an existing Repository.
+    [[nodiscard]] virtual base::Result<std::unique_ptr<IRepositoryStorageAccess>>
+    create_empty(std::string_view locator, base::CancellationToken cancellation) = 0;
 };
 
 } // namespace aegra::ports

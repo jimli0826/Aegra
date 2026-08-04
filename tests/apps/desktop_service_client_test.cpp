@@ -192,10 +192,10 @@ bool test_cross_page_order_violation() {
                    *socket, second_request.value(QStringLiteral("request_id")).toString(),
                    {recovery_point(QLatin1String(kFirstFileUuid), std::nullopt, 1)}, std::nullopt),
                "fake service sends cross-page disorder");
-    passed &= expect(
-        wait_until([&] { return !client.errorText().isEmpty(); }, kShortTimeoutMilliseconds) &&
-            !client.connected(),
-        "desktop rejects cross-page UUID disorder");
+    passed &= expect(wait_until([&] { return !client.repositoryErrorText().isEmpty(); },
+                                kShortTimeoutMilliseconds) &&
+                         client.connected() && !client.repositoryLoading(),
+                     "desktop rejects cross-page UUID disorder without dropping Service");
     socket->abort();
     server.close();
     QLocalServer::removeServer(QLatin1String(kPipeName));

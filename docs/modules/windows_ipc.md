@@ -33,8 +33,8 @@ Service 侧监听器。`WindowsNamedPipeListenRequest` 支持 ACL 配置：
 
 | Profile | 行为 |
 | --- | --- |
-| `kProcessDefault` | 进程 token 默认 DACL + 拒绝远程（交互/开发模式） |
-| `kServiceLocalControl` | LocalSystem 向显式 ACL + 拒绝远程（仅 LocalSystem 监听进程） |
+| `kProcessDefault` | 进程 token 默认 DACL + 拒绝远程（Worker 私有 Pipe） |
+| `kLocalEveryoneControl` | Everyone 本机读写 + 拒绝远程（Service 控制 Pipe） |
 
 `accept_authorized` 在 accept 后执行身份校验；未授权客户端断开并返回 `kUnauthorized`。
 
@@ -48,7 +48,8 @@ Service 侧监听器。`WindowsNamedPipeListenRequest` 支持 ACL 配置：
 ## 核心不变量
 
 - 拒绝远程 Pipe Client
-- 不使用 NULL DACL / Everyone full access
+- Service 控制 Pipe 允许 Everyone 读写，但不授予 full access
+- Worker 私有 Pipe 继续使用进程默认 DACL
 - 取消通过 `CancelIoEx` 唤醒 pending connect/read/write
 - 错误映射为稳定 `ErrorCode`，消息不含客户路径或数据
 - Adapter 不解析 JSON

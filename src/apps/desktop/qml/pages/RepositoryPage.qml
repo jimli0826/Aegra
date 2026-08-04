@@ -7,33 +7,16 @@ import "../components"
 Item {
     id: root
     property bool recoveryPointDrawerOpen: false
-    property int selectedId: serviceClient.repositoryConfigured ? 1 : 1
+    readonly property string selectedId: serviceClient.selectedRepositoryConnectionId
+    readonly property bool repositorySelected: selectedId.length > 0
 
-    // Demo repository matches old screenshot when Service has none.
-    readonly property var demoRepositories: [
-        {
-            id: 1,
-            name: "fff",
-            path: "E:\\qqqq",
-            repoUuid: "5c04b487457e0745bbc0e5355e1f8f80",
-            checkpointCount: 1,
-            kind: "local",
-            connected: true
-        }
-    ]
-
-    readonly property var repositoryModel: serviceClient.repositoryConfigured ? [{
-        id: 1,
-        name: qsTrId("aegra.repository.personal_name"),
-        path: "",
-        repoUuid: serviceClient.repositoryUuid,
-        checkpointCount: serviceClient.recoveryPointCount,
-        kind: "local",
-        connected: serviceClient.connected
-    }] : demoRepositories
-
-    readonly property bool repositorySelected: selectedId >= 0
-                                               && repositoryModel.length > 0
+    function openConnectionDialog(importExisting) {
+        connectionDialog.importExisting = importExisting
+        connectionName.text = ""
+        connectionLocator.text = ""
+        connectionDialog.open()
+        connectionName.forceActiveFocus()
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -63,26 +46,34 @@ Item {
                       ? qsTrId("aegra.common.refresh")
                       : qsTrId("aegra.common.reconnect")
                 enabled: !serviceClient.repositoryLoading
-                onClicked: serviceClient.connected
-                           ? serviceClient.refreshRepository() : serviceClient.reconnect()
+                onClicked: {
+                    if (serviceClient.connected) {
+                        serviceClient.refreshConnections()
+                        serviceClient.refreshRepository()
+                    } else {
+                        serviceClient.reconnect()
+                    }
+                }
             }
             AppButton {
                 //% "Add repository"
                 text: qsTrId("aegra.repository.add")
                 primary: true
-                enabled: true
+                enabled: serviceClient.connected && !serviceClient.repositoryCommandBusy
+                onClicked: root.openConnectionDialog(false)
             }
             AppButton {
                 //% "Import..."
                 text: qsTrId("aegra.repository.import")
-                enabled: true
+                enabled: serviceClient.connected && !serviceClient.repositoryCommandBusy
+                onClicked: root.openConnectionDialog(true)
             }
         }
 
         Text {
             Layout.fillWidth: true
             //% "Loaded %1 repositories"
-            text: qsTrId("aegra.repository.loaded_count").arg(root.repositoryModel.length)
+            text: qsTrId("aegra.repository.loaded_count").arg(serviceClient.connections.count)
             color: Theme.colorTextGrey
             font.family: Theme.fontFamily
             font.pixelSize: 12
@@ -93,23 +84,28 @@ Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            model: root.repositoryModel
+            model: serviceClient.connections
             spacing: 8
 
             delegate: Rectangle {
-                required property var modelData
+                required property string connectionId
+                required property string displayName
+                required property string stateText
+                required property bool isDefault
+                required property bool isAvailable
+                required property var capabilities
                 width: repositoryList.width
                 height: 96
                 radius: 4
-                color: modelData.id === root.selectedId ? Theme.colorHover : Theme.colorCard
+                color: connectionId === root.selectedId ? Theme.colorHover : Theme.colorCard
                 border.width: 1
-                border.color: modelData.id === root.selectedId
+                border.color: connectionId === root.selectedId
                               ? Theme.colorAccentBlue : Theme.colorBorder
 
                 MouseArea {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: root.selectedId = modelData.id
+                    onClicked: serviceClient.selectRepositoryConnection(connectionId)
                 }
 
                 ColumnLayout {
@@ -122,7 +118,7 @@ Item {
 
                         Text {
                             Layout.fillWidth: true
-                            text: modelData.name
+                            text: displayName
                             color: Theme.colorTextWhite
                             font.family: Theme.fontFamily
                             font.pixelSize: 14
@@ -132,47 +128,31 @@ Item {
 
                         Rectangle {
                             z: 2
-                            width: recoveryCount.implicitWidth + 14
-                            height: 22
+                            Layout.preferredWidth: defaultLabel.implicitWidth + 14
+                            Layout.preferredHeight: 22
                             radius: 3
-                            color: recoveryMouse.containsMouse
-                                   ? Theme.colorAccentBlue : Theme.colorButton
+                            color: Theme.colorButton
                             border.width: 1
                             border.color: Theme.colorBorder
 
                             Text {
-                                id: recoveryCount
+                                id: defaultLabel
                                 anchors.centerIn: parent
-                                //% "%1 checkpoint"
-                                //% "%1 checkpoints"
-                                text: modelData.checkpointCount === 1
-                                      ? qsTrId("aegra.repository.checkpoint_one")
-                                      : qsTrId("aegra.repository.recovery_points_count")
-                                            .arg(modelData.checkpointCount)
+                                //% "Default"
+                                text: qsTrId("aegra.backup.connection.default")
                                 color: Theme.colorTextWhite
                                 font.family: Theme.fontFamily
                                 font.pixelSize: 11
                                 font.bold: true
                             }
 
-                            MouseArea {
-                                id: recoveryMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    root.selectedId = modelData.id
-                                    root.recoveryPointDrawerOpen = true
-                                }
-                            }
+                            visible: isDefault
                         }
 
                         Text {
                             //% "connected"
-                            text: modelData.connected
-                                  ? qsTrId("aegra.repository.connected")
-                                  : qsTrId("aegra.repository.offline")
-                            color: Theme.colorTextGrey
+                            text: stateText
+                            color: isAvailable ? Theme.colorGreen : Theme.colorTextGrey
                             font.family: Theme.fontFamily
                             font.pixelSize: 11
                         }
@@ -180,30 +160,33 @@ Item {
 
                     Text {
                         Layout.fillWidth: true
-                        text: modelData.path || ""
+                        text: connectionId
                         color: Theme.colorTextGrey
                         font.family: Theme.fontFamily
                         font.pixelSize: 12
                         elide: Text.ElideMiddle
-                        visible: (modelData.path || "").length > 0
                     }
 
                     Text {
                         Layout.fillWidth: true
-                        text: (modelData.kind || "local") + " · " + (modelData.repoUuid || "")
+                        text: capabilities.join(" · ")
                         color: Theme.colorTextDim
                         font.family: Theme.fontFamily
                         font.pixelSize: 11
                         elide: Text.ElideMiddle
+                        visible: capabilities.length > 0
                     }
                 }
             }
 
             Text {
                 anchors.centerIn: parent
-                visible: repositoryList.count === 0
-                //% "No repository"
-                text: qsTrId("aegra.repository.empty")
+                visible: repositoryList.count === 0 && !serviceClient.connectionsLoading
+                text: !serviceClient.connected
+                      ? serviceClient.statusText
+                      : (serviceClient.connectionsErrorText.length > 0
+                         ? serviceClient.connectionsErrorText
+                         : qsTrId("aegra.repository.empty"))
                 color: Theme.colorTextGrey
                 font.family: Theme.fontFamily
                 font.pixelSize: 13
@@ -219,45 +202,123 @@ Item {
             AppButton {
                 //% "Set default"
                 text: qsTrId("aegra.repository.set_default")
-                enabled: false
+                enabled: serviceClient.connected && !serviceClient.repositoryCommandBusy
+                onClicked: serviceClient.setDefaultRepositoryConnection(root.selectedId)
             }
             AppButton {
                 //% "Test"
                 text: qsTrId("aegra.repository.test")
-                enabled: false
+                enabled: serviceClient.connected && !serviceClient.repositoryCommandBusy
+                onClicked: serviceClient.testRepositoryConnection(root.selectedId)
             }
             AppButton {
-                //% "Unlock"
-                text: qsTrId("aegra.repository.unlock")
-                enabled: false
-            }
-            AppButton {
-                //% "Lock"
-                text: qsTrId("aegra.repository.lock")
-                enabled: false
-            }
-            AppButton {
-                //% "Rebuild index"
-                text: qsTrId("aegra.repository.rebuild_index")
-                enabled: false
-            }
-            AppButton {
-                //% "Export..."
-                text: qsTrId("aegra.repository.export")
-                enabled: false
-            }
-            AppButton {
-                //% "Password..."
-                text: qsTrId("aegra.repository.password")
-                enabled: false
+                text: qsTrId("aegra.repository.recovery_points_count")
+                      .arg(serviceClient.recoveryPointCount)
+                enabled: serviceClient.repositoryConfigured && !serviceClient.repositoryLoading
+                onClicked: root.recoveryPointDrawerOpen = true
             }
             Item { Layout.fillWidth: true }
             AppButton {
                 //% "Delete"
                 text: qsTrId("aegra.common.delete")
                 danger: true
-                enabled: false
+                enabled: serviceClient.connected && !serviceClient.repositoryCommandBusy
+                onClicked: removeDialog.open()
             }
+        }
+
+        Text {
+            Layout.fillWidth: true
+            visible: serviceClient.repositoryCommandErrorText.length > 0
+            text: serviceClient.repositoryCommandErrorText
+            color: Theme.colorAccentRed
+            font.family: Theme.fontFamily
+            font.pixelSize: 11
+        }
+    }
+
+    Dialog {
+        id: connectionDialog
+        property bool importExisting: false
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        width: 440
+        title: importExisting ? qsTrId("aegra.repository.import")
+                              : qsTrId("aegra.repository.add")
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        onAccepted: {
+            if (importExisting)
+                serviceClient.importRepositoryConnection(connectionName.text,
+                                                         connectionLocator.text)
+            else
+                serviceClient.addRepositoryConnection(connectionName.text,
+                                                      connectionLocator.text)
+        }
+        onOpened: standardButton(Dialog.Ok).enabled = Qt.binding(function() {
+            return connectionName.text.trim().length > 0
+                    && connectionLocator.text.trim().length > 0
+        })
+
+        background: Rectangle {
+            color: Theme.colorCard
+            border.width: 1
+            border.color: Theme.colorBorder
+            radius: 4
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 10
+            Text {
+                //% "Display name"
+                text: qsTrId("aegra.repository.display_name")
+                color: Theme.colorTextGrey
+                font.family: Theme.fontFamily
+            }
+            TextField {
+                id: connectionName
+                Layout.fillWidth: true
+                selectByMouse: true
+            }
+            Text {
+                //% "Repository location"
+                text: qsTrId("aegra.repository.location")
+                color: Theme.colorTextGrey
+                font.family: Theme.fontFamily
+            }
+            TextField {
+                id: connectionLocator
+                Layout.fillWidth: true
+                selectByMouse: true
+                placeholderText: "D:\\Backup"
+            }
+        }
+    }
+
+    Dialog {
+        id: removeDialog
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        width: 420
+        //% "Remove repository connection?"
+        title: qsTrId("aegra.repository.remove_title")
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        onAccepted: serviceClient.removeRepositoryConnection(root.selectedId)
+
+        background: Rectangle {
+            color: Theme.colorCard
+            border.width: 1
+            border.color: Theme.colorBorder
+            radius: 4
+        }
+
+        contentItem: Text {
+            //% "Only the saved connection is removed. Backup data is not deleted."
+            text: qsTrId("aegra.repository.remove_description")
+            color: Theme.colorTextGrey
+            font.family: Theme.fontFamily
+            wrapMode: Text.WordWrap
         }
     }
 

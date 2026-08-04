@@ -103,9 +103,9 @@ identity_from_token(const HANDLE token, const std::uint32_t process_id,
     identity.is_administrator = token_has_well_known_sid(token, WinBuiltinAdministratorsSid);
     // Session 0 is the service session. Personal Desktop clients use interactive sessions (>0).
     // Elevated admin tokens still qualify even when the Interactive group is filtered.
-    identity.is_interactive =
-        session_id > 0 || token_has_well_known_sid(token, WinInteractiveSid) ||
-        identity.is_administrator;
+    identity.is_interactive = session_id > 0 ||
+                              token_has_well_known_sid(token, WinInteractiveSid) ||
+                              identity.is_administrator;
     return base::Result<WindowsNamedPipePeerIdentity>::success(std::move(identity));
 }
 
@@ -114,10 +114,11 @@ identity_from_token(const HANDLE token, const std::uint32_t process_id,
 namespace detail {
 
 base::Result<SECURITY_ATTRIBUTES*>
-create_service_local_security_attributes(SECURITY_ATTRIBUTES& attributes,
-                                         UniqueLocal& descriptor_owner) {
-    // LocalSystem + Administrators full; Interactive users read/write. No network ACE.
-    constexpr auto kSddl = L"D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)";
+create_local_everyone_security_attributes(SECURITY_ATTRIBUTES& attributes,
+                                          UniqueLocal& descriptor_owner) {
+    // LocalSystem + Administrators full; all local users read/write. Remote clients are rejected
+    // by the pipe mode rather than this DACL.
+    constexpr auto kSddl = L"D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;WD)";
     PSECURITY_DESCRIPTOR descriptor = nullptr;
     if (ConvertStringSecurityDescriptorToSecurityDescriptorW(kSddl, SDDL_REVISION_1, &descriptor,
                                                              nullptr) == FALSE) {
@@ -170,8 +171,8 @@ authorize_service_caller(const WindowsNamedPipePeerIdentity& peer,
             base::Error{base::ErrorCode::kUnauthorized, "named pipe peer identity is incomplete"});
     }
     if (authorization.policy != WindowsServiceCallerPolicy::kLocalInteractiveOrAdmin) {
-        return base::Result<void>::failure(base::Error{base::ErrorCode::kInvalidArgument,
-                                                       "named pipe authorization policy is invalid"});
+        return base::Result<void>::failure(base::Error{
+            base::ErrorCode::kInvalidArgument, "named pipe authorization policy is invalid"});
     }
     if (peer.is_interactive || peer.is_administrator) {
         return base::Result<void>::success();

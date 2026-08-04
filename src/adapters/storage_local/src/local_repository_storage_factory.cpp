@@ -43,11 +43,33 @@ class LocalRepositoryStorageAccess final : public ports::IRepositoryStorageAcces
     }
 }
 
-} // namespace
+[[nodiscard]] base::Result<void> require_empty_target(const std::filesystem::path& path) {
+    std::error_code error;
+    const bool exists = std::filesystem::exists(path, error);
+    if (error) {
+        return base::Result<void>::failure(
+            {base::ErrorCode::kIoFailure, "inspect repository root failed"});
+    }
+    if (!exists) {
+        return base::Result<void>::success();
+    }
+    if (!std::filesystem::is_directory(path, error) || error) {
+        return base::Result<void>::failure(
+            {base::ErrorCode::kConflict, "repository root is not an empty directory"});
+    }
+    const bool empty = std::filesystem::is_empty(path, error);
+    if (error) {
+        return base::Result<void>::failure(
+            {base::ErrorCode::kIoFailure, "inspect repository root contents failed"});
+    }
+    return empty ? base::Result<void>::success()
+                 : base::Result<void>::failure(
+                       {base::ErrorCode::kConflict, "repository root is not empty"});
+}
 
-base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>
-LocalRepositoryStorageFactory::open(const std::string_view locator,
-                                    const base::CancellationToken cancellation) {
+[[nodiscard]] base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>
+open_local_repository(const std::string_view locator, const LocalRootMode mode,
+                      const base::CancellationToken cancellation) {
     if (cancellation.stop_requested()) {
         return base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>::failure(
             {base::ErrorCode::kCancelled, "repository open cancelled"});
@@ -57,13 +79,34 @@ LocalRepositoryStorageFactory::open(const std::string_view locator,
         return base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>::failure(
             path.error());
     }
-    auto storage = LocalObjectStorage::open({path.value(), LocalRootMode::kOpenExisting});
+    if (mode == LocalRootMode::kCreateIfMissing) {
+        auto empty = require_empty_target(path.value());
+        if (!empty) {
+            return base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>::failure(
+                empty.error());
+        }
+    }
+    auto storage = LocalObjectStorage::open({path.value(), mode});
     if (!storage) {
         return base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>::failure(
             storage.error());
     }
     return base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>::success(
         std::make_unique<LocalRepositoryStorageAccess>(std::move(storage).value()));
+}
+
+} // namespace
+
+base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>
+LocalRepositoryStorageFactory::open(const std::string_view locator,
+                                    const base::CancellationToken cancellation) {
+    return open_local_repository(locator, LocalRootMode::kOpenExisting, cancellation);
+}
+
+base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>
+LocalRepositoryStorageFactory::create_empty(const std::string_view locator,
+                                            const base::CancellationToken cancellation) {
+    return open_local_repository(locator, LocalRootMode::kCreateIfMissing, cancellation);
 }
 
 } // namespace aegra::adapters::storage_local

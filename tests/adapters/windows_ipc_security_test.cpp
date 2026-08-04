@@ -60,21 +60,21 @@ bool test_authorize_rejects_incomplete_and_service_accounts() {
     auto remote = sample_peer("S-1-5-21-1-2-3-1003", 1, true, false);
     remote.is_local = false;
     auto denied_remote = windows_ipc::authorize_service_caller(remote, policy);
-    bool passed =
-        expect(!denied_remote && denied_remote.error().code == aegra::base::ErrorCode::kUnauthorized,
-               "non-local peer is rejected");
+    bool passed = expect(!denied_remote &&
+                             denied_remote.error().code == aegra::base::ErrorCode::kUnauthorized,
+                         "non-local peer is rejected");
 
     auto service_account = sample_peer("S-1-5-18", 0, false, false);
     auto denied_service = windows_ipc::authorize_service_caller(service_account, policy);
-    passed &= expect(
-        !denied_service && denied_service.error().code == aegra::base::ErrorCode::kUnauthorized,
-        "non-interactive service account peer is rejected");
+    passed &= expect(!denied_service &&
+                         denied_service.error().code == aegra::base::ErrorCode::kUnauthorized,
+                     "non-interactive service account peer is rejected");
     return passed;
 }
 
 bool test_process_default_accept_and_peer_identity() {
     // Interactive/dev mode uses process-default DACL with remote clients rejected.
-    // kServiceLocalControl is reserved for LocalSystem composition roots.
+    // Process-default ACL is used only for private same-user process communication.
     const auto name = unique_pipe_name();
     windows_ipc::WindowsNamedPipeListenRequest request;
     request.pipe_name = name;
@@ -86,8 +86,8 @@ bool test_process_default_accept_and_peer_identity() {
     }
     aegra::base::CancellationSource accept_cancellation;
     auto accepted = std::async(std::launch::async, [&] {
-        return listener.value()->accept_authorized(
-            windows_ipc::WindowsServiceCallerAuthorization{}, accept_cancellation.get_token());
+        return listener.value()->accept_authorized(windows_ipc::WindowsServiceCallerAuthorization{},
+                                                   accept_cancellation.get_token());
     });
     auto client = windows_ipc::WindowsNamedPipeChannel::connect(
         {name, 2'000, 4096, windows_ipc::WindowsNamedPipeNamespace::kService}, {});
@@ -117,12 +117,38 @@ bool test_process_default_accept_and_peer_identity() {
     return passed;
 }
 
-bool test_service_local_control_profile_is_creatable() {
-    // Creating the LocalSystem-oriented profile must succeed; connecting as a normal interactive
-    // process is not required and may be denied by design.
+bool test_local_everyone_control_profile_accepts_client() {
+    const auto name = unique_pipe_name();
     auto listener = windows_ipc::WindowsNamedPipeListener::create(
-        {unique_pipe_name(), 4096, windows_ipc::WindowsNamedPipeAclProfile::kServiceLocalControl});
-    return expect(listener.has_value(), "service local control listener profile is accepted");
+        {name, 4096, windows_ipc::WindowsNamedPipeAclProfile::kLocalEveryoneControl});
+    if (!expect(listener.has_value(), "local everyone control listener is created")) {
+        return false;
+    }
+    aegra::base::CancellationSource cancellation;
+    auto accepted = std::async(std::launch::async,
+                               [&] { return listener.value()->accept(cancellation.get_token()); });
+    auto client = windows_ipc::WindowsNamedPipeChannel::connect(
+        {name, 2'000, 4096, windows_ipc::WindowsNamedPipeNamespace::kService}, {});
+    if (!client) {
+        cancellation.request_stop();
+        (void)accepted.get();
+        return expect(false, "local client connects through everyone control pipe");
+    }
+    auto server = accepted.get();
+    if (!expect(server.has_value(), "everyone control listener accepts local client")) {
+        return false;
+    }
+    auto exchange = std::async(std::launch::async, [&] {
+        auto received = server.value()->receive({});
+        auto sent = server.value()->send("acl-ok", {});
+        return received && received.value() == "client-hello" && sent.has_value();
+    });
+    auto sent = client.value()->send("client-hello", {});
+    auto received = client.value()->receive({});
+    return expect(sent.has_value(), "client sends through everyone control pipe") &&
+           expect(received && received.value() == "acl-ok",
+                  "client receives through everyone control pipe") &&
+           expect(exchange.get(), "everyone control session exchanges frames");
 }
 
 bool test_accept_cancellation_with_process_default() {
@@ -147,7 +173,7 @@ int run_tests() {
     const bool passed = test_authorize_success_and_multi_session() &&
                         test_authorize_rejects_incomplete_and_service_accounts() &&
                         test_process_default_accept_and_peer_identity() &&
-                        test_service_local_control_profile_is_creatable() &&
+                        test_local_everyone_control_profile_accepts_client() &&
                         test_accept_cancellation_with_process_default();
     return passed ? EXIT_SUCCESS : EXIT_FAILURE;
 }

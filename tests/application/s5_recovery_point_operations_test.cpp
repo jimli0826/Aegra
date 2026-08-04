@@ -142,6 +142,24 @@ class FakeStorageFactory final : public ports::IRepositoryStorageFactory {
         return base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>::success(
             std::make_unique<MemoryStorageAccess>(found->second));
     }
+
+    [[nodiscard]] base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>
+    create_empty(const std::string_view locator,
+                 const base::CancellationToken cancellation) override {
+        if (cancellation.stop_requested()) {
+            return base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>::failure(
+                {base::ErrorCode::kCancelled, "create cancelled"});
+        }
+        const auto key = std::string(locator);
+        if (stores.contains(key)) {
+            return base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>::failure(
+                {base::ErrorCode::kConflict, "repository root is not empty"});
+        }
+        auto storage = std::make_shared<memory::MemoryObjectStorage>();
+        stores.emplace(key, storage);
+        return base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>::success(
+            std::make_unique<MemoryStorageAccess>(std::move(storage)));
+    }
 };
 
 bool publish(memory::MemoryObjectStorage& storage, const std::string_view destination_key,

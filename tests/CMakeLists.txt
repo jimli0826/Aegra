@@ -38,7 +38,11 @@ aegra_add_test(
 )
 target_link_libraries(
     aegra_s4_inventory_repository_api_tests
-    PRIVATE Aegra::Application Aegra::AdapterMemory Aegra::AdapterSqlite
+    PRIVATE
+        Aegra::Application
+        Aegra::AdapterMemory
+        Aegra::AdapterSqlite
+        Aegra::AdapterStorageLocal
 )
 
 aegra_add_test(
@@ -191,6 +195,7 @@ if(WIN32)
             "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/service_client.cpp"
             "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/service_client.h"
             "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/service_client_backup.cpp"
+            "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/service_client_repository.cpp"
             "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/service_protocol.cpp"
             "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/service_protocol.h"
             "${PROJECT_SOURCE_DIR}/src/apps/desktop/src/client/service_protocol_commands.cpp"

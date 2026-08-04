@@ -7,54 +7,110 @@ import "components"
 import "pages"
 
 // Shell chrome aligned with backup/src/gui Main.qml (title bar, sidebar, page fade).
+// Starts as compact splash window (600×440), then expands to main UI (1080×720).
 Window {
     id: window
+    // Start as splash window only (compact card; not full main UI frame)
+    width: 600
+    height: 440
     visible: true
-    width: 1080
-    height: 720
-    minimumWidth: 900
-    minimumHeight: 600
     //% "Aegra"
     title: qsTrId("aegra.app.title")
-    color: Theme.colorBg
+    color: Theme.colorCard
     flags: Qt.Window | Qt.FramelessWindowHint
+    minimumWidth: appReady ? 900 : 400
+    minimumHeight: appReady ? 600 : 300
 
+    readonly property int mainWidth: 1080
+    readonly property int mainHeight: 720
     readonly property int resizeBorder: 6
-    readonly property bool canResize: visibility !== Window.Maximized
+    readonly property bool canResize: appReady
+                                      && visibility !== Window.Maximized
                                       && visibility !== Window.FullScreen
     /// Settings opens as right drawer (old Main.qml pattern)
     property bool settingsPanelOpen: false
+    /// Latched once splash dismisses so main opacity/animation never re-toggles.
+    property bool appReady: false
+
+    function centerOnScreen() {
+        var scr = window.screen
+        if (!scr)
+            return
+        window.x = scr.virtualX + Math.round((scr.width - window.width) / 2)
+        window.y = scr.virtualY + Math.round((scr.height - window.height) / 2)
+    }
+
+    function applySplashSize() {
+        if (window.appReady)
+            return
+        var w = splash.preferredWidth || 600
+        var h = splash.preferredHeight || 440
+        window.width = w
+        window.height = h
+        window.color = Theme.colorCard
+        centerOnScreen()
+    }
+
+    function applyMainSize() {
+        window.width = window.mainWidth
+        window.height = window.mainHeight
+        window.color = Theme.colorBg
+        centerOnScreen()
+    }
+
+    function enterMainUi() {
+        if (window.appReady)
+            return
+        window.appReady = true
+        splash.windowAppReady = true
+        applyMainSize()
+    }
 
     // Keep window chrome in sync when theme changes (old Main.qml pattern)
     Connections {
         target: Theme
         function onThemeIdChanged() {
-            window.color = serviceClient.splashVisible ? Theme.colorCard : Theme.colorBg
+            window.color = window.appReady ? Theme.colorBg : Theme.colorCard
         }
         function onColorBgChanged() {
-            if (!serviceClient.splashVisible)
+            if (window.appReady)
                 window.color = Theme.colorBg
         }
         function onColorCardChanged() {
-            if (serviceClient.splashVisible)
+            if (!window.appReady)
                 window.color = Theme.colorCard
+        }
+    }
+
+    Connections {
+        target: serviceClient
+        function onSplashChanged() {
+            if (!serviceClient.splashVisible)
+                window.enterMainUi()
+            else if (!window.appReady)
+                window.applySplashSize()
         }
     }
 
     Component.onCompleted: {
         // Load persisted theme after context properties exist (old Theme.initFromBackend)
         Theme.initFromBackend()
-        window.color = serviceClient.splashVisible ? Theme.colorCard : Theme.colorBg
+        if (!serviceClient.splashVisible) {
+            window.enterMainUi()
+        } else {
+            window.applySplashSize()
+        }
     }
 
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
-        // Dim slightly while splash covers (splash is overlay)
-        opacity: serviceClient.splashVisible ? 0 : 1
-        enabled: !serviceClient.splashVisible
+        // Hidden under splash; fade in once when ready (never re-hide → no flicker).
+        opacity: window.appReady ? 1 : 0
+        enabled: window.appReady
         Behavior on opacity {
-            NumberAnimation { duration: 380; easing.type: Easing.OutCubic }
+            enabled: window.appReady
+            NumberAnimation { duration: 280; easing.type: Easing.OutCubic }
         }
 
         // ========== Title Bar ==========
@@ -119,15 +175,29 @@ Window {
                     Layout.preferredHeight: 7
                     radius: 4
                     Layout.alignment: Qt.AlignVCenter
-                    color: serviceClient.connected ? Theme.colorGreen : Theme.colorAccentRed
+                    color: serviceClient.connected ? Theme.colorGreen
+                           : (serviceClient.statusText.indexOf("Connect") >= 0
+                              ? Theme.colorAccentBlue : Theme.colorAccentRed)
                 }
                 Text {
                     //% "Service %1"
                     text: qsTrId("aegra.shell.service_label").arg(serviceClient.statusText)
-                    color: Theme.colorTextGrey
+                    color: serviceClient.connected ? Theme.colorTextGrey
+                           : (statusHover.containsMouse ? Theme.colorAccentBlue
+                                                        : Theme.colorTextGrey)
                     font.family: Theme.fontFamily
                     font.pixelSize: 11
                     Layout.alignment: Qt.AlignVCenter
+                    MouseArea {
+                        id: statusHover
+                        anchors.fill: parent
+                        anchors.margins: -4
+                        hoverEnabled: true
+                        cursorShape: serviceClient.connected ? Qt.ArrowCursor
+                                                             : Qt.PointingHandCursor
+                        enabled: !serviceClient.connected
+                        onClicked: serviceClient.reconnect()
+                    }
                 }
                 Text {
                     visible: serviceClient.jobListAvailable && serviceClient.jobs.activeCount > 0
@@ -386,17 +456,25 @@ Window {
     }
 
     SplashOverlay {
+        id: splash
         anchors.fill: parent
+        windowAppReady: window.appReady
+        onSizeHintChanged: window.applySplashSize()
+        onQuitRequested: window.close()
     }
 
+    // Intentionally not shown on main UI — background queries must not flash a scrim.
     LoadingOverlay {
         anchors.fill: parent
+        visible: false
     }
 
     ToastBanner {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
+        anchors.topMargin: window.appReady ? 32 : 0
+        visible: window.appReady
     }
 
     ResizeHandle {

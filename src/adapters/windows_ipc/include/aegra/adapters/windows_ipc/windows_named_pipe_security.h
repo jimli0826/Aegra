@@ -10,11 +10,11 @@ namespace aegra::adapters::windows_ipc {
 // Local Service control-pipe authorization. Contracts and JSON stay out of this adapter.
 enum class WindowsNamedPipeAclProfile : std::uint8_t {
     // Process-token default DACL + PIPE_REJECT_REMOTE_CLIENTS.
-    // Use for interactive/dev processes where the service runs as the same user as Desktop.
+    // Use for private Worker parent-child pipes.
     kProcessDefault = 1,
-    // Explicit LocalSystem-oriented DACL: LocalSystem + Administrators full; Interactive read/write.
-    // Intended only when the listener runs as LocalSystem; not reliable for ordinary user processes.
-    kServiceLocalControl = 2,
+    // Explicit local-control DACL: LocalSystem + Administrators full; Everyone read/write.
+    // PIPE_REJECT_REMOTE_CLIENTS still restricts the listener to the local machine.
+    kLocalEveryoneControl = 2,
 };
 
 enum class WindowsServiceCallerPolicy : std::uint8_t {

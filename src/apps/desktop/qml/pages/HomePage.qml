@@ -31,8 +31,9 @@ Item {
         }
     ]
 
+    // Keep demo disks while inventory is empty (including during load) so Home does not
+    // flash "Loading sources…" → empty → demo on every connect.
     readonly property bool useDemoDisks: serviceClient.sources.count === 0
-                                        && !serviceClient.inventoryLoading
 
     ColumnLayout {
         anchors.fill: parent
@@ -93,17 +94,6 @@ Item {
                     Layout.fillHeight: true
                     Layout.fillWidth: true
 
-                    Text {
-                        anchors.centerIn: parent
-                        visible: serviceClient.inventoryLoading
-                                 && serviceClient.sources.count === 0
-                        //% "Loading sources…"
-                        text: qsTrId("aegra.home.loading_disks")
-                        color: Theme.colorTextGrey
-                        font.pixelSize: 13
-                        font.family: Theme.fontFamily
-                    }
-
                     Flickable {
                         anchors.fill: parent
                         contentWidth: diskRow.implicitWidth
@@ -138,7 +128,7 @@ Item {
                                             percent: isSelectable ? 0.35 : 0
                                             label: capacityText
                                             diskName: ""
-                                            animationEnabled: true
+                                            animationEnabled: false
                                         }
                                         Text {
                                             Layout.alignment: Qt.AlignHCenter
@@ -189,7 +179,7 @@ Item {
                                             percent: modelData.percent
                                             label: modelData.freeLabel
                                             diskName: ""
-                                            animationEnabled: true
+                                            animationEnabled: false
                                         }
                                         Text {
                                             Layout.alignment: Qt.AlignHCenter

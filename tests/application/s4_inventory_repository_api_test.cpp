@@ -1,5 +1,6 @@
 #include "aegra/adapters/memory/memory_object_storage.h"
 #include "aegra/adapters/sqlite/sqlite_control_plane.h"
+#include "aegra/adapters/storage_local/local_object_storage.h"
 #include "aegra/application/connected_repository_query.h"
 #include "aegra/application/repository_connection_service.h"
 #include "aegra/application/source_inventory_query.h"
@@ -14,6 +15,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <map>
 #include <memory>
 #include <optional>
@@ -30,6 +32,7 @@ namespace application = aegra::application;
 namespace base = aegra::base;
 namespace contracts = aegra::contracts;
 namespace memory = aegra::adapters::memory;
+namespace local = aegra::adapters::storage_local;
 namespace ports = aegra::ports;
 namespace repository = aegra::personal_repository;
 namespace sqlite_cp = aegra::adapters::sqlite;
@@ -63,6 +66,7 @@ class TemporaryDirectory final {
     TemporaryDirectory(const TemporaryDirectory&) = delete;
     TemporaryDirectory& operator=(const TemporaryDirectory&) = delete;
     [[nodiscard]] std::filesystem::path database_path() const { return path_ / "control.db"; }
+    [[nodiscard]] const std::filesystem::path& path() const noexcept { return path_; }
 
   private:
     std::filesystem::path path_;
@@ -189,6 +193,28 @@ class FakeStorageFactory final : public ports::IRepositoryStorageFactory {
         return base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>::success(
             std::make_unique<MemoryStorageAccess>(found->second));
     }
+
+    [[nodiscard]] base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>
+    create_empty(const std::string_view locator,
+                 const base::CancellationToken cancellation) override {
+        if (cancellation.stop_requested()) {
+            return base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>::failure(
+                {base::ErrorCode::kCancelled, "create cancelled"});
+        }
+        const auto key = std::string(locator);
+        if (const auto failed = failures.find(key); failed != failures.end()) {
+            return base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>::failure(
+                failed->second);
+        }
+        if (stores.contains(key)) {
+            return base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>::failure(
+                {base::ErrorCode::kConflict, "repository root is not empty"});
+        }
+        auto storage = std::make_shared<memory::MemoryObjectStorage>();
+        stores.emplace(key, storage);
+        return base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>::success(
+            std::make_unique<MemoryStorageAccess>(std::move(storage)));
+    }
 };
 
 [[nodiscard]] contracts::ServiceRecoveryPointListRequest
@@ -214,12 +240,10 @@ bool publish(memory::MemoryObjectStorage& storage, const std::string_view stagin
                .has_value();
 }
 
-bool seed_repository(memory::MemoryObjectStorage& storage, const std::string_view file_uuid) {
-    repository::RepositoryDescriptor descriptor;
-    descriptor.repository_uuid = kRepositoryUuid;
-    auto encoded_descriptor = repository::encode_repository_descriptor_json(descriptor);
+bool seed_recovery_point(memory::MemoryObjectStorage& storage,
+                         const std::string_view repository_uuid, const std::string_view file_uuid) {
     repository::CatalogEntry entry;
-    entry.repository_uuid = kRepositoryUuid;
+    entry.repository_uuid = std::string(repository_uuid);
     entry.file_uuid = std::string(file_uuid);
     entry.backup_set_uuid = kSetUuid;
     entry.backup_type = aegra::format::BackupType::kFull;
@@ -228,12 +252,37 @@ bool seed_repository(memory::MemoryObjectStorage& storage, const std::string_vie
     entry.stored_size_bytes = 2'048;
     entry.source_count = 1;
     auto encoded_entry = repository::encode_catalog_entry_json(entry);
-    return encoded_descriptor && encoded_entry &&
-           publish(storage, "staging/s4/descriptor", "aegra.repository",
-                   encoded_descriptor.value()) &&
+    return encoded_entry &&
            publish(storage, "staging/s4/entry",
                    std::string("catalog/recovery-points/") + std::string(file_uuid) + ".entry",
                    encoded_entry.value());
+}
+
+bool seed_repository(memory::MemoryObjectStorage& storage, const std::string_view file_uuid) {
+    repository::RepositoryDescriptor descriptor;
+    descriptor.repository_uuid = kRepositoryUuid;
+    auto encoded_descriptor = repository::encode_repository_descriptor_json(descriptor);
+    return encoded_descriptor &&
+           publish(storage, "staging/s4/descriptor", "aegra.repository",
+                   encoded_descriptor.value()) &&
+           seed_recovery_point(storage, descriptor.repository_uuid, file_uuid);
+}
+
+[[nodiscard]] std::optional<repository::RepositoryDescriptor>
+read_descriptor(memory::MemoryObjectStorage& storage) {
+    auto attributes = storage.get_attributes("aegra.repository", {});
+    if (!attributes) {
+        return std::nullopt;
+    }
+    std::vector<std::byte> bytes(static_cast<std::size_t>(attributes.value().size_bytes));
+    auto read = storage.read_range("aegra.repository", 0, bytes, {});
+    if (!read || read.value() != bytes.size()) {
+        return std::nullopt;
+    }
+    const auto encoded =
+        std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    auto descriptor = repository::decode_repository_descriptor_json(encoded);
+    return descriptor ? std::optional{std::move(descriptor).value()} : std::nullopt;
 }
 
 [[nodiscard]] base::Result<std::unique_ptr<sqlite_cp::SqliteControlPlaneDatabase>>
@@ -345,14 +394,11 @@ bool test_repository_connection_lifecycle_and_rp_query() {
     FakeClock clock(1'700'000'000'000);
     FakeRandom random;
     FakeStorageFactory factory;
-    auto store_a = std::make_shared<memory::MemoryObjectStorage>();
     auto store_b = std::make_shared<memory::MemoryObjectStorage>();
-    if (!expect(seed_repository(*store_a, kFileUuid) &&
-                    seed_repository(*store_b, "22222222-2222-4222-8222-222222222222"),
-                "seed two repositories")) {
+    if (!expect(seed_repository(*store_b, "22222222-2222-4222-8222-222222222222"),
+                "seed imported repository")) {
         return false;
     }
-    factory.stores.emplace("mem://repo-a", store_a);
     factory.stores.emplace("mem://repo-b", store_b);
 
     application::RepositoryConnectionService connections(*control.value(), factory, clock, random);
@@ -376,6 +422,14 @@ bool test_repository_connection_lifecycle_and_rp_query() {
         return false;
     }
     const auto connection_a = *added.value().resource_id;
+    auto created_store = factory.stores.at("mem://repo-a");
+    auto created_descriptor = read_descriptor(*created_store);
+    passed &= expect(created_descriptor && created_descriptor->created_utc_ms == 1'700'000'000'000,
+                     "add initializes a valid repository descriptor");
+    if (!created_descriptor ||
+        !seed_recovery_point(*created_store, created_descriptor->repository_uuid, kFileUuid)) {
+        return false;
+    }
 
     auto same_key = connections.add_connection(input_a, "idem-add-a", {});
     passed &= expect(same_key &&
@@ -505,7 +559,7 @@ bool test_import_accepts_descriptor_short_reads() {
                   "repository descriptor supports repeated short reads");
 }
 
-bool test_corrupt_catalog_failure() {
+bool test_add_rejects_non_empty_target() {
     TemporaryDirectory directory;
     auto control = open_control_plane(directory.database_path());
     if (!control) {
@@ -515,21 +569,86 @@ bool test_corrupt_catalog_failure() {
     FakeRandom random;
     FakeStorageFactory factory;
     auto store = std::make_shared<memory::MemoryObjectStorage>();
+    if (!publish(*store, "staging/existing/object", "existing/file", "occupied")) {
+        return false;
+    }
+    factory.stores.emplace("mem://occupied", store);
+    application::RepositoryConnectionService connections(*control.value(), factory, clock, random);
+    contracts::RepositoryConnectionInput input;
+    input.display_name = "Occupied";
+    input.locator = "mem://occupied";
+    auto added = connections.add_connection(input, "idem-occupied", {});
+    return expect(!added && added.error().code == base::ErrorCode::kConflict,
+                  "add rejects a non-empty target without adopting its contents");
+}
+
+bool test_import_rejects_corrupt_descriptor() {
+    TemporaryDirectory directory;
+    auto control = open_control_plane(directory.database_path());
+    if (!control) {
+        return false;
+    }
+    FakeClock clock(250);
+    FakeRandom random;
+    FakeStorageFactory factory;
+    auto store = std::make_shared<memory::MemoryObjectStorage>();
     if (!publish(*store, "staging/bad/descriptor", "aegra.repository", "{not-json")) {
         return false;
     }
     factory.stores.emplace("mem://bad", store);
     application::RepositoryConnectionService connections(*control.value(), factory, clock, random);
-    application::ConnectedRepositoryQuery query(*control.value(), factory);
     contracts::RepositoryConnectionInput input;
     input.display_name = "Bad";
     input.locator = "mem://bad";
-    auto added = connections.add_connection(input, "idem-bad", {});
-    if (!added || !added.value().resource_id) {
+    auto imported = connections.import_connection(input, "idem-bad", {});
+    return expect(!imported && imported.error().code == base::ErrorCode::kCorruptData,
+                  "import rejects a corrupt repository descriptor");
+}
+
+bool test_local_add_initializes_repository() {
+    TemporaryDirectory directory;
+    auto control = open_control_plane(directory.database_path());
+    if (!control) {
         return false;
     }
-    auto page = query.list_recovery_points(rp_request(*added.value().resource_id), {});
-    return expect(!page, "corrupt catalog fails the recovery point query");
+    FakeClock clock(1'800'000'000'000);
+    FakeRandom random;
+    local::LocalRepositoryStorageFactory factory;
+    const auto repository_root = directory.path() / "new-repository";
+    const auto locator_utf8 = repository_root.u8string();
+    contracts::RepositoryConnectionInput input;
+    input.display_name = "Local Repository";
+    input.locator =
+        std::string(reinterpret_cast<const char*>(locator_utf8.data()), locator_utf8.size());
+    ports::RepositoryConnectionRecord pending;
+    pending.connection_id = "conn-pending-local";
+    pending.display_name = input.display_name;
+    pending.locator = input.locator;
+    pending.state = contracts::RepositoryConnectionState::kUnavailable;
+    pending.is_default = true;
+    pending.created_utc_ms = 1'700'000'000'000;
+    pending.updated_utc_ms = pending.created_utc_ms;
+    auto unit = control.value()->begin_unit_of_work({});
+    if (!unit || !unit.value()->repository_connections().upsert(pending, {}) ||
+        !unit.value()->commit({})) {
+        return false;
+    }
+    application::RepositoryConnectionService connections(*control.value(), factory, clock, random);
+    auto added = connections.add_connection(input, "idem-local-add", {});
+    if (!expect(added && added.value().resource_id == pending.connection_id,
+                "local add resumes an unavailable connection")) {
+        return false;
+    }
+
+    std::ifstream descriptor_file(repository_root / "aegra.repository", std::ios::binary);
+    const std::string encoded((std::istreambuf_iterator<char>(descriptor_file)),
+                              std::istreambuf_iterator<char>());
+    auto descriptor = repository::decode_repository_descriptor_json(encoded);
+    auto record = control.value()->get_repository_connection(pending.connection_id, {});
+    return expect(descriptor && descriptor.value().created_utc_ms == 1'800'000'000'000 && record &&
+                      record.value() &&
+                      record.value()->state == contracts::RepositoryConnectionState::kAvailable,
+                  "local add publishes descriptor before persisting an available connection");
 }
 
 } // namespace
@@ -540,7 +659,8 @@ int main() noexcept {
             test_inventory_opaque_ids_and_pagination() && test_inventory_duplicate_ids() &&
             test_inventory_cancel() && test_repository_connection_lifecycle_and_rp_query() &&
             test_import_rejects_missing_descriptor() &&
-            test_import_accepts_descriptor_short_reads() && test_corrupt_catalog_failure();
+            test_import_accepts_descriptor_short_reads() && test_add_rejects_non_empty_target() &&
+            test_import_rejects_corrupt_descriptor() && test_local_add_initializes_repository();
         return passed ? EXIT_SUCCESS : EXIT_FAILURE;
     } catch (...) {
         std::fputs("[FAIL] unexpected exception\n", stderr);

@@ -107,6 +107,9 @@ S4 已增加 `source_inventory.h` 与 `repository_storage.h`，供 Application I
 查询使用；Windows Inventory Adapter 与 Local Storage Factory 已接入 Service composition。S3 增加
 `process_launcher.h`，由 Service Supervisor 使用，接口不暴露 Win32 handle。
 
+`IRepositoryStorageFactory::open` 只打开已有根；`create_empty` 只打开缺失或空根用于初始化，目标非空必须返回
+`kConflict`，不得把已有 Repository 或任意目录内容隐式当作新 Repository。
+
 S6 已增加 durable `RestorePreflightRecord` 与 `IRestorePreflightStore`。记录只包含 opaque token、Repository/
 Recovery Point/目标 ID、Repository UUID、链指纹、容量、链深和创建/过期时间；不得保存 Secret、SecretRef、
 Archive path、Volume GUID、Manifest 或 Chunk Index。`IControlPlaneDatabase` 同时提供按 preflight token 读取记录和

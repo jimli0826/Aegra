@@ -19,6 +19,11 @@ inline constexpr quint32 kConnectionPageSize = 100;
 inline constexpr int kListRepositoryConnectionsRequestKind = 3;
 inline constexpr int kListSourceInventoryRequestKind = 4;
 inline constexpr int kListJobsRequestKind = 5;
+inline constexpr int kAddRepositoryConnectionRequestKind = 32;
+inline constexpr int kImportRepositoryConnectionRequestKind = 33;
+inline constexpr int kTestRepositoryConnectionRequestKind = 34;
+inline constexpr int kSetDefaultRepositoryRequestKind = 35;
+inline constexpr int kRemoveRepositoryConnectionRequestKind = 36;
 inline constexpr int kStartBackupRequestKind = 37;
 inline constexpr int kCancelJobRequestKind = 38;
 inline constexpr int kCommandAcceptedResponseKind = 2;
@@ -35,6 +40,7 @@ struct ServiceInfo final {
 
 struct RecoveryPointPage final {
     bool configured{false};
+    std::optional<QString> repository_connection_id;
     QString repository_uuid;
     QVariantList items;
     std::optional<QString> continuation_token;
@@ -64,9 +70,9 @@ struct CommandAck final {
 };
 
 [[nodiscard]] QByteArray encode_service_info_request(const QString& request_id);
-[[nodiscard]] QByteArray
-encode_recovery_point_request(const QString& request_id,
-                              const std::optional<QString>& continuation_token);
+[[nodiscard]] QByteArray encode_recovery_point_request(
+    const QString& request_id, const std::optional<QString>& continuation_token,
+    const std::optional<QString>& repository_connection_id = std::nullopt);
 [[nodiscard]] QByteArray encode_job_list_request(const QString& request_id,
                                                  const std::optional<QString>& continuation_token);
 [[nodiscard]] QByteArray
@@ -85,6 +91,15 @@ encode_repository_connection_list_request(const QString& request_id,
 [[nodiscard]] QByteArray encode_cancel_job_request(const QString& request_id,
                                                    const QString& idempotency_key,
                                                    const QString& job_id);
+[[nodiscard]] QByteArray encode_repository_connection_input_request(const QString& request_id,
+                                                                    const QString& idempotency_key,
+                                                                    int request_kind,
+                                                                    const QString& display_name,
+                                                                    const QString& locator);
+[[nodiscard]] QByteArray
+encode_repository_connection_resource_request(const QString& request_id,
+                                              const QString& idempotency_key, int request_kind,
+                                              const QString& connection_id);
 
 [[nodiscard]] bool parse_response_root(const QByteArray& body, const QString& request_id,
                                        QJsonObject& root);

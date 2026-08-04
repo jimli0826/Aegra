@@ -23,10 +23,15 @@ class IpcFrameTransport final : public QObject {
     explicit IpcFrameTransport(QString pipe_name, QObject* parent = nullptr);
 
     void set_reconnect_delay_milliseconds(int delay_ms);
+    /// When false, connect failures do not schedule automatic reconnect (splash error until Retry).
+    void set_auto_reconnect_enabled(bool enabled);
+    [[nodiscard]] bool auto_reconnect_enabled() const noexcept;
     [[nodiscard]] bool is_connected() const noexcept;
 
     void connect_to_service();
     void disconnect_from_service();
+    /// Enable auto-reconnect and schedule a connect if not already connected/connecting.
+    void ensure_reconnect_scheduled();
     [[nodiscard]] bool send_frame(const QByteArray& body);
 
   signals:
@@ -50,6 +55,8 @@ class IpcFrameTransport final : public QObject {
     QByteArray input_;
     quint32 expected_frame_bytes_{0};
     bool intentional_disconnect_{false};
+    bool auto_reconnect_enabled_{true};
+    bool error_notified_{false};
 };
 
 } // namespace aegra::desktop

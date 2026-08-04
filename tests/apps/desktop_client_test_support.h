@@ -154,26 +154,30 @@ inline QJsonObject recovery_point(const QString& file_uuid,
 }
 
 inline bool send_catalog_page(QLocalSocket& socket, const QString& request_id, QJsonArray items,
-                              const std::optional<QString>& token) {
+                              const std::optional<QString>& token,
+                              const std::optional<QString>& connection_id = std::nullopt) {
     const QJsonObject catalog{{QStringLiteral("state"), 2},
                               {QStringLiteral("repository_uuid"), QLatin1String(kRepositoryUuid)},
                               {QStringLiteral("items"), std::move(items)},
                               {QStringLiteral("continuation_token"),
                                token ? QJsonValue(*token) : QJsonValue(QJsonValue::Null)}};
     const QJsonObject page{
-        {QStringLiteral("repository_connection_id"), QJsonValue(QJsonValue::Null)},
+        {QStringLiteral("repository_connection_id"),
+         connection_id ? QJsonValue(*connection_id) : QJsonValue(QJsonValue::Null)},
         {QStringLiteral("catalog"), catalog}};
     return send_object(
         socket, response(request_id, 1, 2, 0, QStringLiteral("repository.catalog_ready"), page));
 }
 
-inline bool send_not_configured(QLocalSocket& socket, const QString& request_id) {
+inline bool send_not_configured(QLocalSocket& socket, const QString& request_id,
+                                const std::optional<QString>& connection_id = std::nullopt) {
     const QJsonObject catalog{{QStringLiteral("state"), 1},
                               {QStringLiteral("repository_uuid"), QString{}},
                               {QStringLiteral("items"), QJsonArray{}},
                               {QStringLiteral("continuation_token"), QJsonValue(QJsonValue::Null)}};
     const QJsonObject page{
-        {QStringLiteral("repository_connection_id"), QJsonValue(QJsonValue::Null)},
+        {QStringLiteral("repository_connection_id"),
+         connection_id ? QJsonValue(*connection_id) : QJsonValue(QJsonValue::Null)},
         {QStringLiteral("catalog"), catalog}};
     return send_object(
         socket, response(request_id, 1, 2, 0, QStringLiteral("repository.not_configured"), page));

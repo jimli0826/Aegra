@@ -39,8 +39,8 @@ class UniqueLocal final {
 };
 
 [[nodiscard]] base::Result<SECURITY_ATTRIBUTES*>
-create_service_local_security_attributes(SECURITY_ATTRIBUTES& attributes,
-                                         UniqueLocal& descriptor_owner);
+create_local_everyone_security_attributes(SECURITY_ATTRIBUTES& attributes,
+                                          UniqueLocal& descriptor_owner);
 
 [[nodiscard]] base::Result<WindowsNamedPipePeerIdentity> query_pipe_peer(HANDLE pipe);
 

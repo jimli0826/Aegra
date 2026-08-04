@@ -69,13 +69,14 @@ Accept -> Receive Frame -> Decode/Validate -> Dispatch -> Encode -> Send -> Rece
   主机名、SID、SecretRef 或原始 Adapter 错误。
 - frame 最大 64 KiB，JSON 根必须是 object，整数必须先检查范围。
 - 错误响应使用稳定 `ErrorCode` 和 message code，不返回 JSON/Win32 异常文本。
-- S1：交互模式 `kProcessDefault` + 拒绝远程 Client + 调用方 SID/session 授权；LocalSystem 正式模式再切
-  `kServiceLocalControl`。见 [ADR-0014](../adr/0014-windows-service-ipc-security.md) 与
+- Service 控制 Pipe 在交互模式和 LocalSystem 正式模式都使用 `kLocalEveryoneControl`：允许本机
+  Everyone 读写，同时拒绝远程 Client，并在连接后执行调用方 SID/session 授权。见
+  [ADR-0014](../adr/0014-windows-service-ipc-security.md) 与
   [windows_ipc.md](windows_ipc.md)。
 - 授权 Host：`run_authorized_service_host`；SCM stop 有界等待 STOPPED；`WindowsServiceScmHost`
   在 `stop_deadline` 内收口（非协作 worker 超时失败）。
-- 正式 `--service` 模式在构造 runtime 前进入 `StartServiceCtrlDispatcherW`，使用 `kServiceLocalControl`；
-  交互模式使用 `kProcessDefault`。Desktop 到 Service 的本地安全模型保持轻量，不承担远程零信任认证。
+- 正式 `--service` 模式在构造 runtime 前进入 `StartServiceCtrlDispatcherW`；两种模式的 Service 控制 Pipe
+  都使用 `kLocalEveryoneControl`。Desktop 到 Service 的本地安全模型保持轻量，不承担远程零信任认证。
 
 ## Composition 配置
 

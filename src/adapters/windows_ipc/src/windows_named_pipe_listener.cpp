@@ -62,7 +62,7 @@ class UniqueHandle final {
 
 [[nodiscard]] bool valid_acl_profile(const WindowsNamedPipeAclProfile profile) noexcept {
     return profile == WindowsNamedPipeAclProfile::kProcessDefault ||
-           profile == WindowsNamedPipeAclProfile::kServiceLocalControl;
+           profile == WindowsNamedPipeAclProfile::kLocalEveryoneControl;
 }
 
 [[nodiscard]] std::wstring pipe_path(const WindowsNamedPipeNamespace pipe_namespace,
@@ -127,9 +127,9 @@ create_service_pipe(const std::wstring& path, const std::uint32_t buffer_bytes,
                     const WindowsNamedPipeAclProfile acl_profile,
                     detail::UniqueLocal& security_owner, SECURITY_ATTRIBUTES& security_attributes) {
     LPSECURITY_ATTRIBUTES security = nullptr;
-    if (acl_profile == WindowsNamedPipeAclProfile::kServiceLocalControl) {
+    if (acl_profile == WindowsNamedPipeAclProfile::kLocalEveryoneControl) {
         auto created =
-            detail::create_service_local_security_attributes(security_attributes, security_owner);
+            detail::create_local_everyone_security_attributes(security_attributes, security_owner);
         if (!created) {
             return base::Result<UniqueHandle>::failure(created.error());
         }

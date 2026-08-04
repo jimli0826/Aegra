@@ -107,6 +107,37 @@ bool test_open_and_staging_recovery() {
     return passed;
 }
 
+bool test_repository_factory_create_empty() {
+    TemporaryDirectory missing;
+    local::LocalRepositoryStorageFactory factory;
+    const auto locator = missing.path().u8string();
+    const auto encoded = std::string(reinterpret_cast<const char*>(locator.data()), locator.size());
+    auto created = factory.create_empty(encoded, {});
+    bool passed = tests::contract_expect(created && std::filesystem::is_directory(missing.path()),
+                                         "repository factory creates a missing empty root");
+    if (!created) {
+        return false;
+    }
+    created.value().reset();
+
+    std::ofstream existing(missing.path() / "existing-file", std::ios::binary);
+    existing << "occupied";
+    existing.close();
+    auto rejected = factory.create_empty(encoded, {});
+    passed &= tests::contract_expect(!rejected &&
+                                         rejected.error().code == aegra::base::ErrorCode::kConflict,
+                                     "repository factory rejects a non-empty root");
+
+    TemporaryDirectory empty;
+    std::filesystem::create_directories(empty.path());
+    const auto empty_locator = empty.path().u8string();
+    const auto empty_encoded =
+        std::string(reinterpret_cast<const char*>(empty_locator.data()), empty_locator.size());
+    passed &= tests::contract_expect(factory.create_empty(empty_encoded, {}).has_value(),
+                                     "repository factory accepts an existing empty root");
+    return passed;
+}
+
 bool test_abort_and_external_generation_change() {
     TemporaryDirectory directory;
     auto storage = create_storage(directory.path());
@@ -204,10 +235,10 @@ bool test_reparse_point_safety_when_supported() {
 }
 
 int run_tests() {
-    const bool passed = test_shared_contract() && test_open_and_staging_recovery() &&
-                        test_abort_and_external_generation_change() &&
-                        test_path_and_read_only_safety() &&
-                        test_reparse_point_safety_when_supported();
+    const bool passed =
+        test_shared_contract() && test_open_and_staging_recovery() &&
+        test_repository_factory_create_empty() && test_abort_and_external_generation_change() &&
+        test_path_and_read_only_safety() && test_reparse_point_safety_when_supported();
     return passed ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 

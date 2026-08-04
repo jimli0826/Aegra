@@ -16,12 +16,11 @@ S1 必须在不改动 Service V3 公共协议与 codec 的前提下，建立 SCM
 
 ## 决策
 
-1. Pipe ACL 分两种运行模式，**始终**设置 `PIPE_REJECT_REMOTE_CLIENTS`，禁止 NULL DACL / Everyone full：
-   - `kProcessDefault`：进程 token 默认 DACL。用于交互用户开发模式与当前未接线的 composition root。
-     普通用户环境下可稳定连接。
-   - `kServiceLocalControl`：显式 LocalSystem 向 DACL
-     （`D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)`）。**仅**在监听进程以 LocalSystem 运行时使用；
-     不得作为普通交互用户进程的默认配置。
+1. Pipe ACL 分用途配置，**始终**设置 `PIPE_REJECT_REMOTE_CLIENTS`，禁止 NULL DACL / Everyone full：
+   - `kProcessDefault`：进程 token 默认 DACL，用于 Worker 父子进程私有 Pipe。
+   - `kLocalEveryoneControl`：Service 控制 Pipe 的显式 DACL
+     （`D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;WD)`）。LocalSystem 与 Administrators 拥有 full access，
+     Everyone 仅拥有读写；交互模式和 SCM 模式统一使用，保证提升权限运行的 Service 可由普通 Desktop 连接。
 2. Accept 后通过客户端进程 token 查询调用方身份：用户 SID、session ID、process ID，以及是否
    interactive/administrator。不把高权限句柄交给 Desktop。
 3. 授权策略保持简单：`kLocalInteractiveOrAdmin` —— 本机 interactive session（session > 0）或
@@ -39,15 +38,15 @@ S1 必须在不改动 Service V3 公共协议与 codec 的前提下，建立 SCM
 
 ## 备选方案
 
-- 交互模式强制显式 IU ACL：在部分普通用户/过滤 token 环境连接失败，不采用。
+- 仅允许 Interactive Users：无法覆盖所有本机用户 token，不采用。
 - 首版引入 SID allowlist：部署复杂度高于当前个人版需求，延后。
-- Everyone 或 NULL DACL：扩大本地攻击面，不采用。
+- Everyone full access 或 NULL DACL：权限超过连接与收发所需，不采用。
 - stop 后不写等待直接 start：真实服务常处于 STOP_PENDING，restart 间歇失败，不采用。
 
 ## 影响
 
-- 开发/交互态：`kProcessDefault` + 本地 interactive 身份校验。
-- 正式 LocalSystem Service：composition root 切换到 `kServiceLocalControl`。
+- Service 控制 Pipe 在开发/交互态与正式 LocalSystem 模式统一使用 `kLocalEveryoneControl`。
+- Worker 私有 Pipe 继续使用 `kProcessDefault`。
 - SCM restart/uninstall 在生产路径上会阻塞至 STOPPED 或 deadline。
 - 忽略取消的 worker 不会无限阻塞 ServiceMain；超时后 host 返回失败。
 

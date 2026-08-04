@@ -5,9 +5,10 @@ import QtQuick.Window 2.15
 import ".."
 
 // Matches backup/src/gui SplashScreen: logo ring, indeterminate bar, Retry/Quit on error.
+// Host window resizes to preferredWidth/Height (compact card, not full main UI).
 Rectangle {
     id: root
-    visible: serviceClient.splashVisible
+    visible: !windowAppReady
     anchors.fill: parent
     color: Theme.colorCard
     z: 1000
@@ -15,10 +16,26 @@ Rectangle {
     Accessible.name: serviceClient.splashStatusText
     Accessible.role: Accessible.Pane
 
-    readonly property bool hasError: !serviceClient.splashBusy
+    /// When true, splash is dismissed (host sets this after first ready).
+    property bool windowAppReady: false
+
+    // Prefer explicit error text + not-busy so we do not flicker when busy toggles mid-frame.
+    readonly property bool hasError: !windowAppReady
+                                     && !serviceClient.splashBusy
                                      && serviceClient.splashErrorText.length > 0
-                                     && serviceClient.splashVisible
     readonly property string serviceEndpoint: "\\\\.\\pipe\\aegra-service-control"
+
+    /// Preferred size of the splash window (host resizes to this) — same as old SplashScreen.
+    readonly property int preferredWidth: hasError ? 680 : 600
+    readonly property int preferredHeight: hasError ? 560 : 440
+
+    signal sizeHintChanged()
+    signal finished()
+    signal quitRequested()
+
+    onHasErrorChanged: sizeHintChanged()
+    onPreferredWidthChanged: sizeHintChanged()
+    onPreferredHeightChanged: sizeHintChanged()
 
     Rectangle {
         anchors.fill: parent
@@ -50,13 +67,7 @@ Rectangle {
         z: 3
         icon: "\u2715"
         isClose: true
-        onClicked: {
-            var w = Window.window
-            if (w)
-                w.close()
-            else
-                Qt.quit()
-        }
+        onClicked: root.quitRequested()
     }
 
     ColumnLayout {
@@ -274,13 +285,7 @@ Rectangle {
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
                 }
-                onClicked: {
-                    var w = Window.window
-                    if (w)
-                        w.close()
-                    else
-                        Qt.quit()
-                }
+                onClicked: root.quitRequested()
             }
         }
 

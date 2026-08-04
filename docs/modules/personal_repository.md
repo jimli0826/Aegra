@@ -201,3 +201,7 @@ Tombstone，隐藏删除中的 Recovery Point，验证 Repository/UUID/链图不
 S5 已增加 `delete_plan`：descendant-first 计划、带 Storage generation 的 `members`
 （sidecar → 续卷 → 主卷）、strict revalidation、Tombstone 发布与条件/幂等成员及 Catalog 删除执行。
 Catalog Reconcile（从 Archive 结构补建 Entry）仍属后续工作。
+
+S4 Add 业务闭环已实现创建路径：仅缺失或空目标可初始化；Application 生成 Descriptor、通过 staging +
+create-only publish 写入 `aegra.repository`，并在持久化 Available 连接前读回验证。Import 仍只打开并验证已有
+Descriptor，不承担初始化。

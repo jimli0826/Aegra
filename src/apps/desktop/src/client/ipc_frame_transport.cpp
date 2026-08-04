@@ -43,29 +43,61 @@ void IpcFrameTransport::set_reconnect_delay_milliseconds(const int delay_ms) {
     reconnect_timer_->setInterval(delay_ms);
 }
 
+void IpcFrameTransport::set_auto_reconnect_enabled(const bool enabled) {
+    auto_reconnect_enabled_ = enabled;
+    if (!enabled) {
+        reconnect_timer_->stop();
+    }
+}
+
+bool IpcFrameTransport::auto_reconnect_enabled() const noexcept {
+    return auto_reconnect_enabled_;
+}
+
 bool IpcFrameTransport::is_connected() const noexcept {
     return socket_->state() == QLocalSocket::ConnectedState;
 }
 
 void IpcFrameTransport::connect_to_service() {
     reconnect_timer_->stop();
-    intentional_disconnect_ = false;
+    // Suppress error/disconnect signals while resetting the socket — abort() otherwise
+    // reports a false connect_failed and can leave the client permanently offline.
+    intentional_disconnect_ = true;
+    error_notified_ = true;
     input_.clear();
     expected_frame_bytes_ = 0;
     if (socket_->state() != QLocalSocket::UnconnectedState) {
-        socket_->abort();
+        socket_->disconnectFromServer();
+        if (socket_->state() != QLocalSocket::UnconnectedState) {
+            socket_->abort();
+        }
     }
+    intentional_disconnect_ = false;
+    error_notified_ = false;
     socket_->connectToServer(pipe_name_, QIODevice::ReadWrite);
+    // If the server is missing, Qt may emit error synchronously.
+    if (socket_->state() == QLocalSocket::UnconnectedState && !error_notified_) {
+        error_notified_ = true;
+        emit transport_error(QStringLiteral("service.connect_failed"));
+        if (!intentional_disconnect_) {
+            schedule_reconnect();
+        }
+    }
 }
 
 void IpcFrameTransport::disconnect_from_service() {
     intentional_disconnect_ = true;
     reconnect_timer_->stop();
+    error_notified_ = true;
     input_.clear();
     expected_frame_bytes_ = 0;
     if (socket_->state() != QLocalSocket::UnconnectedState) {
-        socket_->abort();
+        socket_->disconnectFromServer();
+        if (socket_->state() != QLocalSocket::UnconnectedState) {
+            socket_->abort();
+        }
     }
+    error_notified_ = false;
 }
 
 bool IpcFrameTransport::send_frame(const QByteArray& body) {
@@ -86,13 +118,18 @@ bool IpcFrameTransport::send_frame(const QByteArray& body) {
 void IpcFrameTransport::on_connected() {
     input_.clear();
     expected_frame_bytes_ = 0;
+    error_notified_ = false;
     emit connected();
 }
 
 void IpcFrameTransport::on_disconnected() {
     input_.clear();
     expected_frame_bytes_ = 0;
-    emit disconnected();
+    // Socket error path already notified the client; avoid a second disconnect+reconnect cycle.
+    if (!error_notified_) {
+        emit disconnected();
+    }
+    error_notified_ = false;
     if (!intentional_disconnect_) {
         schedule_reconnect();
     }
@@ -107,8 +144,11 @@ void IpcFrameTransport::on_socket_error() {
     if (socket_->state() == QLocalSocket::ConnectedState) {
         return;
     }
+    if (error_notified_) {
+        return;
+    }
+    error_notified_ = true;
     emit transport_error(QStringLiteral("service.connect_failed"));
-    emit disconnected();
     if (!intentional_disconnect_) {
         schedule_reconnect();
     }
@@ -138,8 +178,29 @@ void IpcFrameTransport::consume_frames() {
 }
 
 void IpcFrameTransport::schedule_reconnect() {
+    if (!auto_reconnect_enabled_ || intentional_disconnect_) {
+        return;
+    }
     if (!reconnect_timer_->isActive()) {
         reconnect_timer_->start();
+    }
+}
+
+void IpcFrameTransport::ensure_reconnect_scheduled() {
+    intentional_disconnect_ = false;
+    auto_reconnect_enabled_ = true;
+    if (is_connected()) {
+        return;
+    }
+    if (socket_->state() == QLocalSocket::ConnectingState) {
+        return;
+    }
+    // Prefer an immediate attempt; fall back to the timer if already in flight.
+    if (!reconnect_timer_->isActive()) {
+        // Zero-delay single-shot: coalesce with the event loop instead of re-entering connect.
+        reconnect_timer_->setInterval(0);
+        reconnect_timer_->start();
+        reconnect_timer_->setInterval(kDefaultReconnectDelayMilliseconds);
     }
 }
 

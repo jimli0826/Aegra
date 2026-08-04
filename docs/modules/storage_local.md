@@ -36,6 +36,10 @@ src/adapters/storage_local/
 - `LocalRootMode::kCreateIfMissing`：逐级创建缺失目录；
 - `maximum_read_size`：单次 `read_range()` 的硬上限，必须大于零。
 
+`LocalRepositoryStorageFactory::create_empty()` 在根缺失时创建目录，在根已存在时要求目录完全为空；非目录、
+非空目录和不安全路径均拒绝。它只提供初始化所需的空 Storage Access，不写 Repository Descriptor；Descriptor
+由 Application 暂存、条件发布并读回验证。
+
 一个实例同时实现 `IObjectReader`、`IStagedObjectWriter`、`IPrefixEnumerator`、`IObjectPublisher`、
 `IObjectDeleter` 和 `IObjectStorageCapabilities`。对象 key 使用 Port 的 Repository 相对 key 规则；
 `.aegra-internal` 及其后代是 Adapter 保留命名空间；为避免默认 Windows 文件系统别名，保留前缀按 ASCII

@@ -211,6 +211,10 @@
         <source>Test connection</source>
         <translation>接続テスト</translation>
     </message>
+    <message id="aegra.repository.display_name"><source>Display name</source><translation>表示名</translation></message>
+    <message id="aegra.repository.location"><source>Repository location</source><translation>リポジトリの場所</translation></message>
+    <message id="aegra.repository.remove_title"><source>Remove repository connection?</source><translation>リポジトリ接続を削除しますか？</translation></message>
+    <message id="aegra.repository.remove_description"><source>Only the saved connection is removed. Backup data is not deleted.</source><translation>保存された接続のみを削除します。バックアップデータは削除されません。</translation></message>
     <message id="aegra.repository.unlock">
         <source>Unlock</source>
         <translation>ロック解除</translation>

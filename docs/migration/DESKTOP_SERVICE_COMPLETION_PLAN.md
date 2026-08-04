@@ -108,21 +108,21 @@ aegra.error.repository.not_configured
 
 ### 4.4 旧 Desktop 迁移清单
 
-| 旧界面或组件 | 处理方式 | 归属工作包 |
-| --- | --- | --- |
-| `Main.qml`、`Theme.qml`、窗口/侧栏 | 阶段 13C 已迁移基线；只由 integration owner 扩展导航和全局状态 | D0, D2, D8 |
-| `RepositoryPage.qml` | 已迁移只读页面；补连接、Verify、Delete 等真实操作 | D5 |
-| `HomePage.qml` | 按摘要、近期任务和快捷操作拆分重写 | D2 |
-| `BackupPage.qml` | 按 source、target、options、schedule、confirm、progress 拆分重写 | D3 |
-| `RestorePage.qml` | 按 recovery point、chain、target、confirm、progress 拆分重写 | D4 |
-| `MountPage.qml` | 按 mount request 和 mounted session 列表拆分重写 | D6 |
-| `EventLogPage.qml` | 按 filter、paged table 和 detail drawer 拆分重写 | D7 |
-| `SettingsPage.qml` | 按 appearance、locale、service 和 repository settings 拆分重写 | D8 |
-| `SplashScreen`、`LoadingOverlay`、`ToastBanner` | 建立无业务依赖的共享反馈组件 | D2 |
-| `Card`、`ComboBoxIndicator`、`DatePickerField`、`LinkButton` | 仅在页面确实需要时迁移视觉行为，并完成 i18n/键盘/无障碍 | 页面 owner |
-| `DiskChart`、`DiskIcon`、`DriveItem` | 改为只消费 Service Inventory model 的展示组件 | D3, D4 |
-| `BackupPasswordDialog` | 不传递密码；改为创建或选择 `SecretRef` 的受控交互 | D3 |
-| `AddLocationPanel`、`AddRepositoryPanel`、`LocationManagementDialog` | 合并为新版 Repository connection 工作流 | D5 |
+| 旧界面或组件                                                             | 处理方式                                                   | 归属工作包      |
+| ------------------------------------------------------------------ | ------------------------------------------------------ | ---------- |
+| `Main.qml`、`Theme.qml`、窗口/侧栏                                       | 阶段 13C 已迁移基线；只由 integration owner 扩展导航和全局状态            | D0, D2, D8 |
+| `RepositoryPage.qml`                                               | 已迁移只读页面；补连接、Verify、Delete 等真实操作                        | D5         |
+| `HomePage.qml`                                                     | 按摘要、近期任务和快捷操作拆分重写                                      | D2         |
+| `BackupPage.qml`                                                   | 按 source、target、options、schedule、confirm、progress 拆分重写 | D3         |
+| `RestorePage.qml`                                                  | 按 recovery point、chain、target、confirm、progress 拆分重写    | D4         |
+| `MountPage.qml`                                                    | 按 mount request 和 mounted session 列表拆分重写               | D6         |
+| `EventLogPage.qml`                                                 | 按 filter、paged table 和 detail drawer 拆分重写              | D7         |
+| `SettingsPage.qml`                                                 | 按 appearance、locale、service 和 repository settings 拆分重写 | D8         |
+| `SplashScreen`、`LoadingOverlay`、`ToastBanner`                      | 建立无业务依赖的共享反馈组件                                         | D2         |
+| `Card`、`ComboBoxIndicator`、`DatePickerField`、`LinkButton`          | 仅在页面确实需要时迁移视觉行为，并完成 i18n/键盘/无障碍                        | 页面 owner   |
+| `DiskChart`、`DiskIcon`、`DriveItem`                                 | 改为只消费 Service Inventory model 的展示组件                    | D3, D4     |
+| `BackupPasswordDialog`                                             | 不传递密码；改为创建或选择 `SecretRef` 的受控交互                        | D3         |
+| `AddLocationPanel`、`AddRepositoryPanel`、`LocationManagementDialog` | 合并为新版 Repository connection 工作流                        | D5         |
 
 旧 `LogsPage`、`ManagePage`、`SyncPage` 和 `ToolsPage` 不属于当前个人版导航，不自动迁移。只有产品范围和对应
 Service capability 经过单独设计后才能加入计划。旧 C++ Backend、`TaskWebSocket`、`I18n.qml`、qmake 文件、
@@ -145,27 +145,27 @@ Makefile、`release/` 生成物和 `.bak` 文件全部禁止迁移。
 
 ## 5. 工作包总览
 
-| ID | 状态 | 优先级 | 工作包 | 主要产物 | 前置 |
-| --- | --- | --- | --- | --- | --- |
-| D0 | 已完成 | P0 | Desktop 国际化基础 | Linguist、LocaleController、语言设置、门禁测试 | 无 |
-| D1 | 已完成 | P0 | Desktop 客户端分层 | transport、request coordinator、models、协议适配边界 | 无 |
-| S0 | 已完成 | P0 | Service 协议 V3 | commands/queries/events DTO、codec、ADR | 无 |
-| S1 | 已完成 | P1 | 正式 Windows Service 边界 | SCM、Pipe ACL、调用方身份、安装生命周期 | S0 |
-| S2 | 已完成 | P1 | SQLite 控制面 | schema、repository connection、job/schedule/event stores | S0 |
-| S3 | 已完成 | P1 | Worker Supervisor | 启动、进度、取消、崩溃回收、结果持久化 | S0, S2 |
-| S4 | 已完成 | P1 | Inventory 与 Repository API | source inventory、connection/test、recovery point queries | S0, S2 |
-| D2 | 进行中 | P1 | Home 与全局任务体验 | Home、Splash、toast、task model、旧 UI 视觉返工 | D0, D1, S0 |
-| D3 | 进行中 | P1 | Backup 页面 | source/target/options、启动/取消/进度 | D0, D1, S3, S4 |
-| S5 | 进行中 | P2 | Archive 深度操作 | authenticate、verify、显式链解析、删除计划 | S2, S3, S4 |
-| S6 | 等待前置 | P2 | Restore 编排 | preflight、目标检查、任务监督、结果查询 | S3, S5 |
-| D4 | 等待前置 | P2 | Restore 页面 | recovery point、链、目标、确认、进度 | D0, D1, S6 |
-| D5 | 等待前置 | P2 | Repository 管理 | add/import/test/default/delete/verify actions | D0, D1, S4, S5 |
-| S7 | 等待前置 | P3 | Mount Host 编排 | mounted session、unmount、崩溃清理 | S3, S5 |
-| D6 | 等待前置 | P3 | Mount 页面 | mount/unmount/session table | D0, D1, S7 |
-| S8 | 可开始 | P3 | Schedule 与 Event/Audit | trigger engine、history、paged queries | S2, S3 |
-| D7 | 等待前置 | P3 | Event Log 页面 | filter、分页、详情、导出入口 | D0, D1, S8 |
-| D8 | 可开始 | P3 | Settings 页面 | language、theme、service/repository settings | D0, D1, S1, S4 |
-| R0 | 等待前置 | Gate | 发布工程 | installer、upgrade/uninstall、recovery、diagnostics、E2E | 全部发布范围 |
+| ID  | 状态   | 优先级  | 工作包                        | 主要产物                                                    | 前置             |
+| --- | ---- | ---- | -------------------------- | ------------------------------------------------------- | -------------- |
+| D0  | 已完成  | P0   | Desktop 国际化基础              | Linguist、LocaleController、语言设置、门禁测试                     | 无              |
+| D1  | 已完成  | P0   | Desktop 客户端分层              | transport、request coordinator、models、协议适配边界             | 无              |
+| S0  | 已完成  | P0   | Service 协议 V3              | commands/queries/events DTO、codec、ADR                   | 无              |
+| S1  | 已完成  | P1   | 正式 Windows Service 边界      | SCM、Pipe ACL、调用方身份、安装生命周期                               | S0             |
+| S2  | 已完成  | P1   | SQLite 控制面                 | schema、repository connection、job/schedule/event stores  | S0             |
+| S3  | 已完成  | P1   | Worker Supervisor          | 启动、进度、取消、崩溃回收、结果持久化                                     | S0, S2         |
+| S4  | 已完成  | P1   | Inventory 与 Repository API | source inventory、connection/test、recovery point queries | S0, S2         |
+| D2  | 进行中  | P1   | Home 与全局任务体验               | Home、Splash、toast、task model、旧 UI 视觉返工                  | D0, D1, S0     |
+| D3  | 进行中  | P1   | Backup 页面                  | source/target/options、启动/取消/进度                          | D0, D1, S3, S4 |
+| S5  | 进行中  | P2   | Archive 深度操作               | authenticate、verify、显式链解析、删除计划                          | S2, S3, S4     |
+| S6  | 等待前置 | P2   | Restore 编排                 | preflight、目标检查、任务监督、结果查询                                | S3, S5         |
+| D4  | 等待前置 | P2   | Restore 页面                 | recovery point、链、目标、确认、进度                               | D0, D1, S6     |
+| D5  | 等待前置 | P2   | Repository 管理              | add/import/test/default/delete/verify actions           | D0, D1, S4, S5 |
+| S7  | 等待前置 | P3   | Mount Host 编排              | mounted session、unmount、崩溃清理                            | S3, S5         |
+| D6  | 等待前置 | P3   | Mount 页面                   | mount/unmount/session table                             | D0, D1, S7     |
+| S8  | 可开始  | P3   | Schedule 与 Event/Audit     | trigger engine、history、paged queries                    | S2, S3         |
+| D7  | 等待前置 | P3   | Event Log 页面               | filter、分页、详情、导出入口                                       | D0, D1, S8     |
+| D8  | 可开始  | P3   | Settings 页面                | language、theme、service/repository settings              | D0, D1, S1, S4 |
+| R0  | 等待前置 | Gate | 发布工程                       | installer、upgrade/uninstall、recovery、diagnostics、E2E    | 全部发布范围         |
 
 ## 6. P0 基础工作包
 
@@ -600,15 +600,15 @@ composition/capability；未跑 Release、全套测试或管理员 Restore 门�
 
 ## 10. 页面与 Service 能力映射
 
-| Desktop 页面 | 只读 Query | Command / Event | 缺失时行为 |
-| --- | --- | --- | --- |
-| Shell/Home | service info、capabilities、recent jobs | task event subscription | 显示 Service unavailable/retry |
-| Backup | source inventory、repositories、eligible parents | start/cancel backup、task events | 禁止 Start |
-| Restore | recovery points、chain/preflight、targets | start/cancel restore、task events | 禁止 Start |
-| Mount | mountable points、mounted sessions | mount/unmount、session events | 隐藏或禁用页面 |
-| Repository | connections、recovery points、delete plan | add/import/test/default/verify/delete | 每项按 capability 禁用 |
-| Event Log | paged events、filters | export request（后续） | 显示空状态，不伪造事件 |
-| Settings | service config、repository defaults | update service settings | UI-only 设置仍可用 |
+| Desktop 页面 | 只读 Query                                       | Command / Event                       | 缺失时行为                        |
+| ---------- | ---------------------------------------------- | ------------------------------------- | ---------------------------- |
+| Shell/Home | service info、capabilities、recent jobs          | task event subscription               | 显示 Service unavailable/retry |
+| Backup     | source inventory、repositories、eligible parents | start/cancel backup、task events       | 禁止 Start                     |
+| Restore    | recovery points、chain/preflight、targets        | start/cancel restore、task events      | 禁止 Start                     |
+| Mount      | mountable points、mounted sessions              | mount/unmount、session events          | 隐藏或禁用页面                      |
+| Repository | connections、recovery points、delete plan        | add/import/test/default/verify/delete | 每项按 capability 禁用            |
+| Event Log  | paged events、filters                           | export request（后续）                    | 显示空状态，不伪造事件                  |
+| Settings   | service config、repository defaults             | update service settings               | UI-only 设置仍可用                |
 
 ## 11. Agent 分工与文件所有权
 

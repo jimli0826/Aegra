@@ -173,8 +173,9 @@ QByteArray encode_source_inventory_request(const QString& request_id,
         .toJson(QJsonDocument::Compact);
 }
 
-QByteArray encode_repository_connection_list_request(
-    const QString& request_id, const std::optional<QString>& continuation_token) {
+QByteArray
+encode_repository_connection_list_request(const QString& request_id,
+                                          const std::optional<QString>& continuation_token) {
     const QJsonObject page{
         {QStringLiteral("maximum_results"), static_cast<qint64>(kConnectionPageSize)},
         {QStringLiteral("continuation_token"),
@@ -201,31 +202,62 @@ QByteArray encode_start_backup_request(const QString& request_id, const QString&
         {QStringLiteral("source_id"), source_id},
         {QStringLiteral("repository_connection_id"), repository_connection_id},
         {QStringLiteral("backup_type"), backup_type},
-        {QStringLiteral("parent_recovery_point_id"),
-         parent_recovery_point_id.isEmpty() ? QJsonValue(QJsonValue::Null)
-                                            : QJsonValue(parent_recovery_point_id)}};
-    return QJsonDocument(
-               QJsonObject{
-                   {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
-                   {QStringLiteral("message_type"), 1},
-                   {QStringLiteral("request_id"), request_id},
-                   {QStringLiteral("kind"), kStartBackupRequestKind},
-                   {QStringLiteral("idempotency_key"), idempotency_key},
-                   {QStringLiteral("payload"), payload}})
+        {QStringLiteral("parent_recovery_point_id"), parent_recovery_point_id.isEmpty()
+                                                         ? QJsonValue(QJsonValue::Null)
+                                                         : QJsonValue(parent_recovery_point_id)}};
+    return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
+                                      static_cast<qint64>(kServiceSchemaVersion)},
+                                     {QStringLiteral("message_type"), 1},
+                                     {QStringLiteral("request_id"), request_id},
+                                     {QStringLiteral("kind"), kStartBackupRequestKind},
+                                     {QStringLiteral("idempotency_key"), idempotency_key},
+                                     {QStringLiteral("payload"), payload}})
         .toJson(QJsonDocument::Compact);
 }
 
 QByteArray encode_cancel_job_request(const QString& request_id, const QString& idempotency_key,
                                      const QString& job_id) {
     const QJsonObject payload{{QStringLiteral("resource_id"), job_id}};
-    return QJsonDocument(
-               QJsonObject{
-                   {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
-                   {QStringLiteral("message_type"), 1},
-                   {QStringLiteral("request_id"), request_id},
-                   {QStringLiteral("kind"), kCancelJobRequestKind},
-                   {QStringLiteral("idempotency_key"), idempotency_key},
-                   {QStringLiteral("payload"), payload}})
+    return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
+                                      static_cast<qint64>(kServiceSchemaVersion)},
+                                     {QStringLiteral("message_type"), 1},
+                                     {QStringLiteral("request_id"), request_id},
+                                     {QStringLiteral("kind"), kCancelJobRequestKind},
+                                     {QStringLiteral("idempotency_key"), idempotency_key},
+                                     {QStringLiteral("payload"), payload}})
+        .toJson(QJsonDocument::Compact);
+}
+
+QByteArray encode_repository_connection_input_request(const QString& request_id,
+                                                      const QString& idempotency_key,
+                                                      const int request_kind,
+                                                      const QString& display_name,
+                                                      const QString& locator) {
+    const QJsonObject payload{{QStringLiteral("display_name"), display_name},
+                              {QStringLiteral("locator"), locator},
+                              {QStringLiteral("credential_ref"), QJsonValue(QJsonValue::Null)}};
+    return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
+                                      static_cast<qint64>(kServiceSchemaVersion)},
+                                     {QStringLiteral("message_type"), 1},
+                                     {QStringLiteral("request_id"), request_id},
+                                     {QStringLiteral("kind"), request_kind},
+                                     {QStringLiteral("idempotency_key"), idempotency_key},
+                                     {QStringLiteral("payload"), payload}})
+        .toJson(QJsonDocument::Compact);
+}
+
+QByteArray encode_repository_connection_resource_request(const QString& request_id,
+                                                         const QString& idempotency_key,
+                                                         const int request_kind,
+                                                         const QString& connection_id) {
+    const QJsonObject payload{{QStringLiteral("resource_id"), connection_id}};
+    return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
+                                      static_cast<qint64>(kServiceSchemaVersion)},
+                                     {QStringLiteral("message_type"), 1},
+                                     {QStringLiteral("request_id"), request_id},
+                                     {QStringLiteral("kind"), request_kind},
+                                     {QStringLiteral("idempotency_key"), idempotency_key},
+                                     {QStringLiteral("payload"), payload}})
         .toJson(QJsonDocument::Compact);
 }
 

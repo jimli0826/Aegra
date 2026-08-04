@@ -211,6 +211,10 @@
         <source>Test connection</source>
         <translation>Test connection</translation>
     </message>
+    <message id="aegra.repository.display_name"><source>Display name</source><translation>Display name</translation></message>
+    <message id="aegra.repository.location"><source>Repository location</source><translation>Repository location</translation></message>
+    <message id="aegra.repository.remove_title"><source>Remove repository connection?</source><translation>Remove repository connection?</translation></message>
+    <message id="aegra.repository.remove_description"><source>Only the saved connection is removed. Backup data is not deleted.</source><translation>Only the saved connection is removed. Backup data is not deleted.</translation></message>
     <message id="aegra.repository.unlock">
         <source>Unlock</source>
         <translation>Unlock</translation>

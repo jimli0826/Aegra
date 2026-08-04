@@ -16,6 +16,7 @@ constexpr qsizetype kMaximumVersionCharacters = 64;
 constexpr qsizetype kMaximumCapabilities = 64;
 constexpr qsizetype kMaximumCapabilityCharacters = 64;
 constexpr qsizetype kMaximumContinuationTokenCharacters = 1'024;
+constexpr qsizetype kMaximumStableCodeCharacters = 128;
 
 [[nodiscard]] bool has_exact_keys(const QJsonObject& object,
                                   const std::initializer_list<const char*> keys) {
@@ -227,14 +228,16 @@ QByteArray encode_service_info_request(const QString& request_id) {
 }
 
 QByteArray encode_recovery_point_request(const QString& request_id,
-                                         const std::optional<QString>& continuation_token) {
+                                         const std::optional<QString>& continuation_token,
+                                         const std::optional<QString>& repository_connection_id) {
     const QJsonObject page{
         {QStringLiteral("maximum_results"), static_cast<qint64>(kRecoveryPointPageSize)},
         {QStringLiteral("continuation_token"),
          continuation_token ? QJsonValue(*continuation_token) : QJsonValue(QJsonValue::Null)}};
-    const QJsonObject payload{
-        {QStringLiteral("repository_connection_id"), QJsonValue(QJsonValue::Null)},
-        {QStringLiteral("page"), page}};
+    const QJsonObject payload{{QStringLiteral("repository_connection_id"),
+                               repository_connection_id ? QJsonValue(*repository_connection_id)
+                                                        : QJsonValue(QJsonValue::Null)},
+                              {QStringLiteral("page"), page}};
     return QJsonDocument(
                QJsonObject{
                    {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
@@ -330,8 +333,16 @@ bool parse_recovery_point_response(const QJsonObject& root, RecoveryPointPage& r
     }
     const auto payload = root.value(QStringLiteral("payload")).toObject();
     if (!has_exact_keys(payload, {"repository_connection_id", "catalog"}) ||
-        !payload.value(QStringLiteral("repository_connection_id")).isNull() ||
         !payload.value(QStringLiteral("catalog")).isObject()) {
+        return false;
+    }
+    const auto connection_value = payload.value(QStringLiteral("repository_connection_id"));
+    if (connection_value.isNull()) {
+        result.repository_connection_id.reset();
+    } else if (connection_value.isString() &&
+               stable_code(connection_value.toString(), kMaximumStableCodeCharacters)) {
+        result.repository_connection_id = connection_value.toString();
+    } else {
         return false;
     }
     const auto page = payload.value(QStringLiteral("catalog")).toObject();
@@ -353,8 +364,7 @@ bool parse_recovery_point_response(const QJsonObject& root, RecoveryPointPage& r
                !result.continuation_token && message == QStringLiteral("repository.not_configured");
     }
     return canonical_uuid(result.repository_uuid) &&
-           message == QStringLiteral("repository.catalog_ready") &&
-           (!result.items.isEmpty() || !result.continuation_token);
+           message == QStringLiteral("repository.catalog_ready");
 }
 
 bool is_repository_failure_response(const QJsonObject& root) {
@@ -385,8 +395,9 @@ namespace {
 }
 
 [[nodiscard]] bool parse_job_item_object(const QJsonObject& object, QVariantMap& result) {
-    if (!has_exact_keys(object, {"job_id", "trace_id", "operation", "state", "created_utc_ms",
-                                 "started_utc_ms", "completed_utc_ms", "progress", "message_code"})) {
+    if (!has_exact_keys(object,
+                        {"job_id", "trace_id", "operation", "state", "created_utc_ms",
+                         "started_utc_ms", "completed_utc_ms", "progress", "message_code"})) {
         return false;
     }
     qint64 operation = 0;
@@ -408,13 +419,13 @@ namespace {
         !stable_code(object.value(QStringLiteral("message_code")).toString(), 128)) {
         return false;
     }
-    QVariantMap map{{QStringLiteral("jobId"), object.value(QStringLiteral("job_id")).toString()},
-                    {QStringLiteral("traceId"), object.value(QStringLiteral("trace_id")).toString()},
-                    {QStringLiteral("operation"), operation},
-                    {QStringLiteral("state"), state},
-                    {QStringLiteral("createdUtcMs"), created_utc_ms},
-                    {QStringLiteral("messageCode"),
-                     object.value(QStringLiteral("message_code")).toString()}};
+    QVariantMap map{
+        {QStringLiteral("jobId"), object.value(QStringLiteral("job_id")).toString()},
+        {QStringLiteral("traceId"), object.value(QStringLiteral("trace_id")).toString()},
+        {QStringLiteral("operation"), operation},
+        {QStringLiteral("state"), state},
+        {QStringLiteral("createdUtcMs"), created_utc_ms},
+        {QStringLiteral("messageCode"), object.value(QStringLiteral("message_code")).toString()}};
     if (started_utc_ms) {
         map.insert(QStringLiteral("startedUtcMs"), *started_utc_ms);
     }
@@ -427,9 +438,9 @@ namespace {
             return false;
         }
         const auto progress = progress_value.toObject();
-        if (!has_exact_keys(progress, {"schema_version", "job_id", "trace_id", "phase",
-                                       "logical_bytes", "processed_bytes", "stored_bytes",
-                                       "message_code"})) {
+        if (!has_exact_keys(progress,
+                            {"schema_version", "job_id", "trace_id", "phase", "logical_bytes",
+                             "processed_bytes", "stored_bytes", "message_code"})) {
             return false;
         }
         const auto outer_job_id = object.value(QStringLiteral("job_id")).toString();
@@ -553,4 +564,3 @@ bool is_job_failure_response(const QJsonObject& root) {
 }
 
 } // namespace aegra::desktop
-

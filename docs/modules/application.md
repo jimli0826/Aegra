@@ -49,8 +49,9 @@ JSON 或具体 Storage Adapter。
 S4 已增加：
 
 - `SourceInventoryQuery`：通过 `ISourceInventory` 分页返回 opaque `source_id`，不向 Desktop 暴露设备路径；
-- `RepositoryConnectionService`：add/import/test/set-default/list/remove，仅持久化 locator 与
-  `SecretRef`，删除只移除控制面引用；
+- `RepositoryConnectionService`：add/import/test/set-default/list/remove；Add 只接受缺失或空目标，生成随机
+  Repository UUID，暂存并条件发布 `aegra.repository` 后才持久化 Available 连接；Import 只接受已有有效
+  Descriptor 的 Repository。控制面仅持久化 locator 与 `SecretRef`，删除只移除控制面引用；
 - `ConnectedRepositoryQuery`：按 connection id 或 default 连接打开 `IRepositoryStorageFactory`，
   扫描 Catalog 并返回 `ServiceRecoveryPointPage`。
 

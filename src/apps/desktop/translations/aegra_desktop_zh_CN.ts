@@ -211,6 +211,10 @@
         <source>Test connection</source>
         <translation>连接测试</translation>
     </message>
+    <message id="aegra.repository.display_name"><source>Display name</source><translation>显示名称</translation></message>
+    <message id="aegra.repository.location"><source>Repository location</source><translation>存储库位置</translation></message>
+    <message id="aegra.repository.remove_title"><source>Remove repository connection?</source><translation>移除存储库连接？</translation></message>
+    <message id="aegra.repository.remove_description"><source>Only the saved connection is removed. Backup data is not deleted.</source><translation>仅移除保存的连接，不会删除备份数据。</translation></message>
     <message id="aegra.repository.unlock">
         <source>Unlock</source>
         <translation>解锁</translation>

@@ -16,6 +16,9 @@
         <file alias="qml/components/Card.qml">../qml/components/Card.qml</file>
         <file alias="qml/components/DiskChart.qml">../qml/components/DiskChart.qml</file>
         <file alias="qml/components/DiskIcon.qml">../qml/components/DiskIcon.qml</file>
+        <file alias="qml/components/CheckpointCalendarPanel.qml">../qml/components/CheckpointCalendarPanel.qml</file>
+        <file alias="qml/components/ComboBoxIndicator.qml">../qml/components/ComboBoxIndicator.qml</file>
+        <file alias="qml/components/LinkButton.qml">../qml/components/LinkButton.qml</file>
         <file alias="qml/components/LoadingOverlay.qml">../qml/components/LoadingOverlay.qml</file>
         <file alias="qml/components/PageHeader.qml">../qml/components/PageHeader.qml</file>
         <file alias="qml/components/ResizeHandle.qml">../qml/components/ResizeHandle.qml</file>
@@ -27,6 +30,7 @@
         <file alias="qml/components/WindowButton.qml">../qml/components/WindowButton.qml</file>
         <file alias="qml/pages/HomePage.qml">../qml/pages/HomePage.qml</file>
         <file alias="qml/pages/BackupPage.qml">../qml/pages/BackupPage.qml</file>
+        <file alias="qml/pages/BackupWizardStep2.qml">../qml/pages/BackupWizardStep2.qml</file>
         <file alias="qml/pages/RestorePage.qml">../qml/pages/RestorePage.qml</file>
         <file alias="qml/pages/MountPage.qml">../qml/pages/MountPage.qml</file>
         <file alias="qml/pages/RepositoryPage.qml">../qml/pages/RepositoryPage.qml</file>

@@ -10,12 +10,43 @@ Item {
     //% "Restore"
     Accessible.name: qsTrId("aegra.nav.restore")
 
-    property bool optionsCollapsed: false
+    property bool optionsCollapsed: true
     property bool checkpointPanelOpen: false
     property bool preserveSignature: true
     property bool autoExtend: true
     property real sourceTargetRatio: 0.45
     property real optionsPaneRatio: 0.30
+    property string selectedCheckpointId: ""
+
+    function todayYmd() {
+        var d = new Date()
+        var m = d.getMonth() + 1
+        var day = d.getDate()
+        return d.getFullYear() + "-"
+               + (m < 10 ? "0" : "") + m + "-"
+               + (day < 10 ? "0" : "") + day
+    }
+
+    readonly property var demoTargetDisks: [
+        {
+            name: "Disk 0",
+            style: "Basic (GPT)",
+            size: "20.0 GB",
+            isSystem: false,
+            volumes: [
+                { letter: "E:", size: "20.0 GB", fs: "NTFS" }
+            ]
+        },
+        {
+            name: "Disk 1",
+            style: "Basic (GPT)",
+            size: "30.0 GB",
+            isSystem: true,
+            volumes: [
+                { letter: "C:", size: "19.7 GB", fs: "NTFS" }
+            ]
+        }
+    ]
 
     ColumnLayout {
         anchors.fill: parent
@@ -44,13 +75,6 @@ Item {
                 }
             }
             Item { Layout.fillWidth: true }
-            Text {
-                //% "Service restore is not connected yet — UI preview only"
-                text: qsTrId("aegra.page.preview_only")
-                color: Theme.colorTextDim
-                font.pixelSize: 11
-                font.family: Theme.fontFamily
-            }
         }
 
         RowLayout {
@@ -93,7 +117,7 @@ Item {
                                 Layout.alignment: Qt.AlignVCenter
                             }
                             Text {
-                                //% "Source disks"
+                                //% "Source Disks"
                                 text: qsTrId("aegra.restore.source_disks")
                                 color: Theme.colorTextWhite
                                 font.pixelSize: 14
@@ -101,7 +125,7 @@ Item {
                                 font.family: Theme.fontFamily
                             }
                             Text {
-                                //% "Layout from the selected recovery point"
+                                //% "(from backup image → pick target below)"
                                 text: qsTrId("aegra.restore.source_hint")
                                 color: Theme.colorTextGrey
                                 font.pixelSize: 11
@@ -110,10 +134,20 @@ Item {
                                 Layout.fillWidth: true
                             }
                             AppButton {
-                                //% "Select recovery point"
+                                //% "Select checkpoint"
                                 text: qsTrId("aegra.restore.select_checkpoint")
                                 onClicked: root.checkpointPanelOpen = true
                             }
+                        }
+
+                        Text {
+                            //% "Selected:"
+                            text: qsTrId("aegra.restore.selected_label")
+                                  + (root.selectedCheckpointId.length > 0
+                                     ? (" " + root.selectedCheckpointId) : "")
+                            color: Theme.colorTextGrey
+                            font.pixelSize: 11
+                            font.family: Theme.fontFamily
                         }
 
                         Item {
@@ -124,11 +158,12 @@ Item {
                                 width: parent.width - 32
                                 horizontalAlignment: Text.AlignHCenter
                                 wrapMode: Text.WordWrap
-                                //% "Select a recovery point to show source disk layout"
+                                //% "Select a checkpoint to view source disks"
                                 text: qsTrId("aegra.restore.select_checkpoint_source")
                                 color: Theme.colorTextGrey
                                 font.pixelSize: 13
                                 font.family: Theme.fontFamily
+                                visible: root.selectedCheckpointId.length === 0
                             }
                         }
                     }
@@ -194,7 +229,7 @@ Item {
                                 Layout.alignment: Qt.AlignVCenter
                             }
                             Text {
-                                //% "Target disks"
+                                //% "Target Disks"
                                 text: qsTrId("aegra.restore.target_disks")
                                 color: Theme.colorTextWhite
                                 font.pixelSize: 14
@@ -202,7 +237,7 @@ Item {
                                 font.family: Theme.fontFamily
                             }
                             Text {
-                                //% "Map backup disks onto local disks"
+                                //% "(this PC — available restore destinations)"
                                 text: qsTrId("aegra.restore.target_hint")
                                 color: Theme.colorTextGrey
                                 font.pixelSize: 11
@@ -212,19 +247,83 @@ Item {
                             }
                         }
 
-                        Item {
+                        ListView {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            Text {
-                                anchors.centerIn: parent
-                                //% "Local disks will appear when restore inventory is connected"
-                                text: qsTrId("aegra.restore.target_empty")
-                                color: Theme.colorTextGrey
-                                font.pixelSize: 13
-                                font.family: Theme.fontFamily
-                                width: parent.width - 32
-                                wrapMode: Text.WordWrap
-                                horizontalAlignment: Text.AlignHCenter
+                            clip: true
+                            spacing: 8
+                            model: root.demoTargetDisks
+                            delegate: Rectangle {
+                                required property var modelData
+                                width: ListView.view.width
+                                height: 64
+                                radius: 4
+                                color: Theme.colorListItem
+                                border.width: 1
+                                border.color: Theme.colorBorder
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    spacing: 12
+
+                                    DiskIcon {
+                                        size: 28
+                                        variant: modelData.isSystem ? "system" : "hdd"
+                                    }
+                                    ColumnLayout {
+                                        Layout.preferredWidth: 120
+                                        spacing: 2
+                                        Text {
+                                            text: modelData.name
+                                            color: Theme.colorTextWhite
+                                            font.pixelSize: 13
+                                            font.bold: true
+                                            font.family: Theme.fontFamily
+                                        }
+                                        Text {
+                                            text: modelData.style + "\n" + modelData.size
+                                            color: Theme.colorTextGrey
+                                            font.pixelSize: 11
+                                            font.family: Theme.fontFamily
+                                        }
+                                    }
+                                    Row {
+                                        Layout.fillWidth: true
+                                        spacing: 6
+                                        Repeater {
+                                            model: modelData.volumes
+                                            delegate: Rectangle {
+                                                required property var modelData
+                                                width: 140
+                                                height: 40
+                                                radius: 3
+                                                color: Theme.colorInput
+                                                border.width: 1
+                                                border.color: Theme.colorBorder
+                                                Column {
+                                                    anchors.centerIn: parent
+                                                    spacing: 1
+                                                    Text {
+                                                        anchors.horizontalCenter: parent.horizontalCenter
+                                                        text: modelData.letter
+                                                        color: Theme.colorTextWhite
+                                                        font.pixelSize: 12
+                                                        font.bold: true
+                                                        font.family: Theme.fontFamily
+                                                    }
+                                                    Text {
+                                                        anchors.horizontalCenter: parent.horizontalCenter
+                                                        text: modelData.size + " " + modelData.fs
+                                                        color: Theme.colorTextGrey
+                                                        font.pixelSize: 10
+                                                        font.family: Theme.fontFamily
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -398,88 +497,15 @@ Item {
         }
     }
 
-    // Checkpoint picker drawer (empty UI)
-    Item {
+    CheckpointCalendarPanel {
         anchors.fill: parent
         z: 2000
-        visible: root.checkpointPanelOpen || panel.slideProgress < 0.999
-
-        Rectangle {
-            anchors.fill: parent
-            color: Theme.colorScrim
-            opacity: root.checkpointPanelOpen ? 1 : 0
-            visible: opacity > 0.01
-            Behavior on opacity { NumberAnimation { duration: 250 } }
-            MouseArea {
-                anchors.fill: parent
-                enabled: root.checkpointPanelOpen
-                onClicked: root.checkpointPanelOpen = false
-            }
-        }
-
-        Rectangle {
-            id: panel
-            width: Math.max(420, parent.width * 0.55)
-            height: parent.height
-            property real slideProgress: root.checkpointPanelOpen ? 0 : 1
-            x: parent.width - width + slideProgress * width
-            color: Theme.colorBg
-            border.width: 1
-            border.color: Theme.colorBorder
-            Behavior on slideProgress {
-                NumberAnimation { duration: 280; easing.type: Easing.OutCubic }
-            }
-
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 16
-                spacing: 12
-                RowLayout {
-                    Layout.fillWidth: true
-                    Rectangle {
-                        width: 3
-                        height: 18
-                        color: Theme.colorAccentBlue
-                    }
-                    Text {
-                        //% "Select recovery point"
-                        text: qsTrId("aegra.restore.select_checkpoint")
-                        color: Theme.colorTextWhite
-                        font.pixelSize: 16
-                        font.bold: true
-                        font.family: Theme.fontFamily
-                        Layout.fillWidth: true
-                    }
-                    Button {
-                        Layout.preferredWidth: 32
-                        Layout.preferredHeight: 28
-                        text: "\u2715"
-                        background: Rectangle {
-                            color: parent.hovered ? Theme.colorButtonHover : "transparent"
-                            radius: 4
-                        }
-                        contentItem: Text {
-                            text: parent.text
-                            color: Theme.colorTextWhite
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        onClicked: root.checkpointPanelOpen = false
-                    }
-                }
-                Text {
-                    Layout.fillWidth: true
-                    //% "Recovery point calendar and list will appear when restore Service APIs are connected"
-                    text: qsTrId("aegra.restore.checkpoint_panel_empty")
-                    color: Theme.colorTextGrey
-                    font.pixelSize: 13
-                    font.family: Theme.fontFamily
-                    wrapMode: Text.WordWrap
-                    horizontalAlignment: Text.AlignHCenter
-                    Layout.topMargin: 80
-                }
-                Item { Layout.fillHeight: true }
-            }
+        open: root.checkpointPanelOpen
+        backupDates: [root.todayYmd()]
+        onClosed: root.checkpointPanelOpen = false
+        onCheckpointSelected: function(item) {
+            root.selectedCheckpointId = (item && item.timeText)
+                                        ? item.timeText : "selected"
         }
     }
 }

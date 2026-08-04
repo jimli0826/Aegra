@@ -490,6 +490,23 @@ base::Result<void> validate_command_record(const ports::CommandRecord& record) {
     return base::Result<void>::success();
 }
 
+base::Result<void> validate_restore_preflight_record(const ports::RestorePreflightRecord& record) {
+    if (!valid_text(record.preflight_token, kMaximumTokenBytes) ||
+        !valid_stable_value(record.repository_connection_id, kMaximumIdentifierBytes) ||
+        !valid_stable_value(record.repository_uuid, kMaximumIdentifierBytes) ||
+        !valid_stable_value(record.recovery_point_id, kMaximumIdentifierBytes) ||
+        !valid_stable_value(record.target_source_id, kMaximumIdentifierBytes) ||
+        !valid_stable_value(record.chain_fingerprint, kMaximumIdentifierBytes) ||
+        record.logical_size_bytes == 0 || !valid_wire_integer(record.logical_size_bytes) ||
+        record.target_capacity_bytes < record.logical_size_bytes ||
+        !valid_wire_integer(record.target_capacity_bytes) || record.chain_depth == 0 ||
+        !valid_wire_integer(record.created_utc_ms) || !valid_wire_integer(record.expires_utc_ms) ||
+        record.expires_utc_ms <= record.created_utc_ms) {
+        return invalid("restore preflight record is invalid");
+    }
+    return base::Result<void>::success();
+}
+
 base::Result<void> validate_job_transition(const ports::JobStateTransition& transition) {
     if (!valid_stable_value(transition.job_id, kMaximumIdentifierBytes) ||
         !known_job_state(transition.expected_state) || !known_job_state(transition.next_state) ||
@@ -667,6 +684,29 @@ base::Result<ports::CommandRecord> read_command(sqlite3_stmt* const stmt) {
     auto valid = validate_command_record(record);
     return valid ? base::Result<ports::CommandRecord>::success(std::move(record))
                  : base::Result<ports::CommandRecord>::failure(valid.error());
+}
+
+base::Result<ports::RestorePreflightRecord> read_restore_preflight(sqlite3_stmt* const stmt) {
+    ports::RestorePreflightRecord record;
+    record.preflight_token = column_text_required(stmt, 0);
+    record.repository_connection_id = column_text_required(stmt, 1);
+    record.repository_uuid = column_text_required(stmt, 2);
+    record.recovery_point_id = column_text_required(stmt, 3);
+    record.target_source_id = column_text_required(stmt, 4);
+    record.chain_fingerprint = column_text_required(stmt, 5);
+    record.logical_size_bytes = column_uint64(stmt, 6);
+    record.target_capacity_bytes = column_uint64(stmt, 7);
+    const auto chain_depth = column_uint64(stmt, 8);
+    if (chain_depth > (std::numeric_limits<std::uint32_t>::max)()) {
+        return base::Result<ports::RestorePreflightRecord>::failure(
+            make_error(base::ErrorCode::kCorruptData, "restore preflight chain depth is corrupt"));
+    }
+    record.chain_depth = static_cast<std::uint32_t>(chain_depth);
+    record.created_utc_ms = column_uint64(stmt, 9);
+    record.expires_utc_ms = column_uint64(stmt, 10);
+    auto valid = validate_restore_preflight_record(record);
+    return valid ? base::Result<ports::RestorePreflightRecord>::success(std::move(record))
+                 : base::Result<ports::RestorePreflightRecord>::failure(valid.error());
 }
 
 contracts::RepositoryConnectionSummary

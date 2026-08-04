@@ -236,8 +236,7 @@ parse_recovery_point_request(const Json& payload) {
             payload.at("recovery_point_id").get<std::string>()};
 }
 
-[[nodiscard]] Json
-encode_execute_delete_plan(const contracts::ExecuteDeletePlanCommand& command) {
+[[nodiscard]] Json encode_execute_delete_plan(const contracts::ExecuteDeletePlanCommand& command) {
     return Json{{"plan_token", command.plan_token}, {"confirmed", command.confirmed}};
 }
 
@@ -274,30 +273,33 @@ encode_execute_delete_plan(const contracts::ExecuteDeletePlanCommand& command) {
 
 [[nodiscard]] Json
 encode_restore_preflight_request(const contracts::RestorePreflightRequest& request) {
-    return Json{{"recovery_point_id", request.recovery_point_id},
+    return Json{{"repository_connection_id", request.repository_connection_id},
+                {"recovery_point_id", request.recovery_point_id},
                 {"target_source_id", request.target_source_id}};
 }
 
 [[nodiscard]] contracts::RestorePreflightRequest
 parse_restore_preflight_request(const Json& payload) {
-    constexpr std::array<std::string_view, 2> keys{"recovery_point_id", "target_source_id"};
+    constexpr std::array<std::string_view, 3> keys{"repository_connection_id", "recovery_point_id",
+                                                   "target_source_id"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("restore preflight request fields are invalid");
     }
-    return {payload.at("recovery_point_id").get<std::string>(),
+    return {payload.at("repository_connection_id").get<std::string>(),
+            payload.at("recovery_point_id").get<std::string>(),
             payload.at("target_source_id").get<std::string>()};
 }
 
 [[nodiscard]] Json encode_start_restore(const contracts::StartRestoreCommand& command) {
-    return Json{{"preflight_token", command.preflight_token}};
+    return Json{{"preflight_token", command.preflight_token}, {"confirmed", command.confirmed}};
 }
 
 [[nodiscard]] contracts::StartRestoreCommand parse_start_restore(const Json& payload) {
-    constexpr std::array<std::string_view, 1> keys{"preflight_token"};
+    constexpr std::array<std::string_view, 2> keys{"preflight_token", "confirmed"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("start restore fields are invalid");
     }
-    return {payload.at("preflight_token").get<std::string>()};
+    return {payload.at("preflight_token").get<std::string>(), payload.at("confirmed").get<bool>()};
 }
 
 [[nodiscard]] Json

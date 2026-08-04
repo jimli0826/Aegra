@@ -16,7 +16,7 @@ namespace aegra::ports {
 
 // Personal-edition control-plane schema version for durable local SQLite.
 // Not Recovery Point / Archive / Chunk Index authority.
-inline constexpr std::uint32_t kControlPlaneSchemaVersion = 1;
+inline constexpr std::uint32_t kControlPlaneSchemaVersion = 2;
 
 // ---- Durable records (control-plane only; no plaintext secrets, no RP authority) ----
 
@@ -81,6 +81,20 @@ struct CommandRecord final {
     std::string command_id;
     std::optional<std::string> resource_id;
     std::uint64_t created_utc_ms{0};
+};
+
+struct RestorePreflightRecord final {
+    std::string preflight_token;
+    std::string repository_connection_id;
+    std::string repository_uuid;
+    std::string recovery_point_id;
+    std::string target_source_id;
+    std::string chain_fingerprint;
+    std::uint64_t logical_size_bytes{0};
+    std::uint64_t target_capacity_bytes{0};
+    std::uint32_t chain_depth{0};
+    std::uint64_t created_utc_ms{0};
+    std::uint64_t expires_utc_ms{0};
 };
 
 // ---- Job state machine (shared pure rules) ----
@@ -259,6 +273,22 @@ class ICommandStore {
                                                     base::CancellationToken cancellation) = 0;
 };
 
+class IRestorePreflightStore {
+  public:
+    IRestorePreflightStore() = default;
+    virtual ~IRestorePreflightStore() = default;
+    IRestorePreflightStore(const IRestorePreflightStore&) = delete;
+    IRestorePreflightStore& operator=(const IRestorePreflightStore&) = delete;
+    IRestorePreflightStore(IRestorePreflightStore&&) = delete;
+    IRestorePreflightStore& operator=(IRestorePreflightStore&&) = delete;
+
+    [[nodiscard]] virtual base::Result<void> insert(const RestorePreflightRecord& record,
+                                                    base::CancellationToken cancellation) = 0;
+
+    [[nodiscard]] virtual base::Result<std::optional<RestorePreflightRecord>>
+    get(std::string_view preflight_token, base::CancellationToken cancellation) = 0;
+};
+
 // Single-writer unit of work. Commit is explicit; destruction without commit rolls back.
 // After commit or rollback, every Store reference obtained from this unit rejects further access.
 class IControlPlaneUnitOfWork {
@@ -275,6 +305,7 @@ class IControlPlaneUnitOfWork {
     [[nodiscard]] virtual IScheduleStore& schedules() noexcept = 0;
     [[nodiscard]] virtual IAuditEventStore& audit_events() noexcept = 0;
     [[nodiscard]] virtual ICommandStore& commands() noexcept = 0;
+    [[nodiscard]] virtual IRestorePreflightStore& restore_preflights() noexcept = 0;
 
     [[nodiscard]] virtual base::Result<void> commit(base::CancellationToken cancellation) = 0;
     virtual void rollback() noexcept = 0;
@@ -307,6 +338,9 @@ class IControlPlaneDatabase {
     [[nodiscard]] virtual base::Result<std::optional<JobRecord>>
     get_job_by_idempotency_key(std::string_view idempotency_key,
                                base::CancellationToken cancellation) = 0;
+    [[nodiscard]] virtual base::Result<std::optional<JobRecord>>
+    get_job_by_preflight_token(std::string_view preflight_token,
+                               base::CancellationToken cancellation) = 0;
     [[nodiscard]] virtual base::Result<contracts::JobPage>
     list_jobs(const contracts::JobListRequest& request, base::CancellationToken cancellation) = 0;
     [[nodiscard]] virtual base::Result<std::optional<ScheduleRecord>>
@@ -319,6 +353,9 @@ class IControlPlaneDatabase {
                       base::CancellationToken cancellation) = 0;
     [[nodiscard]] virtual base::Result<std::optional<CommandRecord>>
     get_command(std::string_view idempotency_key, base::CancellationToken cancellation) = 0;
+    [[nodiscard]] virtual base::Result<std::optional<RestorePreflightRecord>>
+    get_restore_preflight(std::string_view preflight_token,
+                          base::CancellationToken cancellation) = 0;
 };
 
 } // namespace aegra::ports

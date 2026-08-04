@@ -188,10 +188,10 @@ QString ServiceClient::splashStatusText() const {
         return {};
     }
     if (splash_error_) {
-        //% "Unable to connect to Service"
+        //% "Unable to connect to the backup server"
         return qtTrId("aegra.splash.status.failed");
     }
-    //% "Connecting to Service"
+    //% "Loading data..."
     return qtTrId("aegra.splash.status.connecting");
 }
 

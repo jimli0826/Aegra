@@ -75,10 +75,12 @@ validate_repository_connection_record(const ports::RepositoryConnectionRecord& r
 [[nodiscard]] base::Result<void> validate_audit_event_record(const ports::AuditEventRecord& record);
 [[nodiscard]] base::Result<void> validate_command_record(const ports::CommandRecord& record);
 [[nodiscard]] base::Result<void>
+validate_restore_preflight_record(const ports::RestorePreflightRecord& record);
+[[nodiscard]] base::Result<void>
 validate_job_transition(const ports::JobStateTransition& transition);
 
 [[nodiscard]] base::Result<void> exec_sql(sqlite3* db, const char* sql);
-[[nodiscard]] base::Result<void> apply_schema_v1(sqlite3* db);
+[[nodiscard]] base::Result<void> apply_schema_v2(sqlite3* db);
 [[nodiscard]] base::Result<std::uint32_t> read_schema_version(sqlite3* db);
 [[nodiscard]] base::Result<void> write_schema_version(sqlite3* db, std::uint32_t version);
 
@@ -88,6 +90,8 @@ read_repository_connection(sqlite3_stmt* stmt);
 [[nodiscard]] base::Result<ports::ScheduleRecord> read_schedule(sqlite3_stmt* stmt);
 [[nodiscard]] base::Result<ports::AuditEventRecord> read_audit_event(sqlite3_stmt* stmt);
 [[nodiscard]] base::Result<ports::CommandRecord> read_command(sqlite3_stmt* stmt);
+[[nodiscard]] base::Result<ports::RestorePreflightRecord>
+read_restore_preflight(sqlite3_stmt* stmt);
 
 [[nodiscard]] contracts::RepositoryConnectionSummary
 to_connection_summary(const ports::RepositoryConnectionRecord& record);
@@ -186,6 +190,20 @@ class CommandStore final : public ports::ICommandStore {
     const bool* unit_of_work_active_{nullptr};
 };
 
+class RestorePreflightStore final : public ports::IRestorePreflightStore {
+  public:
+    explicit RestorePreflightStore(SqliteControlPlaneState& state,
+                                   const bool* unit_of_work_active = nullptr) noexcept;
+    [[nodiscard]] base::Result<void> insert(const ports::RestorePreflightRecord& record,
+                                            base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<std::optional<ports::RestorePreflightRecord>>
+    get(std::string_view preflight_token, base::CancellationToken cancellation) override;
+
+  private:
+    SqliteControlPlaneState& state_;
+    const bool* unit_of_work_active_{nullptr};
+};
+
 class ControlPlaneUnitOfWork final : public ports::IControlPlaneUnitOfWork {
   public:
     // write_lock must own state->mutex for the full unit-of-work lifetime.
@@ -197,6 +215,7 @@ class ControlPlaneUnitOfWork final : public ports::IControlPlaneUnitOfWork {
     [[nodiscard]] ports::IScheduleStore& schedules() noexcept override;
     [[nodiscard]] ports::IAuditEventStore& audit_events() noexcept override;
     [[nodiscard]] ports::ICommandStore& commands() noexcept override;
+    [[nodiscard]] ports::IRestorePreflightStore& restore_preflights() noexcept override;
     [[nodiscard]] base::Result<void> commit(base::CancellationToken cancellation) override;
     void rollback() noexcept override;
 
@@ -211,6 +230,7 @@ class ControlPlaneUnitOfWork final : public ports::IControlPlaneUnitOfWork {
     ScheduleStore schedules_;
     AuditEventStore audit_events_;
     CommandStore commands_;
+    RestorePreflightStore restore_preflights_;
 };
 
 // Opaque continuation: v1|<scope>|<filter>|<created_utc_ms>|<id>, bound to list kind + filters.

@@ -450,12 +450,110 @@ composition/capability；或只跑 Debug/单个测试。
 
 ### S6：Restore 编排
 
-**状态：等待前置 S3、S5。**
+**状态：等待前置 S5。** S3 Supervisor 和 Restore Worker/Pipeline 已存在；S6 只能在 S5 完成真实链认证、
+per-file Archive Credential 映射和 Local Storage 恢复门禁后进入生产接线。前置未关闭时允许先完成 contract
+设计和 fake-port 测试，但 `restore.preflight` / `restore.start` capability 必须保持关闭。
 
-- API 接受 recovery point ID 和 Service Inventory 中的 target ID，不接受 Desktop 提供任意 Archive 链或设备路径。
-- Service 解析链和每层 SecretRef，完成认证/preflight 后构造现有 Restore Worker job。
-- 强制非系统卷、安全容量、磁盘身份和确认前置；把 Worker 稳定结果映射到任务状态。
-- Desktop 断线不取消已接受任务；重新连接后按 job ID 查询/订阅。
+**任务目标：** 完成非系统 Windows Volume 的在线 Restore 控制面闭环：Desktop 只提交受信任的
+`repository_connection_id + recovery_point_id + target_source_id`，Service 生成短期 preflight，用户显式确认后
+启动一个 durable Restore Job，真实 Worker 使用完整 base-first Archive 链写入目标卷。S6 不恢复系统卷、不创建或
+修改分区、不支持 PhysicalDrive、不实现 WinPE/裸机恢复，也不允许 Desktop 提交 Archive path、Repository key、
+Volume GUID、链数组、SecretRef 或任意设备路径。
+
+**开始前必须完成：**
+
+1. 完整阅读 `CPP_ENGINEERING_STANDARD.md`、`MODULAR_ARCHITECTURE.md`、`contracts.md`、`ports.md`、
+   `application.md`、`service_host.md`、`worker_host.md`、`windows_personal_restore.md`、`windows_adapters.md`、
+   `control_plane_sqlite.md`、ADR-0008、ADR-0009、ADR-0013 和 Personal Repository/Backup Format 文档。
+2. 列出现有可复用能力及其明确缺口：S5 chain/authentication、Archive Credential mapping、
+   `SourceInventoryQuery`、`WorkerJobService`、`WorkerSupervisor`、`PersonalArchiveChainReader`、
+   `PersonalArchiveRestoreTask`、`WindowsBlockSink`、Restore Pipeline 和 SQLite Job Store。禁止复制 Pipeline、
+   在 `service_host.cpp` 拼链，或另建一套 Restore Worker 协议。
+3. 先向 integration owner 提交 contract、port、SQLite schema 和 composition 变更清单。产品未发布，发现 V3
+   Restore DTO 不足时直接修正 schema、codec、validator、ADR 和测试，不增加旧 payload fallback。
+
+**必须完成的范围：**
+
+- 必须修正最小 Restore contract。`RestorePreflightRequest` 至少包含 `repository_connection_id`、
+  `recovery_point_id`、`target_source_id`；`RestorePreflight` 必须返回相同资源归属、逻辑大小、目标容量、链深度、
+  过期时间和可展示的结构化 safety/eligibility 状态；`StartRestoreCommand` 必须包含 `preflight_token` 和显式
+  `confirmed=true`。查询不携带幂等键，Start 命令必须携带幂等键。未知字段、空 ID、false confirmation、超限整数
+  和错误 kind/payload 必须拒绝。Desktop 可见 DTO 不得包含路径、key、SecretRef 或底层错误文本。
+- 必须新增 Application Restore 编排用例，而不是把业务逻辑塞进 Host 或 Worker Job Service。Prepare 流程按
+  connection 打开 Repository，调用 S5 解析并认证完整 base-first 链，获取每层稳定 CredentialRef，解析目标
+  Inventory ID，计算逻辑容量并返回结构化 preflight。稳定区分 not found、repository offline、chain incomplete、
+  credential required、archive corrupt、target unavailable/system/read-only/too small、cancelled 和 internal。
+- 必须实现短期、不可伪造且可重启读取的 durable preflight record。建议在 control-plane port/SQLite 中增加细粒度
+  `IRestorePreflightStore`，保存 opaque random token、Repository/Recovery Point/target ID、Repository UUID、
+  链身份或 generation 摘要、逻辑大小、目标容量快照、创建/过期时间；不得保存明文 Secret、SecretRef、
+  Archive path、Volume GUID、Manifest 或 Chunk Index。token 默认 TTL 必须有界，过期后 Start 返回稳定 conflict
+  并要求重新 Prepare。
+- preflight 只是安全快照，不是写盘授权的永久事实。Start 必须重新读取 Repository connection、重扫并认证链、
+  重新解析每层 CredentialRef、重新解析 target ID，并校验 Repository UUID、Recovery Point/链身份、generation、
+  逻辑大小、目标 stable identity、容量和 safety 状态均未变化；任一变化返回 conflict，不得静默刷新旧 token。
+- 必须保证一个 preflight 最多创建一个 Restore Job。SQLite 对非空 `jobs.preflight_token` 建立唯一约束，并提供按
+  token 查询；queued Job intent 与 token 占用必须在 Worker launch 前提交。相同幂等键/同一请求返回同一 Job 的
+  `Replayed`，同键不同请求或不同幂等键复用已占用 token 返回 Conflict；并发 Start 也只能有一个 winner。
+- 必须由受信任 Service/Adapter 把 Repository-relative Archive keys 和 target source ID 转成 Worker 所需的
+  base-first absolute Archive paths、逐层 CredentialRef 与 canonical Volume GUID。Application 和 Desktop 不得手工
+  拼 Windows 路径；如果现有 Storage/Inventory port 无法安全表达该转换，只增加最小 resolver/inspector port，禁止
+  引入万能 Storage Backend 或让核心模块依赖 Windows。
+- 必须复用 `WorkerSupervisor` 启动真实 `JobOperation::kRestore`：Job 的 `source_refs` 是完整 base-first 链，
+  `credential_refs` 与层一一对应，`target_ref` 只来自 Service 解析结果；SQLite Job 保存
+  `source_id = recovery_point_id`、`repository_connection_id`、`target_source_id`、`preflight_token` 和
+  `idempotency_key`。command accepted 只表示 queued intent 已持久化，Worker launch 失败必须留下 terminal failed
+  Job，Service crash 前的 queued/running/cancelling Job 启动时收敛为 interrupted，禁止自动重试破坏性 Restore。
+- Worker 必须继续作为最终写盘安全边界。打开目标写句柄前重新认证全部层并验证 full-first、直接父链、Backup Set、
+  Volume geometry 和最大链深度；重新拒绝系统卷、只读卷、容量不足、Archive 与目标同卷或来源卷无法确认；只有
+  canonical Volume GUID 可以进入生产 Sink，且必须成功 lock + dismount 后才允许首个 write。Service preflight
+  成功不能绕过 ADR-0009 的这些检查。
+- 必须定义取消、deadline 和断线语义。Desktop 断线或窗口关闭不取消 accepted Job；显式 Cancel 复用 S3 command。
+  首个 write 前取消不得修改目标；首个 write 后取消、I/O 失败、Worker crash 或 Service shutdown 必须形成稳定 terminal
+  state 和 `restore.target_may_be_partial` warning/message，不能把目标重新标为安全或自动上线。成功以 Worker Result
+  和 `FlushFileBuffers` 完成为唯一边界。
+- 必须把 Worker 的稳定 `TaskResult` 映射到 SQLite Job 与 Audit Event，至少覆盖 accepted、preflight rejected、
+  running、succeeded、failed、cancelled、interrupted 和 target-may-be-partial；日志、message arguments、Job、Audit
+  和协议响应不得包含 Secret、SecretRef、Archive path、Volume GUID、客户数据或原始 Win32 错误。
+- 必须接入 Service Host query/command handler、runtime composition、CMake、capability gate 和模块文档。
+  `PrepareRestore` 与 `StartRestore` 要分别检查 capability，handler 未满足全部门禁时必须在调用前返回
+  `service.capability_unavailable` 且零副作用；只有本节全部测试通过后才能同时开放
+  `restore.preflight` 与 `restore.start`。
+
+**必须覆盖的测试：**
+
+- Contract/codec：修正后的 Prepare/Start DTO roundtrip、golden JSON、strict keys、资源归属、confirmed、整数边界、
+  token 过期、capability gate、错误 payload、message 脱敏、幂等 replay 和同 key 不同请求冲突。
+- Application preflight：full 与多层增量链、不同层 CredentialRef、缺父/环/跨 set/身份或 generation 漂移、错误凭据、
+  Repository offline、Archive corrupt、target missing/system/read-only/too small、目标身份或容量变化、取消和 deadline。
+- SQLite：preflight insert/get/expire、事务回滚、未知 schema、非空 token 唯一 Job 约束、并发 Start winner、Service
+  重启读取、queued/running/cancelling -> interrupted，以及同 token 不同幂等键冲突。
+- Worker/Adapter：链顺序、Secret 生命周期、系统卷拒绝、canonical path、同卷 Archive 拒绝、lock/dismount 失败、
+  容量不足、首写前取消、写入后取消/失败、flush、deadline、Worker crash、无 Result 和稳定脱敏结果。
+- E2E：至少一个安全的成功 `Service request -> preflight -> start -> real Supervisor/process -> Worker Restore task ->
+  terminal SQLite Job` 测试，使用专用测试 composition 写临时文件或隔离虚拟盘；不得给生产 Worker 增加允许任意文件/
+  Device Path 的命令行后门。真实生产 `aegra_personal_worker` 写临时 VHD/非系统卷的测试作为显式管理员集成门禁，
+  不进入普通 CTest，但必须有可重复脚本和结果说明。
+- Debug/Release 受影响 target、全部非管理员 `ctest`、`architecture.source_limits`、clang-format、秘密扫描和
+  `git diff --check` 必须通过；管理员 Restore 集成测试未执行时 S6 不得标记完成。
+
+**文件所有权：** S6 agent 独占新增 Restore Application use case、preflight port/store、专属 SQLite 文件、
+Restore Service handler 与专属测试。公共 Contracts/codec、`service_main.cpp`、Service/Worker 顶层 CMake、SQLite schema
+registry 和 `tests/CMakeLists.txt` 由 integration owner 统一接线；不得修改 Desktop QML，也不得覆盖 D2/D3/S5 的
+并行改动。
+
+**实施顺序是强制的：** entry gate/S5 验收 -> contract/ADR -> preflight port + SQLite -> Application fake-port
+preflight -> Start 幂等与 queued intent -> trusted path/target resolution -> Supervisor/Worker 接线 ->
+故障/重启恢复 -> 安全 E2E -> 管理员 VHD 门禁 -> Debug/Release 全量验证 -> 文档/capability。禁止先开放 capability，
+禁止先写 Host 大分支再补 Application，禁止用 fake success 代替真实 terminal Job。
+
+**以下情况一律不算完成：** 只返回 preflight token；token 仅存在内存；Start 不显式确认；Desktop 可传路径、key、
+链或 SecretRef；只在 Service 检查系统卷而 Worker 不复查；同 token 可创建多个 Job；accepted 后没有 durable queued
+Job；断线取消任务；写入失败后仍显示目标安全；只做 fake Worker 测试；给生产 Worker 增加测试路径后门；未接
+composition/capability；未跑 Release、全套测试或管理员 Restore 门禁。
+
+**交付报告必须包含：** 修改文件清单、contract/schema 变化、preflight TTL/重放/占用语义、目标身份与 TOCTOU
+处理、完整错误/状态矩阵、真实进程和管理员 VHD 测试证据、Debug/Release 命令与结果、秘密扫描结果和剩余项。
+本节任一“必须”条目缺失时，S6 状态必须保持进行中或等待前置，不得标记已完成。
 
 ### D4：Restore 页面
 

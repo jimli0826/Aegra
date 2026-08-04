@@ -14,7 +14,8 @@
 - 进程传输：`IMessageChannel`。
 - 进程生命周期：`IProcessLauncher`。
 - 个人版控制面：`IControlPlaneDatabase`、`IControlPlaneUnitOfWork`、`IRepositoryConnectionStore`、
-  `IJobStore`、`IScheduleStore`、`IAuditEventStore`、`ICommandStore`（见 `control_plane.h`）。
+  `IJobStore`、`IScheduleStore`、`IAuditEventStore`、`ICommandStore`、`IRestorePreflightStore`
+  （见 `control_plane.h`）。
 - 个人版 Inventory / Repository 访问：`ISourceInventory`（见 `source_inventory.h`）、
   `IRepositoryStorageFactory` / `IRepositoryStorageAccess`（见 `repository_storage.h`）。
 
@@ -105,3 +106,8 @@ S2 已在 `control_plane.h` 定义个人版控制面细粒度 Store 与 Job 状�
 S4 已增加 `source_inventory.h` 与 `repository_storage.h`，供 Application Inventory 与多连接 Catalog
 查询使用；Windows Inventory Adapter 与 Local Storage Factory 已接入 Service composition。S3 增加
 `process_launcher.h`，由 Service Supervisor 使用，接口不暴露 Win32 handle。
+
+S6 已增加 durable `RestorePreflightRecord` 与 `IRestorePreflightStore`。记录只包含 opaque token、Repository/
+Recovery Point/目标 ID、Repository UUID、链指纹、容量、链深和创建/过期时间；不得保存 Secret、SecretRef、
+Archive path、Volume GUID、Manifest 或 Chunk Index。`IControlPlaneDatabase` 同时提供按 preflight token 读取记录和
+查询已占用该 token 的 Job，用于后续 Start 的重放与唯一占用判断。

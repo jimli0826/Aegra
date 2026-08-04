@@ -63,3 +63,10 @@ S5 增加 `RecoveryPointOperations`：按 connection 打开 Repository、扫描 
 Repository `staging/delete-plans/`），计划持久化每个 Archive member 的 Storage generation，并按
 tombstone 协议执行条件删除，防止崩溃续作误删同 key 的新对象。Verify 由 Service
 `WorkerJobService::start_verify` 构造受信任 Archive 路径后提交 Supervisor。
+
+S6 进行中：`RestorePreflightService` 已建立 Application 编排边界，按
+`repository_connection_id + recovery_point_id + target_source_id` 查找受信任资源，验证目标为可用、非系统、
+非只读 Volume 且容量足够，生成默认 5 分钟 opaque token，并把 Repository UUID、完整链指纹、容量和链深写入
+durable control plane。`IRestoreChainInspector` 是 S5 真实逐层认证能力的待组合边界；在该实现和 Start 的 TOCTOU
+重验证、Job 唯一占用及 Worker 接线完成前，Service 不构造本用例且 `restore.preflight` / `restore.start`
+capability 保持关闭。

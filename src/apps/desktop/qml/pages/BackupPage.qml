@@ -4,54 +4,191 @@ import QtQuick.Layouts 1.15
 import ".."
 import "../components"
 
-// Visual baseline: backup/src/gui BackupPage — schedule list + right slide-in wizard.
-// Data: ServiceClient inventory / connections / startBackup / cancel (no old Backend).
+// Visual baseline: backup/src/gui BackupPage — schedule list + Add Schedule Wizard step 1.
+// Demo data fills UI when Service inventory/locations are empty.
 Item {
     id: root
     //% "Backup"
     Accessible.name: qsTrId("aegra.nav.backup")
 
     property bool wizardOpen: false
-    property string selectedSourceId: ""
-    property string selectedConnectionId: ""
-    property bool confirmChecked: false
+    property int wizardStep: 1
+    property int selectedDiskIndex: -1
+    property int selectedLocationIndex: 0
+    property var expandedDisks: ({})
 
-    readonly property bool fullBackupReady: serviceClient.connected
-                                            && serviceClient.backupStartAvailable
-                                            && selectedSourceId.length > 0
-                                            && selectedConnectionId.length > 0
-                                            && confirmChecked
-                                            && !serviceClient.backupCommandBusy
-                                            && !serviceClient.cancelCommandBusy
-                                            && (serviceClient.activeBackupJobId.length === 0
-                                                || serviceClient.activeBackupTerminal)
+    // Local UI schedule list (wizard Create appends; Service schedule API later).
+    property var schedules: [
+        {
+            id: 1,
+            sourceName: "disk0",
+            destinationName: "fff",
+            destinationPath: "E:\\qqqq",
+            frequency: "daily",
+            timeOfDay: "02:00",
+            lastRun: "",
+            nextRun: "2026-08-05 02:00",
+            enabled: true
+        }
+    ]
+
+    // Demo disks matching old wizard look (used when Service has no inventory).
+    readonly property var demoDisks: [
+        {
+            name: "Disk 0",
+            size: "20.0 GB",
+            type: "GPT",
+            isSystem: false,
+            volumes: [
+                { name: "System Reserved", letter: "", size: "100 MB" },
+                { name: "Windows", letter: "C:", size: "19.9 GB" }
+            ]
+        },
+        {
+            name: "Disk 1",
+            size: "30.0 GB",
+            type: "GPT",
+            isSystem: true,
+            volumes: [
+                { name: "Data", letter: "D:", size: "30.0 GB" }
+            ]
+        }
+    ]
+
+    readonly property var demoLocations: [
+        { name: "e", path: "E:\\", isDefault: true, type: "local" },
+        { name: "444", path: "C:\\", isDefault: false, type: "local" }
+    ]
+
+    readonly property var sourceModel: {
+        if (serviceClient.sources && serviceClient.sources.count > 0)
+            return null // use live model via ListView below
+        return demoDisks
+    }
+
+    readonly property var locationModel: {
+        if (serviceClient.connections && serviceClient.connections.count > 0)
+            return null
+        return demoLocations
+    }
+
+    function isDiskExpanded(index) {
+        return expandedDisks[index] === true
+    }
+
+    function toggleDiskExpanded(index) {
+        var next = Object.assign({}, expandedDisks)
+        next[index] = !next[index]
+        expandedDisks = next
+    }
 
     function openWizard() {
-        root.confirmChecked = false
-        if (root.selectedConnectionId.length === 0)
-            root.selectedConnectionId = serviceClient.defaultConnectionId()
-        root.wizardOpen = true
-        serviceClient.refreshInventory()
-        serviceClient.refreshConnections()
+        selectedDiskIndex = -1
+        selectedLocationIndex = 0
+        expandedDisks = ({})
+        wizardStep = 1
+        if (wizardStep2)
+            wizardStep2.resetDefaults()
+        wizardOpen = true
+        if (serviceClient.connected) {
+            serviceClient.refreshInventory()
+            serviceClient.refreshConnections()
+        }
     }
 
     function closeWizard() {
-        root.wizardOpen = false
+        wizardOpen = false
+        wizardStep = 1
     }
 
+    function canGoNext() {
+        return selectedDiskIndex >= 0 && selectedLocationIndex >= 0
+    }
+
+    function freqLabel(f) {
+        var x = (f || "daily").toString().toLowerCase()
+        if (x === "weekly")
+            return qsTrId("aegra.backup.freq.weekly")
+        if (x === "monthly")
+            return qsTrId("aegra.backup.freq.monthly")
+        return qsTrId("aegra.backup.freq.daily")
+    }
+
+    function timeOrNa(v) {
+        var s = (v === undefined || v === null) ? "" : ("" + v).trim()
+        return s.length > 0 ? s : qsTrId("aegra.common.not_available")
+    }
+
+    function createScheduleFromWizard() {
+        var srcName = "disk" + Math.max(0, selectedDiskIndex)
+        if (serviceClient.sources.count > 0 && selectedDiskIndex >= 0
+                && selectedDiskIndex < serviceClient.sources.count) {
+            // keep diskN style for list
+        } else if (selectedDiskIndex >= 0 && selectedDiskIndex < demoDisks.length) {
+            srcName = "disk" + selectedDiskIndex
+        }
+        var destName = "local"
+        var destPath = ""
+        var locs = serviceClient.connections.count > 0
+                   ? null : demoLocations
+        if (locs && selectedLocationIndex >= 0 && selectedLocationIndex < locs.length) {
+            destName = locs[selectedLocationIndex].name
+            destPath = locs[selectedLocationIndex].path
+        }
+        var s2 = wizardStep2
+        var nextId = 1
+        for (var i = 0; i < schedules.length; ++i) {
+            if (schedules[i].id >= nextId)
+                nextId = schedules[i].id + 1
+        }
+        var row = {
+            id: nextId,
+            sourceName: srcName,
+            destinationName: destName,
+            destinationPath: destPath,
+            frequency: s2 ? s2.frequency : "daily",
+            timeOfDay: s2 ? s2.timeOfDay : "02:00",
+            lastRun: "",
+            nextRun: "",
+            enabled: true
+        }
+        var next = schedules.slice()
+        next.push(row)
+        schedules = next
+        closeWizard()
+    }
+
+    function toggleScheduleEnabled(id) {
+        var next = []
+        for (var i = 0; i < schedules.length; ++i) {
+            var r = Object.assign({}, schedules[i])
+            if (r.id === id)
+                r.enabled = !r.enabled
+            next.push(r)
+        }
+        schedules = next
+    }
+
+    function deleteSchedule(id) {
+        var next = []
+        for (var i = 0; i < schedules.length; ++i) {
+            if (schedules[i].id !== id)
+                next.push(schedules[i])
+        }
+        schedules = next
+    }
+
+    // ==================== LIST ====================
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 12
         spacing: 12
 
-        // Page title — old GUI: 3px accent + 18px title
         RowLayout {
             Layout.fillWidth: true
             spacing: 12
-
             Row {
                 spacing: 8
-                Layout.alignment: Qt.AlignVCenter
                 Rectangle {
                     width: 3
                     height: 20
@@ -69,38 +206,8 @@ Item {
                 }
             }
             Item { Layout.fillWidth: true }
-
-            AppButton {
-                //% "Refresh"
-                //% "Reconnect"
-                text: serviceClient.connected
-                      ? qsTrId("aegra.common.refresh")
-                      : qsTrId("aegra.common.reconnect")
-                enabled: !serviceClient.inventoryLoading && !serviceClient.connectionsLoading
-                onClicked: {
-                    if (serviceClient.connected) {
-                        serviceClient.refreshInventory()
-                        serviceClient.refreshConnections()
-                        serviceClient.refreshJobs()
-                    } else {
-                        serviceClient.reconnect()
-                    }
-                }
-            }
         }
 
-        Text {
-            Layout.fillWidth: true
-            visible: !serviceClient.connected || !serviceClient.backupStartAvailable
-            //% "Backup requires Service capabilities: source.inventory, repository.connection, backup.start"
-            text: qsTrId("aegra.backup.capability.missing")
-            color: Theme.colorAccentRed
-            font.pixelSize: 12
-            font.family: Theme.fontFamily
-            wrapMode: Text.WordWrap
-        }
-
-        // Main list card — schedules table (S8 disabled empty state)
         Card {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -115,7 +222,6 @@ Item {
                 z: 2
                 //% "Add"
                 text: qsTrId("aegra.common.add")
-                enabled: serviceClient.connected && serviceClient.backupStartAvailable
                 onClicked: root.openWizard()
             }
 
@@ -127,19 +233,16 @@ Item {
                 anchors.bottomMargin: 12
                 spacing: 0
 
-                // Table header
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 36
                     color: Theme.colorTableHeader
                     radius: 2
-
                     RowLayout {
                         anchors.fill: parent
                         anchors.leftMargin: 12
                         anchors.rightMargin: 12
                         spacing: 8
-
                         Text {
                             Layout.preferredWidth: 140
                             Layout.fillWidth: true
@@ -149,23 +252,21 @@ Item {
                             font.pixelSize: 12
                             font.bold: true
                             font.family: Theme.fontFamily
-                            elide: Text.ElideRight
                         }
                         Text {
                             Layout.preferredWidth: 100
                             Layout.fillWidth: true
-                            //% "Target repository"
-                            text: qsTrId("aegra.backup.section.target")
+                            //% "Destination"
+                            text: qsTrId("aegra.backup.column.destination")
                             color: Theme.colorTextGrey
                             font.pixelSize: 12
                             font.bold: true
                             font.family: Theme.fontFamily
-                            elide: Text.ElideRight
                         }
                         Text {
                             Layout.preferredWidth: 110
-                            //% "Type"
-                            text: qsTrId("aegra.backup.type.full")
+                            //% "Frequency"
+                            text: qsTrId("aegra.backup.column.frequency")
                             color: Theme.colorTextGrey
                             font.pixelSize: 12
                             font.bold: true
@@ -173,14 +274,33 @@ Item {
                         }
                         Text {
                             Layout.preferredWidth: 130
-                            //% "Status"
-                            text: qsTrId("aegra.backup.column.status")
+                            //% "Last run"
+                            text: qsTrId("aegra.backup.column.last_run")
                             color: Theme.colorTextGrey
                             font.pixelSize: 12
                             font.bold: true
                             font.family: Theme.fontFamily
                         }
-                        Item { Layout.preferredWidth: 100 }
+                        Text {
+                            Layout.preferredWidth: 130
+                            //% "Next run"
+                            text: qsTrId("aegra.backup.column.next_run")
+                            color: Theme.colorTextGrey
+                            font.pixelSize: 12
+                            font.bold: true
+                            font.family: Theme.fontFamily
+                        }
+                        Text {
+                            Layout.preferredWidth: 72
+                            //% "Enabled"
+                            text: qsTrId("aegra.backup.column.enabled")
+                            color: Theme.colorTextGrey
+                            font.pixelSize: 12
+                            font.bold: true
+                            font.family: Theme.fontFamily
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+                        Item { Layout.preferredWidth: 140 }
                     }
                 }
 
@@ -188,120 +308,187 @@ Item {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
 
-                    // Empty schedules (engine not wired)
-                    Column {
+                    Text {
                         anchors.centerIn: parent
-                        width: parent.width - 48
-                        spacing: 10
-                        visible: serviceClient.activeBackupJobId.length === 0
-                                 && !serviceClient.backupCommandBusy
-
-                        Text {
-                            width: parent.width
-                            horizontalAlignment: Text.AlignHCenter
-                            //% "No schedules yet"
-                            text: qsTrId("aegra.backup.schedules.empty")
-                            color: Theme.colorTextGrey
-                            font.pixelSize: 13
-                            font.family: Theme.fontFamily
-                            wrapMode: Text.WordWrap
-                        }
-                        Text {
-                            width: parent.width
-                            horizontalAlignment: Text.AlignHCenter
-                            //% "Scheduling is not available yet"
-                            text: qsTrId("aegra.backup.schedule.unavailable")
-                            color: Theme.colorTextDim
-                            font.pixelSize: 12
-                            font.family: Theme.fontFamily
-                            wrapMode: Text.WordWrap
-                        }
-                        Text {
-                            width: parent.width
-                            horizontalAlignment: Text.AlignHCenter
-                            //% "Use Add to start a one-time full backup"
-                            text: qsTrId("aegra.backup.schedules.hint_add")
-                            color: Theme.colorTextDim
-                            font.pixelSize: 12
-                            font.family: Theme.fontFamily
-                            wrapMode: Text.WordWrap
-                        }
+                        visible: root.schedules.length === 0
+                        //% "No schedules"
+                        text: qsTrId("aegra.backup.schedules.empty")
+                        color: Theme.colorTextGrey
+                        font.pixelSize: 13
+                        font.family: Theme.fontFamily
                     }
 
-                    // Active backup row (job observation, same table row chrome)
-                    Rectangle {
-                        anchors.top: parent.top
-                        width: parent.width
-                        height: 52
-                        visible: serviceClient.activeBackupJobId.length > 0
-                                 || serviceClient.backupCommandBusy
-                        color: Theme.colorTableRow
+                    ListView {
+                        id: scheduleList
+                        anchors.fill: parent
+                        clip: true
+                        spacing: 0
+                        visible: root.schedules.length > 0
+                        model: root.schedules
 
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 12
-                            anchors.rightMargin: 12
-                            spacing: 8
+                        delegate: Rectangle {
+                            required property var modelData
+                            required property int index
+                            width: scheduleList.width
+                            height: (modelData.destinationPath || "") !== "" ? 52 : 44
+                            color: index % 2 === 0 ? Theme.colorTableRow : Theme.colorTableAlt
 
-                            Text {
-                                Layout.preferredWidth: 140
-                                Layout.fillWidth: true
-                                text: root.selectedSourceId.length > 0
-                                      ? root.selectedSourceId
-                                      : "—"
-                                color: Theme.colorTextWhite
-                                font.pixelSize: 12
-                                font.family: Theme.fontFamily
-                                elide: Text.ElideMiddle
-                            }
-                            Text {
-                                Layout.preferredWidth: 100
-                                Layout.fillWidth: true
-                                text: root.selectedConnectionId.length > 0
-                                      ? root.selectedConnectionId
-                                      : "—"
-                                color: Theme.colorTextWhite
-                                font.pixelSize: 12
-                                font.family: Theme.fontFamily
-                                elide: Text.ElideMiddle
-                            }
-                            Text {
-                                Layout.preferredWidth: 110
-                                //% "Full"
-                                text: qsTrId("aegra.backup.type.full")
-                                color: Theme.colorTextWhite
-                                font.pixelSize: 12
-                                font.family: Theme.fontFamily
-                            }
-                            ColumnLayout {
-                                Layout.preferredWidth: 160
-                                spacing: 2
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 12
+                                anchors.rightMargin: 12
+                                spacing: 8
+
                                 Text {
-                                    text: serviceClient.activeBackupStateText
+                                    Layout.preferredWidth: 140
+                                    Layout.fillWidth: true
+                                    text: modelData.sourceName || ""
                                     color: Theme.colorTextWhite
                                     font.pixelSize: 12
                                     font.family: Theme.fontFamily
+                                    elide: Text.ElideMiddle
                                 }
-                                TaskProgressBar {
+                                Item {
+                                    Layout.preferredWidth: 120
                                     Layout.fillWidth: true
-                                    visible: serviceClient.activeBackupProgressVisible
-                                             || serviceClient.backupCommandBusy
-                                    value: serviceClient.activeBackupProgressPercent
-                                    active: !serviceClient.activeBackupTerminal
+                                    Layout.fillHeight: true
+                                    Column {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        spacing: 0
+                                        Text {
+                                            width: parent.width
+                                            height: (modelData.destinationPath || "") !== ""
+                                                    ? 16 : implicitHeight
+                                            text: modelData.destinationName || ""
+                                            color: Theme.colorTextWhite
+                                            font.pixelSize: (modelData.destinationPath || "") !== ""
+                                                            ? 11 : 12
+                                            font.family: Theme.fontFamily
+                                            elide: Text.ElideMiddle
+                                        }
+                                        Text {
+                                            width: parent.width
+                                            height: 14
+                                            visible: (modelData.destinationPath || "") !== ""
+                                            text: modelData.destinationPath || ""
+                                            color: Theme.colorTextGrey
+                                            font.pixelSize: 9
+                                            font.family: Theme.fontFamily
+                                            elide: Text.ElideMiddle
+                                        }
+                                    }
                                 }
-                            }
-                            AppButton {
-                                //% "Cancel job"
-                                text: qsTrId("aegra.backup.action.cancel")
-                                danger: true
-                                enabled: serviceClient.activeBackupCancellable
-                                         && !serviceClient.cancelCommandBusy
-                                onClicked: serviceClient.cancelActiveBackup()
-                            }
-                            AppButton {
-                                //% "Details"
-                                text: qsTrId("aegra.backup.action.details")
-                                onClicked: root.openWizard()
+                                Text {
+                                    Layout.preferredWidth: 110
+                                    text: root.freqLabel(modelData.frequency)
+                                          + " · " + (modelData.timeOfDay || "02:00")
+                                    color: Theme.colorAccentBlue
+                                    font.pixelSize: 12
+                                    font.family: Theme.fontFamily
+                                    elide: Text.ElideRight
+                                }
+                                Text {
+                                    Layout.preferredWidth: 130
+                                    text: root.timeOrNa(modelData.lastRun)
+                                    color: (modelData.lastRun && ("" + modelData.lastRun).trim().length > 0)
+                                           ? Theme.colorTextWhite : Theme.colorTextGrey
+                                    font.pixelSize: 11
+                                    font.family: Theme.fontFamily
+                                    elide: Text.ElideRight
+                                }
+                                Text {
+                                    Layout.preferredWidth: 130
+                                    text: root.timeOrNa(modelData.nextRun)
+                                    color: (modelData.nextRun && ("" + modelData.nextRun).trim().length > 0)
+                                           ? Theme.colorTextWhite : Theme.colorTextGrey
+                                    font.pixelSize: 11
+                                    font.family: Theme.fontFamily
+                                    elide: Text.ElideRight
+                                }
+                                Item {
+                                    Layout.preferredWidth: 72
+                                    Layout.fillHeight: true
+                                    Rectangle {
+                                        width: 40
+                                        height: 22
+                                        radius: 11
+                                        anchors.centerIn: parent
+                                        color: modelData.enabled ? Theme.colorAccentBlue : "#555"
+                                        border.width: 1
+                                        border.color: modelData.enabled
+                                                      ? Theme.colorAccentBlue : Theme.colorBorder
+                                        Rectangle {
+                                            width: 16
+                                            height: 16
+                                            radius: 8
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            x: modelData.enabled ? parent.width - width - 3 : 3
+                                            color: "white"
+                                        }
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: root.toggleScheduleEnabled(modelData.id)
+                                        }
+                                    }
+                                }
+                                Row {
+                                    Layout.preferredWidth: 140
+                                    spacing: 8
+                                    layoutDirection: Qt.RightToLeft
+                                    Rectangle {
+                                        width: 60
+                                        height: 28
+                                        radius: 4
+                                        color: delHover.containsMouse ? "#cc3333" : Theme.colorButton
+                                        border.width: 1
+                                        border.color: Theme.colorBorder
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        Text {
+                                            anchors.centerIn: parent
+                                            //% "Delete"
+                                            text: qsTrId("aegra.common.delete")
+                                            color: Theme.colorTextWhite
+                                            font.pixelSize: 12
+                                            font.family: Theme.fontFamily
+                                        }
+                                        MouseArea {
+                                            id: delHover
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: root.deleteSchedule(modelData.id)
+                                        }
+                                    }
+                                    Rectangle {
+                                        width: 60
+                                        height: 28
+                                        radius: 4
+                                        color: runHover.containsMouse
+                                               ? Theme.colorButtonHover : Theme.colorButton
+                                        border.width: 1
+                                        border.color: Theme.colorBorder
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        opacity: modelData.enabled ? 1.0 : 0.55
+                                        Text {
+                                            anchors.centerIn: parent
+                                            //% "Run"
+                                            text: qsTrId("aegra.backup.action.run")
+                                            color: Theme.colorTextWhite
+                                            font.pixelSize: 12
+                                            font.family: Theme.fontFamily
+                                        }
+                                        MouseArea {
+                                            id: runHover
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: { /* UI only until Service schedule run */ }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -310,14 +497,13 @@ Item {
         }
     }
 
-    // ── Right slide-in wizard (90% width) — same pattern as old BackupPage ──
+    // ==================== WIZARD (old Add Schedule Wizard step 1) ====================
     Item {
         id: wizardDrawer
         anchors.fill: parent
         z: 2000
 
         Rectangle {
-            id: wizardScrim
             anchors.fill: parent
             color: Theme.colorScrim
             opacity: root.wizardOpen ? 1 : 0
@@ -333,22 +519,13 @@ Item {
             id: wizardPanel
             width: Math.max(420, parent.width * 9 / 10)
             height: parent.height
-            y: 0
             property real slideProgress: root.wizardOpen ? 0 : 1
             x: parent.width - width + slideProgress * width
-            Behavior on slideProgress {
-                NumberAnimation { duration: 280; easing.type: Easing.OutCubic }
-            }
             color: Theme.colorBg
             border.width: 1
             border.color: Theme.colorBorder
-
-            Rectangle {
-                anchors.left: parent.left
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
-                width: 1
-                color: Theme.colorBorder
+            Behavior on slideProgress {
+                NumberAnimation { duration: 280; easing.type: Easing.OutCubic }
             }
 
             ColumnLayout {
@@ -356,12 +533,11 @@ Item {
                 anchors.margins: 16
                 spacing: 12
 
-                // Wizard header
+                // Header — "Add Schedule Wizard"
                 RowLayout {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 28
                     spacing: 8
-
                     Rectangle {
                         width: 3
                         height: 18
@@ -369,13 +545,12 @@ Item {
                         Layout.alignment: Qt.AlignVCenter
                     }
                     Text {
-                        //% "Start backup"
+                        //% "Add Schedule Wizard"
                         text: qsTrId("aegra.backup.wizard.title")
                         color: Theme.colorTextWhite
                         font.pixelSize: 16
                         font.bold: true
                         font.family: Theme.fontFamily
-                        Layout.alignment: Qt.AlignVCenter
                         Layout.fillWidth: true
                         elide: Text.ElideRight
                     }
@@ -398,573 +573,498 @@ Item {
                     }
                 }
 
-                // Source + destination row
-                RowLayout {
+                StackLayout {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    spacing: 20
+                    currentIndex: root.wizardStep === 1 ? 0 : 1
 
-                    // SOURCE
-                    Card {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        //% "SOURCE"
-                        title: qsTrId("aegra.backup.section.source_upper")
+                    // -------- Step 1: SOURCE | DESTINATION --------
+                    ColumnLayout {
+                        spacing: 12
 
-                        ColumnLayout {
-                            anchors.fill: parent
-                            anchors.topMargin: 44
-                            anchors.margins: 12
-                            spacing: 8
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            spacing: 20
 
-                            Text {
-                                visible: serviceClient.inventoryErrorText.length > 0
-                                text: serviceClient.inventoryErrorText
-                                color: Theme.colorAccentRed
-                                font.pixelSize: 12
-                                font.family: Theme.fontFamily
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
-                            }
-
-                            BusyIndicator {
-                                running: serviceClient.inventoryLoading
-                                visible: running
-                                Layout.preferredWidth: 22
-                                Layout.preferredHeight: 22
-                                Layout.alignment: Qt.AlignHCenter
-                            }
-
-                            Text {
-                                visible: serviceClient.inventoryAvailable
-                                         && !serviceClient.inventoryLoading
-                                         && serviceClient.sources.count === 0
-                                         && serviceClient.inventoryErrorText.length === 0
-                                //% "No backup sources reported by Service"
-                                text: qsTrId("aegra.backup.source.empty")
-                                color: Theme.colorTextGrey
-                                font.pixelSize: 12
-                                font.family: Theme.fontFamily
-                                Layout.alignment: Qt.AlignHCenter
-                            }
-
-                            ListView {
-                                id: sourceList
+                            // -------- SOURCE --------
+                            Card {
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
-                                clip: true
-                                spacing: 6
-                                model: serviceClient.sources
-                                boundsBehavior: Flickable.StopAtBounds
-                                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                                //% "SOURCE"
+                                title: qsTrId("aegra.backup.section.source_upper")
 
-                                delegate: Rectangle {
-                                    id: sourceRow
-                                    required property string sourceId
-                                    required property string displayName
-                                    required property string capacityText
-                                    required property string availabilityText
-                                    required property bool isSelectable
-                                    required property string disabledReasonText
-                                    required property bool isSystem
-                                    required property bool isReadOnly
+                                ScrollView {
+                                    id: sourceScroll
+                                    anchors.fill: parent
+                                    anchors.topMargin: 50
+                                    anchors.margins: 16
+                                    clip: true
+                                    contentWidth: availableWidth
 
-                                    width: sourceList.width
-                                    height: 45
-                                    radius: 4
-                                    color: sourceHover.containsMouse && isSelectable
-                                           ? Theme.colorHover : Theme.colorListItem
-                                    opacity: isSelectable ? 1.0 : 0.55
-                                    Accessible.name: displayName + " " + capacityText
-
-                                    readonly property bool selected:
-                                        root.selectedSourceId === sourceId
-
-                                    RowLayout {
-                                        anchors.fill: parent
-                                        anchors.leftMargin: 10
-                                        anchors.rightMargin: 10
+                                    Column {
+                                        id: disksColumn
+                                        width: sourceScroll.availableWidth
                                         spacing: 10
 
-                                        // Checkbox
-                                        Rectangle {
-                                            width: 18
-                                            height: 18
-                                            visible: isSelectable
-                                            radius: 3
-                                            color: sourceRow.selected
-                                                   ? Theme.colorAccentBlue : "transparent"
-                                            border.width: 2
-                                            border.color: sourceRow.selected
-                                                          ? Theme.colorAccentBlue
-                                                          : Theme.colorTextGrey
-                                            Text {
-                                                anchors.centerIn: parent
-                                                text: sourceRow.selected ? "\u2713" : ""
-                                                color: "white"
-                                                font.pixelSize: 12
-                                                font.bold: true
-                                            }
-                                        }
-                                        Item {
-                                            width: 18
-                                            height: 18
-                                            visible: !isSelectable
+                                        // Live Service sources when available
+                                        Repeater {
+                                            model: serviceClient.sources
+                                            visible: serviceClient.sources.count > 0
+                                            delegate: sourceDiskDelegate
                                         }
 
-                                        DiskIcon {
-                                            size: 28
-                                            iconOpacity: isSelectable ? 1.0 : 0.55
-                                            variant: isSystem ? "system" : "hdd"
+                                        // Demo disks when Service empty
+                                        Repeater {
+                                            model: serviceClient.sources.count > 0
+                                                   ? [] : root.demoDisks
+                                            delegate: Rectangle {
+                                                required property int index
+                                                required property var modelData
+                                                width: disksColumn.width
+                                                height: 45
+                                                radius: 4
+                                                color: diskHover.containsMouse
+                                                       ? Theme.colorHover : Theme.colorListItem
+
+                                                readonly property bool selected:
+                                                    root.selectedDiskIndex === index
+
+                                                RowLayout {
+                                                    anchors.fill: parent
+                                                    anchors.leftMargin: 10
+                                                    anchors.rightMargin: 10
+                                                    spacing: 10
+
+                                                    Rectangle {
+                                                        width: 18
+                                                        height: 18
+                                                        radius: 3
+                                                        color: selected ? Theme.colorAccentBlue
+                                                                        : "transparent"
+                                                        border.width: 2
+                                                        border.color: selected
+                                                                      ? Theme.colorAccentBlue
+                                                                      : Theme.colorTextGrey
+                                                        Text {
+                                                            anchors.centerIn: parent
+                                                            text: selected ? "\u2713" : ""
+                                                            color: "white"
+                                                            font.pixelSize: 12
+                                                            font.bold: true
+                                                        }
+                                                    }
+
+                                                    Text {
+                                                        text: "\u25B6"
+                                                        color: Theme.colorTextGrey
+                                                        font.pixelSize: 10
+                                                        Layout.preferredWidth: 15
+                                                        rotation: root.isDiskExpanded(index)
+                                                                  ? 90 : 0
+                                                        Behavior on rotation {
+                                                            NumberAnimation { duration: 150 }
+                                                        }
+                                                        MouseArea {
+                                                            anchors.fill: parent
+                                                            cursorShape: Qt.PointingHandCursor
+                                                            onClicked: root.toggleDiskExpanded(index)
+                                                        }
+                                                    }
+
+                                                    DiskIcon {
+                                                        size: 28
+                                                        variant: modelData.isSystem
+                                                                 ? "system" : "hdd"
+                                                    }
+
+                                                    ColumnLayout {
+                                                        Layout.fillWidth: true
+                                                        spacing: 2
+                                                        Text {
+                                                            text: modelData.name
+                                                                  + " (" + modelData.size + ")"
+                                                            color: Theme.colorTextWhite
+                                                            font.pixelSize: 13
+                                                            font.bold: true
+                                                            font.family: Theme.fontFamily
+                                                        }
+                                                        Text {
+                                                            text: modelData.type
+                                                            color: Theme.colorTextGrey
+                                                            font.pixelSize: 11
+                                                            font.family: Theme.fontFamily
+                                                        }
+                                                    }
+                                                    Item { Layout.fillWidth: true }
+                                                }
+
+                                                MouseArea {
+                                                    id: diskHover
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    z: -1
+                                                    onClicked: root.selectedDiskIndex = index
+                                                }
+                                            }
                                         }
 
-                                        ColumnLayout {
-                                            Layout.fillWidth: true
-                                            spacing: 2
-                                            Text {
-                                                text: displayName + (capacityText.length > 0
-                                                      ? (" (" + capacityText + ")") : "")
-                                                color: Theme.colorTextWhite
-                                                font.pixelSize: 13
-                                                font.bold: true
-                                                font.family: Theme.fontFamily
-                                                elide: Text.ElideRight
-                                                Layout.fillWidth: true
-                                            }
-                                            Text {
-                                                text: isSelectable ? availabilityText
-                                                                   : disabledReasonText
-                                                color: isSelectable ? Theme.colorTextGrey
-                                                                    : Theme.colorAccentRed
-                                                font.pixelSize: 11
-                                                font.family: Theme.fontFamily
-                                                elide: Text.ElideRight
-                                                Layout.fillWidth: true
-                                            }
-                                        }
-                                    }
+                                        // Expanded volumes for demo disk
+                                        Repeater {
+                                            model: serviceClient.sources.count > 0
+                                                   ? [] : root.demoDisks
+                                            delegate: Column {
+                                                required property int index
+                                                required property var modelData
+                                                width: disksColumn.width
+                                                visible: root.isDiskExpanded(index)
+                                                spacing: 2
 
-                                    MouseArea {
-                                        id: sourceHover
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        enabled: isSelectable
-                                        cursorShape: isSelectable ? Qt.PointingHandCursor
-                                                                  : Qt.ArrowCursor
-                                        onClicked: {
-                                            root.selectedSourceId = sourceId
-                                            root.confirmChecked = false
+                                                Repeater {
+                                                    model: modelData.volumes
+                                                    delegate: Rectangle {
+                                                        required property var modelData
+                                                        width: parent.width
+                                                        height: 55
+                                                        color: Theme.colorListItemAlt
+                                                        radius: 4
+                                                        RowLayout {
+                                                            anchors.fill: parent
+                                                            anchors.leftMargin: 40
+                                                            anchors.rightMargin: 10
+                                                            spacing: 10
+                                                            Rectangle {
+                                                                width: 16
+                                                                height: 16
+                                                                radius: 2
+                                                                color: "transparent"
+                                                                border.width: 1
+                                                                border.color: Theme.colorTextGrey
+                                                            }
+                                                            ColumnLayout {
+                                                                Layout.fillWidth: true
+                                                                spacing: 2
+                                                                RowLayout {
+                                                                    spacing: 8
+                                                                    Text {
+                                                                        text: modelData.name
+                                                                        color: Theme.colorTextWhite
+                                                                        font.pixelSize: 12
+                                                                        font.bold: true
+                                                                        font.family: Theme.fontFamily
+                                                                    }
+                                                                    Text {
+                                                                        text: modelData.letter
+                                                                        color: Theme.colorAccentBlue
+                                                                        font.pixelSize: 12
+                                                                        font.family: Theme.fontFamily
+                                                                        visible: modelData.letter
+                                                                                 .length > 0
+                                                                    }
+                                                                }
+                                                                Text {
+                                                                    text: modelData.size
+                                                                    color: Theme.colorTextGrey
+                                                                    font.pixelSize: 11
+                                                                    font.family: Theme.fontFamily
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
-                    }
 
-                    // DESTINATION
-                    Card {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        //% "DESTINATION"
-                        title: qsTrId("aegra.backup.section.destination_upper")
-
-                        ColumnLayout {
-                            anchors.fill: parent
-                            anchors.topMargin: 44
-                            anchors.margins: 12
-                            spacing: 8
-
-                            Text {
-                                //% "Repository"
-                                text: qsTrId("aegra.nav.repository")
-                                color: Theme.colorTextGrey
-                                font.pixelSize: 11
-                                font.family: Theme.fontFamily
-                            }
-
-                            Rectangle {
+                            // -------- DESTINATION --------
+                            Card {
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
-                                color: Theme.colorBg
-                                radius: 4
-                                border.width: 1
-                                border.color: Theme.colorBorder
+                                //% "DESTINATION"
+                                title: qsTrId("aegra.backup.section.destination_upper")
 
                                 ColumnLayout {
                                     anchors.fill: parent
-                                    anchors.margins: 4
-                                    spacing: 2
+                                    anchors.topMargin: 50
+                                    anchors.margins: 16
+                                    spacing: 10
 
                                     Text {
-                                        visible: serviceClient.connectionsErrorText.length > 0
-                                        text: serviceClient.connectionsErrorText
-                                        color: Theme.colorAccentRed
-                                        font.pixelSize: 12
-                                        font.family: Theme.fontFamily
-                                        wrapMode: Text.WordWrap
-                                        Layout.fillWidth: true
-                                        Layout.margins: 8
-                                    }
-
-                                    BusyIndicator {
-                                        running: serviceClient.connectionsLoading
-                                        visible: running
-                                        Layout.preferredWidth: 22
-                                        Layout.preferredHeight: 22
-                                        Layout.alignment: Qt.AlignHCenter
-                                    }
-
-                                    Text {
-                                        visible: serviceClient.connectionsAvailable
-                                                 && !serviceClient.connectionsLoading
-                                                 && serviceClient.connections.count === 0
-                                        //% "No repository connection configured"
-                                        text: qsTrId("aegra.backup.target.empty")
+                                        //% "Locations"
+                                        text: qsTrId("aegra.backup.locations")
                                         color: Theme.colorTextGrey
-                                        font.pixelSize: 12
+                                        font.pixelSize: 11
                                         font.family: Theme.fontFamily
-                                        Layout.alignment: Qt.AlignHCenter
-                                        Layout.topMargin: 40
                                     }
 
-                                    ListView {
-                                        id: connectionList
+                                    Rectangle {
                                         Layout.fillWidth: true
                                         Layout.fillHeight: true
-                                        clip: true
-                                        spacing: 2
-                                        model: serviceClient.connections
+                                        color: Theme.colorBg
+                                        radius: 4
+                                        border.width: 1
+                                        border.color: Theme.colorBorder
 
-                                        delegate: Rectangle {
-                                            id: connRow
-                                            required property string connectionId
-                                            required property string displayName
-                                            required property string stateText
-                                            required property bool isAvailable
-                                            required property bool isDefault
+                                        ListView {
+                                            id: locList
+                                            anchors.fill: parent
+                                            anchors.margins: 4
+                                            clip: true
+                                            spacing: 2
+                                            model: serviceClient.connections.count > 0
+                                                   ? serviceClient.connections
+                                                   : root.demoLocations
 
-                                            width: connectionList.width
-                                            height: 46
-                                            radius: 4
-                                            color: locHover.containsMouse
-                                                   ? Theme.colorHover : "transparent"
-                                            opacity: isAvailable ? 1.0 : 0.55
+                                            delegate: Rectangle {
+                                                id: locRow
+                                                width: locList.width - 8
+                                                height: 46
+                                                anchors.horizontalCenter: parent
+                                                                          ? parent.horizontalCenter
+                                                                          : undefined
+                                                radius: 4
+                                                color: locHover.containsMouse
+                                                       ? Theme.colorHover : "transparent"
 
-                                            readonly property bool selected:
-                                                root.selectedConnectionId === connectionId
+                                                readonly property string locName:
+                                                    (typeof displayName !== "undefined"
+                                                     && displayName)
+                                                    ? displayName
+                                                    : (modelData && modelData.name
+                                                       ? modelData.name : "")
+                                                readonly property string locPath:
+                                                    (typeof connectionId !== "undefined"
+                                                     && connectionId)
+                                                    ? connectionId
+                                                    : (modelData && modelData.path
+                                                       ? modelData.path : "")
+                                                readonly property bool locDefault:
+                                                    (typeof isDefault !== "undefined")
+                                                    ? isDefault
+                                                    : (modelData && modelData.isDefault)
+                                                readonly property bool selected:
+                                                    root.selectedLocationIndex === index
 
-                                            RowLayout {
-                                                anchors.fill: parent
-                                                anchors.margins: 8
-                                                spacing: 8
+                                                required property int index
+                                                property var modelData
+                                                property string displayName
+                                                property string connectionId
+                                                property bool isDefault
+                                                property bool isAvailable
 
-                                                Rectangle {
-                                                    width: 18
-                                                    height: 18
-                                                    radius: 3
-                                                    color: connRow.selected
-                                                           ? Theme.colorAccentBlue : "transparent"
-                                                    border.width: 2
-                                                    border.color: connRow.selected
-                                                                  ? Theme.colorAccentBlue
-                                                                  : Theme.colorTextGrey
-                                                    Text {
-                                                        anchors.centerIn: parent
-                                                        text: connRow.selected ? "\u2713" : ""
-                                                        color: "white"
-                                                        font.pixelSize: 11
-                                                        font.bold: true
+                                                RowLayout {
+                                                    anchors.fill: parent
+                                                    anchors.margins: 8
+                                                    spacing: 8
+
+                                                    Rectangle {
+                                                        width: 18
+                                                        height: 18
+                                                        radius: 3
+                                                        color: locRow.selected
+                                                               ? Theme.colorAccentBlue
+                                                               : "transparent"
+                                                        border.width: 2
+                                                        border.color: locRow.selected
+                                                                      ? Theme.colorAccentBlue
+                                                                      : Theme.colorTextGrey
+                                                        Text {
+                                                            anchors.centerIn: parent
+                                                            text: locRow.selected ? "\u2713" : ""
+                                                            color: "white"
+                                                            font.pixelSize: 11
+                                                            font.bold: true
+                                                        }
                                                     }
-                                                }
 
-                                                Rectangle {
-                                                    width: 24
-                                                    height: 24
-                                                    radius: 4
-                                                    color: "#4a9eff"
-                                                    Text {
-                                                        anchors.centerIn: parent
-                                                        text: "\uD83D\uDCBB"
-                                                        font.pixelSize: 12
+                                                    Rectangle {
+                                                        width: 24
+                                                        height: 24
+                                                        radius: 4
+                                                        color: "#4a9eff"
+                                                        Text {
+                                                            anchors.centerIn: parent
+                                                            text: "\uD83D\uDCBB"
+                                                            font.pixelSize: 12
+                                                        }
                                                     }
-                                                }
 
-                                                ColumnLayout {
-                                                    Layout.fillWidth: true
-                                                    spacing: 1
-                                                    Text {
-                                                        text: displayName
-                                                        color: Theme.colorTextWhite
-                                                        font.pixelSize: 12
-                                                        font.bold: true
-                                                        font.family: Theme.fontFamily
-                                                        elide: Text.ElideRight
+                                                    Column {
                                                         Layout.fillWidth: true
+                                                        spacing: 1
+                                                        Text {
+                                                            text: locRow.locName
+                                                            color: Theme.colorTextWhite
+                                                            font.pixelSize: 12
+                                                            font.bold: true
+                                                            font.family: Theme.fontFamily
+                                                            elide: Text.ElideRight
+                                                            width: parent.width
+                                                        }
+                                                        Text {
+                                                            text: locRow.locPath
+                                                            color: Theme.colorTextGrey
+                                                            font.pixelSize: 11
+                                                            font.family: Theme.fontFamily
+                                                            elide: Text.ElideMiddle
+                                                            width: parent.width
+                                                        }
+                                                    }
+
+                                                    Text {
+                                                        text: locRow.locDefault
+                                                              ? "\u2605" : "\u2606"
+                                                        color: locRow.locDefault
+                                                               ? Theme.colorAccentBlue
+                                                               : Theme.colorTextDim
+                                                        font.pixelSize: 14
+                                                        opacity: 0.85
                                                     }
                                                     Text {
-                                                        text: (isDefault
-                                                               ? qsTrId("aegra.backup.connection.default")
-                                                                 + " · " : "") + stateText
-                                                        color: isAvailable ? Theme.colorTextGrey
-                                                                           : Theme.colorAccentRed
-                                                        font.pixelSize: 11
-                                                        font.family: Theme.fontFamily
-                                                        elide: Text.ElideRight
-                                                        Layout.fillWidth: true
+                                                        text: "\uD83D\uDDD1"
+                                                        color: Theme.colorTextDim
+                                                        font.pixelSize: 13
+                                                        opacity: 0.5
                                                     }
                                                 }
-                                            }
 
-                                            MouseArea {
-                                                id: locHover
-                                                anchors.fill: parent
-                                                hoverEnabled: true
-                                                enabled: isAvailable
-                                                cursorShape: isAvailable
-                                                             ? Qt.PointingHandCursor
-                                                             : Qt.ArrowCursor
-                                                onClicked: {
-                                                    root.selectedConnectionId = connectionId
-                                                    root.confirmChecked = false
+                                                MouseArea {
+                                                    id: locHover
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: root.selectedLocationIndex = index
+                                                    z: -1
                                                 }
                                             }
                                         }
                                     }
+
+                                    LinkButton {
+                                        //% "Add location"
+                                        text: qsTrId("aegra.backup.add_location")
+                                        onClicked: { /* UI only for now */ }
+                                    }
                                 }
                             }
+                        }
 
-                            RowLayout {
-                                spacing: 8
-                                AppButton {
-                                    //% "Add"
-                                    text: qsTrId("aegra.common.add")
-                                    enabled: false
-                                }
-                                AppButton {
-                                    //% "Import"
-                                    text: qsTrId("aegra.common.import")
-                                    enabled: false
-                                }
+                        // Footer: Cancel + Next (wizard step 1)
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 15
+                            Item { Layout.fillWidth: true }
+
+                            AppButton {
+                                //% "Cancel"
+                                text: qsTrId("aegra.common.cancel")
+                                Layout.preferredWidth: 100
+                                Layout.preferredHeight: 40
+                                onClicked: root.closeWizard()
+                            }
+                            AppButton {
+                                //% "Next"
+                                text: qsTrId("aegra.common.next")
+                                Layout.preferredWidth: 140
+                                Layout.preferredHeight: 40
+                                enabled: root.canGoNext()
+                                primary: true
+                                onClicked: root.wizardStep = 2
                             }
                         }
                     }
-                }
 
-                // Options strip
-                Card {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: optionsInner.implicitHeight + 56
-                    //% "Backup options"
-                    title: qsTrId("aegra.backup.section.options")
-
-                    ColumnLayout {
-                        id: optionsInner
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.top: parent.top
-                        anchors.topMargin: 44
-                        anchors.leftMargin: 16
-                        anchors.rightMargin: 16
-                        spacing: 10
-
-                        Row {
-                            spacing: 8
-                            Rectangle {
-                                width: Math.max(90, fullLabel.implicitWidth + 28)
-                                height: 34
-                                radius: 4
-                                color: Theme.colorAccentBlue
-                                Text {
-                                    id: fullLabel
-                                    anchors.centerIn: parent
-                                    //% "Full"
-                                    text: qsTrId("aegra.backup.type.full")
-                                    color: Theme.colorTextWhite
-                                    font.pixelSize: 13
-                                    font.bold: true
-                                    font.family: Theme.fontFamily
-                                }
-                            }
-                            Rectangle {
-                                width: Math.max(90, incLabel.implicitWidth + 28)
-                                height: 34
-                                radius: 4
-                                color: Theme.colorButtonDisabled
-                                border.width: 1
-                                border.color: Theme.colorBorder
-                                opacity: 0.7
-                                Text {
-                                    id: incLabel
-                                    anchors.centerIn: parent
-                                    //% "Incremental"
-                                    text: qsTrId("aegra.backup.type.incremental")
-                                    color: Theme.colorButtonDisabledText
-                                    font.pixelSize: 13
-                                    font.family: Theme.fontFamily
-                                }
-                            }
-                            Rectangle {
-                                width: Math.max(90, diffLabel.implicitWidth + 28)
-                                height: 34
-                                radius: 4
-                                color: Theme.colorButtonDisabled
-                                border.width: 1
-                                border.color: Theme.colorBorder
-                                opacity: 0.7
-                                Text {
-                                    id: diffLabel
-                                    anchors.centerIn: parent
-                                    //% "Differential"
-                                    text: qsTrId("aegra.backup.type.differential")
-                                    color: Theme.colorButtonDisabledText
-                                    font.pixelSize: 13
-                                    font.family: Theme.fontFamily
-                                }
-                            }
-                        }
-
-                        Text {
-                            //% "Incremental backup is unavailable until Service returns eligible parents"
-                            text: qsTrId("aegra.backup.incremental.unavailable")
-                            color: Theme.colorTextDim
-                            font.pixelSize: 11
-                            font.family: Theme.fontFamily
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
-
-                        Text {
-                            //% "Repository credentials are managed by Service. Passwords are never entered in Desktop."
-                            text: qsTrId("aegra.backup.credential.service_managed")
-                            color: Theme.colorTextDim
-                            font.pixelSize: 11
-                            font.family: Theme.fontFamily
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
-
-                        CheckBox {
-                            id: confirmBox
-                            //% "I understand this will start a full backup of the selected source"
-                            text: qsTrId("aegra.backup.confirm.checkbox")
-                            checked: root.confirmChecked
-                            onCheckedChanged: root.confirmChecked = checked
-                            indicator: Rectangle {
-                                implicitWidth: 18
-                                implicitHeight: 18
-                                x: confirmBox.leftPadding
-                                y: parent.height / 2 - height / 2
-                                radius: 3
-                                color: confirmBox.checked ? Theme.colorAccentBlue
-                                                          : Theme.colorInput
-                                border.width: 1
-                                border.color: confirmBox.checked ? Theme.colorAccentBlue
-                                                                 : Theme.colorBorder
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: confirmBox.checked ? "\u2713" : ""
-                                    color: Theme.colorTextWhite
-                                    font.pixelSize: 12
-                                    font.bold: true
-                                }
-                            }
-                            contentItem: Text {
-                                text: confirmBox.text
-                                color: Theme.colorTextWhite
-                                font.family: Theme.fontFamily
-                                font.pixelSize: 12
-                                leftPadding: confirmBox.indicator.width + 8
-                                verticalAlignment: Text.AlignVCenter
-                                wrapMode: Text.WordWrap
-                            }
-                        }
-
-                        Text {
-                            visible: serviceClient.backupCommandErrorText.length > 0
-                            text: serviceClient.backupCommandErrorText
-                            color: Theme.colorAccentRed
-                            font.pixelSize: 12
-                            font.family: Theme.fontFamily
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
-
-                        // Active progress inside wizard
-                        ColumnLayout {
-                            visible: serviceClient.activeBackupJobId.length > 0
-                                     || serviceClient.backupCommandBusy
-                            Layout.fillWidth: true
-                            spacing: 6
-                            Text {
-                                text: serviceClient.activeBackupStateText
-                                color: Theme.colorTextWhite
-                                font.pixelSize: 13
-                                font.family: Theme.fontFamily
-                            }
-                            Text {
-                                visible: serviceClient.activeBackupJobId.length > 0
-                                //% "Job %1"
-                                text: qsTrId("aegra.backup.job_id")
-                                      .arg(serviceClient.activeBackupJobId)
-                                color: Theme.colorTextDim
-                                font.pixelSize: 11
-                                font.family: Theme.fontFamily
-                            }
-                            TaskProgressBar {
-                                Layout.fillWidth: true
-                                value: serviceClient.activeBackupProgressPercent
-                                active: !serviceClient.activeBackupTerminal
-                            }
-                        }
-                    }
-                }
-
-                // Footer actions — old GUI button chrome
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 12
-
-                    Item { Layout.fillWidth: true }
-
-                    AppButton {
-                        //% "Cancel"
-                        text: qsTrId("aegra.common.cancel")
-                        Layout.preferredWidth: 120
-                        Layout.preferredHeight: 40
-                        onClicked: root.closeWizard()
-                    }
-                    AppButton {
-                        //% "Cancel job"
-                        text: qsTrId("aegra.backup.action.cancel")
-                        danger: true
-                        Layout.preferredWidth: 120
-                        Layout.preferredHeight: 40
-                        visible: serviceClient.activeBackupCancellable
-                        enabled: !serviceClient.cancelCommandBusy
-                        onClicked: serviceClient.cancelActiveBackup()
-                    }
-                    AppButton {
-                        //% "Start backup"
-                        text: qsTrId("aegra.backup.action.start")
-                        primary: true
-                        Layout.preferredWidth: 140
-                        Layout.preferredHeight: 40
-                        enabled: root.fullBackupReady
-                        onClicked: serviceClient.startBackup(root.selectedSourceId,
-                                                             root.selectedConnectionId)
+                    // -------- Step 2: Schedule settings + Options --------
+                    BackupWizardStep2 {
+                        id: wizardStep2
+                        onBackRequested: root.wizardStep = 1
+                        onCreateRequested: root.createScheduleFromWizard()
                     }
                 }
             }
         }
     }
 
-    Connections {
-        target: serviceClient
-        function onConnectionsChanged() {
-            if (root.selectedConnectionId.length === 0) {
-                const id = serviceClient.defaultConnectionId()
-                if (id.length > 0)
-                    root.selectedConnectionId = id
+    // Shared delegate for live Service source model
+    Component {
+        id: sourceDiskDelegate
+        Rectangle {
+            required property int index
+            required property string displayName
+            required property string capacityText
+            required property bool isSystem
+            required property bool isSelectable
+            width: disksColumn.width
+            height: 45
+            radius: 4
+            color: hover.containsMouse ? Theme.colorHover : Theme.colorListItem
+            opacity: isSelectable ? 1.0 : 0.55
+            readonly property bool selected: root.selectedDiskIndex === index
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 10
+                anchors.rightMargin: 10
+                spacing: 10
+                Rectangle {
+                    width: 18
+                    height: 18
+                    radius: 3
+                    visible: isSelectable
+                    color: selected ? Theme.colorAccentBlue : "transparent"
+                    border.width: 2
+                    border.color: selected ? Theme.colorAccentBlue : Theme.colorTextGrey
+                    Text {
+                        anchors.centerIn: parent
+                        text: selected ? "\u2713" : ""
+                        color: "white"
+                        font.pixelSize: 12
+                        font.bold: true
+                    }
+                }
+                Text {
+                    text: "\u25B6"
+                    color: Theme.colorTextGrey
+                    font.pixelSize: 10
+                    Layout.preferredWidth: 15
+                }
+                DiskIcon {
+                    size: 28
+                    variant: isSystem ? "system" : "hdd"
+                    iconOpacity: isSelectable ? 1.0 : 0.55
+                }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 2
+                    Text {
+                        text: displayName
+                              + (capacityText.length > 0 ? (" (" + capacityText + ")") : "")
+                        color: Theme.colorTextWhite
+                        font.pixelSize: 13
+                        font.bold: true
+                        font.family: Theme.fontFamily
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                    Text {
+                        //% "Volume"
+                        text: qsTrId("aegra.backup.source.volume")
+                        color: Theme.colorTextGrey
+                        font.pixelSize: 11
+                        font.family: Theme.fontFamily
+                    }
+                }
+                Item { Layout.fillWidth: true }
+            }
+            MouseArea {
+                id: hover
+                anchors.fill: parent
+                hoverEnabled: true
+                enabled: isSelectable
+                cursorShape: isSelectable ? Qt.PointingHandCursor : Qt.ArrowCursor
+                onClicked: root.selectedDiskIndex = index
             }
         }
     }

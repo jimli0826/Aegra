@@ -11,6 +11,29 @@ Item {
     Accessible.name: qsTrId("aegra.nav.home")
     signal homeNavigate(int index)
 
+    // Demo disks match old Home when Service inventory is empty.
+    readonly property var demoDisks: [
+        {
+            name: "Disk 0",
+            freeLabel: "19.7 GB",
+            size: "20.0 GB",
+            media: "SSD",
+            isSystem: false,
+            percent: 0.015
+        },
+        {
+            name: "Disk 1",
+            freeLabel: "11.3 GB",
+            size: "30.0 GB",
+            media: "SSD",
+            isSystem: true,
+            percent: 0.62
+        }
+    ]
+
+    readonly property bool useDemoDisks: serviceClient.sources.count === 0
+                                        && !serviceClient.inventoryLoading
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 12
@@ -32,48 +55,30 @@ Item {
                 anchors.bottomMargin: 16
                 spacing: 30
 
-                // Left: service / system summary
+                // Left: system information (old layout)
                 ColumnLayout {
                     Layout.fillHeight: true
                     Layout.preferredWidth: 220
                     spacing: 8
 
                     Text {
-                        //% "System information"
+                        //% "System Information"
                         text: qsTrId("aegra.home.system_information")
                         color: Theme.colorTextGrey
                         font.pixelSize: 12
                         font.family: Theme.fontFamily
                     }
                     Text {
-                        //% "Service"
-                        text: qsTrId("aegra.home.card.service")
+                        //% "Windows"
+                        text: qsTrId("aegra.home.os_name")
                         color: Theme.colorTextWhite
                         font.pixelSize: 16
                         font.bold: true
                         font.family: Theme.fontFamily
                     }
                     Text {
-                        text: serviceClient.statusText
-                              + (serviceClient.serviceVersion.length > 0
-                                 ? (" · V" + serviceClient.serviceVersion) : "")
-                        color: Theme.colorTextGrey
-                        font.pixelSize: 12
-                        font.family: Theme.fontFamily
-                        wrapMode: Text.WordWrap
-                        Layout.preferredWidth: 220
-                    }
-                    Text {
-                        //% "Repository"
-                        text: qsTrId("aegra.home.card.repository")
-                        color: Theme.colorTextWhite
-                        font.pixelSize: 13
-                        font.bold: true
-                        font.family: Theme.fontFamily
-                        Layout.topMargin: 8
-                    }
-                    Text {
-                        text: serviceClient.repositoryStatusText
+                        //% "© Microsoft Corporation. All Rights Reserved."
+                        text: qsTrId("aegra.home.os_copyright")
                         color: Theme.colorTextGrey
                         font.pixelSize: 11
                         font.family: Theme.fontFamily
@@ -83,7 +88,7 @@ Item {
                     Item { Layout.fillHeight: true }
                 }
 
-                // Center: inventory sources as disk charts
+                // Center: inventory sources or demo disk charts
                 Item {
                     Layout.fillHeight: true
                     Layout.fillWidth: true
@@ -98,27 +103,6 @@ Item {
                         font.pixelSize: 13
                         font.family: Theme.fontFamily
                     }
-                    Text {
-                        anchors.centerIn: parent
-                        visible: !serviceClient.inventoryAvailable
-                                 && !serviceClient.inventoryLoading
-                        //% "Source inventory unavailable"
-                        text: qsTrId("aegra.home.disks_unavailable")
-                        color: Theme.colorTextGrey
-                        font.pixelSize: 13
-                        font.family: Theme.fontFamily
-                    }
-                    Text {
-                        anchors.centerIn: parent
-                        visible: serviceClient.inventoryAvailable
-                                 && !serviceClient.inventoryLoading
-                                 && serviceClient.sources.count === 0
-                        //% "No disks found"
-                        text: qsTrId("aegra.home.no_disks")
-                        color: Theme.colorTextGrey
-                        font.pixelSize: 13
-                        font.family: Theme.fontFamily
-                    }
 
                     Flickable {
                         anchors.fill: parent
@@ -126,7 +110,7 @@ Item {
                         contentHeight: height
                         clip: true
                         interactive: diskRow.implicitWidth > width
-                        visible: serviceClient.sources.count > 0
+                        visible: serviceClient.sources.count > 0 || root.useDemoDisks
                         boundsBehavior: Flickable.StopAtBounds
 
                         Row {
@@ -134,6 +118,7 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: 28
 
+                            // Live Service sources
                             Repeater {
                                 model: serviceClient.sources
                                 delegate: Item {
@@ -143,7 +128,6 @@ Item {
                                     required property bool isSelectable
                                     width: 110
                                     height: 120
-
                                     ColumnLayout {
                                         anchors.centerIn: parent
                                         spacing: 6
@@ -175,6 +159,52 @@ Item {
                                                 if (capacityText.length > 0)
                                                     parts.push(capacityText)
                                                 if (isSystem)
+                                                    parts.push(qsTrId("aegra.home.system_tag"))
+                                                return parts.join(" · ")
+                                            }
+                                            color: Theme.colorTextGrey
+                                            font.pixelSize: 10
+                                            font.family: Theme.fontFamily
+                                            elide: Text.ElideRight
+                                            horizontalAlignment: Text.AlignHCenter
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Demo disks (old Home look)
+                            Repeater {
+                                model: root.useDemoDisks ? root.demoDisks : []
+                                delegate: Item {
+                                    required property var modelData
+                                    width: 110
+                                    height: 120
+                                    ColumnLayout {
+                                        anchors.centerIn: parent
+                                        spacing: 6
+                                        DiskChart {
+                                            Layout.alignment: Qt.AlignHCenter
+                                            width: 72
+                                            height: 72
+                                            percent: modelData.percent
+                                            label: modelData.freeLabel
+                                            diskName: ""
+                                            animationEnabled: true
+                                        }
+                                        Text {
+                                            Layout.alignment: Qt.AlignHCenter
+                                            text: modelData.name
+                                            color: Theme.colorTextWhite
+                                            font.pixelSize: 12
+                                            font.bold: true
+                                            font.family: Theme.fontFamily
+                                        }
+                                        Text {
+                                            Layout.alignment: Qt.AlignHCenter
+                                            Layout.maximumWidth: 108
+                                            text: {
+                                                var parts = [modelData.size, modelData.media]
+                                                if (modelData.isSystem)
                                                     parts.push(qsTrId("aegra.home.system_tag"))
                                                 return parts.join(" · ")
                                             }
@@ -225,31 +255,28 @@ Item {
                 z: 2
 
                 Text {
-                    //% "Latest tasks from Service"
-                    text: qsTrId("aegra.home.tasks_latest_hint")
+                    //% "Showing latest 10 only"
+                    text: qsTrId("aegra.home.tasks_latest_10")
                     color: Theme.colorTextGrey
                     font.pixelSize: 11
                     font.family: Theme.fontFamily
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
-                    //% "Refresh"
-                    text: qsTrId("aegra.common.refresh")
-                    color: refreshMouse.containsMouse ? "#33b8ff" : Theme.colorAccentBlue
+                    //% "More"
+                    text: qsTrId("aegra.home.more")
+                    color: moreMouse.containsMouse ? "#33b8ff" : Theme.colorAccentBlue
                     font.pixelSize: 12
                     font.bold: true
                     font.family: Theme.fontFamily
                     anchors.verticalCenter: parent.verticalCenter
-                    opacity: serviceClient.jobListAvailable ? 1 : 0.45
                     MouseArea {
-                        id: refreshMouse
+                        id: moreMouse
                         anchors.fill: parent
                         anchors.margins: -4
                         hoverEnabled: true
-                        enabled: serviceClient.connected && serviceClient.jobListAvailable
-                                 && !serviceClient.jobsLoading
-                        cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                        onClicked: serviceClient.refreshJobs()
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.homeNavigate(5)
                     }
                 }
             }
@@ -285,8 +312,18 @@ Item {
                         Text {
                             Layout.preferredWidth: 140
                             Layout.fillWidth: true
-                            //% "Job"
-                            text: qsTrId("aegra.home.column.job")
+                            //% "Source"
+                            text: qsTrId("aegra.backup.section.source")
+                            color: Theme.colorTextGrey
+                            font.pixelSize: 12
+                            font.bold: true
+                            font.family: Theme.fontFamily
+                        }
+                        Text {
+                            Layout.preferredWidth: 180
+                            Layout.fillWidth: true
+                            //% "Destination"
+                            text: qsTrId("aegra.backup.column.destination")
                             color: Theme.colorTextGrey
                             font.pixelSize: 12
                             font.bold: true
@@ -330,19 +367,10 @@ Item {
                     Text {
                         anchors.centerIn: parent
                         visible: !serviceClient.jobListAvailable
-                        //% "Service does not expose job.list yet"
-                        text: qsTrId("aegra.home.jobs_capability_missing")
-                        color: Theme.colorTextGrey
-                        font.pixelSize: 13
-                        font.family: Theme.fontFamily
-                    }
-                    Text {
-                        anchors.centerIn: parent
-                        visible: serviceClient.jobListAvailable
-                                 && serviceClient.jobs.count === 0
-                                 && !serviceClient.jobsLoading
-                        //% "No tasks yet"
-                        text: qsTrId("aegra.home.jobs_empty")
+                                 || (serviceClient.jobs.count === 0
+                                     && !serviceClient.jobsLoading)
+                        //% "No backup or restore tasks"
+                        text: qsTrId("aegra.home.no_backup_restore_tasks")
                         color: Theme.colorTextGrey
                         font.pixelSize: 13
                         font.family: Theme.fontFamily
@@ -400,26 +428,25 @@ Item {
                                         color: Theme.colorAccentBlue
                                     }
                                 }
-                                Column {
+                                // Source
+                                Text {
                                     Layout.preferredWidth: 140
                                     Layout.fillWidth: true
-                                    spacing: 0
-                                    Text {
-                                        width: parent.width
-                                        text: operationText
-                                        color: Theme.colorTextWhite
-                                        font.pixelSize: 12
-                                        font.family: Theme.fontFamily
-                                        elide: Text.ElideRight
-                                    }
-                                    Text {
-                                        width: parent.width
-                                        text: jobId
-                                        color: Theme.colorTextDim
-                                        font.pixelSize: 10
-                                        font.family: Theme.fontFamily
-                                        elide: Text.ElideMiddle
-                                    }
+                                    text: operationText
+                                    color: Theme.colorTextWhite
+                                    font.pixelSize: 12
+                                    font.family: Theme.fontFamily
+                                    elide: Text.ElideMiddle
+                                }
+                                // Destination
+                                Text {
+                                    Layout.preferredWidth: 180
+                                    Layout.fillWidth: true
+                                    text: messageText.length > 0 ? messageText : jobId
+                                    color: Theme.colorTextWhite
+                                    font.pixelSize: 12
+                                    font.family: Theme.fontFamily
+                                    elide: Text.ElideMiddle
                                 }
                                 Item {
                                     Layout.preferredWidth: 140
@@ -456,28 +483,7 @@ Item {
                                     font.family: Theme.fontFamily
                                     elide: Text.ElideRight
                                 }
-                                Item {
-                                    Layout.preferredWidth: 72
-                                    Layout.fillHeight: true
-                                    Text {
-                                        anchors.centerIn: parent
-                                        //% "Backup"
-                                        text: qsTrId("aegra.nav.backup")
-                                        color: goMouse.containsMouse ? "#33b8ff"
-                                                                     : Theme.colorAccentBlue
-                                        font.pixelSize: 11
-                                        font.bold: true
-                                        font.family: Theme.fontFamily
-                                        MouseArea {
-                                            id: goMouse
-                                            anchors.fill: parent
-                                            anchors.margins: -4
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.homeNavigate(1)
-                                        }
-                                    }
-                                }
+                                Item { Layout.preferredWidth: 72 }
                             }
                         }
                     }

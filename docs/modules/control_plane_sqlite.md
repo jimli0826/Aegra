@@ -1,4 +1,4 @@
-# 个人版 SQLite 控制面 Adapter（S2）
+# 个人版 SQLite 控制面 Adapter（S2 / S6）
 
 ## 目标与非目标
 
@@ -42,6 +42,7 @@ src/adapters/sqlite/
 - `IScheduleStore`：upsert/get/list/remove。
 - `IAuditEventStore`：append/list。
 - `ICommandStore`：按 idempotency key 读取/插入不可变 command record。
+- `IRestorePreflightStore`：插入/读取短期 Restore 安全快照；token 不可覆盖。
 - `IControlPlaneUnitOfWork`：同一事务内访问上述 store；显式 `commit`，析构回滚。
 - `IControlPlaneDatabase`：schema version、begin unit of work、只读查询快照。
 
@@ -51,14 +52,19 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
 
 ## Schema 与不变量
 
-- `schema_meta.version` 当前为 `1`（`ports::kControlPlaneSchemaVersion`）。
+- `schema_meta.version` 当前为 `2`（`ports::kControlPlaneSchemaVersion`）。产品未发布，schema V2 直接定义当前
+  表结构，不提供 V1 迁移或兼容读取。
 - 打开时在 `BEGIN IMMEDIATE` 事务中 `CREATE IF NOT EXISTS` 并写入版本；未知更高版本返回
   `kUnsupportedVersion`。
 - 外键：`jobs.repository_connection_id` → `ON DELETE SET NULL`；
   `schedules.repository_connection_id` → `ON DELETE CASCADE`。
 - 唯一：Repository `locator`、Job `idempotency_key`（非空）、Command `idempotency_key`、至多一个
-  `is_default=1`。
+  `is_default=1`、Restore preflight token，以及非空 `jobs.preflight_token`。
 - Command record 保存请求指纹、command ID 与可选 resource ID；同键同请求可重放，同键不同请求冲突。
+- `restore_preflights` 只保存 connection/recovery point/target ID、Repository UUID、链指纹、容量/链深和
+  创建/过期 UTC；不保存 Secret、SecretRef、Archive path、Volume GUID、Manifest 或 Chunk Index。
+- 一个非空 preflight token 最多关联一个 Job；数据库提供按 token 查询 Job，供 Start 在 Worker launch 前
+  持久化并确认唯一 queued intent。
 - 时间全部为非负 UTC 毫秒整数；超出有符号 64 位线范围拒绝。
 - 只存 `SecretRef` 字符串；不存明文凭据、Chunk Index、Manifest 或 Archive metadata。
 
@@ -87,6 +93,8 @@ request kind 或不同 filter 复用 token 返回 `kInvalidArgument`。
 - 损坏数据库与缺失 open-existing；
 - 单写者 + 并发只读。
 - command store 持久化、唯一键、同请求 replay 与请求指纹冲突。
+- Restore preflight 插入/读取、非法记录、token 冲突、事务回滚、重启读取、取消、UoW 失效，以及 Job token
+  唯一占用和反查。
 
 ## Definition of Done
 

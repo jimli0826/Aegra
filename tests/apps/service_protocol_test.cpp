@@ -281,7 +281,7 @@ bool test_planned_request_payload_codecs() {
         contracts::MountSessionListRequest{page, contracts::MountSessionState::kMounted}, false);
     passed &= request_roundtrips(
         contracts::ServiceRequestKind::kPrepareRestore,
-        contracts::RestorePreflightRequest{"recovery:1", "source:target-1"}, false);
+        contracts::RestorePreflightRequest{"repository:1", "recovery:1", "source:target-1"}, false);
     const contracts::RecoveryPointRef recovery_ref{"repository:1", "recovery:1"};
     passed &= request_roundtrips(contracts::ServiceRequestKind::kResolveRecoveryPointChain,
                                  recovery_ref, false);
@@ -312,7 +312,7 @@ bool test_planned_request_payload_codecs() {
     passed &= request_roundtrips(contracts::ServiceRequestKind::kExecuteDeletePlan,
                                  contracts::ExecuteDeletePlanCommand{"plan-token-1", true}, true);
     passed &= request_roundtrips(contracts::ServiceRequestKind::kStartRestore,
-                                 contracts::StartRestoreCommand{"preflight-token"}, true);
+                                 contracts::StartRestoreCommand{"preflight-token", true}, true);
     passed &= request_roundtrips(
         contracts::ServiceRequestKind::kMountRecoveryPoint,
         contracts::MountRecoveryPointCommand{"recovery:1", std::string("M")}, true);
@@ -386,10 +386,11 @@ bool test_planned_response_payload_codecs() {
                                      .root_recovery_point_id = "recovery:1",
                                      .targets = {{"recovery:1", 1, 1}},
                                      .expires_utc_ms = 1});
-    passed &= query_response_roundtrips(contracts::ServiceRequestKind::kPrepareRestore,
-                                        contracts::RestorePreflight{"preflight-token", "recovery:1",
-                                                                    "source:target-1", 100, 1,
-                                                                    1'800'000'000'000ULL});
+    passed &= query_response_roundtrips(
+        contracts::ServiceRequestKind::kPrepareRestore,
+        contracts::RestorePreflight{"preflight-token", "repository:1", "recovery:1",
+                                    "source:target-1", 100, 200, 1, 1'800'000'000'000ULL, true,
+                                    "restore.preflight_ready"});
     return expect(passed, "all planned query response payload variants roundtrip");
 }
 

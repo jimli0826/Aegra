@@ -107,6 +107,18 @@
         <source>Cancel</source>
         <translation>キャンセル</translation>
     </message>
+    <message id="aegra.common.back">
+        <source>Back</source>
+        <translation>戻る</translation>
+    </message>
+    <message id="aegra.common.create">
+        <source>Create</source>
+        <translation>作成</translation>
+    </message>
+    <message id="aegra.common.not_available">
+        <source>N/A</source>
+        <translation>N/A</translation>
+    </message>
     <message id="aegra.error.unknown">
         <source>Unexpected service response (%1)</source>
         <translation>予期しない Service 応答（%1）</translation>
@@ -120,8 +132,8 @@
         <translation>Service 接続が切断されました</translation>
     </message>
     <message id="aegra.error.service.connect_failed">
-        <source>Unable to connect to Service</source>
-        <translation>Service に接続できません</translation>
+        <source>Connection refused</source>
+        <translation>接続が拒否されました</translation>
     </message>
     <message id="aegra.error.service.protocol_invalid">
         <source>Invalid Service response</source>
@@ -146,6 +158,42 @@
     <message id="aegra.repository.recovery_points_count">
         <source>%1 recovery points</source>
         <translation>回復ポイント %1 件</translation>
+    </message>
+    <message id="aegra.repository.checkpoint_one">
+        <source>1 checkpoint</source>
+        <translation>チェックポイント 1 件</translation>
+    </message>
+    <message id="aegra.repository.add">
+        <source>Add repository</source>
+        <translation>リポジトリを追加</translation>
+    </message>
+    <message id="aegra.repository.import">
+        <source>Import...</source>
+        <translation>インポート...</translation>
+    </message>
+    <message id="aegra.repository.loaded_count">
+        <source>Loaded %1 repositories</source>
+        <translation>リポジトリ %1 件を読み込みました</translation>
+    </message>
+    <message id="aegra.repository.connected">
+        <source>connected</source>
+        <translation>接続済み</translation>
+    </message>
+    <message id="aegra.repository.offline">
+        <source>offline</source>
+        <translation>オフライン</translation>
+    </message>
+    <message id="aegra.repository.test">
+        <source>Test</source>
+        <translation>テスト</translation>
+    </message>
+    <message id="aegra.repository.export">
+        <source>Export...</source>
+        <translation>エクスポート...</translation>
+    </message>
+    <message id="aegra.repository.password">
+        <source>Password...</source>
+        <translation>パスワード...</translation>
     </message>
     <message id="aegra.repository.kind_local_catalog">
         <source>local · catalog</source>
@@ -259,6 +307,10 @@
         <source>Retry</source>
         <translation>再試行</translation>
     </message>
+    <message id="aegra.common.quit">
+        <source>Quit</source>
+        <translation>終了</translation>
+    </message>
     <message id="aegra.common.dismiss">
         <source>Dismiss</source>
         <translation>閉じる</translation>
@@ -272,12 +324,18 @@
         <translation>タスク %1</translation>
     </message>
     <message id="aegra.splash.status.connecting">
-        <source>Connecting to Service</source>
-        <translation>Service に接続中</translation>
+        <source>Loading data...</source>
+        <translation>データを読み込み中...</translation>
     </message>
     <message id="aegra.splash.status.failed">
-        <source>Unable to connect to Service</source>
-        <translation>Service に接続できません</translation>
+        <source>Unable to connect to the backup server</source>
+        <translation>バックアップサーバーに接続できません</translation>
+    </message>
+    <message id="aegra.splash.error.detail">
+        <source>Please ensure Aegra Service is running and try again.
+Server: %1</source>
+        <translation>Aegra Service が起動していることを確認して、再試行してください。
+サーバー: %1</translation>
     </message>
     <message id="aegra.home.refresh_tasks">
         <source>Refresh tasks</source>
@@ -304,8 +362,28 @@
         <translation>この PC</translation>
     </message>
     <message id="aegra.home.system_information">
-        <source>System information</source>
+        <source>System Information</source>
         <translation>システム情報</translation>
+    </message>
+    <message id="aegra.home.os_name">
+        <source>Windows 10</source>
+        <translation>Windows 10</translation>
+    </message>
+    <message id="aegra.home.os_copyright">
+        <source>© Microsoft Corporation. All Rights Reserved.</source>
+        <translation>© Microsoft Corporation. All Rights Reserved.</translation>
+    </message>
+    <message id="aegra.home.tasks_latest_10">
+        <source>Showing latest 10 only</source>
+        <translation>最新 10 件のみ表示</translation>
+    </message>
+    <message id="aegra.home.more">
+        <source>More</source>
+        <translation>詳細</translation>
+    </message>
+    <message id="aegra.home.no_backup_restore_tasks">
+        <source>No backup or restore tasks</source>
+        <translation>バックアップまたは復元タスクはありません</translation>
     </message>
     <message id="aegra.home.loading_disks">
         <source>Loading sources…</source>
@@ -464,20 +542,156 @@
         <translation>ターゲットリポジトリ</translation>
     </message>
     <message id="aegra.backup.wizard.title">
-        <source>Start backup</source>
-        <translation>バックアップ開始</translation>
+        <source>Add Schedule Wizard</source>
+        <translation>スケジュール追加ウィザード</translation>
+    </message>
+    <message id="aegra.backup.column.destination">
+        <source>Destination</source>
+        <translation>保存先</translation>
+    </message>
+    <message id="aegra.backup.column.frequency">
+        <source>Frequency</source>
+        <translation>頻度</translation>
+    </message>
+    <message id="aegra.backup.column.last_run">
+        <source>Last run</source>
+        <translation>前回実行</translation>
+    </message>
+    <message id="aegra.backup.column.next_run">
+        <source>Next run</source>
+        <translation>次回実行</translation>
+    </message>
+    <message id="aegra.backup.locations">
+        <source>Locations</source>
+        <translation>場所</translation>
+    </message>
+    <message id="aegra.backup.add_location">
+        <source>Add location</source>
+        <translation>場所を追加</translation>
+    </message>
+    <message id="aegra.backup.source.volume">
+        <source>Volume</source>
+        <translation>ボリューム</translation>
+    </message>
+    <message id="aegra.common.next">
+        <source>Next</source>
+        <translation>次へ</translation>
+    </message>
+    <message id="aegra.backup.schedule_settings">
+        <source>Schedule settings</source>
+        <translation>スケジュール設定</translation>
+    </message>
+    <message id="aegra.backup.freq.daily">
+        <source>Daily</source>
+        <translation>毎日</translation>
+    </message>
+    <message id="aegra.backup.freq.weekly">
+        <source>Weekly</source>
+        <translation>毎週</translation>
+    </message>
+    <message id="aegra.backup.freq.monthly">
+        <source>Monthly</source>
+        <translation>毎月</translation>
+    </message>
+    <message id="aegra.backup.day_of_week">
+        <source>Day of week</source>
+        <translation>曜日</translation>
+    </message>
+    <message id="aegra.backup.day_of_month">
+        <source>Day of month</source>
+        <translation>日</translation>
+    </message>
+    <message id="aegra.backup.time_of_day">
+        <source>Time of day</source>
+        <translation>時刻</translation>
+    </message>
+    <message id="aegra.backup.weekday.mon">
+        <source>Mon</source>
+        <translation>月</translation>
+    </message>
+    <message id="aegra.backup.weekday.tue">
+        <source>Tue</source>
+        <translation>火</translation>
+    </message>
+    <message id="aegra.backup.weekday.wed">
+        <source>Wed</source>
+        <translation>水</translation>
+    </message>
+    <message id="aegra.backup.weekday.thu">
+        <source>Thu</source>
+        <translation>木</translation>
+    </message>
+    <message id="aegra.backup.weekday.fri">
+        <source>Fri</source>
+        <translation>金</translation>
+    </message>
+    <message id="aegra.backup.weekday.sat">
+        <source>Sat</source>
+        <translation>土</translation>
+    </message>
+    <message id="aegra.backup.weekday.sun">
+        <source>Sun</source>
+        <translation>日</translation>
+    </message>
+    <message id="aegra.backup.opt.dedup">
+        <source>Enable deduplication</source>
+        <translation>重複排除を有効にする</translation>
+    </message>
+    <message id="aegra.backup.opt.exclude_page">
+        <source>Exclude pagefile / hiberfil / swapfile</source>
+        <translation>pagefile / hiberfil / swapfile を除外</translation>
+    </message>
+    <message id="aegra.backup.opt.shutdown">
+        <source>Shut down when backup completes</source>
+        <translation>バックアップ完了後にシャットダウン</translation>
+    </message>
+    <message id="aegra.backup.opt.split">
+        <source>Split image into fixed-size files</source>
+        <translation>イメージを固定サイズに分割</translation>
+    </message>
+    <message id="aegra.backup.opt.split_suffix">
+        <source>per file</source>
+        <translation>ファイルごと</translation>
+    </message>
+    <message id="aegra.backup.opt.encryption">
+        <source>Encryption (password required)</source>
+        <translation>暗号化（パスワード必須）</translation>
+    </message>
+    <message id="aegra.backup.opt.compression">
+        <source>Compression</source>
+        <translation>圧縮</translation>
+    </message>
+    <message id="aegra.backup.comp.none">
+        <source>None</source>
+        <translation>なし</translation>
+    </message>
+    <message id="aegra.backup.comp.normal">
+        <source>Normal</source>
+        <translation>標準</translation>
+    </message>
+    <message id="aegra.backup.comp.best">
+        <source>Best</source>
+        <translation>最高</translation>
     </message>
     <message id="aegra.backup.column.status">
         <source>Status</source>
         <translation>状態</translation>
     </message>
     <message id="aegra.backup.schedules.empty">
-        <source>No schedules yet</source>
-        <translation>スケジュールはまだありません</translation>
+        <source>No schedules</source>
+        <translation>スケジュールがありません</translation>
+    </message>
+    <message id="aegra.backup.column.enabled">
+        <source>Enabled</source>
+        <translation>有効</translation>
+    </message>
+    <message id="aegra.backup.action.run">
+        <source>Run</source>
+        <translation>実行</translation>
     </message>
     <message id="aegra.backup.schedules.hint_add">
-        <source>Use Add to start a one-time full backup</source>
-        <translation>「追加」でワンタイムのフルバックアップを開始します</translation>
+        <source>Use Add to open the schedule wizard</source>
+        <translation>「追加」でスケジュールウィザードを開きます</translation>
     </message>
     <message id="aegra.backup.action.details">
         <source>Details</source>
@@ -624,28 +838,48 @@
         <translation>Service 未接続 — UI プレビューのみ</translation>
     </message>
     <message id="aegra.restore.source_disks">
-        <source>Source disks</source>
+        <source>Source Disks</source>
         <translation>ソースディスク</translation>
     </message>
     <message id="aegra.restore.source_hint">
-        <source>Layout from the selected recovery point</source>
-        <translation>選択した回復ポイントのレイアウト</translation>
+        <source>(from backup image → pick target below)</source>
+        <translation>（バックアップイメージから → 下でターゲットを選択）</translation>
     </message>
     <message id="aegra.restore.select_checkpoint">
-        <source>Select recovery point</source>
-        <translation>回復ポイントを選択</translation>
+        <source>Select checkpoint</source>
+        <translation>チェックポイントを選択</translation>
+    </message>
+    <message id="aegra.restore.select_checkpoint_title">
+        <source>Select checkpoint</source>
+        <translation>チェックポイントを選択</translation>
     </message>
     <message id="aegra.restore.select_checkpoint_source">
-        <source>Select a recovery point to show source disk layout</source>
-        <translation>ソースディスク構成を表示するには回復ポイントを選択してください</translation>
+        <source>Select a checkpoint to view source disks</source>
+        <translation>チェックポイントを選択してソースディスクを表示</translation>
+    </message>
+    <message id="aegra.restore.selected_label">
+        <source>Selected:</source>
+        <translation>選択：</translation>
+    </message>
+    <message id="aegra.restore.calendar">
+        <source>Calendar</source>
+        <translation>カレンダー</translation>
+    </message>
+    <message id="aegra.restore.checkpoints">
+        <source>Checkpoints</source>
+        <translation>チェックポイント</translation>
+    </message>
+    <message id="aegra.restore.select_date_with_backups">
+        <source>Select a date with backups</source>
+        <translation>バックアップがある日付を選択</translation>
     </message>
     <message id="aegra.restore.target_disks">
-        <source>Target disks</source>
+        <source>Target Disks</source>
         <translation>ターゲットディスク</translation>
     </message>
     <message id="aegra.restore.target_hint">
-        <source>Map backup disks onto local disks</source>
-        <translation>バックアップディスクをローカルディスクに割り当てます</translation>
+        <source>(this PC — available restore destinations)</source>
+        <translation>（この PC — 利用可能な復元先）</translation>
     </message>
     <message id="aegra.restore.target_empty">
         <source>Local disks will appear when restore inventory is connected</source>
@@ -676,28 +910,40 @@
         <translation>復元 Service API 接続後に回復ポイントのカレンダーと一覧が表示されます</translation>
     </message>
     <message id="aegra.mount.source_disks">
-        <source>Source disks</source>
+        <source>Source Disks</source>
         <translation>ソースディスク</translation>
     </message>
     <message id="aegra.mount.source_hint">
-        <source>Disk layout inside the selected recovery point</source>
-        <translation>選択した回復ポイント内のディスク構成</translation>
+        <source>(check disks to mount — volumes auto-get drive letters)</source>
+        <translation>（マウントするディスクにチェック — ボリュームにドライブレターを自動割当）</translation>
     </message>
     <message id="aegra.mount.source_empty">
-        <source>Select a recovery point to show mountable disks</source>
-        <translation>マウント可能なディスクを表示するには回復ポイントを選択してください</translation>
+        <source>Select a checkpoint to view source disks</source>
+        <translation>チェックポイントを選択してソースディスクを表示</translation>
     </message>
     <message id="aegra.mount.mounted">
-        <source>Mounted sessions</source>
-        <translation>マウント中のセッション</translation>
+        <source>Mounted</source>
+        <translation>マウント済み</translation>
     </message>
     <message id="aegra.mount.mounted_hint">
-        <source>Active mount sessions on this machine</source>
-        <translation>このマシン上のアクティブなマウントセッション</translation>
+        <source>Check source disk(s), then click Mount</source>
+        <translation>ソースディスクを選択してマウントをクリック</translation>
     </message>
     <message id="aegra.mount.mounted_empty">
-        <source>No mounted sessions</source>
-        <translation>マウント中のセッションはありません</translation>
+        <source>No mounted images</source>
+        <translation>マウント済みイメージはありません</translation>
+    </message>
+    <message id="aegra.mount.col.drives">
+        <source>Drive(s)</source>
+        <translation>ドライブ</translation>
+    </message>
+    <message id="aegra.mount.col.disk">
+        <source>Disk</source>
+        <translation>ディスク</translation>
+    </message>
+    <message id="aegra.mount.col.image">
+        <source>Image</source>
+        <translation>イメージ</translation>
     </message>
     <message id="aegra.mount.drive_letter">
         <source>Preferred drive letter</source>
@@ -716,8 +962,8 @@
         <translation>時刻</translation>
     </message>
     <message id="aegra.eventlog.range.all">
-        <source>All</source>
-        <translation>すべて</translation>
+        <source>All time</source>
+        <translation>全期間</translation>
     </message>
     <message id="aegra.eventlog.range.24h">
         <source>24h</source>
@@ -732,24 +978,32 @@
         <translation>30 日</translation>
     </message>
     <message id="aegra.eventlog.type.all">
-        <source>All types</source>
-        <translation>すべての種類</translation>
+        <source>All</source>
+        <translation>すべて</translation>
     </message>
     <message id="aegra.eventlog.status.all">
-        <source>All statuses</source>
-        <translation>すべての状態</translation>
+        <source>All</source>
+        <translation>すべて</translation>
+    </message>
+    <message id="aegra.eventlog.status.success">
+        <source>Success</source>
+        <translation>成功</translation>
     </message>
     <message id="aegra.eventlog.column.summary">
         <source>Summary</source>
         <translation>概要</translation>
     </message>
     <message id="aegra.eventlog.empty">
-        <source>No events yet. Task history will appear when event log Service APIs are connected.</source>
-        <translation>イベントはまだありません。イベントログ Service API 接続後にタスク履歴が表示されます。</translation>
+        <source>No events yet</source>
+        <translation>イベントはまだありません</translation>
     </message>
     <message id="aegra.eventlog.page_of">
         <source>Page %1 of %2</source>
         <translation>%2 ページ中 %1</translation>
+    </message>
+    <message id="aegra.eventlog.page_range">
+        <source>%1–%2 of %3 · Page %4 / %5</source>
+        <translation>%1–%2 / 全 %3 · %4 / %5 ページ</translation>
     </message>
     <message id="aegra.eventlog.prev">
         <source>Previous</source>
@@ -772,8 +1026,8 @@
         <translation>テーマ</translation>
     </message>
     <message id="aegra.settings.theme_desc">
-        <source>Appearance follows the blueExtra palette until theme Service settings are connected</source>
-        <translation>テーマ Service 設定接続までは blueExtra パレットを使用します</translation>
+        <source>Choose a color theme for the desktop client</source>
+        <translation>デスクトップクライアントの配色テーマを選択します</translation>
     </message>
     <message id="aegra.settings.theme.blue_extra">
         <source>Blue Extra</source>

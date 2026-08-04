@@ -52,6 +52,11 @@ Session 和 task event DTO。列表每页最多 100 项，event 未确认窗口�
 有符号 64 位范围。Catalog 状态仍不表达 Archive 已认证或 Restore Ready。完整 wire 决策见
 [ADR-0013](../adr/0013-service-control-protocol-v3.md)。
 
+S6 修正了 Restore V3 DTO：Prepare 必须携带 Repository connection、Recovery Point 和 opaque target source ID；
+成功 preflight 返回相同资源归属、逻辑大小、目标容量、链深、过期 UTC、eligibility 与稳定 message code；Start
+只接受 opaque preflight token 且必须显式 `confirmed=true`。协议不接受 Archive path、对象 key、链数组、
+SecretRef、Volume GUID 或任意设备路径。
+
 ## 测试
 
 - 每个消息的必填字段、版本和枚举验证。

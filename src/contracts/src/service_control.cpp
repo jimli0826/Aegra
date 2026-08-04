@@ -365,7 +365,8 @@ base::Result<void> validate_start_verify_command(const StartVerifyCommand& comma
 }
 
 base::Result<void> validate_restore_preflight_request(const RestorePreflightRequest& request) {
-    if (!valid_stable_value(request.recovery_point_id, kMaximumIdentifierBytes) ||
+    if (!valid_stable_value(request.repository_connection_id, kMaximumIdentifierBytes) ||
+        !valid_stable_value(request.recovery_point_id, kMaximumIdentifierBytes) ||
         !valid_stable_value(request.target_source_id, kMaximumIdentifierBytes)) {
         return invalid("restore preflight request is invalid");
     }
@@ -374,10 +375,15 @@ base::Result<void> validate_restore_preflight_request(const RestorePreflightRequ
 
 base::Result<void> validate_restore_preflight(const RestorePreflight& preflight) {
     if (!valid_token(preflight.preflight_token) ||
+        !valid_stable_value(preflight.repository_connection_id, kMaximumIdentifierBytes) ||
         !valid_stable_value(preflight.recovery_point_id, kMaximumIdentifierBytes) ||
         !valid_stable_value(preflight.target_source_id, kMaximumIdentifierBytes) ||
-        !valid_wire_integer(preflight.logical_size_bytes) || preflight.chain_depth == 0 ||
-        preflight.expires_utc_ms == 0 || !valid_wire_integer(preflight.expires_utc_ms)) {
+        preflight.logical_size_bytes == 0 || !valid_wire_integer(preflight.logical_size_bytes) ||
+        preflight.target_capacity_bytes < preflight.logical_size_bytes ||
+        !valid_wire_integer(preflight.target_capacity_bytes) || preflight.chain_depth == 0 ||
+        preflight.expires_utc_ms == 0 || !valid_wire_integer(preflight.expires_utc_ms) ||
+        !preflight.restore_eligible ||
+        !valid_stable_value(preflight.message_code, kMaximumMessageCodeBytes)) {
         return invalid("restore preflight is invalid");
     }
     return base::Result<void>::success();
@@ -385,8 +391,8 @@ base::Result<void> validate_restore_preflight(const RestorePreflight& preflight)
 
 base::Result<void> validate_start_restore_command(const StartRestoreCommand& command) {
     const std::optional<std::string> token = command.preflight_token;
-    return valid_token(token) ? base::Result<void>::success()
-                              : invalid("start restore command is invalid");
+    return valid_token(token) && command.confirmed ? base::Result<void>::success()
+                                                   : invalid("start restore command is invalid");
 }
 
 base::Result<void> validate_mount_recovery_point_command(const MountRecoveryPointCommand& command) {
@@ -524,12 +530,10 @@ base::Result<void> validate_recovery_point_chain_result(const RecoveryPointChain
     const bool authenticated = std::ranges::all_of(result.layers, [](const auto& layer) {
         return layer.authentication_state == RecoveryPointAuthenticationState::kAuthenticated;
     });
-    if (result.restore_eligible &&
-        !(structurally_ready && chain_ready && authenticated)) {
+    if (result.restore_eligible && !(structurally_ready && chain_ready && authenticated)) {
         return invalid("restore eligibility is inconsistent with chain layer state");
     }
-    if (result.mount_eligible &&
-        !(structurally_ready && chain_ready && authenticated)) {
+    if (result.mount_eligible && !(structurally_ready && chain_ready && authenticated)) {
         return invalid("mount eligibility is inconsistent with chain layer state");
     }
     if (result.verify_eligible && !structurally_ready) {

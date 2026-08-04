@@ -107,6 +107,18 @@
         <source>Cancel</source>
         <translation>Cancel</translation>
     </message>
+    <message id="aegra.common.back">
+        <source>Back</source>
+        <translation>Back</translation>
+    </message>
+    <message id="aegra.common.create">
+        <source>Create</source>
+        <translation>Create</translation>
+    </message>
+    <message id="aegra.common.not_available">
+        <source>N/A</source>
+        <translation>N/A</translation>
+    </message>
     <message id="aegra.error.unknown">
         <source>Unexpected service response (%1)</source>
         <translation>Unexpected service response (%1)</translation>
@@ -120,8 +132,8 @@
         <translation>Service connection lost</translation>
     </message>
     <message id="aegra.error.service.connect_failed">
-        <source>Unable to connect to Service</source>
-        <translation>Unable to connect to Service</translation>
+        <source>Connection refused</source>
+        <translation>Connection refused</translation>
     </message>
     <message id="aegra.error.service.protocol_invalid">
         <source>Invalid Service response</source>
@@ -146,6 +158,42 @@
     <message id="aegra.repository.recovery_points_count">
         <source>%1 recovery points</source>
         <translation>%1 recovery points</translation>
+    </message>
+    <message id="aegra.repository.checkpoint_one">
+        <source>1 checkpoint</source>
+        <translation>1 checkpoint</translation>
+    </message>
+    <message id="aegra.repository.add">
+        <source>Add repository</source>
+        <translation>Add repository</translation>
+    </message>
+    <message id="aegra.repository.import">
+        <source>Import...</source>
+        <translation>Import...</translation>
+    </message>
+    <message id="aegra.repository.loaded_count">
+        <source>Loaded %1 repositories</source>
+        <translation>Loaded %1 repositories</translation>
+    </message>
+    <message id="aegra.repository.connected">
+        <source>connected</source>
+        <translation>connected</translation>
+    </message>
+    <message id="aegra.repository.offline">
+        <source>offline</source>
+        <translation>offline</translation>
+    </message>
+    <message id="aegra.repository.test">
+        <source>Test</source>
+        <translation>Test</translation>
+    </message>
+    <message id="aegra.repository.export">
+        <source>Export...</source>
+        <translation>Export...</translation>
+    </message>
+    <message id="aegra.repository.password">
+        <source>Password...</source>
+        <translation>Password...</translation>
     </message>
     <message id="aegra.repository.kind_local_catalog">
         <source>local · catalog</source>
@@ -259,6 +307,10 @@
         <source>Retry</source>
         <translation>Retry</translation>
     </message>
+    <message id="aegra.common.quit">
+        <source>Quit</source>
+        <translation>Quit</translation>
+    </message>
     <message id="aegra.common.dismiss">
         <source>Dismiss</source>
         <translation>Dismiss</translation>
@@ -272,12 +324,18 @@
         <translation>Tasks %1</translation>
     </message>
     <message id="aegra.splash.status.connecting">
-        <source>Connecting to Service</source>
-        <translation>Connecting to Service</translation>
+        <source>Loading data...</source>
+        <translation>Loading data...</translation>
     </message>
     <message id="aegra.splash.status.failed">
-        <source>Unable to connect to Service</source>
-        <translation>Unable to connect to Service</translation>
+        <source>Unable to connect to the backup server</source>
+        <translation>Unable to connect to the backup server</translation>
+    </message>
+    <message id="aegra.splash.error.detail">
+        <source>Please ensure Aegra Service is running and try again.
+Server: %1</source>
+        <translation>Please ensure Aegra Service is running and try again.
+Server: %1</translation>
     </message>
     <message id="aegra.home.refresh_tasks">
         <source>Refresh tasks</source>
@@ -304,8 +362,28 @@
         <translation>This PC</translation>
     </message>
     <message id="aegra.home.system_information">
-        <source>System information</source>
-        <translation>System information</translation>
+        <source>System Information</source>
+        <translation>System Information</translation>
+    </message>
+    <message id="aegra.home.os_name">
+        <source>Windows 10</source>
+        <translation>Windows 10</translation>
+    </message>
+    <message id="aegra.home.os_copyright">
+        <source>© Microsoft Corporation. All Rights Reserved.</source>
+        <translation>© Microsoft Corporation. All Rights Reserved.</translation>
+    </message>
+    <message id="aegra.home.tasks_latest_10">
+        <source>Showing latest 10 only</source>
+        <translation>Showing latest 10 only</translation>
+    </message>
+    <message id="aegra.home.more">
+        <source>More</source>
+        <translation>More</translation>
+    </message>
+    <message id="aegra.home.no_backup_restore_tasks">
+        <source>No backup or restore tasks</source>
+        <translation>No backup or restore tasks</translation>
     </message>
     <message id="aegra.home.loading_disks">
         <source>Loading sources…</source>
@@ -464,20 +542,156 @@
         <translation>Target repository</translation>
     </message>
     <message id="aegra.backup.wizard.title">
-        <source>Start backup</source>
-        <translation>Start backup</translation>
+        <source>Add Schedule Wizard</source>
+        <translation>Add Schedule Wizard</translation>
+    </message>
+    <message id="aegra.backup.column.destination">
+        <source>Destination</source>
+        <translation>Destination</translation>
+    </message>
+    <message id="aegra.backup.column.frequency">
+        <source>Frequency</source>
+        <translation>Frequency</translation>
+    </message>
+    <message id="aegra.backup.column.last_run">
+        <source>Last run</source>
+        <translation>Last run</translation>
+    </message>
+    <message id="aegra.backup.column.next_run">
+        <source>Next run</source>
+        <translation>Next run</translation>
+    </message>
+    <message id="aegra.backup.locations">
+        <source>Locations</source>
+        <translation>Locations</translation>
+    </message>
+    <message id="aegra.backup.add_location">
+        <source>Add location</source>
+        <translation>Add location</translation>
+    </message>
+    <message id="aegra.backup.source.volume">
+        <source>Volume</source>
+        <translation>Volume</translation>
+    </message>
+    <message id="aegra.common.next">
+        <source>Next</source>
+        <translation>Next</translation>
+    </message>
+    <message id="aegra.backup.schedule_settings">
+        <source>Schedule settings</source>
+        <translation>Schedule settings</translation>
+    </message>
+    <message id="aegra.backup.freq.daily">
+        <source>Daily</source>
+        <translation>Daily</translation>
+    </message>
+    <message id="aegra.backup.freq.weekly">
+        <source>Weekly</source>
+        <translation>Weekly</translation>
+    </message>
+    <message id="aegra.backup.freq.monthly">
+        <source>Monthly</source>
+        <translation>Monthly</translation>
+    </message>
+    <message id="aegra.backup.day_of_week">
+        <source>Day of week</source>
+        <translation>Day of week</translation>
+    </message>
+    <message id="aegra.backup.day_of_month">
+        <source>Day of month</source>
+        <translation>Day of month</translation>
+    </message>
+    <message id="aegra.backup.time_of_day">
+        <source>Time of day</source>
+        <translation>Time of day</translation>
+    </message>
+    <message id="aegra.backup.weekday.mon">
+        <source>Mon</source>
+        <translation>Mon</translation>
+    </message>
+    <message id="aegra.backup.weekday.tue">
+        <source>Tue</source>
+        <translation>Tue</translation>
+    </message>
+    <message id="aegra.backup.weekday.wed">
+        <source>Wed</source>
+        <translation>Wed</translation>
+    </message>
+    <message id="aegra.backup.weekday.thu">
+        <source>Thu</source>
+        <translation>Thu</translation>
+    </message>
+    <message id="aegra.backup.weekday.fri">
+        <source>Fri</source>
+        <translation>Fri</translation>
+    </message>
+    <message id="aegra.backup.weekday.sat">
+        <source>Sat</source>
+        <translation>Sat</translation>
+    </message>
+    <message id="aegra.backup.weekday.sun">
+        <source>Sun</source>
+        <translation>Sun</translation>
+    </message>
+    <message id="aegra.backup.opt.dedup">
+        <source>Enable deduplication</source>
+        <translation>Enable deduplication</translation>
+    </message>
+    <message id="aegra.backup.opt.exclude_page">
+        <source>Exclude pagefile / hiberfil / swapfile</source>
+        <translation>Exclude pagefile / hiberfil / swapfile</translation>
+    </message>
+    <message id="aegra.backup.opt.shutdown">
+        <source>Shut down when backup completes</source>
+        <translation>Shut down when backup completes</translation>
+    </message>
+    <message id="aegra.backup.opt.split">
+        <source>Split image into fixed-size files</source>
+        <translation>Split image into fixed-size files</translation>
+    </message>
+    <message id="aegra.backup.opt.split_suffix">
+        <source>per file</source>
+        <translation>per file</translation>
+    </message>
+    <message id="aegra.backup.opt.encryption">
+        <source>Encryption (password required)</source>
+        <translation>Encryption (password required)</translation>
+    </message>
+    <message id="aegra.backup.opt.compression">
+        <source>Compression</source>
+        <translation>Compression</translation>
+    </message>
+    <message id="aegra.backup.comp.none">
+        <source>None</source>
+        <translation>None</translation>
+    </message>
+    <message id="aegra.backup.comp.normal">
+        <source>Normal</source>
+        <translation>Normal</translation>
+    </message>
+    <message id="aegra.backup.comp.best">
+        <source>Best</source>
+        <translation>Best</translation>
     </message>
     <message id="aegra.backup.column.status">
         <source>Status</source>
         <translation>Status</translation>
     </message>
     <message id="aegra.backup.schedules.empty">
-        <source>No schedules yet</source>
-        <translation>No schedules yet</translation>
+        <source>No schedules</source>
+        <translation>No schedules</translation>
+    </message>
+    <message id="aegra.backup.column.enabled">
+        <source>Enabled</source>
+        <translation>Enabled</translation>
+    </message>
+    <message id="aegra.backup.action.run">
+        <source>Run</source>
+        <translation>Run</translation>
     </message>
     <message id="aegra.backup.schedules.hint_add">
-        <source>Use Add to start a one-time full backup</source>
-        <translation>Use Add to start a one-time full backup</translation>
+        <source>Use Add to open the schedule wizard</source>
+        <translation>Use Add to open the schedule wizard</translation>
     </message>
     <message id="aegra.backup.action.details">
         <source>Details</source>
@@ -624,28 +838,48 @@
         <translation>Service is not connected yet — UI preview only</translation>
     </message>
     <message id="aegra.restore.source_disks">
-        <source>Source disks</source>
-        <translation>Source disks</translation>
+        <source>Source Disks</source>
+        <translation>Source Disks</translation>
     </message>
     <message id="aegra.restore.source_hint">
-        <source>Layout from the selected recovery point</source>
-        <translation>Layout from the selected recovery point</translation>
+        <source>(from backup image → pick target below)</source>
+        <translation>(from backup image → pick target below)</translation>
     </message>
     <message id="aegra.restore.select_checkpoint">
-        <source>Select recovery point</source>
-        <translation>Select recovery point</translation>
+        <source>Select checkpoint</source>
+        <translation>Select checkpoint</translation>
+    </message>
+    <message id="aegra.restore.select_checkpoint_title">
+        <source>Select checkpoint</source>
+        <translation>Select checkpoint</translation>
     </message>
     <message id="aegra.restore.select_checkpoint_source">
-        <source>Select a recovery point to show source disk layout</source>
-        <translation>Select a recovery point to show source disk layout</translation>
+        <source>Select a checkpoint to view source disks</source>
+        <translation>Select a checkpoint to view source disks</translation>
+    </message>
+    <message id="aegra.restore.selected_label">
+        <source>Selected:</source>
+        <translation>Selected:</translation>
+    </message>
+    <message id="aegra.restore.calendar">
+        <source>Calendar</source>
+        <translation>Calendar</translation>
+    </message>
+    <message id="aegra.restore.checkpoints">
+        <source>Checkpoints</source>
+        <translation>Checkpoints</translation>
+    </message>
+    <message id="aegra.restore.select_date_with_backups">
+        <source>Select a date with backups</source>
+        <translation>Select a date with backups</translation>
     </message>
     <message id="aegra.restore.target_disks">
-        <source>Target disks</source>
-        <translation>Target disks</translation>
+        <source>Target Disks</source>
+        <translation>Target Disks</translation>
     </message>
     <message id="aegra.restore.target_hint">
-        <source>Map backup disks onto local disks</source>
-        <translation>Map backup disks onto local disks</translation>
+        <source>(this PC — available restore destinations)</source>
+        <translation>(this PC — available restore destinations)</translation>
     </message>
     <message id="aegra.restore.target_empty">
         <source>Local disks will appear when restore inventory is connected</source>
@@ -676,28 +910,40 @@
         <translation>Recovery point calendar and list will appear when restore Service APIs are connected</translation>
     </message>
     <message id="aegra.mount.source_disks">
-        <source>Source disks</source>
-        <translation>Source disks</translation>
+        <source>Source Disks</source>
+        <translation>Source Disks</translation>
     </message>
     <message id="aegra.mount.source_hint">
-        <source>Disk layout inside the selected recovery point</source>
-        <translation>Disk layout inside the selected recovery point</translation>
+        <source>(check disks to mount — volumes auto-get drive letters)</source>
+        <translation>(check disks to mount — volumes auto-get drive letters)</translation>
     </message>
     <message id="aegra.mount.source_empty">
-        <source>Select a recovery point to show mountable disks</source>
-        <translation>Select a recovery point to show mountable disks</translation>
+        <source>Select a checkpoint to view source disks</source>
+        <translation>Select a checkpoint to view source disks</translation>
     </message>
     <message id="aegra.mount.mounted">
-        <source>Mounted sessions</source>
-        <translation>Mounted sessions</translation>
+        <source>Mounted</source>
+        <translation>Mounted</translation>
     </message>
     <message id="aegra.mount.mounted_hint">
-        <source>Active mount sessions on this machine</source>
-        <translation>Active mount sessions on this machine</translation>
+        <source>Check source disk(s), then click Mount</source>
+        <translation>Check source disk(s), then click Mount</translation>
     </message>
     <message id="aegra.mount.mounted_empty">
-        <source>No mounted sessions</source>
-        <translation>No mounted sessions</translation>
+        <source>No mounted images</source>
+        <translation>No mounted images</translation>
+    </message>
+    <message id="aegra.mount.col.drives">
+        <source>Drive(s)</source>
+        <translation>Drive(s)</translation>
+    </message>
+    <message id="aegra.mount.col.disk">
+        <source>Disk</source>
+        <translation>Disk</translation>
+    </message>
+    <message id="aegra.mount.col.image">
+        <source>Image</source>
+        <translation>Image</translation>
     </message>
     <message id="aegra.mount.drive_letter">
         <source>Preferred drive letter</source>
@@ -716,8 +962,8 @@
         <translation>Time</translation>
     </message>
     <message id="aegra.eventlog.range.all">
-        <source>All</source>
-        <translation>All</translation>
+        <source>All time</source>
+        <translation>All time</translation>
     </message>
     <message id="aegra.eventlog.range.24h">
         <source>24h</source>
@@ -732,24 +978,32 @@
         <translation>30d</translation>
     </message>
     <message id="aegra.eventlog.type.all">
-        <source>All types</source>
-        <translation>All types</translation>
+        <source>All</source>
+        <translation>All</translation>
     </message>
     <message id="aegra.eventlog.status.all">
-        <source>All statuses</source>
-        <translation>All statuses</translation>
+        <source>All</source>
+        <translation>All</translation>
+    </message>
+    <message id="aegra.eventlog.status.success">
+        <source>Success</source>
+        <translation>Success</translation>
     </message>
     <message id="aegra.eventlog.column.summary">
         <source>Summary</source>
         <translation>Summary</translation>
     </message>
     <message id="aegra.eventlog.empty">
-        <source>No events yet. Task history will appear when event log Service APIs are connected.</source>
-        <translation>No events yet. Task history will appear when event log Service APIs are connected.</translation>
+        <source>No events yet</source>
+        <translation>No events yet</translation>
     </message>
     <message id="aegra.eventlog.page_of">
         <source>Page %1 of %2</source>
         <translation>Page %1 of %2</translation>
+    </message>
+    <message id="aegra.eventlog.page_range">
+        <source>%1–%2 of %3 · Page %4 / %5</source>
+        <translation>%1–%2 of %3 · Page %4 / %5</translation>
     </message>
     <message id="aegra.eventlog.prev">
         <source>Previous</source>
@@ -772,8 +1026,8 @@
         <translation>Theme</translation>
     </message>
     <message id="aegra.settings.theme_desc">
-        <source>Appearance follows the blueExtra palette until theme Service settings are connected</source>
-        <translation>Appearance follows the blueExtra palette until theme Service settings are connected</translation>
+        <source>Choose a color theme for the desktop client</source>
+        <translation>Choose a color theme for the desktop client</translation>
     </message>
     <message id="aegra.settings.theme.blue_extra">
         <source>Blue Extra</source>

@@ -11,6 +11,7 @@ namespace aegra::desktop {
 namespace {
 
 constexpr auto kSettingsKey = "ui/language";
+constexpr auto kThemeSettingsKey = "ui/theme";
 constexpr auto kTranslationPrefix = ":/Aegra/i18n/aegra_desktop_";
 
 [[nodiscard]] QLocale locale_for_tag(const QString& language_tag) {
@@ -33,13 +34,17 @@ constexpr auto kTranslationPrefix = ":/Aegra/i18n/aegra_desktop_";
 
 LocaleController::LocaleController(QQmlEngine* engine, QObject* parent)
     : QObject(parent), engine_(engine), translator_(new QTranslator(this)),
-      language_tag_(QStringLiteral("en_US")), locale_(QLocale::English, QLocale::UnitedStates) {
+      language_tag_(QStringLiteral("en_US")), theme_id_(QStringLiteral("blueExtra")),
+      locale_(QLocale::English, QLocale::UnitedStates) {
     load_saved_or_system_language();
+    load_saved_theme();
 }
 
 LocaleController::~LocaleController() = default;
 
 QString LocaleController::language() const { return language_tag_; }
+
+QString LocaleController::theme() const { return theme_id_; }
 
 QString LocaleController::languageLabel() const {
     for (const auto& entry : supported_languages()) {
@@ -195,6 +200,32 @@ bool LocaleController::install_translator(const QString& language_tag) {
 void LocaleController::save_language(const QString& language_tag) const {
     QSettings settings;
     settings.setValue(QLatin1String(kSettingsKey), language_tag);
+}
+
+bool LocaleController::is_supported_theme(const QString& theme_id) {
+    return theme_id == QLatin1String("blueExtra") || theme_id == QLatin1String("dark") ||
+           theme_id == QLatin1String("light");
+}
+
+void LocaleController::load_saved_theme() {
+    QSettings settings;
+    const auto id =
+        settings.value(QLatin1String(kThemeSettingsKey), QStringLiteral("blueExtra")).toString();
+    theme_id_ = is_supported_theme(id) ? id : QStringLiteral("blueExtra");
+}
+
+void LocaleController::save_theme() const {
+    QSettings settings;
+    settings.setValue(QLatin1String(kThemeSettingsKey), theme_id_);
+}
+
+void LocaleController::setTheme(const QString& theme_id) {
+    if (!is_supported_theme(theme_id) || theme_id_ == theme_id) {
+        return;
+    }
+    theme_id_ = theme_id;
+    save_theme();
+    emit themeChanged();
 }
 
 } // namespace aegra::desktop

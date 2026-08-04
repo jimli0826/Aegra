@@ -368,26 +368,36 @@ template <typename Item, typename Parser>
 
 [[nodiscard]] Json encode_restore_preflight(const contracts::RestorePreflight& preflight) {
     return Json{{"preflight_token", preflight.preflight_token},
+                {"repository_connection_id", preflight.repository_connection_id},
                 {"recovery_point_id", preflight.recovery_point_id},
                 {"target_source_id", preflight.target_source_id},
                 {"logical_size_bytes", preflight.logical_size_bytes},
+                {"target_capacity_bytes", preflight.target_capacity_bytes},
                 {"chain_depth", preflight.chain_depth},
-                {"expires_utc_ms", preflight.expires_utc_ms}};
+                {"expires_utc_ms", preflight.expires_utc_ms},
+                {"restore_eligible", preflight.restore_eligible},
+                {"message_code", preflight.message_code}};
 }
 
 [[nodiscard]] contracts::RestorePreflight parse_restore_preflight(const Json& payload) {
-    constexpr std::array<std::string_view, 6> keys{"preflight_token",  "recovery_point_id",
-                                                   "target_source_id", "logical_size_bytes",
-                                                   "chain_depth",      "expires_utc_ms"};
+    constexpr std::array<std::string_view, 10> keys{
+        "preflight_token",  "repository_connection_id", "recovery_point_id",
+        "target_source_id", "logical_size_bytes",       "target_capacity_bytes",
+        "chain_depth",      "expires_utc_ms",           "restore_eligible",
+        "message_code"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("restore preflight fields are invalid");
     }
     return {payload.at("preflight_token").get<std::string>(),
+            payload.at("repository_connection_id").get<std::string>(),
             payload.at("recovery_point_id").get<std::string>(),
             payload.at("target_source_id").get<std::string>(),
             unsigned_value<std::uint64_t>(payload, "logical_size_bytes"),
+            unsigned_value<std::uint64_t>(payload, "target_capacity_bytes"),
             unsigned_value<std::uint32_t>(payload, "chain_depth"),
-            unsigned_value<std::uint64_t>(payload, "expires_utc_ms")};
+            unsigned_value<std::uint64_t>(payload, "expires_utc_ms"),
+            payload.at("restore_eligible").get<bool>(),
+            payload.at("message_code").get<std::string>()};
 }
 
 [[nodiscard]] Json encode_chain_layer(const contracts::RecoveryPointChainLayer& layer) {
@@ -400,9 +410,9 @@ template <typename Item, typename Parser>
 }
 
 [[nodiscard]] contracts::RecoveryPointChainLayer parse_chain_layer(const Json& payload) {
-    constexpr std::array<std::string_view, 6> keys{
-        "recovery_point_id", "backup_type",         "parent_recovery_point_id",
-        "structural_state",  "authentication_state", "chain_state"};
+    constexpr std::array<std::string_view, 6> keys{"recovery_point_id",        "backup_type",
+                                                   "parent_recovery_point_id", "structural_state",
+                                                   "authentication_state",     "chain_state"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("recovery point chain layer fields are invalid");
     }
@@ -436,7 +446,7 @@ template <typename Item, typename Parser>
 
 [[nodiscard]] contracts::RecoveryPointChainResult parse_chain_result(const Json& payload) {
     constexpr std::array<std::string_view, 7> keys{
-        "repository_connection_id", "recovery_point_id", "layers",        "restore_eligible",
+        "repository_connection_id", "recovery_point_id", "layers",      "restore_eligible",
         "mount_eligible",           "verify_eligible",   "message_code"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("recovery point chain result fields are invalid");
@@ -486,8 +496,8 @@ template <typename Item, typename Parser>
 
 [[nodiscard]] contracts::DeletePlanSummary parse_delete_plan_summary(const Json& payload) {
     constexpr std::array<std::string_view, 6> keys{
-        "plan_token", "operation_id", "repository_connection_id",
-        "root_recovery_point_id", "targets", "expires_utc_ms"};
+        "plan_token", "operation_id",  "repository_connection_id", "root_recovery_point_id",
+        "targets",    "expires_utc_ms"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("delete plan summary fields are invalid");
     }

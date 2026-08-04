@@ -93,6 +93,43 @@ bool test_command_request_validation() {
     request.kind = static_cast<contracts::ServiceRequestKind>(255);
     passed &=
         expect(!contracts::validate_service_request(request), "unknown request kind is rejected");
+
+    contracts::ServiceRequest restore;
+    restore.request_id = "request-restore";
+    restore.kind = contracts::ServiceRequestKind::kStartRestore;
+    restore.idempotency_key = "restore-command-1";
+    restore.payload = contracts::StartRestoreCommand{"preflight-token", false};
+    passed &= expect(!contracts::validate_service_request(restore),
+                     "restore start requires explicit confirmation");
+    std::get<contracts::StartRestoreCommand>(restore.payload).confirmed = true;
+    passed &= expect(contracts::validate_service_request(restore).has_value(),
+                     "confirmed restore start is accepted");
+    return passed;
+}
+
+bool test_restore_preflight_validation() {
+    contracts::RestorePreflightRequest request{"repository:1", "recovery:1", "source:target-1"};
+    bool passed = expect(contracts::validate_restore_preflight_request(request).has_value(),
+                         "restore preflight request owns repository identity");
+    request.repository_connection_id.clear();
+    passed &= expect(!contracts::validate_restore_preflight_request(request),
+                     "restore preflight rejects missing repository identity");
+
+    contracts::RestorePreflight preflight{"preflight-token",
+                                          "repository:1",
+                                          "recovery:1",
+                                          "source:target-1",
+                                          100,
+                                          200,
+                                          1,
+                                          1'800'000'000'000ULL,
+                                          true,
+                                          "restore.preflight_ready"};
+    passed &= expect(contracts::validate_restore_preflight(preflight).has_value(),
+                     "eligible restore preflight is accepted");
+    preflight.target_capacity_bytes = 99;
+    passed &= expect(!contracts::validate_restore_preflight(preflight),
+                     "restore preflight rejects an undersized target");
     return passed;
 }
 
@@ -173,8 +210,8 @@ bool test_event_validation() {
 
 int run_tests() {
     return test_query_request_validation() && test_command_request_validation() &&
-                   test_service_info_validation() && test_response_validation() &&
-                   test_event_validation()
+                   test_restore_preflight_validation() && test_service_info_validation() &&
+                   test_response_validation() && test_event_validation()
                ? EXIT_SUCCESS
                : EXIT_FAILURE;
 }

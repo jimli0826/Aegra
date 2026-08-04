@@ -107,6 +107,18 @@
         <source>Cancel</source>
         <translation>Abbrechen</translation>
     </message>
+    <message id="aegra.common.back">
+        <source>Back</source>
+        <translation>Zurück</translation>
+    </message>
+    <message id="aegra.common.create">
+        <source>Create</source>
+        <translation>Erstellen</translation>
+    </message>
+    <message id="aegra.common.not_available">
+        <source>N/A</source>
+        <translation>N/A</translation>
+    </message>
     <message id="aegra.error.unknown">
         <source>Unexpected service response (%1)</source>
         <translation>Unerwartete Service-Antwort (%1)</translation>
@@ -120,8 +132,8 @@
         <translation>Service-Verbindung getrennt</translation>
     </message>
     <message id="aegra.error.service.connect_failed">
-        <source>Unable to connect to Service</source>
-        <translation>Verbindung zum Service nicht möglich</translation>
+        <source>Connection refused</source>
+        <translation>Verbindung abgelehnt</translation>
     </message>
     <message id="aegra.error.service.protocol_invalid">
         <source>Invalid Service response</source>
@@ -146,6 +158,42 @@
     <message id="aegra.repository.recovery_points_count">
         <source>%1 recovery points</source>
         <translation>%1 Wiederherstellungspunkte</translation>
+    </message>
+    <message id="aegra.repository.checkpoint_one">
+        <source>1 checkpoint</source>
+        <translation>1 Prüfpunkt</translation>
+    </message>
+    <message id="aegra.repository.add">
+        <source>Add repository</source>
+        <translation>Repository hinzufügen</translation>
+    </message>
+    <message id="aegra.repository.import">
+        <source>Import...</source>
+        <translation>Importieren...</translation>
+    </message>
+    <message id="aegra.repository.loaded_count">
+        <source>Loaded %1 repositories</source>
+        <translation>%1 Repositories geladen</translation>
+    </message>
+    <message id="aegra.repository.connected">
+        <source>connected</source>
+        <translation>verbunden</translation>
+    </message>
+    <message id="aegra.repository.offline">
+        <source>offline</source>
+        <translation>offline</translation>
+    </message>
+    <message id="aegra.repository.test">
+        <source>Test</source>
+        <translation>Test</translation>
+    </message>
+    <message id="aegra.repository.export">
+        <source>Export...</source>
+        <translation>Exportieren...</translation>
+    </message>
+    <message id="aegra.repository.password">
+        <source>Password...</source>
+        <translation>Kennwort...</translation>
     </message>
     <message id="aegra.repository.kind_local_catalog">
         <source>local · catalog</source>
@@ -259,6 +307,10 @@
         <source>Retry</source>
         <translation>Erneut versuchen</translation>
     </message>
+    <message id="aegra.common.quit">
+        <source>Quit</source>
+        <translation>Beenden</translation>
+    </message>
     <message id="aegra.common.dismiss">
         <source>Dismiss</source>
         <translation>Schließen</translation>
@@ -272,12 +324,18 @@
         <translation>Aufgaben %1</translation>
     </message>
     <message id="aegra.splash.status.connecting">
-        <source>Connecting to Service</source>
-        <translation>Verbindung zum Service wird hergestellt</translation>
+        <source>Loading data...</source>
+        <translation>Daten werden geladen...</translation>
     </message>
     <message id="aegra.splash.status.failed">
-        <source>Unable to connect to Service</source>
-        <translation>Verbindung zum Service nicht möglich</translation>
+        <source>Unable to connect to the backup server</source>
+        <translation>Verbindung zum Sicherungsserver nicht möglich</translation>
+    </message>
+    <message id="aegra.splash.error.detail">
+        <source>Please ensure Aegra Service is running and try again.
+Server: %1</source>
+        <translation>Stellen Sie sicher, dass Aegra Service läuft, und versuchen Sie es erneut.
+Server: %1</translation>
     </message>
     <message id="aegra.home.refresh_tasks">
         <source>Refresh tasks</source>
@@ -304,8 +362,28 @@
         <translation>Dieser PC</translation>
     </message>
     <message id="aegra.home.system_information">
-        <source>System information</source>
+        <source>System Information</source>
         <translation>Systeminformationen</translation>
+    </message>
+    <message id="aegra.home.os_name">
+        <source>Windows 10</source>
+        <translation>Windows 10</translation>
+    </message>
+    <message id="aegra.home.os_copyright">
+        <source>© Microsoft Corporation. All Rights Reserved.</source>
+        <translation>© Microsoft Corporation. All Rights Reserved.</translation>
+    </message>
+    <message id="aegra.home.tasks_latest_10">
+        <source>Showing latest 10 only</source>
+        <translation>Nur die neuesten 10</translation>
+    </message>
+    <message id="aegra.home.more">
+        <source>More</source>
+        <translation>Mehr</translation>
+    </message>
+    <message id="aegra.home.no_backup_restore_tasks">
+        <source>No backup or restore tasks</source>
+        <translation>Keine Sicherungs- oder Wiederherstellungsaufgaben</translation>
     </message>
     <message id="aegra.home.loading_disks">
         <source>Loading sources…</source>
@@ -464,20 +542,156 @@
         <translation>Ziel-Repository</translation>
     </message>
     <message id="aegra.backup.wizard.title">
-        <source>Start backup</source>
-        <translation>Sicherung starten</translation>
+        <source>Add Schedule Wizard</source>
+        <translation>Zeitplan-Assistent</translation>
+    </message>
+    <message id="aegra.backup.column.destination">
+        <source>Destination</source>
+        <translation>Ziel</translation>
+    </message>
+    <message id="aegra.backup.column.frequency">
+        <source>Frequency</source>
+        <translation>Häufigkeit</translation>
+    </message>
+    <message id="aegra.backup.column.last_run">
+        <source>Last run</source>
+        <translation>Letzter Lauf</translation>
+    </message>
+    <message id="aegra.backup.column.next_run">
+        <source>Next run</source>
+        <translation>Nächster Lauf</translation>
+    </message>
+    <message id="aegra.backup.locations">
+        <source>Locations</source>
+        <translation>Speicherorte</translation>
+    </message>
+    <message id="aegra.backup.add_location">
+        <source>Add location</source>
+        <translation>Speicherort hinzufügen</translation>
+    </message>
+    <message id="aegra.backup.source.volume">
+        <source>Volume</source>
+        <translation>Volume</translation>
+    </message>
+    <message id="aegra.common.next">
+        <source>Next</source>
+        <translation>Weiter</translation>
+    </message>
+    <message id="aegra.backup.schedule_settings">
+        <source>Schedule settings</source>
+        <translation>Zeitplaneinstellungen</translation>
+    </message>
+    <message id="aegra.backup.freq.daily">
+        <source>Daily</source>
+        <translation>Täglich</translation>
+    </message>
+    <message id="aegra.backup.freq.weekly">
+        <source>Weekly</source>
+        <translation>Wöchentlich</translation>
+    </message>
+    <message id="aegra.backup.freq.monthly">
+        <source>Monthly</source>
+        <translation>Monatlich</translation>
+    </message>
+    <message id="aegra.backup.day_of_week">
+        <source>Day of week</source>
+        <translation>Wochentag</translation>
+    </message>
+    <message id="aegra.backup.day_of_month">
+        <source>Day of month</source>
+        <translation>Tag des Monats</translation>
+    </message>
+    <message id="aegra.backup.time_of_day">
+        <source>Time of day</source>
+        <translation>Uhrzeit</translation>
+    </message>
+    <message id="aegra.backup.weekday.mon">
+        <source>Mon</source>
+        <translation>Mo</translation>
+    </message>
+    <message id="aegra.backup.weekday.tue">
+        <source>Tue</source>
+        <translation>Di</translation>
+    </message>
+    <message id="aegra.backup.weekday.wed">
+        <source>Wed</source>
+        <translation>Mi</translation>
+    </message>
+    <message id="aegra.backup.weekday.thu">
+        <source>Thu</source>
+        <translation>Do</translation>
+    </message>
+    <message id="aegra.backup.weekday.fri">
+        <source>Fri</source>
+        <translation>Fr</translation>
+    </message>
+    <message id="aegra.backup.weekday.sat">
+        <source>Sat</source>
+        <translation>Sa</translation>
+    </message>
+    <message id="aegra.backup.weekday.sun">
+        <source>Sun</source>
+        <translation>So</translation>
+    </message>
+    <message id="aegra.backup.opt.dedup">
+        <source>Enable deduplication</source>
+        <translation>Deduplizierung aktivieren</translation>
+    </message>
+    <message id="aegra.backup.opt.exclude_page">
+        <source>Exclude pagefile / hiberfil / swapfile</source>
+        <translation>pagefile / hiberfil / swapfile ausschließen</translation>
+    </message>
+    <message id="aegra.backup.opt.shutdown">
+        <source>Shut down when backup completes</source>
+        <translation>Nach Abschluss herunterfahren</translation>
+    </message>
+    <message id="aegra.backup.opt.split">
+        <source>Split image into fixed-size files</source>
+        <translation>Image in feste Dateigrößen teilen</translation>
+    </message>
+    <message id="aegra.backup.opt.split_suffix">
+        <source>per file</source>
+        <translation>pro Datei</translation>
+    </message>
+    <message id="aegra.backup.opt.encryption">
+        <source>Encryption (password required)</source>
+        <translation>Verschlüsselung (Passwort erforderlich)</translation>
+    </message>
+    <message id="aegra.backup.opt.compression">
+        <source>Compression</source>
+        <translation>Kompression</translation>
+    </message>
+    <message id="aegra.backup.comp.none">
+        <source>None</source>
+        <translation>Keine</translation>
+    </message>
+    <message id="aegra.backup.comp.normal">
+        <source>Normal</source>
+        <translation>Normal</translation>
+    </message>
+    <message id="aegra.backup.comp.best">
+        <source>Best</source>
+        <translation>Beste</translation>
     </message>
     <message id="aegra.backup.column.status">
         <source>Status</source>
         <translation>Status</translation>
     </message>
     <message id="aegra.backup.schedules.empty">
-        <source>No schedules yet</source>
-        <translation>Noch keine Zeitpläne</translation>
+        <source>No schedules</source>
+        <translation>Keine Zeitpläne</translation>
+    </message>
+    <message id="aegra.backup.column.enabled">
+        <source>Enabled</source>
+        <translation>Aktiviert</translation>
+    </message>
+    <message id="aegra.backup.action.run">
+        <source>Run</source>
+        <translation>Ausführen</translation>
     </message>
     <message id="aegra.backup.schedules.hint_add">
-        <source>Use Add to start a one-time full backup</source>
-        <translation>Mit „Hinzufügen“ eine einmalige Vollsicherung starten</translation>
+        <source>Use Add to open the schedule wizard</source>
+        <translation>Mit „Hinzufügen“ den Zeitplan-Assistenten öffnen</translation>
     </message>
     <message id="aegra.backup.action.details">
         <source>Details</source>
@@ -624,28 +838,48 @@
         <translation>Service noch nicht verbunden — nur UI-Vorschau</translation>
     </message>
     <message id="aegra.restore.source_disks">
-        <source>Source disks</source>
+        <source>Source Disks</source>
         <translation>Quelldatenträger</translation>
     </message>
     <message id="aegra.restore.source_hint">
-        <source>Layout from the selected recovery point</source>
-        <translation>Layout des gewählten Wiederherstellungspunkts</translation>
+        <source>(from backup image → pick target below)</source>
+        <translation>(aus Backup-Image → Ziel unten wählen)</translation>
     </message>
     <message id="aegra.restore.select_checkpoint">
-        <source>Select recovery point</source>
-        <translation>Wiederherstellungspunkt wählen</translation>
+        <source>Select checkpoint</source>
+        <translation>Prüfpunkt wählen</translation>
+    </message>
+    <message id="aegra.restore.select_checkpoint_title">
+        <source>Select checkpoint</source>
+        <translation>Prüfpunkt wählen</translation>
     </message>
     <message id="aegra.restore.select_checkpoint_source">
-        <source>Select a recovery point to show source disk layout</source>
-        <translation>Wiederherstellungspunkt wählen, um die Quell-Datenträger anzuzeigen</translation>
+        <source>Select a checkpoint to view source disks</source>
+        <translation>Prüfpunkt wählen, um Quelldatenträger anzuzeigen</translation>
+    </message>
+    <message id="aegra.restore.selected_label">
+        <source>Selected:</source>
+        <translation>Ausgewählt:</translation>
+    </message>
+    <message id="aegra.restore.calendar">
+        <source>Calendar</source>
+        <translation>Kalender</translation>
+    </message>
+    <message id="aegra.restore.checkpoints">
+        <source>Checkpoints</source>
+        <translation>Prüfpunkte</translation>
+    </message>
+    <message id="aegra.restore.select_date_with_backups">
+        <source>Select a date with backups</source>
+        <translation>Datum mit Sicherungen wählen</translation>
     </message>
     <message id="aegra.restore.target_disks">
-        <source>Target disks</source>
+        <source>Target Disks</source>
         <translation>Zieldatenträger</translation>
     </message>
     <message id="aegra.restore.target_hint">
-        <source>Map backup disks onto local disks</source>
-        <translation>Sicherungsdatenträger lokalen Datenträgern zuordnen</translation>
+        <source>(this PC — available restore destinations)</source>
+        <translation>(dieser PC — verfügbare Wiederherstellungsziele)</translation>
     </message>
     <message id="aegra.restore.target_empty">
         <source>Local disks will appear when restore inventory is connected</source>
@@ -676,28 +910,40 @@
         <translation>Kalender und Liste der Wiederherstellungspunkte erscheinen nach Anbindung der Restore-Service-APIs</translation>
     </message>
     <message id="aegra.mount.source_disks">
-        <source>Source disks</source>
+        <source>Source Disks</source>
         <translation>Quelldatenträger</translation>
     </message>
     <message id="aegra.mount.source_hint">
-        <source>Disk layout inside the selected recovery point</source>
-        <translation>Datenträgerlayout im gewählten Wiederherstellungspunkt</translation>
+        <source>(check disks to mount — volumes auto-get drive letters)</source>
+        <translation>(Datenträger zum Mounten markieren — Laufwerksbuchstaben automatisch)</translation>
     </message>
     <message id="aegra.mount.source_empty">
-        <source>Select a recovery point to show mountable disks</source>
-        <translation>Wiederherstellungspunkt wählen, um einbindbare Datenträger anzuzeigen</translation>
+        <source>Select a checkpoint to view source disks</source>
+        <translation>Prüfpunkt wählen, um Quelldatenträger anzuzeigen</translation>
     </message>
     <message id="aegra.mount.mounted">
-        <source>Mounted sessions</source>
-        <translation>Eingebundene Sitzungen</translation>
+        <source>Mounted</source>
+        <translation>Eingehängt</translation>
     </message>
     <message id="aegra.mount.mounted_hint">
-        <source>Active mount sessions on this machine</source>
-        <translation>Aktive Einbindungssitzungen auf diesem Gerät</translation>
+        <source>Check source disk(s), then click Mount</source>
+        <translation>Quelldatenträger markieren und Mount klicken</translation>
     </message>
     <message id="aegra.mount.mounted_empty">
-        <source>No mounted sessions</source>
-        <translation>Keine eingebundenen Sitzungen</translation>
+        <source>No mounted images</source>
+        <translation>Keine eingehängten Images</translation>
+    </message>
+    <message id="aegra.mount.col.drives">
+        <source>Drive(s)</source>
+        <translation>Laufwerk(e)</translation>
+    </message>
+    <message id="aegra.mount.col.disk">
+        <source>Disk</source>
+        <translation>Datenträger</translation>
+    </message>
+    <message id="aegra.mount.col.image">
+        <source>Image</source>
+        <translation>Image</translation>
     </message>
     <message id="aegra.mount.drive_letter">
         <source>Preferred drive letter</source>
@@ -716,8 +962,8 @@
         <translation>Zeit</translation>
     </message>
     <message id="aegra.eventlog.range.all">
-        <source>All</source>
-        <translation>Alle</translation>
+        <source>All time</source>
+        <translation>Gesamte Zeit</translation>
     </message>
     <message id="aegra.eventlog.range.24h">
         <source>24h</source>
@@ -732,24 +978,32 @@
         <translation>30 Tage</translation>
     </message>
     <message id="aegra.eventlog.type.all">
-        <source>All types</source>
-        <translation>Alle Typen</translation>
+        <source>All</source>
+        <translation>Alle</translation>
     </message>
     <message id="aegra.eventlog.status.all">
-        <source>All statuses</source>
-        <translation>Alle Status</translation>
+        <source>All</source>
+        <translation>Alle</translation>
+    </message>
+    <message id="aegra.eventlog.status.success">
+        <source>Success</source>
+        <translation>Erfolg</translation>
     </message>
     <message id="aegra.eventlog.column.summary">
         <source>Summary</source>
         <translation>Zusammenfassung</translation>
     </message>
     <message id="aegra.eventlog.empty">
-        <source>No events yet. Task history will appear when event log Service APIs are connected.</source>
-        <translation>Noch keine Ereignisse. Aufgabenverlauf erscheint nach Anbindung der Event-Log-Service-APIs.</translation>
+        <source>No events yet</source>
+        <translation>Noch keine Ereignisse</translation>
     </message>
     <message id="aegra.eventlog.page_of">
         <source>Page %1 of %2</source>
         <translation>Seite %1 von %2</translation>
+    </message>
+    <message id="aegra.eventlog.page_range">
+        <source>%1–%2 of %3 · Page %4 / %5</source>
+        <translation>%1–%2 von %3 · Seite %4 / %5</translation>
     </message>
     <message id="aegra.eventlog.prev">
         <source>Previous</source>
@@ -772,8 +1026,8 @@
         <translation>Design</translation>
     </message>
     <message id="aegra.settings.theme_desc">
-        <source>Appearance follows the blueExtra palette until theme Service settings are connected</source>
-        <translation>Darstellung nutzt blueExtra, bis Theme-Service-Einstellungen verbunden sind</translation>
+        <source>Choose a color theme for the desktop client</source>
+        <translation>Farbdesign für den Desktop-Client wählen</translation>
     </message>
     <message id="aegra.settings.theme.blue_extra">
         <source>Blue Extra</source>

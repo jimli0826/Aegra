@@ -184,7 +184,7 @@ Item {
 
                     Text {
                         Layout.fillWidth: true
-                        //% "Appearance follows the blueExtra palette until theme Service settings are connected"
+                        //% "Choose a color theme for the desktop client"
                         text: qsTrId("aegra.settings.theme_desc")
                         color: Theme.colorTextGrey
                         font.pixelSize: 12
@@ -197,45 +197,17 @@ Item {
                         spacing: 12
 
                         Repeater {
-                            model: [
-                                {
-                                    id: "blueExtra",
-                                    label: qsTrId("aegra.settings.theme.blue_extra"),
-                                    previewBg: "#1b2a40",
-                                    previewCard: "#2a3f5c",
-                                    previewAccent: "#4fc1ff",
-                                    previewText: "#ffffff",
-                                    selected: true
-                                },
-                                {
-                                    id: "dark",
-                                    label: qsTrId("aegra.settings.theme.dark"),
-                                    previewBg: "#1e1e1e",
-                                    previewCard: "#2d2d30",
-                                    previewAccent: "#007acc",
-                                    previewText: "#ffffff",
-                                    selected: false
-                                },
-                                {
-                                    id: "light",
-                                    label: qsTrId("aegra.settings.theme.light"),
-                                    previewBg: "#eeeeee",
-                                    previewCard: "#ffffff",
-                                    previewAccent: "#0078d4",
-                                    previewText: "#1e1e1e",
-                                    selected: false
-                                }
-                            ]
+                            model: Theme.themes
                             delegate: Rectangle {
+                                id: themeCard
                                 required property var modelData
+                                readonly property bool selected: Theme.themeId === modelData.id
                                 width: 148
                                 height: 112
                                 radius: 6
                                 color: Theme.colorInput
-                                border.width: modelData.selected ? 2 : 1
-                                border.color: modelData.selected
-                                              ? Theme.colorAccentBlue : Theme.colorBorder
-                                opacity: modelData.selected ? 1.0 : 0.55
+                                border.width: selected ? 2 : 1
+                                border.color: selected ? Theme.colorAccentBlue : Theme.colorBorder
 
                                 ColumnLayout {
                                     anchors.fill: parent
@@ -287,10 +259,10 @@ Item {
                                     }
                                     Text {
                                         Layout.fillWidth: true
-                                        text: modelData.label
+                                        text: Theme.themeLabel(modelData)
                                         color: Theme.colorTextWhite
                                         font.pixelSize: 12
-                                        font.bold: modelData.selected
+                                        font.bold: themeCard.selected
                                         font.family: Theme.fontFamily
                                         horizontalAlignment: Text.AlignHCenter
                                         elide: Text.ElideRight
@@ -301,8 +273,15 @@ Item {
                                         color: Theme.colorAccentBlue
                                         font.pixelSize: 12
                                         font.bold: true
-                                        visible: modelData.selected
+                                        visible: themeCard.selected
                                     }
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: Theme.setTheme(modelData.id)
                                 }
                             }
                         }

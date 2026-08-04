@@ -4,6 +4,7 @@ add_library(aegra_application STATIC
     src/personal_repository_query.cpp
     src/recovery_point_operations.cpp
     src/repository_connection_service.cpp
+    src/restore_preflight_service.cpp
     src/source_inventory_query.cpp
 )
 

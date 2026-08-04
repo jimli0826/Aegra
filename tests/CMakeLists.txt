@@ -20,6 +20,9 @@ target_link_libraries(aegra_ports_compile_test PRIVATE Aegra::Ports)
 aegra_add_test(aegra_sqlite_control_plane_tests adapters/sqlite_control_plane_test.cpp)
 target_link_libraries(aegra_sqlite_control_plane_tests PRIVATE Aegra::AdapterSqlite)
 
+aegra_add_test(aegra_sqlite_restore_preflight_tests adapters/sqlite_restore_preflight_test.cpp)
+target_link_libraries(aegra_sqlite_restore_preflight_tests PRIVATE Aegra::AdapterSqlite)
+
 aegra_add_test(
     aegra_personal_repository_query_tests
     application/personal_repository_query_test.cpp
@@ -51,6 +54,15 @@ target_link_libraries(
         Aegra::AdapterMemory
         Aegra::AdapterSqlite
         Aegra::AdapterWindowsProcess
+)
+
+aegra_add_test(
+    aegra_s6_restore_preflight_tests
+    application/s6_restore_preflight_test.cpp
+)
+target_link_libraries(
+    aegra_s6_restore_preflight_tests
+    PRIVATE Aegra::Application Aegra::AdapterSqlite
 )
 
 aegra_add_test(aegra_format_tests format/manifest_codec_test.cpp)

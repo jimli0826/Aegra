@@ -1,7 +1,7 @@
 #include "sqlite_internal.h"
 
 namespace aegra::adapters::sqlite::detail {
-base::Result<void> apply_schema_v1(sqlite3* const db) {
+base::Result<void> apply_schema_v2(sqlite3* const db) {
     static constexpr char kSchema[] = R"sql(
 PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_jobs_idempotency_key
     ON jobs(idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_jobs_preflight_token
+    ON jobs(preflight_token) WHERE preflight_token IS NOT NULL;
 CREATE INDEX IF NOT EXISTS ix_jobs_created ON jobs(created_utc_ms DESC, job_id ASC);
 CREATE INDEX IF NOT EXISTS ix_jobs_state ON jobs(state, created_utc_ms DESC);
 CREATE TABLE IF NOT EXISTS schedules (
@@ -86,6 +88,21 @@ CREATE TABLE IF NOT EXISTS commands (
     resource_id TEXT,
     created_utc_ms INTEGER NOT NULL CHECK (created_utc_ms >= 0)
 );
+CREATE TABLE IF NOT EXISTS restore_preflights (
+    preflight_token TEXT PRIMARY KEY NOT NULL,
+    repository_connection_id TEXT NOT NULL,
+    repository_uuid TEXT NOT NULL,
+    recovery_point_id TEXT NOT NULL,
+    target_source_id TEXT NOT NULL,
+    chain_fingerprint TEXT NOT NULL,
+    logical_size_bytes INTEGER NOT NULL CHECK (logical_size_bytes > 0),
+    target_capacity_bytes INTEGER NOT NULL CHECK (target_capacity_bytes >= logical_size_bytes),
+    chain_depth INTEGER NOT NULL CHECK (chain_depth > 0 AND chain_depth <= 4294967295),
+    created_utc_ms INTEGER NOT NULL CHECK (created_utc_ms >= 0),
+    expires_utc_ms INTEGER NOT NULL CHECK (expires_utc_ms > created_utc_ms)
+);
+CREATE INDEX IF NOT EXISTS ix_restore_preflights_expires
+    ON restore_preflights(expires_utc_ms);
 )sql";
     return exec_sql(db, kSchema);
 }

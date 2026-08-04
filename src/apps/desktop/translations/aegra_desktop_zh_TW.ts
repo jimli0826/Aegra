@@ -107,6 +107,18 @@
         <source>Cancel</source>
         <translation>取消</translation>
     </message>
+    <message id="aegra.common.back">
+        <source>Back</source>
+        <translation>上一步</translation>
+    </message>
+    <message id="aegra.common.create">
+        <source>Create</source>
+        <translation>建立</translation>
+    </message>
+    <message id="aegra.common.not_available">
+        <source>N/A</source>
+        <translation>N/A</translation>
+    </message>
     <message id="aegra.error.unknown">
         <source>Unexpected service response (%1)</source>
         <translation>意外的 Service 回應（%1）</translation>
@@ -120,8 +132,8 @@
         <translation>Service 連線已中斷</translation>
     </message>
     <message id="aegra.error.service.connect_failed">
-        <source>Unable to connect to Service</source>
-        <translation>無法連線到 Service</translation>
+        <source>Connection refused</source>
+        <translation>連線被拒絕</translation>
     </message>
     <message id="aegra.error.service.protocol_invalid">
         <source>Invalid Service response</source>
@@ -146,6 +158,42 @@
     <message id="aegra.repository.recovery_points_count">
         <source>%1 recovery points</source>
         <translation>%1 個還原點</translation>
+    </message>
+    <message id="aegra.repository.checkpoint_one">
+        <source>1 checkpoint</source>
+        <translation>1 個檢查點</translation>
+    </message>
+    <message id="aegra.repository.add">
+        <source>Add repository</source>
+        <translation>新增 Repository</translation>
+    </message>
+    <message id="aegra.repository.import">
+        <source>Import...</source>
+        <translation>匯入...</translation>
+    </message>
+    <message id="aegra.repository.loaded_count">
+        <source>Loaded %1 repositories</source>
+        <translation>已載入 %1 個 Repository</translation>
+    </message>
+    <message id="aegra.repository.connected">
+        <source>connected</source>
+        <translation>已連線</translation>
+    </message>
+    <message id="aegra.repository.offline">
+        <source>offline</source>
+        <translation>離線</translation>
+    </message>
+    <message id="aegra.repository.test">
+        <source>Test</source>
+        <translation>測試</translation>
+    </message>
+    <message id="aegra.repository.export">
+        <source>Export...</source>
+        <translation>匯出...</translation>
+    </message>
+    <message id="aegra.repository.password">
+        <source>Password...</source>
+        <translation>密碼...</translation>
     </message>
     <message id="aegra.repository.kind_local_catalog">
         <source>local · catalog</source>
@@ -259,6 +307,10 @@
         <source>Retry</source>
         <translation>重試</translation>
     </message>
+    <message id="aegra.common.quit">
+        <source>Quit</source>
+        <translation>結束</translation>
+    </message>
     <message id="aegra.common.dismiss">
         <source>Dismiss</source>
         <translation>關閉</translation>
@@ -272,12 +324,18 @@
         <translation>任務 %1</translation>
     </message>
     <message id="aegra.splash.status.connecting">
-        <source>Connecting to Service</source>
-        <translation>正在連線 Service</translation>
+        <source>Loading data...</source>
+        <translation>資料載入中...</translation>
     </message>
     <message id="aegra.splash.status.failed">
-        <source>Unable to connect to Service</source>
-        <translation>無法連線到 Service</translation>
+        <source>Unable to connect to the backup server</source>
+        <translation>無法連線到備份伺服器</translation>
+    </message>
+    <message id="aegra.splash.error.detail">
+        <source>Please ensure Aegra Service is running and try again.
+Server: %1</source>
+        <translation>請確認 Aegra Service 已啟動後再試。
+伺服器: %1</translation>
     </message>
     <message id="aegra.home.refresh_tasks">
         <source>Refresh tasks</source>
@@ -304,8 +362,28 @@
         <translation>此電腦</translation>
     </message>
     <message id="aegra.home.system_information">
-        <source>System information</source>
+        <source>System Information</source>
         <translation>系統資訊</translation>
+    </message>
+    <message id="aegra.home.os_name">
+        <source>Windows 10</source>
+        <translation>Windows 10</translation>
+    </message>
+    <message id="aegra.home.os_copyright">
+        <source>© Microsoft Corporation. All Rights Reserved.</source>
+        <translation>© Microsoft Corporation. All Rights Reserved.</translation>
+    </message>
+    <message id="aegra.home.tasks_latest_10">
+        <source>Showing latest 10 only</source>
+        <translation>僅顯示最近 10 筆</translation>
+    </message>
+    <message id="aegra.home.more">
+        <source>More</source>
+        <translation>更多</translation>
+    </message>
+    <message id="aegra.home.no_backup_restore_tasks">
+        <source>No backup or restore tasks</source>
+        <translation>沒有備份或還原任務</translation>
     </message>
     <message id="aegra.home.loading_disks">
         <source>Loading sources…</source>
@@ -464,20 +542,156 @@
         <translation>目標 Repository</translation>
     </message>
     <message id="aegra.backup.wizard.title">
-        <source>Start backup</source>
-        <translation>開始備份</translation>
+        <source>Add Schedule Wizard</source>
+        <translation>新增排程精靈</translation>
+    </message>
+    <message id="aegra.backup.column.destination">
+        <source>Destination</source>
+        <translation>目標</translation>
+    </message>
+    <message id="aegra.backup.column.frequency">
+        <source>Frequency</source>
+        <translation>頻率</translation>
+    </message>
+    <message id="aegra.backup.column.last_run">
+        <source>Last run</source>
+        <translation>上次執行</translation>
+    </message>
+    <message id="aegra.backup.column.next_run">
+        <source>Next run</source>
+        <translation>下次執行</translation>
+    </message>
+    <message id="aegra.backup.locations">
+        <source>Locations</source>
+        <translation>位置</translation>
+    </message>
+    <message id="aegra.backup.add_location">
+        <source>Add location</source>
+        <translation>新增位置</translation>
+    </message>
+    <message id="aegra.backup.source.volume">
+        <source>Volume</source>
+        <translation>磁碟區</translation>
+    </message>
+    <message id="aegra.common.next">
+        <source>Next</source>
+        <translation>下一步</translation>
+    </message>
+    <message id="aegra.backup.schedule_settings">
+        <source>Schedule settings</source>
+        <translation>排程設定</translation>
+    </message>
+    <message id="aegra.backup.freq.daily">
+        <source>Daily</source>
+        <translation>每天</translation>
+    </message>
+    <message id="aegra.backup.freq.weekly">
+        <source>Weekly</source>
+        <translation>每週</translation>
+    </message>
+    <message id="aegra.backup.freq.monthly">
+        <source>Monthly</source>
+        <translation>每月</translation>
+    </message>
+    <message id="aegra.backup.day_of_week">
+        <source>Day of week</source>
+        <translation>星期</translation>
+    </message>
+    <message id="aegra.backup.day_of_month">
+        <source>Day of month</source>
+        <translation>日期</translation>
+    </message>
+    <message id="aegra.backup.time_of_day">
+        <source>Time of day</source>
+        <translation>時間</translation>
+    </message>
+    <message id="aegra.backup.weekday.mon">
+        <source>Mon</source>
+        <translation>一</translation>
+    </message>
+    <message id="aegra.backup.weekday.tue">
+        <source>Tue</source>
+        <translation>二</translation>
+    </message>
+    <message id="aegra.backup.weekday.wed">
+        <source>Wed</source>
+        <translation>三</translation>
+    </message>
+    <message id="aegra.backup.weekday.thu">
+        <source>Thu</source>
+        <translation>四</translation>
+    </message>
+    <message id="aegra.backup.weekday.fri">
+        <source>Fri</source>
+        <translation>五</translation>
+    </message>
+    <message id="aegra.backup.weekday.sat">
+        <source>Sat</source>
+        <translation>六</translation>
+    </message>
+    <message id="aegra.backup.weekday.sun">
+        <source>Sun</source>
+        <translation>日</translation>
+    </message>
+    <message id="aegra.backup.opt.dedup">
+        <source>Enable deduplication</source>
+        <translation>啟用重複資料刪除</translation>
+    </message>
+    <message id="aegra.backup.opt.exclude_page">
+        <source>Exclude pagefile / hiberfil / swapfile</source>
+        <translation>排除 pagefile / hiberfil / swapfile</translation>
+    </message>
+    <message id="aegra.backup.opt.shutdown">
+        <source>Shut down when backup completes</source>
+        <translation>備份完成後關機</translation>
+    </message>
+    <message id="aegra.backup.opt.split">
+        <source>Split image into fixed-size files</source>
+        <translation>將映像分割為固定大小檔案</translation>
+    </message>
+    <message id="aegra.backup.opt.split_suffix">
+        <source>per file</source>
+        <translation>每個檔案</translation>
+    </message>
+    <message id="aegra.backup.opt.encryption">
+        <source>Encryption (password required)</source>
+        <translation>加密（需要密碼）</translation>
+    </message>
+    <message id="aegra.backup.opt.compression">
+        <source>Compression</source>
+        <translation>壓縮</translation>
+    </message>
+    <message id="aegra.backup.comp.none">
+        <source>None</source>
+        <translation>無</translation>
+    </message>
+    <message id="aegra.backup.comp.normal">
+        <source>Normal</source>
+        <translation>標準</translation>
+    </message>
+    <message id="aegra.backup.comp.best">
+        <source>Best</source>
+        <translation>最佳</translation>
     </message>
     <message id="aegra.backup.column.status">
         <source>Status</source>
         <translation>狀態</translation>
     </message>
     <message id="aegra.backup.schedules.empty">
-        <source>No schedules yet</source>
-        <translation>尚無排程</translation>
+        <source>No schedules</source>
+        <translation>沒有排程</translation>
+    </message>
+    <message id="aegra.backup.column.enabled">
+        <source>Enabled</source>
+        <translation>啟用</translation>
+    </message>
+    <message id="aegra.backup.action.run">
+        <source>Run</source>
+        <translation>執行</translation>
     </message>
     <message id="aegra.backup.schedules.hint_add">
-        <source>Use Add to start a one-time full backup</source>
-        <translation>按「新增」啟動一次性完整備份</translation>
+        <source>Use Add to open the schedule wizard</source>
+        <translation>按「新增」開啟排程精靈</translation>
     </message>
     <message id="aegra.backup.action.details">
         <source>Details</source>
@@ -624,28 +838,48 @@
         <translation>尚未連線 Service — 僅 UI 預覽</translation>
     </message>
     <message id="aegra.restore.source_disks">
-        <source>Source disks</source>
+        <source>Source Disks</source>
         <translation>來源磁碟</translation>
     </message>
     <message id="aegra.restore.source_hint">
-        <source>Layout from the selected recovery point</source>
-        <translation>來自所選還原點的配置</translation>
+        <source>(from backup image → pick target below)</source>
+        <translation>（來自備份映像 → 在下方選擇目標）</translation>
     </message>
     <message id="aegra.restore.select_checkpoint">
-        <source>Select recovery point</source>
-        <translation>選擇還原點</translation>
+        <source>Select checkpoint</source>
+        <translation>選擇檢查點</translation>
+    </message>
+    <message id="aegra.restore.select_checkpoint_title">
+        <source>Select checkpoint</source>
+        <translation>選擇檢查點</translation>
     </message>
     <message id="aegra.restore.select_checkpoint_source">
-        <source>Select a recovery point to show source disk layout</source>
-        <translation>選擇還原點以顯示來源磁碟配置</translation>
+        <source>Select a checkpoint to view source disks</source>
+        <translation>選擇檢查點以檢視來源磁碟</translation>
+    </message>
+    <message id="aegra.restore.selected_label">
+        <source>Selected:</source>
+        <translation>已選：</translation>
+    </message>
+    <message id="aegra.restore.calendar">
+        <source>Calendar</source>
+        <translation>行事曆</translation>
+    </message>
+    <message id="aegra.restore.checkpoints">
+        <source>Checkpoints</source>
+        <translation>檢查點</translation>
+    </message>
+    <message id="aegra.restore.select_date_with_backups">
+        <source>Select a date with backups</source>
+        <translation>選擇有備份的日期</translation>
     </message>
     <message id="aegra.restore.target_disks">
-        <source>Target disks</source>
+        <source>Target Disks</source>
         <translation>目標磁碟</translation>
     </message>
     <message id="aegra.restore.target_hint">
-        <source>Map backup disks onto local disks</source>
-        <translation>將備份磁碟對應到本機磁碟</translation>
+        <source>(this PC — available restore destinations)</source>
+        <translation>（此電腦 — 可用還原目標）</translation>
     </message>
     <message id="aegra.restore.target_empty">
         <source>Local disks will appear when restore inventory is connected</source>
@@ -676,28 +910,40 @@
         <translation>連線 Restore Service API 後會顯示還原點月曆與清單</translation>
     </message>
     <message id="aegra.mount.source_disks">
-        <source>Source disks</source>
+        <source>Source Disks</source>
         <translation>來源磁碟</translation>
     </message>
     <message id="aegra.mount.source_hint">
-        <source>Disk layout inside the selected recovery point</source>
-        <translation>所選還原點內的磁碟配置</translation>
+        <source>(check disks to mount — volumes auto-get drive letters)</source>
+        <translation>（勾選要掛載的磁碟 — 磁碟區將自動取得磁碟機代號）</translation>
     </message>
     <message id="aegra.mount.source_empty">
-        <source>Select a recovery point to show mountable disks</source>
-        <translation>選擇還原點以顯示可掛載磁碟</translation>
+        <source>Select a checkpoint to view source disks</source>
+        <translation>選擇檢查點以檢視來源磁碟</translation>
     </message>
     <message id="aegra.mount.mounted">
-        <source>Mounted sessions</source>
-        <translation>已掛載工作階段</translation>
+        <source>Mounted</source>
+        <translation>已掛載</translation>
     </message>
     <message id="aegra.mount.mounted_hint">
-        <source>Active mount sessions on this machine</source>
-        <translation>本機上的作用中掛載工作階段</translation>
+        <source>Check source disk(s), then click Mount</source>
+        <translation>勾選來源磁碟後按掛載</translation>
     </message>
     <message id="aegra.mount.mounted_empty">
-        <source>No mounted sessions</source>
-        <translation>沒有已掛載工作階段</translation>
+        <source>No mounted images</source>
+        <translation>沒有已掛載映像</translation>
+    </message>
+    <message id="aegra.mount.col.drives">
+        <source>Drive(s)</source>
+        <translation>磁碟機</translation>
+    </message>
+    <message id="aegra.mount.col.disk">
+        <source>Disk</source>
+        <translation>磁碟</translation>
+    </message>
+    <message id="aegra.mount.col.image">
+        <source>Image</source>
+        <translation>映像</translation>
     </message>
     <message id="aegra.mount.drive_letter">
         <source>Preferred drive letter</source>
@@ -716,8 +962,8 @@
         <translation>時間</translation>
     </message>
     <message id="aegra.eventlog.range.all">
-        <source>All</source>
-        <translation>全部</translation>
+        <source>All time</source>
+        <translation>全部時間</translation>
     </message>
     <message id="aegra.eventlog.range.24h">
         <source>24h</source>
@@ -732,24 +978,32 @@
         <translation>30 天</translation>
     </message>
     <message id="aegra.eventlog.type.all">
-        <source>All types</source>
-        <translation>全部類型</translation>
+        <source>All</source>
+        <translation>全部</translation>
     </message>
     <message id="aegra.eventlog.status.all">
-        <source>All statuses</source>
-        <translation>全部狀態</translation>
+        <source>All</source>
+        <translation>全部</translation>
+    </message>
+    <message id="aegra.eventlog.status.success">
+        <source>Success</source>
+        <translation>成功</translation>
     </message>
     <message id="aegra.eventlog.column.summary">
         <source>Summary</source>
         <translation>摘要</translation>
     </message>
     <message id="aegra.eventlog.empty">
-        <source>No events yet. Task history will appear when event log Service APIs are connected.</source>
-        <translation>尚無事件。連線事件記錄 Service API 後會顯示任務歷程。</translation>
+        <source>No events yet</source>
+        <translation>尚無事件</translation>
     </message>
     <message id="aegra.eventlog.page_of">
         <source>Page %1 of %2</source>
         <translation>第 %1 頁 / 共 %2 頁</translation>
+    </message>
+    <message id="aegra.eventlog.page_range">
+        <source>%1–%2 of %3 · Page %4 / %5</source>
+        <translation>%1–%2 / 共 %3 · 第 %4 / %5 頁</translation>
     </message>
     <message id="aegra.eventlog.prev">
         <source>Previous</source>
@@ -772,8 +1026,8 @@
         <translation>佈景主題</translation>
     </message>
     <message id="aegra.settings.theme_desc">
-        <source>Appearance follows the blueExtra palette until theme Service settings are connected</source>
-        <translation>在佈景主題 Service 設定接入前，外觀使用 blueExtra 調色盤</translation>
+        <source>Choose a color theme for the desktop client</source>
+        <translation>選擇桌面用戶端的配色主題</translation>
     </message>
     <message id="aegra.settings.theme.blue_extra">
         <source>Blue Extra</source>

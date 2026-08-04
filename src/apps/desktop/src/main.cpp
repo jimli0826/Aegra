@@ -1,12 +1,16 @@
 #include "client/service_client.h"
 #include "locale/locale_controller.h"
 
+#include <QFile>
 #include <QGuiApplication>
 #include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQmlError>
 #include <QQuickStyle>
 #include <QSize>
+#include <QStandardPaths>
+#include <QTextStream>
 #include <QUrl>
 
 namespace {
@@ -30,6 +34,21 @@ void configure_application(QGuiApplication& application) {
     }
 }
 
+void write_qml_errors(const QList<QQmlError>& errors) {
+    if (errors.isEmpty()) {
+        return;
+    }
+    const auto dir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+    QFile file(dir + QStringLiteral("/aegra_desktop_qml_errors.txt"));
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+        return;
+    }
+    QTextStream stream(&file);
+    for (const auto& error : errors) {
+        stream << error.toString() << '\n';
+    }
+}
+
 } // namespace
 
 int main(int argument_count, char* arguments[]) {
@@ -45,6 +64,7 @@ int main(int argument_count, char* arguments[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("localeController"),
                                              &locale_controller);
     engine.rootContext()->setContextProperty(QStringLiteral("serviceClient"), &service_client);
+    QObject::connect(&engine, &QQmlApplicationEngine::warnings, &application, &write_qml_errors);
     const QUrl root(QStringLiteral("qrc:/Aegra/qml/Main.qml"));
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreated, &application,

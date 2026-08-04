@@ -289,21 +289,27 @@ struct ExecuteDeletePlanCommand final {
 };
 
 struct RestorePreflightRequest final {
+    std::string repository_connection_id;
     std::string recovery_point_id;
     std::string target_source_id;
 };
 
 struct RestorePreflight final {
     std::string preflight_token;
+    std::string repository_connection_id;
     std::string recovery_point_id;
     std::string target_source_id;
     std::uint64_t logical_size_bytes{0};
+    std::uint64_t target_capacity_bytes{0};
     std::uint32_t chain_depth{0};
     std::uint64_t expires_utc_ms{0};
+    bool restore_eligible{false};
+    std::string message_code;
 };
 
 struct StartRestoreCommand final {
     std::string preflight_token;
+    bool confirmed{false};
 };
 
 struct MountRecoveryPointCommand final {

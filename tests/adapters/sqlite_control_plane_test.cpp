@@ -140,7 +140,7 @@ bool test_schema_open_and_secret_ref_only() {
         return false;
     }
     passed &= expect(database.value()->schema_version() == ports::kControlPlaneSchemaVersion,
-                     "schema version is 1");
+                     "schema version is current");
     auto unit = database.value()->begin_unit_of_work({});
     if (!expect(unit.has_value(), "begin unit of work")) {
         return false;

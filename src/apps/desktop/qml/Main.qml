@@ -25,6 +25,28 @@ Window {
     /// Settings opens as right drawer (old Main.qml pattern)
     property bool settingsPanelOpen: false
 
+    // Keep window chrome in sync when theme changes (old Main.qml pattern)
+    Connections {
+        target: Theme
+        function onThemeIdChanged() {
+            window.color = serviceClient.splashVisible ? Theme.colorCard : Theme.colorBg
+        }
+        function onColorBgChanged() {
+            if (!serviceClient.splashVisible)
+                window.color = Theme.colorBg
+        }
+        function onColorCardChanged() {
+            if (serviceClient.splashVisible)
+                window.color = Theme.colorCard
+        }
+    }
+
+    Component.onCompleted: {
+        // Load persisted theme after context properties exist (old Theme.initFromBackend)
+        Theme.initFromBackend()
+        window.color = serviceClient.splashVisible ? Theme.colorCard : Theme.colorBg
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0

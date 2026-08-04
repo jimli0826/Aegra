@@ -32,7 +32,7 @@ namespace {
     if (!begin) {
         return begin;
     }
-    auto schema = detail::apply_schema_v1(db);
+    auto schema = detail::apply_schema_v2(db);
     if (!schema) {
         (void)detail::exec_sql(db, "ROLLBACK");
         return schema;
@@ -117,8 +117,8 @@ ControlPlaneUnitOfWork::ControlPlaneUnitOfWork(std::shared_ptr<SqliteControlPlan
                                                std::unique_lock<std::mutex> write_lock)
     : state_(std::move(state)), write_lock_(std::move(write_lock)),
       repository_connections_(*state_, &active_), jobs_(*state_, &active_),
-      schedules_(*state_, &active_), audit_events_(*state_, &active_),
-      commands_(*state_, &active_) {}
+      schedules_(*state_, &active_), audit_events_(*state_, &active_), commands_(*state_, &active_),
+      restore_preflights_(*state_, &active_) {}
 
 ControlPlaneUnitOfWork::~ControlPlaneUnitOfWork() { rollback(); }
 
@@ -133,6 +133,10 @@ ports::IScheduleStore& ControlPlaneUnitOfWork::schedules() noexcept { return sch
 ports::IAuditEventStore& ControlPlaneUnitOfWork::audit_events() noexcept { return audit_events_; }
 
 ports::ICommandStore& ControlPlaneUnitOfWork::commands() noexcept { return commands_; }
+
+ports::IRestorePreflightStore& ControlPlaneUnitOfWork::restore_preflights() noexcept {
+    return restore_preflights_;
+}
 
 void ControlPlaneUnitOfWork::finish_unlocked() noexcept {
     active_ = false;
@@ -318,6 +322,39 @@ SqliteControlPlaneDatabase::get_job_by_idempotency_key(const std::string_view id
                : base::Result<std::optional<ports::JobRecord>>::failure(record.error());
 }
 
+base::Result<std::optional<ports::JobRecord>>
+SqliteControlPlaneDatabase::get_job_by_preflight_token(const std::string_view preflight_token,
+                                                       const base::CancellationToken cancellation) {
+    std::lock_guard lock(state_->mutex);
+    if (auto cancelled = detail::check_cancelled(cancellation); !cancelled) {
+        return base::Result<std::optional<ports::JobRecord>>::failure(cancelled.error());
+    }
+    auto statement = detail::SqliteStatement::prepare(
+        state_->db,
+        "SELECT job_id, trace_id, operation, state, created_utc_ms, started_utc_ms, "
+        "completed_utc_ms, source_id, repository_connection_id, target_source_id, backup_type, "
+        "parent_recovery_point_id, preflight_token, message_code, idempotency_key, "
+        "result_error_code, result_outcome, result_message_code FROM jobs "
+        "WHERE preflight_token = ?");
+    if (!statement) {
+        return base::Result<std::optional<ports::JobRecord>>::failure(statement.error());
+    }
+    if (auto bound = statement.value().bind_text(1, preflight_token); !bound) {
+        return base::Result<std::optional<ports::JobRecord>>::failure(bound.error());
+    }
+    auto stepped = statement.value().step();
+    if (!stepped) {
+        return base::Result<std::optional<ports::JobRecord>>::failure(stepped.error());
+    }
+    if (stepped.value() == SQLITE_DONE) {
+        return base::Result<std::optional<ports::JobRecord>>::success(std::nullopt);
+    }
+    auto record = detail::read_job(statement.value().get());
+    return record
+               ? base::Result<std::optional<ports::JobRecord>>::success(std::move(record).value())
+               : base::Result<std::optional<ports::JobRecord>>::failure(record.error());
+}
+
 base::Result<contracts::JobPage>
 SqliteControlPlaneDatabase::list_jobs(const contracts::JobListRequest& request,
                                       const base::CancellationToken cancellation) {
@@ -356,6 +393,14 @@ SqliteControlPlaneDatabase::get_command(const std::string_view idempotency_key,
     std::lock_guard lock(state_->mutex);
     detail::CommandStore store(*state_);
     return store.get(idempotency_key, cancellation);
+}
+
+base::Result<std::optional<ports::RestorePreflightRecord>>
+SqliteControlPlaneDatabase::get_restore_preflight(const std::string_view preflight_token,
+                                                  const base::CancellationToken cancellation) {
+    std::lock_guard lock(state_->mutex);
+    detail::RestorePreflightStore store(*state_);
+    return store.get(preflight_token, cancellation);
 }
 
 } // namespace aegra::adapters::sqlite

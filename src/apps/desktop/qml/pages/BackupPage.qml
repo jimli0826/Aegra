@@ -293,13 +293,14 @@ Item {
         }
     }
 
-    /// Run schedule now (old BackupBackend.runSchedule). Uses Service backup.start when possible.
-    function runSchedule(item) {
+    /// Run schedule now. backupType: 1 = full, 2 = incremental (service_protocol).
+    function runSchedule(item, backupType) {
         if (!item || !item.enabled) {
             //% "Enable the schedule before running it"
             serviceClient.showToast(qsTrId("aegra.backup.run.disabled"))
             return
         }
+        var type = (backupType === 2) ? 2 : 1
         if (serviceClient.connected && serviceClient.hasCapability("backup.start")) {
             var sourceIds = item.sourceIds || []
             var connectionId = item.connectionId || ""
@@ -311,7 +312,7 @@ Item {
                 var encryption = item.encryptionEnabled === true
                 var scheduleId = item.scheduleId || item.id || ""
                 if (serviceClient.startBackup(sourceIds, connectionId, excludePage, encryption,
-                                              "", encryption ? scheduleId : ""))
+                                              "", encryption ? scheduleId : "", type))
                     return
                 root.pendingRunScheduleId = ""
                 return
@@ -473,7 +474,7 @@ Item {
                             font.family: Theme.fontFamily
                             horizontalAlignment: Text.AlignHCenter
                         }
-                        Item { Layout.preferredWidth: 140 }
+                        Item { Layout.preferredWidth: 40 }
                     }
                 }
 
@@ -607,60 +608,124 @@ Item {
                                         }
                                     }
                                 }
-                                Row {
-                                    Layout.preferredWidth: 140
-                                    spacing: 8
-                                    layoutDirection: Qt.RightToLeft
+                                Item {
+                                    Layout.preferredWidth: 40
+                                    Layout.fillHeight: true
                                     Rectangle {
-                                        width: 60
+                                        id: moreBtn
+                                        width: 32
                                         height: 28
                                         radius: 4
-                                        color: delHover.containsMouse ? "#cc3333" : Theme.colorButton
-                                        border.width: 1
-                                        border.color: Theme.colorBorder
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        Text {
-                                            anchors.centerIn: parent
-                                            //% "Delete"
-                                            text: qsTrId("aegra.common.delete")
-                                            color: Theme.colorTextWhite
-                                            font.pixelSize: 12
-                                            font.family: Theme.fontFamily
-                                        }
-                                        MouseArea {
-                                            id: delHover
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.deleteSchedule(modelData.id)
-                                        }
-                                    }
-                                    Rectangle {
-                                        width: 60
-                                        height: 28
-                                        radius: 4
-                                        color: runHover.containsMouse
+                                        anchors.centerIn: parent
+                                        color: (moreHover.containsMouse || scheduleMenu.visible)
                                                ? Theme.colorButtonHover : Theme.colorButton
                                         border.width: 1
                                         border.color: Theme.colorBorder
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        opacity: modelData.enabled ? 1.0 : 0.55
+                                        //% "More actions"
+                                        Accessible.name: qsTrId("aegra.backup.action.more")
                                         Text {
                                             anchors.centerIn: parent
-                                            //% "Run"
-                                            text: qsTrId("aegra.backup.action.run")
+                                            // Vertical ellipsis ⋮
+                                            text: "\u22EE"
                                             color: Theme.colorTextWhite
-                                            font.pixelSize: 12
+                                            font.pixelSize: 16
+                                            font.bold: true
                                             font.family: Theme.fontFamily
                                         }
                                         MouseArea {
-                                            id: runHover
+                                            id: moreHover
                                             anchors.fill: parent
                                             hoverEnabled: true
-                                            enabled: modelData.enabled
-                                            cursorShape: modelData.enabled
-                                                         ? Qt.PointingHandCursor : Qt.ArrowCursor
-                                            onClicked: root.runSchedule(modelData)
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: scheduleMenu.open()
+                                        }
+                                        Menu {
+                                            id: scheduleMenu
+                                            y: moreBtn.height + 2
+                                            x: moreBtn.width - width
+                                            padding: 4
+                                            background: Rectangle {
+                                                implicitWidth: 168
+                                                color: Theme.colorPopup
+                                                border.width: 1
+                                                border.color: Theme.colorBorder
+                                                radius: 4
+                                            }
+                                            MenuItem {
+                                                //% "Run full"
+                                                text: qsTrId("aegra.backup.action.run_full")
+                                                enabled: modelData.enabled
+                                                height: 32
+                                                leftPadding: 12
+                                                rightPadding: 12
+                                                background: Rectangle {
+                                                    color: parent.highlighted
+                                                           ? Theme.colorHover : "transparent"
+                                                    radius: 3
+                                                    opacity: parent.enabled ? 1.0 : 0.45
+                                                }
+                                                contentItem: Text {
+                                                    text: parent.text
+                                                    color: Theme.colorTextWhite
+                                                    font.pixelSize: 12
+                                                    font.family: Theme.fontFamily
+                                                    verticalAlignment: Text.AlignVCenter
+                                                    elide: Text.ElideRight
+                                                }
+                                                onTriggered: root.runSchedule(modelData, 1)
+                                            }
+                                            MenuItem {
+                                                //% "Run incremental"
+                                                text: qsTrId("aegra.backup.action.run_incremental")
+                                                enabled: modelData.enabled
+                                                height: 32
+                                                leftPadding: 12
+                                                rightPadding: 12
+                                                background: Rectangle {
+                                                    color: parent.highlighted
+                                                           ? Theme.colorHover : "transparent"
+                                                    radius: 3
+                                                    opacity: parent.enabled ? 1.0 : 0.45
+                                                }
+                                                contentItem: Text {
+                                                    text: parent.text
+                                                    color: Theme.colorTextWhite
+                                                    font.pixelSize: 12
+                                                    font.family: Theme.fontFamily
+                                                    verticalAlignment: Text.AlignVCenter
+                                                    elide: Text.ElideRight
+                                                }
+                                                onTriggered: root.runSchedule(modelData, 2)
+                                            }
+                                            MenuSeparator {
+                                                contentItem: Rectangle {
+                                                    implicitHeight: 1
+                                                    color: Theme.colorBorder
+                                                }
+                                                topPadding: 4
+                                                bottomPadding: 4
+                                            }
+                                            MenuItem {
+                                                //% "Delete"
+                                                text: qsTrId("aegra.common.delete")
+                                                height: 32
+                                                leftPadding: 12
+                                                rightPadding: 12
+                                                background: Rectangle {
+                                                    color: parent.highlighted
+                                                           ? "#cc3333" : "transparent"
+                                                    radius: 3
+                                                }
+                                                contentItem: Text {
+                                                    text: parent.text
+                                                    color: Theme.colorTextWhite
+                                                    font.pixelSize: 12
+                                                    font.family: Theme.fontFamily
+                                                    verticalAlignment: Text.AlignVCenter
+                                                    elide: Text.ElideRight
+                                                }
+                                                onTriggered: root.deleteSchedule(modelData.id)
+                                            }
                                         }
                                     }
                                 }

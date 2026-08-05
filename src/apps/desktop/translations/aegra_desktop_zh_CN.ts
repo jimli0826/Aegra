@@ -147,6 +147,18 @@
         <source>Passwords do not match</source>
         <translation>两次输入的密码不一致</translation>
     </message>
+    <message id="aegra.restore.password_title">
+        <source>Backup password</source>
+        <translation>备份密码</translation>
+    </message>
+    <message id="aegra.restore.password_hint">
+        <source>This backup is encrypted. Enter the password to view source disks.</source>
+        <translation>此备份已加密。请输入密码以查看源磁盘。</translation>
+    </message>
+    <message id="aegra.common.ok">
+        <source>OK</source>
+        <translation>确定</translation>
+    </message>
     <message id="aegra.error.service.disconnected">
         <source>Service connection lost</source>
         <translation>Service 连接已断开</translation>
@@ -708,6 +720,18 @@ Server: %1</source>
     <message id="aegra.backup.action.run">
         <source>Run</source>
         <translation>运行</translation>
+    </message>
+    <message id="aegra.backup.action.more">
+        <source>More actions</source>
+        <translation>更多操作</translation>
+    </message>
+    <message id="aegra.backup.action.run_full">
+        <source>Run full</source>
+        <translation>运行全量</translation>
+    </message>
+    <message id="aegra.backup.action.run_incremental">
+        <source>Run incremental</source>
+        <translation>运行增量</translation>
     </message>
     <message id="aegra.backup.run.started">
         <source>Backup started</source>

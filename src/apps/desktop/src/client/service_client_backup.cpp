@@ -85,7 +85,7 @@ QString ServiceClient::defaultConnectionId() const { return connections_.default
 bool ServiceClient::startBackup(const QVariantList& source_ids, const QString& connection_id,
                                 const bool exclude_page_and_hibernation_files,
                                 const bool encryption_enabled, const QString& archive_password,
-                                const QString& schedule_id) {
+                                const QString& schedule_id, const int backup_type) {
     if (state_ != State::kReady) {
         //% "Service is not connected"
         const auto msg = qtTrId("aegra.error.service.disconnected");
@@ -98,6 +98,10 @@ bool ServiceClient::startBackup(const QVariantList& source_ids, const QString& c
         const auto msg = qtTrId("aegra.backup.run.capability_missing");
         emit backupStartFailed(msg);
         show_toast(msg);
+        return false;
+    }
+    if (backup_type != kBackupTypeFull && backup_type != kBackupTypeIncremental) {
+        finish_backup_command_failure(QStringLiteral("backup.preflight_failed"));
         return false;
     }
     if (backup_command_busy_ || cancel_command_busy_) {
@@ -153,7 +157,7 @@ bool ServiceClient::startBackup(const QVariantList& source_ids, const QString& c
     const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     start_backup_request_id_ = request_id;
     const auto body = encode_start_backup_request(
-        request_id, start_backup_idempotency_key_, source_ids, connection_id, kBackupTypeFull, {},
+        request_id, start_backup_idempotency_key_, source_ids, connection_id, backup_type, {},
         exclude_page_and_hibernation_files, encryption_enabled, archive_password, schedule_id);
     const auto started =
         coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {

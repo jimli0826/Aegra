@@ -5,6 +5,7 @@
 #include <winioctl.h>
 
 #include <array>
+#include <cstddef>
 #include <cstring>
 #include <iomanip>
 #include <sstream>
@@ -185,27 +186,34 @@ partition_from_info(const PARTITION_INFORMATION_EX& entry, const DWORD disk_styl
 
 [[nodiscard]] base::Result<void> fill_partitions(const HANDLE handle,
                                                  WindowsPhysicalDiskLayout& layout) {
+    // DRIVE_LAYOUT_INFORMATION_EX embeds PartitionEntry[1]; sizeof includes one entry.
+    // Variable entries start at offsetof(..., PartitionEntry). Using sizeof as the base
+    // overstates required bytes by one entry and mis-indexes partitions.
     constexpr DWORD kMaxPartitions = 128;
+    constexpr auto kPartitionEntriesOffset =
+        offsetof(DRIVE_LAYOUT_INFORMATION_EX, PartitionEntry);
+    constexpr auto kHeaderMinBytes = kPartitionEntriesOffset;
     const auto layout_bytes =
-        sizeof(DRIVE_LAYOUT_INFORMATION_EX) + sizeof(PARTITION_INFORMATION_EX) * kMaxPartitions;
+        kPartitionEntriesOffset + sizeof(PARTITION_INFORMATION_EX) * kMaxPartitions;
     std::vector<std::byte> layout_buffer(layout_bytes);
     DWORD bytes_returned = 0;
     if (!DeviceIoControl(handle, IOCTL_DISK_GET_DRIVE_LAYOUT_EX, nullptr, 0, layout_buffer.data(),
                          static_cast<DWORD>(layout_buffer.size()), &bytes_returned, nullptr) ||
-        bytes_returned < sizeof(DRIVE_LAYOUT_INFORMATION_EX)) {
+        bytes_returned < kHeaderMinBytes) {
         return base::Result<void>::failure(
             {base::ErrorCode::kIoFailure, "physical disk partition layout is unavailable"});
     }
     DRIVE_LAYOUT_INFORMATION_EX header{};
-    std::memcpy(&header, layout_buffer.data(), sizeof(header));
+    std::memcpy(&header, layout_buffer.data(), kHeaderMinBytes);
     layout.partition_style = partition_style_name(header.PartitionStyle);
     if (header.PartitionCount > kMaxPartitions) {
         return base::Result<void>::failure(
             {base::ErrorCode::kIoFailure, "physical disk reports too many partitions"});
     }
-    const auto entries_bytes =
+    const auto required_bytes =
+        kPartitionEntriesOffset +
         static_cast<std::size_t>(header.PartitionCount) * sizeof(PARTITION_INFORMATION_EX);
-    if (sizeof(DRIVE_LAYOUT_INFORMATION_EX) + entries_bytes > bytes_returned) {
+    if (required_bytes > bytes_returned || required_bytes > layout_buffer.size()) {
         return base::Result<void>::failure(
             {base::ErrorCode::kIoFailure, "physical disk partition layout is truncated"});
     }
@@ -213,7 +221,7 @@ partition_from_info(const PARTITION_INFORMATION_EX& entry, const DWORD disk_styl
     for (DWORD index = 0; index < header.PartitionCount; ++index) {
         PARTITION_INFORMATION_EX entry{};
         const auto offset =
-            sizeof(DRIVE_LAYOUT_INFORMATION_EX) + index * sizeof(PARTITION_INFORMATION_EX);
+            kPartitionEntriesOffset + index * sizeof(PARTITION_INFORMATION_EX);
         std::memcpy(&entry, layout_buffer.data() + offset, sizeof(entry));
         // Skip empty partition table slots (zero length).
         if (entry.PartitionLength.QuadPart <= 0 || entry.PartitionNumber == 0) {

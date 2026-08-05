@@ -13,6 +13,7 @@
         <file alias="qml/Theme.qml">../qml/Theme.qml</file>
         <file alias="qml/qmldir">../qml/qmldir</file>
         <file alias="qml/components/AppButton.qml">../qml/components/AppButton.qml</file>
+        <file alias="qml/components/BackupPasswordDialog.qml">../qml/components/BackupPasswordDialog.qml</file>
         <file alias="qml/components/Card.qml">../qml/components/Card.qml</file>
         <file alias="qml/components/DiskChart.qml">../qml/components/DiskChart.qml</file>
         <file alias="qml/components/DiskIcon.qml">../qml/components/DiskIcon.qml</file>

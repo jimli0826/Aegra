@@ -191,11 +191,12 @@ class ServiceClient final : public QObject {
     /// Returns true if the start request was accepted for send (not yet Service ack).
     /// exclude_page_and_hibernation_files maps to Options "Exclude pagefile / hiberfil / swapfile".
     /// encryption_enabled + archive_password map to Options "Encryption (password required)".
+    /// backup_type: 1 = full, 2 = incremental (matches service_protocol kBackupType*).
     Q_INVOKABLE bool startBackup(const QVariantList& source_ids, const QString& connection_id,
                                  bool exclude_page_and_hibernation_files = true,
                                  bool encryption_enabled = false,
                                  const QString& archive_password = {},
-                                 const QString& schedule_id = {});
+                                 const QString& schedule_id = {}, int backup_type = 1);
     Q_INVOKABLE void cancelActiveBackup();
     Q_INVOKABLE void dismissToast();
     /// Show a top toast (success/info). Safe for QML schedule Run feedback.

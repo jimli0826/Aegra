@@ -557,7 +557,13 @@ struct PersonalArchiveSession::Impl final {
                     return protected_payload;
                 }
             } else {
-                chunk.header.payload_nonce.fill(std::byte{0});
+                // Wire format rejects an all-zero payload_nonce even for plaintext archives.
+                // Still mint a non-zero nonce; leave tag empty and payload uncompressed plaintext.
+                auto nonce = crypto_sodium::create_payload_nonce();
+                if (!nonce) {
+                    return base::Result<void>::failure(nonce.error());
+                }
+                chunk.header.payload_nonce = nonce.value();
                 chunk.header.payload_authentication_tag.fill(std::byte{0});
             }
             auto rotated = rotate_if_needed(chunk);

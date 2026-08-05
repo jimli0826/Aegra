@@ -142,10 +142,12 @@ ScheduleStore::list(const contracts::ScheduleListRequest& request,
     if (!token) {
         return base::Result<contracts::SchedulePage>::failure(token.error());
     }
+    // Column order must match read_schedule() / kSelectScheduleSql (includes encryption_enabled).
     std::string sql =
         "SELECT schedule_id, display_name, enabled, source_ids, repository_connection_id, "
         "backup_type, trigger_kind, local_minute_of_day, weekday_mask, timezone_id, "
-        "next_run_utc_ms, exclude_page_and_hibernation_files, created_utc_ms, updated_utc_ms "
+        "next_run_utc_ms, exclude_page_and_hibernation_files, encryption_enabled, "
+        "created_utc_ms, updated_utc_ms "
         "FROM schedules WHERE 1=1";
     if (request.enabled) {
         sql += " AND enabled = ?";

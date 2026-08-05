@@ -147,6 +147,18 @@
         <source>Passwords do not match</source>
         <translation>Passwords do not match</translation>
     </message>
+    <message id="aegra.restore.password_title">
+        <source>Backup password</source>
+        <translation>Backup password</translation>
+    </message>
+    <message id="aegra.restore.password_hint">
+        <source>This backup is encrypted. Enter the password to view source disks.</source>
+        <translation>This backup is encrypted. Enter the password to view source disks.</translation>
+    </message>
+    <message id="aegra.common.ok">
+        <source>OK</source>
+        <translation>OK</translation>
+    </message>
     <message id="aegra.error.service.disconnected">
         <source>Service connection lost</source>
         <translation>Service connection lost</translation>
@@ -708,6 +720,18 @@ Server: %1</translation>
     <message id="aegra.backup.action.run">
         <source>Run</source>
         <translation>Run</translation>
+    </message>
+    <message id="aegra.backup.action.more">
+        <source>More actions</source>
+        <translation>More actions</translation>
+    </message>
+    <message id="aegra.backup.action.run_full">
+        <source>Run full</source>
+        <translation>Run full</translation>
+    </message>
+    <message id="aegra.backup.action.run_incremental">
+        <source>Run incremental</source>
+        <translation>Run incremental</translation>
     </message>
     <message id="aegra.backup.run.started">
         <source>Backup started</source>

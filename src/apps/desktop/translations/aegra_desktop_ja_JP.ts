@@ -147,6 +147,18 @@
         <source>Passwords do not match</source>
         <translation>パスワードが一致しません</translation>
     </message>
+    <message id="aegra.restore.password_title">
+        <source>Backup password</source>
+        <translation>バックアップパスワード</translation>
+    </message>
+    <message id="aegra.restore.password_hint">
+        <source>This backup is encrypted. Enter the password to view source disks.</source>
+        <translation>このバックアップは暗号化されています。ソースディスクを表示するにはパスワードを入力してください。</translation>
+    </message>
+    <message id="aegra.common.ok">
+        <source>OK</source>
+        <translation>OK</translation>
+    </message>
     <message id="aegra.error.service.disconnected">
         <source>Service connection lost</source>
         <translation>Service 接続が切断されました</translation>
@@ -708,6 +720,18 @@ Server: %1</source>
     <message id="aegra.backup.action.run">
         <source>Run</source>
         <translation>実行</translation>
+    </message>
+    <message id="aegra.backup.action.more">
+        <source>More actions</source>
+        <translation>その他の操作</translation>
+    </message>
+    <message id="aegra.backup.action.run_full">
+        <source>Run full</source>
+        <translation>フル実行</translation>
+    </message>
+    <message id="aegra.backup.action.run_incremental">
+        <source>Run incremental</source>
+        <translation>増分実行</translation>
     </message>
     <message id="aegra.backup.run.started">
         <source>Backup started</source>

@@ -147,6 +147,18 @@
         <source>Passwords do not match</source>
         <translation>Passwörter stimmen nicht überein</translation>
     </message>
+    <message id="aegra.restore.password_title">
+        <source>Backup password</source>
+        <translation>Sicherungspasswort</translation>
+    </message>
+    <message id="aegra.restore.password_hint">
+        <source>This backup is encrypted. Enter the password to view source disks.</source>
+        <translation>Diese Sicherung ist verschlüsselt. Passwort eingeben, um Quelldatenträger anzuzeigen.</translation>
+    </message>
+    <message id="aegra.common.ok">
+        <source>OK</source>
+        <translation>OK</translation>
+    </message>
     <message id="aegra.error.service.disconnected">
         <source>Service connection lost</source>
         <translation>Service-Verbindung getrennt</translation>
@@ -708,6 +720,18 @@ Server: %1</translation>
     <message id="aegra.backup.action.run">
         <source>Run</source>
         <translation>Ausführen</translation>
+    </message>
+    <message id="aegra.backup.action.more">
+        <source>More actions</source>
+        <translation>Weitere Aktionen</translation>
+    </message>
+    <message id="aegra.backup.action.run_full">
+        <source>Run full</source>
+        <translation>Vollständig ausführen</translation>
+    </message>
+    <message id="aegra.backup.action.run_incremental">
+        <source>Run incremental</source>
+        <translation>Inkrementell ausführen</translation>
     </message>
     <message id="aegra.backup.run.started">
         <source>Backup started</source>

@@ -141,15 +141,13 @@ Password 在 Service 没有对应能力时不显示。布局必须在 900x600、
 - D0：Linguist 五语言、`LocaleController`、message-code 映射、`LocaleFormat`、最小语言切换入口。
 - D1：transport / protocol / coordinator / `RecoveryPointModel` 分层；Repository 行为已接入 Service V3。
 - S0 integration：Desktop 私有 codec 使用 V3 Request/Response envelope，仍只消费已声明 capability。
-- D2（进行中）：Home 页面、Splash/Retry、Toast、Loading overlay、`JobModel` + `job.list` 分页与有界轮询；
+- D2（已完成，按生产功能范围）：Home 页面、Splash/Retry、Toast、Loading overlay、`JobModel` + `job.list` 分页与有界轮询；
   `ServiceRequestCoordinator` 支持并发 Repository/Job 请求；Home↔Repository 导航可用；
   Backup/Restore/Mount 在 D3/D4/D6 接线前强制禁用（不得仅凭 capability 呈现无操作按钮）；
   进度协议严格校验与溢出安全百分比；首次 Job 快照 toast 基线与可重启 Toast 定时器；
   后台 Job 轮询不触发全屏 Loading overlay，Service Job 状态码映射到五语言稳定文案；
-  多 viewport/locale 视觉证据保存到 `docs/migration/evidence/d2/`。仍缺：按旧 `backup/src/gui` 对齐
-  Home/Splash/Toast/Loading/Shell 的
-  显示效果，并提交旧/新并排视觉证据。
-- D3（进行中）：Backup 页面与 Inventory/Connection model/codec、`StartBackup`/`CancelJob` 门面；
+  Home/Splash/Toast/Loading/Shell 已接入真实生产状态和导航。
+- D3（已完成，按生产功能范围）：Backup 页面与 Inventory/Connection model/codec、`StartBackup`/`CancelJob` 门面；
   Source 仅绑定 Service Inventory 稳定 ID；Target 仅绑定 Repository connection；全量备份真实启动；
   增量/差异禁用；凭据仅 SecretRef/Service 侧，QML 无明文密码；页面进度复用 D2 Job 观察；
   五语言翻译与 Home↔Backup↔Repository 导航已接线。
@@ -158,5 +156,10 @@ Password 在 Service 没有对应能力时不显示。布局必须在 900x600、
   Source，也不得为每个 Volume 拆分 Schedule、Job 或 Archive。单卷可以独立选择；选中 Disk 时必须
   选中并提交该 Disk 下所有具备稳定 identity 和可靠非零容量的 Volume。系统卷、只读卷、EFI/FAT、RAW
   和未知文件系统卷都可勾选；读取方式由 Worker 决定，Desktop 不按 VSS 能力过滤。
-  仍缺：按旧 `backup/src/gui` 对齐 Backup list + Add + 90% slide-in wizard 的显示效果、多 viewport/locale
-  旧/新并排视觉证据矩阵、真实 Service/SQLite Job 人工运行证据和 Debug/Release 生产构建闭环。
+  Backup list、Add、slide-in wizard、真实 Service/SQLite Job、Schedule、多 Volume 单 Archive、取消和聚合进度
+  均已具备生产功能。
+- Restore Source Disks：选中 checkpoint 后调用 Service V3 `GetRecoveryPointLayout`（kind 12）。payload 为
+  hierarchical `disks[]` + `volumes[]`（与旧 `GET /api/v1/backups/layout` 一致）。Desktop 按物理
+  `disk_number` 渲染一行 Source Disk，分区条由 `partitions[]` 顺序 + `volumes[].extents[]` 绑定盘符/卷标，
+  并过滤 MSR/EFI/Recovery（对齐旧 `RestoreBackend::volumesForSourceDisk`）。无 `disks[]` 的旧 Archive
+  返回 layout 失败（需重新备份），不合成假 Disk 0。

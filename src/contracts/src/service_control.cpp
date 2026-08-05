@@ -8,6 +8,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace aegra::contracts {
 namespace {
@@ -509,6 +510,52 @@ base::Result<void> validate_audit_event_page(const AuditEventPage& page) {
 
 base::Result<void> validate_mount_session_page(const MountSessionPage& page) {
     return validate_page(page, validate_mount_session_summary);
+}
+
+base::Result<void> validate_recovery_point_layout(const RecoveryPointLayout& layout) {
+    if (!valid_stable_value(layout.repository_connection_id, kMaximumIdentifierBytes) ||
+        !valid_stable_value(layout.recovery_point_id, kMaximumIdentifierBytes) ||
+        layout.disks.empty() || layout.disks.size() > 64 || layout.volumes.empty() ||
+        layout.volumes.size() > 100) {
+        return invalid("recovery point layout is invalid");
+    }
+    std::set<std::uint32_t> seen_disks;
+    std::set<std::pair<std::uint32_t, std::uint32_t>> known_partitions;
+    for (const auto& disk : layout.disks) {
+        if (!seen_disks.insert(disk.disk_number).second || disk.disk_size_bytes == 0 ||
+            (disk.partition_style != "mbr" && disk.partition_style != "gpt" &&
+             disk.partition_style != "raw") ||
+            disk.model.size() > 256 || disk.media_type.size() > 64 ||
+            disk.partitions.size() > 256) {
+            return invalid("recovery point source disk is invalid");
+        }
+        std::set<std::uint32_t> seen_parts;
+        for (const auto& partition : disk.partitions) {
+            if (!seen_parts.insert(partition.partition_number).second ||
+                partition.size_bytes == 0 || partition.gpt_type_guid.size() > 64 ||
+                partition.gpt_name.size() > 256 || partition.volume_label.size() > 256 ||
+                partition.filesystem.size() > 64) {
+                return invalid("recovery point source partition is invalid");
+            }
+            known_partitions.emplace(disk.disk_number, partition.partition_number);
+        }
+    }
+    std::set<std::uint32_t> seen_index;
+    for (const auto& volume : layout.volumes) {
+        if (!seen_index.insert(volume.volume_index).second || volume.total_size_bytes == 0 ||
+            volume.letter.size() > 16 || volume.label.size() > 256 ||
+            volume.filesystem.size() > 64 || volume.extents.empty() ||
+            volume.extents.size() > 32) {
+            return invalid("recovery point source volume is invalid");
+        }
+        for (const auto& extent : volume.extents) {
+            if (extent.length == 0 ||
+                !known_partitions.contains({extent.disk_number, extent.partition_number})) {
+                return invalid("recovery point source volume extent is invalid");
+            }
+        }
+    }
+    return base::Result<void>::success();
 }
 
 base::Result<void> validate_recovery_point_chain_result(const RecoveryPointChainResult& result) {

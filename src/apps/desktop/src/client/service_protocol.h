@@ -21,6 +21,7 @@ inline constexpr int kListRepositoryConnectionsRequestKind = 3;
 inline constexpr int kListSourceInventoryRequestKind = 4;
 inline constexpr int kListJobsRequestKind = 5;
 inline constexpr int kListSchedulesRequestKind = 6;
+inline constexpr int kGetRecoveryPointLayoutRequestKind = 12;
 inline constexpr int kAddRepositoryConnectionRequestKind = 32;
 inline constexpr int kImportRepositoryConnectionRequestKind = 33;
 inline constexpr int kTestRepositoryConnectionRequestKind = 34;
@@ -84,6 +85,9 @@ struct CommandAck final {
 [[nodiscard]] QByteArray encode_recovery_point_request(
     const QString& request_id, const std::optional<QString>& continuation_token,
     const std::optional<QString>& repository_connection_id = std::nullopt);
+[[nodiscard]] QByteArray encode_recovery_point_layout_request(const QString& request_id,
+                                                              const QString& repository_connection_id,
+                                                              const QString& recovery_point_id);
 [[nodiscard]] QByteArray encode_job_list_request(const QString& request_id,
                                                  const std::optional<QString>& continuation_token);
 [[nodiscard]] QByteArray
@@ -130,6 +134,9 @@ encode_repository_connection_resource_request(const QString& request_id,
 [[nodiscard]] bool parse_service_info_response(const QJsonObject& root, ServiceInfo& result);
 [[nodiscard]] bool parse_recovery_point_response(const QJsonObject& root,
                                                  RecoveryPointPage& result);
+/// On success, result is { repositoryConnectionId, recoveryPointId, volumes: [...] }.
+[[nodiscard]] bool parse_recovery_point_layout_response(const QJsonObject& root,
+                                                        QVariantMap& result);
 [[nodiscard]] bool parse_job_list_response(const QJsonObject& root, JobPage& result);
 [[nodiscard]] bool parse_source_inventory_response(const QJsonObject& root,
                                                    SourceInventoryPage& result);
@@ -141,6 +148,7 @@ encode_repository_connection_resource_request(const QString& request_id,
 // Parses one JobSummary JSON object into the desktop map form used by JobModel.
 [[nodiscard]] bool parse_job_summary_object(const QJsonObject& object, QVariantMap& result);
 [[nodiscard]] bool is_repository_failure_response(const QJsonObject& root);
+[[nodiscard]] bool is_recovery_point_layout_failure_response(const QJsonObject& root);
 [[nodiscard]] bool is_job_failure_response(const QJsonObject& root);
 [[nodiscard]] bool is_inventory_failure_response(const QJsonObject& root);
 [[nodiscard]] bool is_connection_list_failure_response(const QJsonObject& root);

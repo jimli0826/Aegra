@@ -35,6 +35,8 @@ enum class ServiceRequestKind : std::uint8_t {
     kPrepareRestore = 9,
     kResolveRecoveryPointChain = 10,
     kPlanDeleteRecoveryPoints = 11,
+    /// Open archive manifest for a recovery point; returns source volume geometry for Restore UI.
+    kGetRecoveryPointLayout = 12,
     kAddRepositoryConnection = 32,
     kImportRepositoryConnection = 33,
     kTestRepositoryConnection = 34,
@@ -95,7 +97,7 @@ using ServiceResponsePayload =
     std::variant<std::monostate, ServiceInfo, ServiceRecoveryPointPage, RepositoryConnectionPage,
                  SourceInventoryPage, JobPage, SchedulePage, AuditEventPage, MountSessionPage,
                  RestorePreflight, RecoveryPointChainResult, DeletePlanSummary,
-                 CommandAcknowledgement>;
+                 RecoveryPointLayout, CommandAcknowledgement>;
 
 struct ServiceResponse final {
     std::uint32_t schema_version{kServiceResponseSchemaVersion};

@@ -2,6 +2,7 @@
 
 #include "aegra/apps/worker/windows_personal_backup.h"
 
+#include "aegra/adapters/windows_disk/windows_disk.h"
 #include "aegra/format/manifest.h"
 #include "aegra/ports/backup_session.h"
 #include "aegra/ports/block_io.h"
@@ -22,6 +23,8 @@ struct PreparedVolumeMetadata final {
     std::uint64_t logical_size_bytes{0};
     std::uint32_t cluster_size_bytes{0};
     bool vss_used{false};
+    /// Live volume→disk extents (IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS) for Manifest mapping.
+    std::vector<aegra::adapters::windows_disk::WindowsVolumeExtent> disk_extents;
 };
 
 class ISnapshotLease {

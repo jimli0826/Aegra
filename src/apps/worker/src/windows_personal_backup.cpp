@@ -3,14 +3,18 @@
 #include "windows_personal_backup_runtime.h"
 #include "worker_task_log.h"
 
+#include "aegra/adapters/windows_disk/windows_disk.h"
 #include "aegra/contracts/service_control.h"
 #include "aegra/format/manifest.h"
 
 #include <algorithm>
 #include <limits>
+#include <map>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -101,8 +105,70 @@ std::string utf8_path(const std::filesystem::path& path) {
     return result;
 }
 
-format::Manifest make_manifest(const WindowsPersonalBackupRequest& request,
-                               const std::vector<PreparedVolumeMetadata>& sources) {
+[[nodiscard]] format::PartitionStyle partition_style_from_name(const std::string_view name) {
+    if (name == "MBR") {
+        return format::PartitionStyle::kMbr;
+    }
+    if (name == "GPT") {
+        return format::PartitionStyle::kGpt;
+    }
+    return format::PartitionStyle::kRaw;
+}
+
+[[nodiscard]] std::optional<std::uint32_t>
+match_partition_number(const format::Disk& disk, const std::uint64_t physical_offset,
+                       const std::uint64_t length) {
+    for (const auto& partition : disk.partitions) {
+        if (partition.size == 0) {
+            continue;
+        }
+        const auto partition_end = partition.offset + partition.size;
+        const auto extent_end = physical_offset + length;
+        // Extent belongs to partition when its start falls inside the partition range.
+        if (physical_offset >= partition.offset && physical_offset < partition_end) {
+            return partition.partition_number;
+        }
+        // Also accept near-full overlap (offset rounding).
+        if (physical_offset <= partition.offset && extent_end >= partition_end) {
+            return partition.partition_number;
+        }
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] base::Result<format::Disk>
+disk_from_layout(const adapters::windows_disk::WindowsPhysicalDiskLayout& layout) {
+    format::Disk disk;
+    disk.disk_number = layout.disk_number;
+    disk.disk_size = layout.disk_size_bytes;
+    disk.bytes_per_sector = layout.bytes_per_sector;
+    disk.total_sectors = layout.total_sectors;
+    disk.partition_style = partition_style_from_name(layout.partition_style);
+    disk.model = layout.model;
+    disk.serial = layout.serial;
+    disk.media_type = layout.media_type;
+    disk.partitions.reserve(layout.partitions.size());
+    for (const auto& source : layout.partitions) {
+        format::Partition partition;
+        partition.partition_number = source.partition_number;
+        partition.offset = source.offset_bytes;
+        partition.size = source.size_bytes;
+        partition.style = partition_style_from_name(source.partition_style);
+        partition.is_active = source.is_active;
+        partition.mbr_type = source.mbr_type;
+        partition.gpt_type_guid = source.gpt_type_guid;
+        partition.gpt_name = source.gpt_name;
+        partition.volume_label = source.volume_label;
+        partition.filesystem = source.filesystem;
+        partition.volume_guid = source.volume_guid;
+        disk.partitions.push_back(std::move(partition));
+    }
+    return base::Result<format::Disk>::success(std::move(disk));
+}
+
+[[nodiscard]] base::Result<format::Manifest>
+make_manifest(const WindowsPersonalBackupRequest& request,
+              const std::vector<PreparedVolumeMetadata>& sources) {
     format::Manifest manifest;
     manifest.system.hostname = request.hostname;
     manifest.system.collection_time_utc = request.created_utc;
@@ -112,6 +178,31 @@ format::Manifest make_manifest(const WindowsPersonalBackupRequest& request,
             : format::BackupType::kIncremental;
     manifest.backup_job.created_utc = request.created_utc;
     manifest.backup_job.application_version = request.application_version;
+
+    std::set<std::uint32_t> disk_numbers;
+    for (const auto& metadata : sources) {
+        if (metadata.disk_extents.empty()) {
+            return base::Result<format::Manifest>::failure(base::Error{
+                base::ErrorCode::kIoFailure,
+                "selected volume has no physical disk extents for layout metadata",
+            });
+        }
+        for (const auto& extent : metadata.disk_extents) {
+            disk_numbers.insert(extent.disk_number);
+        }
+    }
+    std::map<std::uint32_t, format::Disk> disks_by_number;
+    for (const auto disk_number : disk_numbers) {
+        auto layout = adapters::windows_disk::inspect_physical_disk_layout(disk_number);
+        if (!layout) {
+            return base::Result<format::Manifest>::failure(layout.error());
+        }
+        auto disk = disk_from_layout(layout.value());
+        if (!disk) {
+            return base::Result<format::Manifest>::failure(disk.error());
+        }
+        disks_by_number.emplace(disk_number, std::move(disk).value());
+    }
 
     for (std::size_t index = 0; index < sources.size(); ++index) {
         const auto& metadata = sources[index];
@@ -130,9 +221,70 @@ format::Manifest make_manifest(const WindowsPersonalBackupRequest& request,
         for (const auto& mount_point : metadata.mount_points) {
             volume.mount_points.push_back(utf8_path(mount_point));
         }
+        std::uint64_t volume_offset = 0;
+        for (const auto& disk_extent : metadata.disk_extents) {
+            auto disk_it = disks_by_number.find(disk_extent.disk_number);
+            if (disk_it == disks_by_number.end()) {
+                return base::Result<format::Manifest>::failure(base::Error{
+                    base::ErrorCode::kInternal,
+                    "volume extent references a disk that was not collected",
+                });
+            }
+            auto partition_number =
+                match_partition_number(disk_it->second, disk_extent.disk_offset_bytes,
+                                       disk_extent.length_bytes);
+            if (!partition_number) {
+                return base::Result<format::Manifest>::failure(base::Error{
+                    base::ErrorCode::kIoFailure,
+                    "volume extent could not be matched to a disk partition",
+                });
+            }
+            for (auto& partition : disk_it->second.partitions) {
+                if (partition.partition_number != *partition_number) {
+                    continue;
+                }
+                if (partition.volume_label.empty()) {
+                    partition.volume_label = metadata.label;
+                }
+                if (partition.filesystem.empty()) {
+                    partition.filesystem = metadata.filesystem;
+                }
+                if (partition.volume_guid.empty()) {
+                    partition.volume_guid = volume.volume_guid;
+                }
+                break;
+            }
+            format::VolumeExtent extent;
+            extent.disk_number = disk_extent.disk_number;
+            extent.partition_number = *partition_number;
+            extent.physical_offset = disk_extent.disk_offset_bytes;
+            extent.volume_offset = volume_offset;
+            extent.length = disk_extent.length_bytes;
+            extent.extent_role = "basic";
+            volume.extents.push_back(std::move(extent));
+            volume_offset += disk_extent.length_bytes;
+        }
         manifest.volumes.push_back(std::move(volume));
     }
-    return manifest;
+
+    for (auto& [_, disk] : disks_by_number) {
+        manifest.disks.push_back(std::move(disk));
+    }
+    std::sort(manifest.disks.begin(), manifest.disks.end(),
+              [](const format::Disk& left, const format::Disk& right) {
+                  return left.disk_number < right.disk_number;
+              });
+    if (manifest.disks.empty() || manifest.volumes.empty()) {
+        return base::Result<format::Manifest>::failure(base::Error{
+            base::ErrorCode::kInternal,
+            "backup layout metadata is incomplete",
+        });
+    }
+    auto valid = format::validate_manifest(manifest);
+    if (!valid) {
+        return base::Result<format::Manifest>::failure(valid.error());
+    }
+    return base::Result<format::Manifest>::success(std::move(manifest));
 }
 
 std::optional<base::Error> release_snapshot(PreparedVolumeSources& prepared) {
@@ -232,7 +384,11 @@ base::Result<WindowsPersonalBackupResult> backup_windows_personal_volumes_with_r
     }
 
     auto manifest = make_manifest(request, prepared.value().metadata);
-    auto session = runtime.create_archive(request, manifest);
+    if (!manifest) {
+        (void)release_snapshot(prepared.value());
+        return base::Result<WindowsPersonalBackupResult>::failure(manifest.error());
+    }
+    auto session = runtime.create_archive(request, manifest.value());
     if (!session) {
         (void)release_snapshot(prepared.value());
         return base::Result<WindowsPersonalBackupResult>::failure(session.error());

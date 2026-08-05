@@ -127,6 +127,10 @@
         <source>Unable to read the repository catalog</source>
         <translation>無法讀取 Repository 目錄</translation>
     </message>
+    <message id="aegra.error.recovery_point.layout_failed">
+        <source>Unable to load source volumes for this checkpoint</source>
+        <translation>無法載入此檢查點的來源磁碟區資訊</translation>
+    </message>
     <message id="aegra.error.service.disconnected">
         <source>Service connection lost</source>
         <translation>Service 連線已中斷</translation>
@@ -933,6 +937,14 @@ Server: %1</source>
         <source>Select a checkpoint to view source disks</source>
         <translation>選擇檢查點以檢視來源磁碟</translation>
     </message>
+    <message id="aegra.restore.loading_source">
+        <source>Loading source disks...</source>
+        <translation>正在載入來源磁碟…</translation>
+    </message>
+    <message id="aegra.restore.no_source_volumes">
+        <source>No source volumes in this checkpoint</source>
+        <translation>此檢查點沒有來源磁碟區</translation>
+    </message>
     <message id="aegra.restore.selected_label">
         <source>Selected:</source>
         <translation>已選：</translation>
@@ -958,8 +970,8 @@ Server: %1</source>
         <translation>（此電腦 — 可用還原目標）</translation>
     </message>
     <message id="aegra.restore.target_empty">
-        <source>Local disks will appear when restore inventory is connected</source>
-        <translation>連線還原清單後會顯示本機磁碟</translation>
+        <source>Local disks will appear when inventory is available</source>
+        <translation>清單可用時會顯示本機磁碟</translation>
     </message>
     <message id="aegra.restore.options">
         <source>Options</source>
@@ -970,16 +982,32 @@ Server: %1</source>
         <translation>保留磁碟簽章</translation>
     </message>
     <message id="aegra.restore.preserve_signature_hint">
-        <source>Keeps the original disk signature when supported</source>
-        <translation>在支援時保留原始磁碟簽章</translation>
+        <source>Keep MBR signature / GPT DiskId (recommended for bootable disks). Uncheck only when cloning a data disk while the source remains online.</source>
+        <translation>保留 MBR 簽章 / GPT DiskId（可開機磁碟建議）。僅在來源仍在線且複製資料磁碟時取消勾選。</translation>
     </message>
     <message id="aegra.restore.auto_extend">
-        <source>Auto-extend last partition</source>
+        <source>Auto expand last partition</source>
         <translation>自動延伸最後一個磁碟分割區</translation>
     </message>
     <message id="aegra.restore.auto_extend_hint">
-        <source>Grow the last volume to fill free space on the target</source>
-        <translation>將最後一個磁碟區延伸以填滿目標剩餘空間</translation>
+        <source>When the target disk is larger than the source, grow the last data partition (and filesystem) into free space so no large unallocated region remains. Uncheck to leave free space unallocated. Note: FAT/FAT32 volumes cannot be auto-expanded (Windows does not support online extend); free space stays unallocated.</source>
+        <translation>目標磁碟大於來源時，將最後一個資料分割區（及檔案系統）延伸到可用空間，避免大片未配置區域。取消勾選則保留未配置空間。注意：FAT/FAT32 無法線上延伸。</translation>
+    </message>
+    <message id="aegra.restore.unallocated">
+        <source>Unallocated</source>
+        <translation>未配置</translation>
+    </message>
+    <message id="aegra.restore.no_partitions">
+        <source>No partitions</source>
+        <translation>無分割區</translation>
+    </message>
+    <message id="aegra.restore.source_volume">
+        <source>Volume %1</source>
+        <translation>磁碟區 %1</translation>
+    </message>
+    <message id="aegra.restore.no_recovery_points_on_date">
+        <source>No recovery points on this date</source>
+        <translation>此日期沒有還原點</translation>
     </message>
     <message id="aegra.restore.checkpoint_panel_empty">
         <source>Recovery point calendar and list will appear when restore Service APIs are connected</source>

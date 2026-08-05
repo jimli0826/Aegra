@@ -493,6 +493,7 @@ Json encode_request_payload(const contracts::ServiceRequest& request) {
             std::get<contracts::RestorePreflightRequest>(request.payload));
     case contracts::ServiceRequestKind::kResolveRecoveryPointChain:
     case contracts::ServiceRequestKind::kPlanDeleteRecoveryPoints:
+    case contracts::ServiceRequestKind::kGetRecoveryPointLayout:
         return encode_recovery_point_ref(std::get<contracts::RecoveryPointRef>(request.payload));
     case contracts::ServiceRequestKind::kAddRepositoryConnection:
     case contracts::ServiceRequestKind::kImportRepositoryConnection:
@@ -560,6 +561,7 @@ contracts::ServiceRequestPayload parse_request_payload(const contracts::ServiceR
         return parse_restore_preflight_request(payload);
     case contracts::ServiceRequestKind::kResolveRecoveryPointChain:
     case contracts::ServiceRequestKind::kPlanDeleteRecoveryPoints:
+    case contracts::ServiceRequestKind::kGetRecoveryPointLayout:
         return parse_recovery_point_ref(payload);
     case contracts::ServiceRequestKind::kAddRepositoryConnection:
     case contracts::ServiceRequestKind::kImportRepositoryConnection:

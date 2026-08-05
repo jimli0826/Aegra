@@ -59,12 +59,20 @@ class RecoveryPointModel final : public QAbstractListModel {
     [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
     [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
 
+    /// Local calendar dates (YYYY-MM-DD) that have at least one recovery point.
+    Q_INVOKABLE [[nodiscard]] QStringList backupDateYmds() const;
+    /// Checkpoints for a local date, newest first. Each map: fileUuid, timeText, backupType,
+    /// sizeText, logicalSizeBytes, sourceCount, createdUtcMs, createdText, chainComplete.
+    Q_INVOKABLE [[nodiscard]] QVariantList checkpointsForDate(const QString& date_ymd) const;
+
   signals:
     void countChanged();
 
   private:
     [[nodiscard]] QString backup_type_text(std::int64_t backup_type) const;
     [[nodiscard]] QString chain_state_text(std::int64_t chain_state) const;
+    [[nodiscard]] static QString local_date_ymd(std::int64_t created_utc_ms);
+    [[nodiscard]] static QString local_time_hm(std::int64_t created_utc_ms);
 
     LocaleFormat* format_{nullptr};
     QVector<RecoveryPointRow> rows_;

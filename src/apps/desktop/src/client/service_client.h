@@ -145,6 +145,9 @@ class ServiceClient final : public QObject {
     [[nodiscard]] bool toastVisible() const noexcept;
     [[nodiscard]] QString toastText() const;
     [[nodiscard]] bool globalLoading() const noexcept;
+    [[nodiscard]] bool recoveryPointLayoutLoading() const noexcept;
+    [[nodiscard]] QVariantList recoveryPointSourceDisks() const;
+    [[nodiscard]] QString recoveryPointLayoutErrorText() const;
 
     Q_INVOKABLE void reconnect();
     Q_INVOKABLE void refreshRepository();
@@ -152,6 +155,15 @@ class ServiceClient final : public QObject {
     Q_INVOKABLE void refreshInventory();
     Q_INVOKABLE void refreshConnections();
     Q_INVOKABLE void refreshSchedules();
+    /// Loads Manifest volumes for a recovery point (Restore Source Disks). Async; emits
+    /// recoveryPointLayoutChanged when finished. Pass empty recovery_point_id to clear.
+    Q_INVOKABLE void loadRecoveryPointLayout(const QString& recovery_point_id);
+    Q_PROPERTY(bool recoveryPointLayoutLoading READ recoveryPointLayoutLoading NOTIFY
+                   recoveryPointLayoutChanged)
+    Q_PROPERTY(QVariantList recoveryPointSourceDisks READ recoveryPointSourceDisks NOTIFY
+                   recoveryPointLayoutChanged)
+    Q_PROPERTY(QString recoveryPointLayoutErrorText READ recoveryPointLayoutErrorText NOTIFY
+                   recoveryPointLayoutChanged)
     /// Create or update a schedule (empty scheduleId creates). Returns false if not sent.
     Q_INVOKABLE bool upsertSchedule(const QString& schedule_id, const QString& display_name,
                                      bool enabled, const QVariantList& source_ids,
@@ -187,6 +199,7 @@ class ServiceClient final : public QObject {
   signals:
     void stateChanged();
     void repositoryChanged();
+    void recoveryPointLayoutChanged();
     void jobsChanged();
     void inventoryChanged();
     void schedulesChanged();
@@ -223,6 +236,7 @@ class ServiceClient final : public QObject {
     void start_schedule_query();
     [[nodiscard]] RequestDisposition handle_service_info_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_recovery_point_frame(const QByteArray& body);
+    [[nodiscard]] RequestDisposition handle_recovery_point_layout_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_job_list_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_inventory_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_connection_list_frame(const QByteArray& body);
@@ -232,6 +246,7 @@ class ServiceClient final : public QObject {
     [[nodiscard]] RequestDisposition handle_start_backup_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_cancel_job_frame(const QByteArray& body);
     void finish_repository_failure(const QString& message_code);
+    void finish_recovery_point_layout_failure(const QString& message_code);
     void finish_job_failure(const QString& message_code);
     void finish_inventory_failure(const QString& message_code);
     void finish_connection_failure(const QString& message_code);
@@ -243,6 +258,7 @@ class ServiceClient final : public QObject {
     void finish_backup_command_failure(const QString& message_code);
     void finish_cancel_command_failure(const QString& message_code);
     void reset_repository();
+    void reset_recovery_point_layout();
     void reset_jobs();
     void reset_inventory();
     void reset_connections();
@@ -276,6 +292,8 @@ class ServiceClient final : public QObject {
     QString error_code_;
     QString repository_uuid_;
     QString repository_error_code_;
+    QString recovery_point_layout_error_code_;
+    QVariantList recovery_point_source_disks_;
     QString jobs_error_code_;
     QString inventory_error_code_;
     QString schedules_error_code_;
@@ -284,6 +302,8 @@ class ServiceClient final : public QObject {
     QString selected_repository_connection_id_;
     QString backup_command_error_code_;
     QString repository_request_id_;
+    QString recovery_point_layout_request_id_;
+    QString recovery_point_layout_recovery_point_id_;
     QString job_request_id_;
     QString inventory_request_id_;
     QString schedule_request_id_;
@@ -322,6 +342,7 @@ class ServiceClient final : public QObject {
     State state_{State::kDisconnected};
     bool repository_configured_{false};
     bool repository_loading_{false};
+    bool recovery_point_layout_loading_{false};
     bool jobs_loading_{false};
     bool job_list_available_{false};
     bool inventory_loading_{false};

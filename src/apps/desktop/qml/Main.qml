@@ -31,6 +31,20 @@ Window {
     property bool settingsPanelOpen: false
     /// Latched once splash dismisses so main opacity/animation never re-toggles.
     property bool appReady: false
+    /// Global busy after splash: page catalog reload / commands (old Main.qml appLoading).
+    /// Bound to each loading flag so NOTIFY from domain signals is enough (not only loadingChanged).
+    readonly property bool appLoading: {
+        if (!window.appReady || !serviceClient.connected)
+            return false
+        return serviceClient.jobsLoading
+                || serviceClient.inventoryLoading
+                || serviceClient.connectionsLoading
+                || serviceClient.schedulesLoading
+                || serviceClient.repositoryLoading
+                || serviceClient.repositoryCommandBusy
+                || serviceClient.backupCommandBusy
+                || serviceClient.cancelCommandBusy
+    }
 
     function centerOnScreen() {
         var scr = window.screen
@@ -282,14 +296,24 @@ Window {
                         previousIndex = currentIndex
                         currentIndex = newIndex
                         sideMenu.currentIndex = newIndex
-                        if (newIndex === 0)
+                        // Reload page data on every menu switch (old onPageActivated / refresh*).
+                        // LoadingOverlay covers UI while ServiceClient.globalLoading is true.
+                        if (newIndex === 0) {
                             serviceClient.refreshJobs()
-                        if (newIndex === 1) {
+                        } else if (newIndex === 1) {
                             serviceClient.refreshInventory()
                             serviceClient.refreshConnections()
-                        }
-                        if (newIndex === 4)
+                            serviceClient.refreshSchedules()
+                        } else if (newIndex === 2 || newIndex === 3) {
+                            // Restore/Mount target list uses source inventory disksTree.
+                            serviceClient.refreshInventory()
+                            serviceClient.refreshConnections()
                             serviceClient.refreshRepository()
+                        } else if (newIndex === 4) {
+                            serviceClient.refreshConnections()
+                            serviceClient.refreshRepository()
+                        }
+                        // Event Log: no Service catalog query yet.
                     }
 
                     // 0 Home, 1 Backup, 2 Restore, 3 Mount, 4 Repository, 5 Event Log
@@ -398,10 +422,13 @@ Window {
         onQuitRequested: window.close()
     }
 
-    // Intentionally not shown on main UI — background queries must not flash a scrim.
+    // Global loading overlay (old Main.qml): menu switch / catalog reload / busy commands.
     LoadingOverlay {
         anchors.fill: parent
-        visible: false
+        z: 500
+        visible: window.appLoading
+        //% "Loading"
+        message: qsTrId("aegra.common.loading")
     }
 
     ToastBanner {

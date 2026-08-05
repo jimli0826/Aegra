@@ -97,6 +97,7 @@ void ServiceClient::start_schedule_query() {
     pending_schedules_.clear();
     schedule_requested_token_.reset();
     emit schedulesChanged();
+    emit loadingChanged();
 
     const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     schedule_request_id_ = request_id;
@@ -162,6 +163,7 @@ RequestDisposition ServiceClient::handle_schedule_list_frame(const QByteArray& b
     schedule_request_id_.clear();
     schedule_requested_token_.reset();
     emit schedulesChanged();
+    emit loadingChanged();
     return RequestDisposition::kFinished;
 }
 
@@ -172,6 +174,7 @@ void ServiceClient::finish_schedule_failure(const QString& message_code) {
     schedule_requested_token_.reset();
     pending_schedules_.clear();
     emit schedulesChanged();
+    emit loadingChanged();
 }
 
 void ServiceClient::reset_schedules() {

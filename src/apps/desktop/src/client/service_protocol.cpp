@@ -250,6 +250,22 @@ QByteArray encode_recovery_point_request(const QString& request_id,
         .toJson(QJsonDocument::Compact);
 }
 
+QByteArray encode_recovery_point_layout_request(const QString& request_id,
+                                                const QString& repository_connection_id,
+                                                const QString& recovery_point_id) {
+    const QJsonObject payload{{QStringLiteral("repository_connection_id"), repository_connection_id},
+                              {QStringLiteral("recovery_point_id"), recovery_point_id}};
+    return QJsonDocument(
+               QJsonObject{
+                   {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
+                   {QStringLiteral("message_type"), 1},
+                   {QStringLiteral("request_id"), request_id},
+                   {QStringLiteral("kind"), kGetRecoveryPointLayoutRequestKind},
+                   {QStringLiteral("idempotency_key"), QJsonValue(QJsonValue::Null)},
+                   {QStringLiteral("payload"), payload}})
+        .toJson(QJsonDocument::Compact);
+}
+
 bool parse_response_root(const QByteArray& body, const QString& request_id, QJsonObject& root) {
     QJsonParseError parse_error{};
     const auto document = QJsonDocument::fromJson(body, &parse_error);
@@ -322,6 +338,214 @@ bool parse_service_info_response(const QJsonObject& root, ServiceInfo& result) {
     return true;
 }
 
+namespace {
+
+[[nodiscard]] bool parse_layout_partition(const QJsonObject& object, QVariantMap& result) {
+    if (!has_exact_keys(object, {"partition_number", "offset_bytes", "size_bytes", "is_active",
+                                 "mbr_type", "gpt_type_guid", "gpt_name", "volume_label",
+                                 "filesystem"})) {
+        return false;
+    }
+    qint64 partition_number = 0;
+    qint64 offset_bytes = 0;
+    qint64 size_bytes = 0;
+    qint64 mbr_type = 0;
+    if (!integer_in_range(object.value(QStringLiteral("partition_number")), 0, 1000,
+                          partition_number) ||
+        !integer_in_range(object.value(QStringLiteral("offset_bytes")), 0,
+                          (std::numeric_limits<qint64>::max)(), offset_bytes) ||
+        !integer_in_range(object.value(QStringLiteral("size_bytes")), 1,
+                          (std::numeric_limits<qint64>::max)(), size_bytes) ||
+        !integer_in_range(object.value(QStringLiteral("mbr_type")), 0, 255, mbr_type) ||
+        !object.value(QStringLiteral("is_active")).isBool() ||
+        !object.value(QStringLiteral("gpt_type_guid")).isString() ||
+        !object.value(QStringLiteral("gpt_name")).isString() ||
+        !object.value(QStringLiteral("volume_label")).isString() ||
+        !object.value(QStringLiteral("filesystem")).isString()) {
+        return false;
+    }
+    result = {{QStringLiteral("partitionNumber"), partition_number},
+              {QStringLiteral("offsetBytes"), offset_bytes},
+              {QStringLiteral("sizeBytes"), size_bytes},
+              {QStringLiteral("isActive"), object.value(QStringLiteral("is_active")).toBool()},
+              {QStringLiteral("mbrType"), mbr_type},
+              {QStringLiteral("gptTypeGuid"),
+               object.value(QStringLiteral("gpt_type_guid")).toString()},
+              {QStringLiteral("gptName"), object.value(QStringLiteral("gpt_name")).toString()},
+              {QStringLiteral("volumeLabel"),
+               object.value(QStringLiteral("volume_label")).toString()},
+              {QStringLiteral("filesystem"), object.value(QStringLiteral("filesystem")).toString()}};
+    return true;
+}
+
+[[nodiscard]] bool parse_layout_disk(const QJsonObject& object, QVariantMap& result) {
+    if (!has_exact_keys(object, {"disk_number", "disk_size_bytes", "partition_style", "model",
+                                 "media_type", "partitions"}) ||
+        !object.value(QStringLiteral("partitions")).isArray() ||
+        !object.value(QStringLiteral("partition_style")).isString() ||
+        !object.value(QStringLiteral("model")).isString() ||
+        !object.value(QStringLiteral("media_type")).isString()) {
+        return false;
+    }
+    qint64 disk_number = 0;
+    qint64 disk_size = 0;
+    if (!integer_in_range(object.value(QStringLiteral("disk_number")), 0, 1000, disk_number) ||
+        !integer_in_range(object.value(QStringLiteral("disk_size_bytes")), 1,
+                          (std::numeric_limits<qint64>::max)(), disk_size)) {
+        return false;
+    }
+    const auto style = object.value(QStringLiteral("partition_style")).toString();
+    if (style != QLatin1String("mbr") && style != QLatin1String("gpt") &&
+        style != QLatin1String("raw")) {
+        return false;
+    }
+    QVariantList partitions;
+    for (const auto& value : object.value(QStringLiteral("partitions")).toArray()) {
+        if (!value.isObject()) {
+            return false;
+        }
+        QVariantMap partition;
+        if (!parse_layout_partition(value.toObject(), partition)) {
+            return false;
+        }
+        partitions.push_back(std::move(partition));
+    }
+    result = {{QStringLiteral("diskNumber"), disk_number},
+              {QStringLiteral("diskSizeBytes"), disk_size},
+              {QStringLiteral("partitionStyle"), style},
+              {QStringLiteral("model"), object.value(QStringLiteral("model")).toString()},
+              {QStringLiteral("mediaType"), object.value(QStringLiteral("media_type")).toString()},
+              {QStringLiteral("partitions"), partitions}};
+    return true;
+}
+
+[[nodiscard]] bool parse_layout_extent(const QJsonObject& object, QVariantMap& result) {
+    if (!has_exact_keys(object, {"disk_number", "partition_number", "physical_offset",
+                                 "volume_offset", "length"})) {
+        return false;
+    }
+    qint64 disk_number = 0;
+    qint64 partition_number = 0;
+    qint64 physical_offset = 0;
+    qint64 volume_offset = 0;
+    qint64 length = 0;
+    if (!integer_in_range(object.value(QStringLiteral("disk_number")), 0, 1000, disk_number) ||
+        !integer_in_range(object.value(QStringLiteral("partition_number")), 0, 1000,
+                          partition_number) ||
+        !integer_in_range(object.value(QStringLiteral("physical_offset")), 0,
+                          (std::numeric_limits<qint64>::max)(), physical_offset) ||
+        !integer_in_range(object.value(QStringLiteral("volume_offset")), 0,
+                          (std::numeric_limits<qint64>::max)(), volume_offset) ||
+        !integer_in_range(object.value(QStringLiteral("length")), 1,
+                          (std::numeric_limits<qint64>::max)(), length)) {
+        return false;
+    }
+    result = {{QStringLiteral("diskNumber"), disk_number},
+              {QStringLiteral("partitionNumber"), partition_number},
+              {QStringLiteral("physicalOffset"), physical_offset},
+              {QStringLiteral("volumeOffset"), volume_offset},
+              {QStringLiteral("length"), length}};
+    return true;
+}
+
+[[nodiscard]] bool parse_layout_volume(const QJsonObject& object, QVariantMap& result) {
+    if (!has_exact_keys(object, {"volume_index", "letter", "label", "filesystem",
+                                 "total_size_bytes", "extents"}) ||
+        !object.value(QStringLiteral("extents")).isArray() ||
+        !object.value(QStringLiteral("letter")).isString() ||
+        !object.value(QStringLiteral("label")).isString() ||
+        !object.value(QStringLiteral("filesystem")).isString()) {
+        return false;
+    }
+    qint64 volume_index = 0;
+    qint64 total_size = 0;
+    if (!integer_in_range(object.value(QStringLiteral("volume_index")), 0, 1000, volume_index) ||
+        !integer_in_range(object.value(QStringLiteral("total_size_bytes")), 1,
+                          (std::numeric_limits<qint64>::max)(), total_size)) {
+        return false;
+    }
+    QVariantList extents;
+    for (const auto& value : object.value(QStringLiteral("extents")).toArray()) {
+        if (!value.isObject()) {
+            return false;
+        }
+        QVariantMap extent;
+        if (!parse_layout_extent(value.toObject(), extent)) {
+            return false;
+        }
+        extents.push_back(std::move(extent));
+    }
+    if (extents.isEmpty()) {
+        return false;
+    }
+    result = {{QStringLiteral("volumeIndex"), volume_index},
+              {QStringLiteral("letter"), object.value(QStringLiteral("letter")).toString()},
+              {QStringLiteral("label"), object.value(QStringLiteral("label")).toString()},
+              {QStringLiteral("filesystem"), object.value(QStringLiteral("filesystem")).toString()},
+              {QStringLiteral("totalSizeBytes"), total_size},
+              {QStringLiteral("extents"), extents}};
+    return true;
+}
+
+} // namespace
+
+bool parse_recovery_point_layout_response(const QJsonObject& root, QVariantMap& result) {
+    qint64 kind = 0;
+    qint64 request_kind = 0;
+    qint64 error = 0;
+    if (!integer_in_range(root.value(QStringLiteral("kind")), 1, 1, kind) ||
+        !integer_in_range(root.value(QStringLiteral("request_kind")),
+                          kGetRecoveryPointLayoutRequestKind, kGetRecoveryPointLayoutRequestKind,
+                          request_kind) ||
+        !integer_in_range(root.value(QStringLiteral("boundary_error_code")), 0, 0, error) ||
+        root.value(QStringLiteral("message_code")).toString() !=
+            QStringLiteral("recovery_point.layout_ready") ||
+        !root.value(QStringLiteral("payload")).isObject()) {
+        return false;
+    }
+    const auto payload = root.value(QStringLiteral("payload")).toObject();
+    if (!has_exact_keys(payload,
+                        {"repository_connection_id", "recovery_point_id", "disks", "volumes"}) ||
+        !payload.value(QStringLiteral("repository_connection_id")).isString() ||
+        !payload.value(QStringLiteral("recovery_point_id")).isString() ||
+        !payload.value(QStringLiteral("disks")).isArray() ||
+        !payload.value(QStringLiteral("volumes")).isArray()) {
+        return false;
+    }
+    QVariantList disks;
+    for (const auto& value : payload.value(QStringLiteral("disks")).toArray()) {
+        if (!value.isObject()) {
+            return false;
+        }
+        QVariantMap disk;
+        if (!parse_layout_disk(value.toObject(), disk)) {
+            return false;
+        }
+        disks.push_back(std::move(disk));
+    }
+    QVariantList volumes;
+    for (const auto& value : payload.value(QStringLiteral("volumes")).toArray()) {
+        if (!value.isObject()) {
+            return false;
+        }
+        QVariantMap volume;
+        if (!parse_layout_volume(value.toObject(), volume)) {
+            return false;
+        }
+        volumes.push_back(std::move(volume));
+    }
+    if (disks.isEmpty() || volumes.isEmpty()) {
+        return false;
+    }
+    result = {{QStringLiteral("repositoryConnectionId"),
+               payload.value(QStringLiteral("repository_connection_id")).toString()},
+              {QStringLiteral("recoveryPointId"),
+               payload.value(QStringLiteral("recovery_point_id")).toString()},
+              {QStringLiteral("disks"), disks},
+              {QStringLiteral("volumes"), volumes}};
+    return true;
+}
+
 bool parse_recovery_point_response(const QJsonObject& root, RecoveryPointPage& result) {
     qint64 kind = 0;
     qint64 request_kind = 0;
@@ -377,6 +601,20 @@ bool is_repository_failure_response(const QJsonObject& root) {
            integer_in_range(root.value(QStringLiteral("boundary_error_code")), 1, 11, error) &&
            root.value(QStringLiteral("message_code")).toString() ==
                QStringLiteral("repository.query_failed") &&
+           root.value(QStringLiteral("payload")).isNull();
+}
+
+bool is_recovery_point_layout_failure_response(const QJsonObject& root) {
+    qint64 kind = 0;
+    qint64 request_kind = 0;
+    qint64 error = 0;
+    return integer_in_range(root.value(QStringLiteral("kind")), 3, 3, kind) &&
+           integer_in_range(root.value(QStringLiteral("request_kind")),
+                            kGetRecoveryPointLayoutRequestKind, kGetRecoveryPointLayoutRequestKind,
+                            request_kind) &&
+           integer_in_range(root.value(QStringLiteral("boundary_error_code")), 1, 11, error) &&
+           root.value(QStringLiteral("message_code")).toString() ==
+               QStringLiteral("recovery_point.layout_failed") &&
            root.value(QStringLiteral("payload")).isNull();
 }
 

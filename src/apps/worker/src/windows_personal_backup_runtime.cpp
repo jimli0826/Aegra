@@ -60,10 +60,11 @@ resolve_volume(const std::filesystem::path& volume_guid_path) {
 
 PreparedVolumeMetadata make_metadata(const windows_disk::WindowsVolumeInfo& volume,
                                      const bool vss_used) {
-    return PreparedVolumeMetadata{
+    PreparedVolumeMetadata metadata{
         volume.volume_guid_path, volume.mount_points,       volume.filesystem, volume.label,
-        volume.total_size_bytes, volume.cluster_size_bytes, vss_used,
-    };
+        volume.total_size_bytes, volume.cluster_size_bytes, vss_used,          {}};
+    metadata.disk_extents = volume.extents;
+    return metadata;
 }
 
 class WindowsSnapshotLease final : public ISnapshotLease {

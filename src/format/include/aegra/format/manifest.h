@@ -37,6 +37,12 @@ struct Partition final {
     std::uint64_t size{0};
     PartitionStyle style{PartitionStyle::kRaw};
     bool is_active{false};
+    /// MBR partition type (0 when GPT/RAW). Used for reserved-partition filtering.
+    std::uint8_t mbr_type{0};
+    /// GPT type GUID as lowercase "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", empty when MBR/RAW.
+    std::string gpt_type_guid;
+    /// GPT partition name (UTF-8), empty when unavailable.
+    std::string gpt_name;
     std::string volume_label;
     std::string filesystem;
     std::string volume_guid;

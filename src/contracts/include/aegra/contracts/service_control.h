@@ -291,6 +291,56 @@ struct RecoveryPointChainResult final {
     std::string message_code{"recovery_point.chain_ready"};
 };
 
+/// Partition entry from Manifest disks[] (for Restore Source Disks / reserved filtering).
+struct RecoveryPointSourcePartition final {
+    std::uint32_t partition_number{0};
+    std::uint64_t offset_bytes{0};
+    std::uint64_t size_bytes{0};
+    bool is_active{false};
+    std::uint8_t mbr_type{0};
+    std::string gpt_type_guid;
+    std::string gpt_name;
+    std::string volume_label;
+    std::string filesystem;
+};
+
+/// Physical disk from Manifest disks[] (old Restore layout primary axis).
+struct RecoveryPointSourceDisk final {
+    std::uint32_t disk_number{0};
+    std::uint64_t disk_size_bytes{0};
+    /// Stable code: "mbr" | "gpt" | "raw".
+    std::string partition_style;
+    std::string model;
+    std::string media_type;
+    std::vector<RecoveryPointSourcePartition> partitions;
+};
+
+/// Volume→partition join key (Manifest volumes[].extents[]).
+struct RecoveryPointSourceExtent final {
+    std::uint32_t disk_number{0};
+    std::uint32_t partition_number{0};
+    std::uint64_t physical_offset{0};
+    std::uint64_t volume_offset{0};
+    std::uint64_t length{0};
+};
+
+/// Source volume geometry from an archive Manifest (personal volume backup layout).
+struct RecoveryPointSourceVolume final {
+    std::uint32_t volume_index{0};
+    std::string letter;
+    std::string label;
+    std::string filesystem;
+    std::uint64_t total_size_bytes{0};
+    std::vector<RecoveryPointSourceExtent> extents;
+};
+
+struct RecoveryPointLayout final {
+    std::string repository_connection_id;
+    std::string recovery_point_id;
+    std::vector<RecoveryPointSourceDisk> disks;
+    std::vector<RecoveryPointSourceVolume> volumes;
+};
+
 struct DeletePlanTargetSummary final {
     std::string recovery_point_id;
     std::uint64_t catalog_generation{0};
@@ -428,6 +478,8 @@ validate_event_acknowledgement(const EventAcknowledgement& acknowledgement);
 validate_command_acknowledgement(const CommandAcknowledgement& acknowledgement);
 [[nodiscard]] base::Result<void>
 validate_recovery_point_chain_result(const RecoveryPointChainResult& result);
+[[nodiscard]] base::Result<void>
+validate_recovery_point_layout(const RecoveryPointLayout& layout);
 [[nodiscard]] base::Result<void> validate_delete_plan_summary(const DeletePlanSummary& summary);
 [[nodiscard]] base::Result<void>
 validate_execute_delete_plan_command(const ExecuteDeletePlanCommand& command);

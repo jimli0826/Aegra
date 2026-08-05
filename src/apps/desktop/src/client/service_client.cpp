@@ -209,9 +209,15 @@ QString ServiceClient::splashErrorText() const { return splash_error_ ? errorTex
 bool ServiceClient::toastVisible() const noexcept { return toast_visible_; }
 QString ServiceClient::toastText() const { return toast_text_; }
 bool ServiceClient::globalLoading() const noexcept {
-    // Never cover the main UI for background catalog/inventory queries. Splash owns
-    // first-connect UX; pages update in place (Home keeps demo disks until live data arrives).
-    return false;
+    // After splash: full-window overlay while page catalog queries run (menu switch reload),
+    // matching old AegraImage Main.qml appLoading.
+    if (state_ != State::kReady || !first_ready_seen_) {
+        return false;
+    }
+    return repository_loading_ || recovery_point_layout_loading_ || jobs_loading_ ||
+           inventory_loading_ || connections_loading_ || schedules_loading_ ||
+           repository_command_busy_ || backup_command_busy_ || cancel_command_busy_ ||
+           schedule_command_busy_;
 }
 
 bool ServiceClient::hasCapability(const QString& capability) const {
@@ -309,12 +315,16 @@ void ServiceClient::on_request_failed(const QString& message_code) {
         // After Ready, treat query protocol/timeout as soft failures when a catalog/job request
         // is in flight — keep the socket and mark the domain error instead of full disconnect.
         if (handshake_complete_ && first_ready_seen_ &&
-            (repository_loading_ || jobs_loading_ || inventory_loading_ || connections_loading_ ||
-             schedules_loading_ || repository_command_busy_ || schedule_command_busy_ ||
-             backup_command_busy_ || cancel_command_busy_) &&
+            (repository_loading_ || recovery_point_layout_loading_ || jobs_loading_ ||
+             inventory_loading_ || connections_loading_ || schedules_loading_ ||
+             repository_command_busy_ || schedule_command_busy_ || backup_command_busy_ ||
+             cancel_command_busy_) &&
             message_code == QLatin1String("service.protocol_invalid")) {
             if (repository_loading_) {
                 finish_repository_failure(QStringLiteral("repository.query_failed"));
+            }
+            if (recovery_point_layout_loading_) {
+                finish_recovery_point_layout_failure(QStringLiteral("recovery_point.layout_failed"));
             }
             if (jobs_loading_) {
                 finish_job_failure(QStringLiteral("job.query_failed"));
@@ -352,6 +362,9 @@ void ServiceClient::on_request_failed(const QString& message_code) {
     }
     if (repository_loading_) {
         finish_repository_failure(QStringLiteral("repository.query_failed"));
+    }
+    if (recovery_point_layout_loading_) {
+        finish_recovery_point_layout_failure(QStringLiteral("recovery_point.layout_failed"));
     }
     if (jobs_loading_) {
         finish_job_failure(QStringLiteral("job.query_failed"));
@@ -612,6 +625,7 @@ void ServiceClient::set_state(const State state, QString error_code) {
             job_cancel_available_ = false;
             handshake_complete_ = false;
             reset_repository();
+            reset_recovery_point_layout();
             reset_jobs();
             reset_inventory();
             reset_connections();

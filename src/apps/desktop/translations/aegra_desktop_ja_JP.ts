@@ -127,6 +127,10 @@
         <source>Unable to read the repository catalog</source>
         <translation>リポジトリカタログを読み取れません</translation>
     </message>
+    <message id="aegra.error.recovery_point.layout_failed">
+        <source>Unable to load source volumes for this checkpoint</source>
+        <translation>このチェックポイントのソースボリュームを読み込めません</translation>
+    </message>
     <message id="aegra.error.service.disconnected">
         <source>Service connection lost</source>
         <translation>Service 接続が切断されました</translation>
@@ -933,6 +937,14 @@ Server: %1</source>
         <source>Select a checkpoint to view source disks</source>
         <translation>チェックポイントを選択してソースディスクを表示</translation>
     </message>
+    <message id="aegra.restore.loading_source">
+        <source>Loading source disks...</source>
+        <translation>ソースディスクを読み込み中…</translation>
+    </message>
+    <message id="aegra.restore.no_source_volumes">
+        <source>No source volumes in this checkpoint</source>
+        <translation>このチェックポイントにソースボリュームはありません</translation>
+    </message>
     <message id="aegra.restore.selected_label">
         <source>Selected:</source>
         <translation>選択：</translation>
@@ -958,8 +970,8 @@ Server: %1</source>
         <translation>（この PC — 利用可能な復元先）</translation>
     </message>
     <message id="aegra.restore.target_empty">
-        <source>Local disks will appear when restore inventory is connected</source>
-        <translation>復元インベントリ接続後にローカルディスクが表示されます</translation>
+        <source>Local disks will appear when inventory is available</source>
+        <translation>インベントリが利用可能になるとローカルディスクが表示されます</translation>
     </message>
     <message id="aegra.restore.options">
         <source>Options</source>
@@ -970,16 +982,32 @@ Server: %1</source>
         <translation>ディスク署名を保持</translation>
     </message>
     <message id="aegra.restore.preserve_signature_hint">
-        <source>Keeps the original disk signature when supported</source>
-        <translation>対応している場合は元のディスク署名を保持します</translation>
+        <source>Keep MBR signature / GPT DiskId (recommended for bootable disks). Uncheck only when cloning a data disk while the source remains online.</source>
+        <translation>MBR 署名 / GPT DiskId を保持（ブート可能ディスクで推奨）。ソースがオンラインのままデータディスクを複製する場合のみオフ。</translation>
     </message>
     <message id="aegra.restore.auto_extend">
-        <source>Auto-extend last partition</source>
+        <source>Auto expand last partition</source>
         <translation>最後のパーティションを自動拡張</translation>
     </message>
     <message id="aegra.restore.auto_extend_hint">
-        <source>Grow the last volume to fill free space on the target</source>
-        <translation>ターゲットの空き領域を埋めるように最後のボリュームを拡張します</translation>
+        <source>When the target disk is larger than the source, grow the last data partition (and filesystem) into free space so no large unallocated region remains. Uncheck to leave free space unallocated. Note: FAT/FAT32 volumes cannot be auto-expanded (Windows does not support online extend); free space stays unallocated.</source>
+        <translation>ターゲットがソースより大きい場合、最後のデータパーティション（とファイルシステム）を空き領域まで拡張します。オフにすると未割り当て領域が残ります。FAT/FAT32 はオンライン拡張不可。</translation>
+    </message>
+    <message id="aegra.restore.unallocated">
+        <source>Unallocated</source>
+        <translation>未割り当て</translation>
+    </message>
+    <message id="aegra.restore.no_partitions">
+        <source>No partitions</source>
+        <translation>パーティションなし</translation>
+    </message>
+    <message id="aegra.restore.source_volume">
+        <source>Volume %1</source>
+        <translation>ボリューム %1</translation>
+    </message>
+    <message id="aegra.restore.no_recovery_points_on_date">
+        <source>No recovery points on this date</source>
+        <translation>この日に回復ポイントはありません</translation>
     </message>
     <message id="aegra.restore.checkpoint_panel_empty">
         <source>Recovery point calendar and list will appear when restore Service APIs are connected</source>

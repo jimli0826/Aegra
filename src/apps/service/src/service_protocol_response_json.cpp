@@ -261,6 +261,162 @@ parse_repository_connection(const Json& payload) {
     return summary;
 }
 
+[[nodiscard]] Json
+encode_recovery_point_source_partition(const contracts::RecoveryPointSourcePartition& partition) {
+    return Json{{"partition_number", partition.partition_number},
+                {"offset_bytes", partition.offset_bytes},
+                {"size_bytes", partition.size_bytes},
+                {"is_active", partition.is_active},
+                {"mbr_type", partition.mbr_type},
+                {"gpt_type_guid", partition.gpt_type_guid},
+                {"gpt_name", partition.gpt_name},
+                {"volume_label", partition.volume_label},
+                {"filesystem", partition.filesystem}};
+}
+
+[[nodiscard]] contracts::RecoveryPointSourcePartition
+parse_recovery_point_source_partition(const Json& payload) {
+    constexpr std::array<std::string_view, 9> keys{
+        "partition_number", "offset_bytes", "size_bytes", "is_active", "mbr_type",
+        "gpt_type_guid",    "gpt_name",     "volume_label", "filesystem"};
+    if (!exact_keys(payload, keys)) {
+        throw std::invalid_argument("recovery point source partition fields are invalid");
+    }
+    return {unsigned_value<std::uint32_t>(payload, "partition_number"),
+            unsigned_value<std::uint64_t>(payload, "offset_bytes"),
+            unsigned_value<std::uint64_t>(payload, "size_bytes"),
+            payload.at("is_active").get<bool>(),
+            unsigned_value<std::uint8_t>(payload, "mbr_type"),
+            payload.at("gpt_type_guid").get<std::string>(),
+            payload.at("gpt_name").get<std::string>(),
+            payload.at("volume_label").get<std::string>(),
+            payload.at("filesystem").get<std::string>()};
+}
+
+[[nodiscard]] Json
+encode_recovery_point_source_disk(const contracts::RecoveryPointSourceDisk& disk) {
+    Json partitions = Json::array();
+    for (const auto& partition : disk.partitions) {
+        partitions.push_back(encode_recovery_point_source_partition(partition));
+    }
+    return Json{{"disk_number", disk.disk_number},
+                {"disk_size_bytes", disk.disk_size_bytes},
+                {"partition_style", disk.partition_style},
+                {"model", disk.model},
+                {"media_type", disk.media_type},
+                {"partitions", std::move(partitions)}};
+}
+
+[[nodiscard]] contracts::RecoveryPointSourceDisk
+parse_recovery_point_source_disk(const Json& payload) {
+    constexpr std::array<std::string_view, 6> keys{"disk_number",     "disk_size_bytes",
+                                                   "partition_style", "model",
+                                                   "media_type",      "partitions"};
+    if (!exact_keys(payload, keys) || !payload.at("partitions").is_array()) {
+        throw std::invalid_argument("recovery point source disk fields are invalid");
+    }
+    contracts::RecoveryPointSourceDisk disk;
+    disk.disk_number = unsigned_value<std::uint32_t>(payload, "disk_number");
+    disk.disk_size_bytes = unsigned_value<std::uint64_t>(payload, "disk_size_bytes");
+    disk.partition_style = payload.at("partition_style").get<std::string>();
+    disk.model = payload.at("model").get<std::string>();
+    disk.media_type = payload.at("media_type").get<std::string>();
+    for (const auto& item : payload.at("partitions")) {
+        disk.partitions.push_back(parse_recovery_point_source_partition(item));
+    }
+    return disk;
+}
+
+[[nodiscard]] Json
+encode_recovery_point_source_extent(const contracts::RecoveryPointSourceExtent& extent) {
+    return Json{{"disk_number", extent.disk_number},
+                {"partition_number", extent.partition_number},
+                {"physical_offset", extent.physical_offset},
+                {"volume_offset", extent.volume_offset},
+                {"length", extent.length}};
+}
+
+[[nodiscard]] contracts::RecoveryPointSourceExtent
+parse_recovery_point_source_extent(const Json& payload) {
+    constexpr std::array<std::string_view, 5> keys{"disk_number", "partition_number",
+                                                   "physical_offset", "volume_offset", "length"};
+    if (!exact_keys(payload, keys)) {
+        throw std::invalid_argument("recovery point source extent fields are invalid");
+    }
+    return {unsigned_value<std::uint32_t>(payload, "disk_number"),
+            unsigned_value<std::uint32_t>(payload, "partition_number"),
+            unsigned_value<std::uint64_t>(payload, "physical_offset"),
+            unsigned_value<std::uint64_t>(payload, "volume_offset"),
+            unsigned_value<std::uint64_t>(payload, "length")};
+}
+
+[[nodiscard]] Json encode_recovery_point_source_volume(const contracts::RecoveryPointSourceVolume& volume) {
+    Json extents = Json::array();
+    for (const auto& extent : volume.extents) {
+        extents.push_back(encode_recovery_point_source_extent(extent));
+    }
+    return Json{{"volume_index", volume.volume_index},
+                {"letter", volume.letter},
+                {"label", volume.label},
+                {"filesystem", volume.filesystem},
+                {"total_size_bytes", volume.total_size_bytes},
+                {"extents", std::move(extents)}};
+}
+
+[[nodiscard]] contracts::RecoveryPointSourceVolume
+parse_recovery_point_source_volume(const Json& payload) {
+    constexpr std::array<std::string_view, 6> keys{"volume_index", "letter", "label", "filesystem",
+                                                   "total_size_bytes", "extents"};
+    if (!exact_keys(payload, keys) || !payload.at("extents").is_array()) {
+        throw std::invalid_argument("recovery point source volume fields are invalid");
+    }
+    contracts::RecoveryPointSourceVolume volume{
+        unsigned_value<std::uint32_t>(payload, "volume_index"),
+        payload.at("letter").get<std::string>(),
+        payload.at("label").get<std::string>(),
+        payload.at("filesystem").get<std::string>(),
+        unsigned_value<std::uint64_t>(payload, "total_size_bytes"),
+        {}};
+    for (const auto& item : payload.at("extents")) {
+        volume.extents.push_back(parse_recovery_point_source_extent(item));
+    }
+    return volume;
+}
+
+[[nodiscard]] Json encode_recovery_point_layout(const contracts::RecoveryPointLayout& layout) {
+    Json disks = Json::array();
+    for (const auto& disk : layout.disks) {
+        disks.push_back(encode_recovery_point_source_disk(disk));
+    }
+    Json volumes = Json::array();
+    for (const auto& volume : layout.volumes) {
+        volumes.push_back(encode_recovery_point_source_volume(volume));
+    }
+    return Json{{"repository_connection_id", layout.repository_connection_id},
+                {"recovery_point_id", layout.recovery_point_id},
+                {"disks", std::move(disks)},
+                {"volumes", std::move(volumes)}};
+}
+
+[[nodiscard]] contracts::RecoveryPointLayout parse_recovery_point_layout(const Json& payload) {
+    constexpr std::array<std::string_view, 4> keys{"repository_connection_id", "recovery_point_id",
+                                                   "disks", "volumes"};
+    if (!exact_keys(payload, keys) || !payload.at("disks").is_array() ||
+        !payload.at("volumes").is_array()) {
+        throw std::invalid_argument("recovery point layout fields are invalid");
+    }
+    contracts::RecoveryPointLayout layout;
+    layout.repository_connection_id = payload.at("repository_connection_id").get<std::string>();
+    layout.recovery_point_id = payload.at("recovery_point_id").get<std::string>();
+    for (const auto& item : payload.at("disks")) {
+        layout.disks.push_back(parse_recovery_point_source_disk(item));
+    }
+    for (const auto& item : payload.at("volumes")) {
+        layout.volumes.push_back(parse_recovery_point_source_volume(item));
+    }
+    return layout;
+}
+
 [[nodiscard]] Json encode_schedule_trigger(const contracts::ScheduleTrigger& trigger) {
     return Json{{"kind", static_cast<std::uint8_t>(trigger.kind)},
                 {"local_minute_of_day", trigger.local_minute_of_day},
@@ -658,6 +814,9 @@ Json encode_response_payload(const contracts::ServiceResponse& response) {
         return encode_chain_result(std::get<contracts::RecoveryPointChainResult>(response.payload));
     case contracts::ServiceRequestKind::kPlanDeleteRecoveryPoints:
         return encode_delete_plan_summary(std::get<contracts::DeletePlanSummary>(response.payload));
+    case contracts::ServiceRequestKind::kGetRecoveryPointLayout:
+        return encode_recovery_point_layout(
+            std::get<contracts::RecoveryPointLayout>(response.payload));
     default:
         throw std::invalid_argument("service query response kind is invalid");
     }
@@ -702,6 +861,8 @@ parse_response_payload(const contracts::ServiceResponseKind response_kind,
         return parse_chain_result(payload);
     case contracts::ServiceRequestKind::kPlanDeleteRecoveryPoints:
         return parse_delete_plan_summary(payload);
+    case contracts::ServiceRequestKind::kGetRecoveryPointLayout:
+        return parse_recovery_point_layout(payload);
     default:
         throw std::invalid_argument("service query response kind is invalid");
     }

@@ -178,6 +178,41 @@ class WindowsVolumeEnumerator final {
     [[nodiscard]] static base::Result<std::vector<WindowsVolumeInfo>> enumerate();
 };
 
+/// One partition from IOCTL_DISK_GET_DRIVE_LAYOUT_EX (for Manifest disks[]).
+struct WindowsPartitionLayout final {
+    std::uint32_t partition_number{0};
+    std::uint64_t offset_bytes{0};
+    std::uint64_t size_bytes{0};
+    /// "MBR" | "GPT" | "RAW"
+    std::string partition_style;
+    bool is_active{false};
+    std::uint8_t mbr_type{0};
+    /// Lowercase UUID string; empty for MBR/RAW.
+    std::string gpt_type_guid;
+    std::string gpt_name;
+    std::string volume_label;
+    std::string filesystem;
+    std::string volume_guid;
+};
+
+/// Full physical disk layout for personal backup Manifest metadata.
+struct WindowsPhysicalDiskLayout final {
+    std::uint32_t disk_number{0};
+    std::uint64_t disk_size_bytes{0};
+    std::uint32_t bytes_per_sector{0};
+    std::uint64_t total_sectors{0};
+    /// "MBR" | "GPT" | "RAW"
+    std::string partition_style;
+    std::string model;
+    std::string serial;
+    std::string media_type;
+    std::vector<WindowsPartitionLayout> partitions;
+};
+
+/// Opens \\.\PhysicalDrive{N} and reads size, style, model, and all partitions.
+[[nodiscard]] base::Result<WindowsPhysicalDiskLayout>
+inspect_physical_disk_layout(std::uint32_t disk_number);
+
 class WindowsSourceInventory final : public ports::ISourceInventory {
   public:
     [[nodiscard]] base::Result<std::vector<ports::SourceInventoryRecord>>

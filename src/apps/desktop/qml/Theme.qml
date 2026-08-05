@@ -61,6 +61,16 @@ QtObject {
     property color colorUnallocatedHatch: "#3d4a5c"
     property color colorUnallocatedText: "#9aabbc"
 
+    function volumeColor(index) {
+        var list = volumeColors
+        if (!list || list.length === 0)
+            return colorButton
+        var i = index % list.length
+        if (i < 0)
+            i += list.length
+        return list[i]
+    }
+
     property string fontFamily: "Segoe UI"
 
     /// Catalog for Settings UI (preview chips) — blueExtra first (default)

@@ -23,6 +23,8 @@ namespace {
          QStringLiteral("aegra.repository.status.catalog_ready")},
         {QStringLiteral("repository.query_failed"),
          QStringLiteral("aegra.error.repository.query_failed")},
+        {QStringLiteral("recovery_point.layout_failed"),
+         QStringLiteral("aegra.error.recovery_point.layout_failed")},
         {QStringLiteral("job.queued"), QStringLiteral("aegra.task.state.queued")},
         {QStringLiteral("job.running"), QStringLiteral("aegra.task.state.running")},
         {QStringLiteral("job.progress"), QStringLiteral("aegra.task.state.running")},

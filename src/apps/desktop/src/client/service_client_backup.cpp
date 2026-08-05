@@ -189,6 +189,7 @@ void ServiceClient::start_inventory_query() {
     pending_sources_.clear();
     inventory_requested_token_.reset();
     emit inventoryChanged();
+    emit loadingChanged();
 
     const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     inventory_request_id_ = request_id;
@@ -211,6 +212,7 @@ void ServiceClient::start_connection_query() {
     pending_connections_.clear();
     connection_requested_token_.reset();
     emit connectionsChanged();
+    emit loadingChanged();
 
     const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     connection_request_id_ = request_id;
@@ -271,6 +273,7 @@ RequestDisposition ServiceClient::handle_inventory_frame(const QByteArray& body)
     inventory_request_id_.clear();
     inventory_requested_token_.reset();
     emit inventoryChanged();
+    emit loadingChanged();
     return RequestDisposition::kFinished;
 }
 
@@ -328,6 +331,7 @@ RequestDisposition ServiceClient::handle_connection_list_frame(const QByteArray&
         selected_repository_connection_id_ = connections_.default_connection_id();
     }
     emit connectionsChanged();
+    emit loadingChanged();
     if (!schedules_.isEmpty()) {
         enrich_schedules_with_connections();
         emit schedulesChanged();
@@ -420,6 +424,7 @@ void ServiceClient::finish_inventory_failure(const QString& message_code) {
     inventory_error_code_ = message_code;
     sources_.clear();
     emit inventoryChanged();
+    emit loadingChanged();
 }
 
 void ServiceClient::finish_connection_failure(const QString& message_code) {
@@ -430,6 +435,7 @@ void ServiceClient::finish_connection_failure(const QString& message_code) {
     connections_error_code_ = message_code;
     connections_.clear();
     emit connectionsChanged();
+    emit loadingChanged();
 }
 
 void ServiceClient::finish_backup_command_failure(const QString& message_code) {

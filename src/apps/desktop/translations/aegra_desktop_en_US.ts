@@ -127,6 +127,10 @@
         <source>Unable to read the repository catalog</source>
         <translation>Unable to read the repository catalog</translation>
     </message>
+    <message id="aegra.error.recovery_point.layout_failed">
+        <source>Unable to load source volumes for this checkpoint</source>
+        <translation>Unable to load source volumes for this checkpoint</translation>
+    </message>
     <message id="aegra.error.service.disconnected">
         <source>Service connection lost</source>
         <translation>Service connection lost</translation>
@@ -933,6 +937,14 @@ Server: %1</translation>
         <source>Select a checkpoint to view source disks</source>
         <translation>Select a checkpoint to view source disks</translation>
     </message>
+    <message id="aegra.restore.loading_source">
+        <source>Loading source disks...</source>
+        <translation>Loading source disks...</translation>
+    </message>
+    <message id="aegra.restore.no_source_volumes">
+        <source>No source volumes in this checkpoint</source>
+        <translation>No source volumes in this checkpoint</translation>
+    </message>
     <message id="aegra.restore.selected_label">
         <source>Selected:</source>
         <translation>Selected:</translation>
@@ -958,8 +970,8 @@ Server: %1</translation>
         <translation>(this PC — available restore destinations)</translation>
     </message>
     <message id="aegra.restore.target_empty">
-        <source>Local disks will appear when restore inventory is connected</source>
-        <translation>Local disks will appear when restore inventory is connected</translation>
+        <source>Local disks will appear when inventory is available</source>
+        <translation>Local disks will appear when inventory is available</translation>
     </message>
     <message id="aegra.restore.options">
         <source>Options</source>
@@ -970,16 +982,32 @@ Server: %1</translation>
         <translation>Preserve disk signature</translation>
     </message>
     <message id="aegra.restore.preserve_signature_hint">
-        <source>Keeps the original disk signature when supported</source>
-        <translation>Keeps the original disk signature when supported</translation>
+        <source>Keep MBR signature / GPT DiskId (recommended for bootable disks). Uncheck only when cloning a data disk while the source remains online.</source>
+        <translation>Keep MBR signature / GPT DiskId (recommended for bootable disks). Uncheck only when cloning a data disk while the source remains online.</translation>
     </message>
     <message id="aegra.restore.auto_extend">
-        <source>Auto-extend last partition</source>
-        <translation>Auto-extend last partition</translation>
+        <source>Auto expand last partition</source>
+        <translation>Auto expand last partition</translation>
     </message>
     <message id="aegra.restore.auto_extend_hint">
-        <source>Grow the last volume to fill free space on the target</source>
-        <translation>Grow the last volume to fill free space on the target</translation>
+        <source>When the target disk is larger than the source, grow the last data partition (and filesystem) into free space so no large unallocated region remains. Uncheck to leave free space unallocated. Note: FAT/FAT32 volumes cannot be auto-expanded (Windows does not support online extend); free space stays unallocated.</source>
+        <translation>When the target disk is larger than the source, grow the last data partition (and filesystem) into free space so no large unallocated region remains. Uncheck to leave free space unallocated. Note: FAT/FAT32 volumes cannot be auto-expanded (Windows does not support online extend); free space stays unallocated.</translation>
+    </message>
+    <message id="aegra.restore.unallocated">
+        <source>Unallocated</source>
+        <translation>Unallocated</translation>
+    </message>
+    <message id="aegra.restore.no_partitions">
+        <source>No partitions</source>
+        <translation>No partitions</translation>
+    </message>
+    <message id="aegra.restore.source_volume">
+        <source>Volume %1</source>
+        <translation>Volume %1</translation>
+    </message>
+    <message id="aegra.restore.no_recovery_points_on_date">
+        <source>No recovery points on this date</source>
+        <translation>No recovery points on this date</translation>
     </message>
     <message id="aegra.restore.checkpoint_panel_empty">
         <source>Recovery point calendar and list will appear when restore Service APIs are connected</source>

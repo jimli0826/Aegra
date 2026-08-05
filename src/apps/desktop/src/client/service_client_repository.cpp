@@ -1,10 +1,14 @@
 #include "client/service_client.h"
 
 #include "client/service_protocol.h"
+#include "locale/locale_format.h"
 #include "locale/message_code_map.h"
 
+#include <QHash>
 #include <QJsonObject>
 #include <QUuid>
+
+#include <algorithm>
 
 namespace aegra::desktop {
 namespace {
@@ -17,6 +21,179 @@ constexpr qsizetype kMaximumRecoveryPoints = 10'000;
 
 [[nodiscard]] QString new_idempotency_key() {
     return QStringLiteral("desktop-") + new_request_id();
+}
+
+/// Old RestoreBackend::isReservedPartitionJson — hide MSR/EFI/Recovery from data bars.
+[[nodiscard]] bool is_reserved_partition(const QVariantMap& partition) {
+    auto gpt = partition.value(QStringLiteral("gptTypeGuid")).toString().trimmed().toLower();
+    gpt.remove(QLatin1Char('{'));
+    gpt.remove(QLatin1Char('}'));
+    static const char* k_reserved_gpt[] = {
+        "c12a7328-f81f-11d2-ba4b-00a0c93ec93b", // EFI
+        "e3c9e316-0b5c-4db8-817d-f92df00215ae", // MSR
+        "de94bba4-06d1-4d40-a16a-bfd50179d6ac", // Recovery
+        "5808c8aa-7e8f-42e0-85d2-e1e90434cfb3", // LDM metadata
+        "af9b60a0-1431-4f62-bc68-3311714a69ad", // LDM data
+        "e75caf8f-f680-4cee-afa3-b001e56efc2d", // Storage Spaces
+        "00000000-0000-0000-0000-000000000000",
+    };
+    for (const char* guid : k_reserved_gpt) {
+        if (gpt == QLatin1String(guid)) {
+            return true;
+        }
+    }
+    switch (partition.value(QStringLiteral("mbrType")).toInt()) {
+    case 0x00:
+    case 0x05:
+    case 0x0F:
+    case 0x12:
+    case 0x27:
+    case 0xEE:
+    case 0xEF:
+    case 0xDE:
+        return true;
+    default:
+        break;
+    }
+    const auto name = (partition.value(QStringLiteral("volumeLabel")).toString() + QLatin1Char(' ') +
+                       partition.value(QStringLiteral("gptName")).toString())
+                          .toLower();
+    static const char* k_name_keys[] = {
+        "microsoft reserved", "msr", "efi system", "efi ", "recovery", "winre", "oem", "diag",
+        "system partition",
+    };
+    for (const char* key : k_name_keys) {
+        if (name.contains(QLatin1String(key))) {
+            return true;
+        }
+    }
+    const auto fs = partition.value(QStringLiteral("filesystem")).toString().trimmed();
+    const auto size = partition.value(QStringLiteral("sizeBytes")).toULongLong();
+    return fs.isEmpty() && size > 0 && size < 256ULL * 1024 * 1024;
+}
+
+[[nodiscard]] QString style_display(const QString& style_code) {
+    if (style_code == QLatin1String("mbr")) {
+        return QStringLiteral("MBR");
+    }
+    if (style_code == QLatin1String("gpt")) {
+        return QStringLiteral("GPT");
+    }
+    return QStringLiteral("RAW");
+}
+
+/// Old volumesForSourceDisk: partitions (order) + volumes via extents for letter/label/fs/size.
+[[nodiscard]] QVariantList volumes_for_source_disk(const int disk_number,
+                                                  const QVariantList& partitions,
+                                                  const QVariantList& all_volumes,
+                                                  const qint64 disk_total,
+                                                  const LocaleFormat& format) {
+    QHash<int, QString> letter_by_part;
+    QHash<int, QString> label_by_part;
+    QHash<int, QString> fs_by_part;
+    QHash<int, qint64> size_by_part;
+    for (const auto& item : all_volumes) {
+        const auto volume = item.toMap();
+        int part_num = -1;
+        for (const auto& extent_value : volume.value(QStringLiteral("extents")).toList()) {
+            const auto extent = extent_value.toMap();
+            if (extent.value(QStringLiteral("diskNumber")).toInt() == disk_number) {
+                part_num = extent.value(QStringLiteral("partitionNumber")).toInt();
+                break;
+            }
+        }
+        if (part_num < 0) {
+            continue;
+        }
+        const auto letter = volume.value(QStringLiteral("letter")).toString();
+        if (!letter.isEmpty()) {
+            letter_by_part.insert(part_num, letter);
+        }
+        const auto label = volume.value(QStringLiteral("label")).toString().trimmed();
+        if (!label.isEmpty()) {
+            label_by_part.insert(part_num, label);
+        }
+        const auto fs = volume.value(QStringLiteral("filesystem")).toString().trimmed();
+        if (!fs.isEmpty()) {
+            fs_by_part.insert(part_num, fs);
+        }
+        const auto size = volume.value(QStringLiteral("totalSizeBytes")).toLongLong();
+        if (size > 0) {
+            size_by_part.insert(part_num, size);
+        }
+    }
+
+    QVariantList ui_volumes;
+    for (const auto& item : partitions) {
+        const auto partition = item.toMap();
+        if (is_reserved_partition(partition)) {
+            continue;
+        }
+        const int part_num = partition.value(QStringLiteral("partitionNumber")).toInt();
+        auto size = size_by_part.value(part_num, 0);
+        if (size <= 0) {
+            size = partition.value(QStringLiteral("sizeBytes")).toLongLong();
+        }
+        if (size <= 0) {
+            continue;
+        }
+        const auto letter = letter_by_part.value(part_num);
+        auto name = label_by_part.value(part_num);
+        if (name.isEmpty()) {
+            name = partition.value(QStringLiteral("volumeLabel")).toString().trimmed();
+        }
+        if (name.isEmpty()) {
+            name = QStringLiteral("New Volume");
+        }
+        auto fs = fs_by_part.value(part_num);
+        if (fs.isEmpty()) {
+            fs = partition.value(QStringLiteral("filesystem")).toString();
+        }
+        ui_volumes.push_back(QVariantMap{
+            {QStringLiteral("letter"), letter},
+            {QStringLiteral("name"), name},
+            {QStringLiteral("size"), format.format_bytes(size)},
+            {QStringLiteral("capacityBytes"), size},
+            {QStringLiteral("fileSystem"), fs},
+            {QStringLiteral("fs"), fs},
+            {QStringLiteral("partitionNumber"), part_num},
+        });
+    }
+    Q_UNUSED(disk_total);
+    return ui_volumes;
+}
+
+/// Hierarchical layout (disks + volumes) → Restore Source DiskRows (old project shape).
+[[nodiscard]] QVariantList source_disks_from_layout(const QVariantList& disks,
+                                                   const QVariantList& volumes,
+                                                   const LocaleFormat& format) {
+    QVariantList sorted = disks;
+    std::sort(sorted.begin(), sorted.end(), [](const QVariant& left, const QVariant& right) {
+        return left.toMap().value(QStringLiteral("diskNumber")).toInt() <
+               right.toMap().value(QStringLiteral("diskNumber")).toInt();
+    });
+    QVariantList out;
+    out.reserve(sorted.size());
+    for (const auto& item : sorted) {
+        const auto disk = item.toMap();
+        const int disk_number = disk.value(QStringLiteral("diskNumber")).toInt();
+        const auto disk_total = disk.value(QStringLiteral("diskSizeBytes")).toLongLong();
+        const auto style = style_display(disk.value(QStringLiteral("partitionStyle")).toString());
+        const auto ui_volumes =
+            volumes_for_source_disk(disk_number, disk.value(QStringLiteral("partitions")).toList(),
+                                    volumes, disk_total, format);
+        out.push_back(QVariantMap{
+            {QStringLiteral("diskNumber"), disk_number},
+            {QStringLiteral("name"), QStringLiteral("Disk %1").arg(disk_number)},
+            {QStringLiteral("partitionStyle"), style},
+            {QStringLiteral("type"), QStringLiteral("Basic (%1)").arg(style)},
+            {QStringLiteral("size"), format.format_bytes(disk_total)},
+            {QStringLiteral("capacityBytes"), disk_total},
+            {QStringLiteral("isSystemDisk"), false},
+            {QStringLiteral("volumes"), ui_volumes},
+        });
+    }
+    return out;
 }
 
 } // namespace
@@ -136,8 +313,117 @@ void ServiceClient::reset_repository() {
     repository_configured_ = false;
     repository_loading_ = false;
     repository_request_id_.clear();
+    reset_recovery_point_layout();
     emit repositoryChanged();
     emit loadingChanged();
+}
+
+bool ServiceClient::recoveryPointLayoutLoading() const noexcept {
+    return recovery_point_layout_loading_;
+}
+
+QVariantList ServiceClient::recoveryPointSourceDisks() const {
+    return recovery_point_source_disks_;
+}
+
+QString ServiceClient::recoveryPointLayoutErrorText() const {
+    return recovery_point_layout_error_code_.isEmpty()
+               ? QString{}
+               : localize_message_code(recovery_point_layout_error_code_);
+}
+
+void ServiceClient::loadRecoveryPointLayout(const QString& recovery_point_id) {
+    if (recovery_point_id.isEmpty()) {
+        reset_recovery_point_layout();
+        return;
+    }
+    if (state_ != State::kReady || selected_repository_connection_id_.isEmpty()) {
+        finish_recovery_point_layout_failure(QStringLiteral("recovery_point.layout_failed"));
+        return;
+    }
+    // Replace any in-flight layout query for a different checkpoint.
+    recovery_point_layout_error_code_.clear();
+    recovery_point_source_disks_.clear();
+    recovery_point_layout_loading_ = true;
+    recovery_point_layout_recovery_point_id_ = recovery_point_id;
+    emit recoveryPointLayoutChanged();
+    emit loadingChanged();
+
+    const auto request_id = new_request_id();
+    recovery_point_layout_request_id_ = request_id;
+    const auto body = encode_recovery_point_layout_request(
+        request_id, selected_repository_connection_id_, recovery_point_id);
+    const auto started =
+        coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
+            return handle_recovery_point_layout_frame(frame_body);
+        });
+    if (!started) {
+        finish_recovery_point_layout_failure(QStringLiteral("recovery_point.layout_failed"));
+    }
+}
+
+RequestDisposition ServiceClient::handle_recovery_point_layout_frame(const QByteArray& body) {
+    const auto request_id = extract_response_request_id(body);
+    // Superseded layout requests must not mutate the active selection state.
+    if (request_id.isEmpty() || request_id != recovery_point_layout_request_id_) {
+        return RequestDisposition::kFinished;
+    }
+    QJsonObject root;
+    if (!parse_response_root(body, request_id, root)) {
+        return RequestDisposition::kProtocolError;
+    }
+    if (is_recovery_point_layout_failure_response(root)) {
+        finish_recovery_point_layout_failure(QStringLiteral("recovery_point.layout_failed"));
+        return RequestDisposition::kFinished;
+    }
+    QVariantMap layout;
+    if (!parse_recovery_point_layout_response(root, layout)) {
+        return RequestDisposition::kProtocolError;
+    }
+    const auto connection_id = layout.value(QStringLiteral("repositoryConnectionId")).toString();
+    const auto recovery_point_id = layout.value(QStringLiteral("recoveryPointId")).toString();
+    if (connection_id != selected_repository_connection_id_ ||
+        recovery_point_id != recovery_point_layout_recovery_point_id_) {
+        finish_recovery_point_layout_failure(QStringLiteral("recovery_point.layout_failed"));
+        return RequestDisposition::kFinished;
+    }
+    recovery_point_source_disks_ =
+        source_disks_from_layout(layout.value(QStringLiteral("disks")).toList(),
+                                 layout.value(QStringLiteral("volumes")).toList(), format_);
+    if (recovery_point_source_disks_.isEmpty()) {
+        finish_recovery_point_layout_failure(QStringLiteral("recovery_point.layout_failed"));
+        return RequestDisposition::kFinished;
+    }
+    recovery_point_layout_loading_ = false;
+    recovery_point_layout_request_id_.clear();
+    recovery_point_layout_error_code_.clear();
+    emit recoveryPointLayoutChanged();
+    emit loadingChanged();
+    return RequestDisposition::kFinished;
+}
+
+void ServiceClient::finish_recovery_point_layout_failure(const QString& message_code) {
+    recovery_point_source_disks_.clear();
+    recovery_point_layout_loading_ = false;
+    recovery_point_layout_request_id_.clear();
+    recovery_point_layout_error_code_ = message_code;
+    emit recoveryPointLayoutChanged();
+    emit loadingChanged();
+}
+
+void ServiceClient::reset_recovery_point_layout() {
+    const bool had_state = recovery_point_layout_loading_ || !recovery_point_source_disks_.isEmpty() ||
+                           !recovery_point_layout_error_code_.isEmpty() ||
+                           !recovery_point_layout_recovery_point_id_.isEmpty();
+    recovery_point_source_disks_.clear();
+    recovery_point_layout_loading_ = false;
+    recovery_point_layout_request_id_.clear();
+    recovery_point_layout_recovery_point_id_.clear();
+    recovery_point_layout_error_code_.clear();
+    if (had_state) {
+        emit recoveryPointLayoutChanged();
+        emit loadingChanged();
+    }
 }
 
 QString ServiceClient::selectedRepositoryConnectionId() const {

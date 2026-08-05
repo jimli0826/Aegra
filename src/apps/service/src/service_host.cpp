@@ -9,6 +9,7 @@
 #include "aegra/apps/service/service_protocol.h"
 #include "aegra/apps/service/worker_job_service.h"
 #include "aegra/apps/service/worker_supervisor.h"
+#include "recovery_point_layout_service.h"
 #include "service_log_formatter.h"
 #include "aegra/contracts/progress.h"
 #include "aegra/ports/control_plane.h"
@@ -450,6 +451,30 @@ dispatch_service_request(const contracts::ServiceRequest& request,
     case contracts::ServiceRequestKind::kPlanDeleteRecoveryPoints:
         response = recovery_point_ops_response(request, runtime, cancellation);
         break;
+    case contracts::ServiceRequestKind::kGetRecoveryPointLayout: {
+        if (runtime.control_plane == nullptr || runtime.storage_factory == nullptr) {
+            response = capability_unavailable(request);
+            break;
+        }
+        auto layout = load_recovery_point_layout(
+            *runtime.control_plane, *runtime.storage_factory,
+            std::get<contracts::RecoveryPointRef>(request.payload), cancellation);
+        if (!layout) {
+            response = base::Result<contracts::ServiceResponse>::success(
+                failure(layout.error().code, request.request_id, request.kind,
+                        "recovery_point.layout_failed"));
+            break;
+        }
+        contracts::ServiceResponse ok;
+        ok.request_id = request.request_id;
+        ok.kind = contracts::ServiceResponseKind::kQueryResult;
+        ok.request_kind = request.kind;
+        ok.boundary_error_code = base::ErrorCode::kNone;
+        ok.message_code = "recovery_point.layout_ready";
+        ok.payload = std::move(layout).value();
+        response = base::Result<contracts::ServiceResponse>::success(std::move(ok));
+        break;
+    }
     case contracts::ServiceRequestKind::kAddRepositoryConnection:
     case contracts::ServiceRequestKind::kImportRepositoryConnection:
     case contracts::ServiceRequestKind::kTestRepositoryConnection:

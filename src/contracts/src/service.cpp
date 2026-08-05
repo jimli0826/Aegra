@@ -87,6 +87,7 @@ template <typename Payload, typename Validator>
                                                          validate_restore_preflight_request);
     case ServiceRequestKind::kResolveRecoveryPointChain:
     case ServiceRequestKind::kPlanDeleteRecoveryPoints:
+    case ServiceRequestKind::kGetRecoveryPointLayout:
         return validate_payload<RecoveryPointRef>(request, validate_recovery_point_ref);
     default:
         return invalid("service query kind is invalid");
@@ -165,6 +166,9 @@ template <typename Payload, typename Validator>
             response, validate_recovery_point_chain_result);
     case ServiceRequestKind::kPlanDeleteRecoveryPoints:
         return validate_response_payload<DeletePlanSummary>(response, validate_delete_plan_summary);
+    case ServiceRequestKind::kGetRecoveryPointLayout:
+        return validate_response_payload<RecoveryPointLayout>(response,
+                                                              validate_recovery_point_layout);
     default:
         return invalid("service query response kind is invalid");
     }
@@ -195,7 +199,7 @@ template <typename Payload, typename Validator>
 
 bool is_service_query_kind(const ServiceRequestKind kind) noexcept {
     return kind >= ServiceRequestKind::kGetServiceInfo &&
-           kind <= ServiceRequestKind::kPlanDeleteRecoveryPoints;
+           kind <= ServiceRequestKind::kGetRecoveryPointLayout;
 }
 
 bool is_service_command_kind(const ServiceRequestKind kind) noexcept {

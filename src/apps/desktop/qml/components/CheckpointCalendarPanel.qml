@@ -7,16 +7,27 @@ import ".."
 Item {
     id: root
 
+    /// Controlled by parent only — never assign to open from inside this panel
+    /// (writing open breaks the parent's binding and blocks reopening).
     property bool open: false
-    // Dates with backups as "YYYY-MM-DD" strings (demo: today)
+    /// Dates with backups as "YYYY-MM-DD" (local), from Service recovery points.
     property var backupDates: []
+    /// Checkpoints for selectedDate: [{ timeText, backupType, sizeText, fileUuid, ... }]
+    property var checkpoints: []
+    /// Bump when checkpoints array is replaced so ListView always refreshes.
+    property int checkpointsEpoch: 0
     property string selectedDate: ""
     property int displayYear: new Date().getFullYear()
     property int displayMonth: new Date().getMonth() // 0-11
+    property bool loading: false
 
     signal closed()
     signal dateSelected(string dateStr)
     signal checkpointSelected(var item)
+
+    function requestClose() {
+        root.closed()
+    }
 
     readonly property var monthNames: [
         "January", "February", "March", "April", "May", "June",
@@ -112,12 +123,6 @@ Item {
 
     readonly property var cells: monthCells()
 
-    // Demo checkpoints when a date with backups is selected
-    readonly property var demoCheckpoints: root.selectedDate.length > 0 ? [
-        { id: "cp1", timeText: "02:00", backupType: "Full", sizeText: "12.4 GB" },
-        { id: "cp2", timeText: "14:30", backupType: "Incremental", sizeText: "1.2 GB" }
-    ] : []
-
     Rectangle {
         anchors.fill: parent
         color: Theme.colorScrim
@@ -182,10 +187,7 @@ Item {
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
                     }
-                    onClicked: {
-                        root.open = false
-                        root.closed()
-                    }
+                    onClicked: root.requestClose()
                 }
             }
 
@@ -349,10 +351,10 @@ Item {
                                     enabled: canSelect
                                     cursorShape: canSelect ? Qt.PointingHandCursor : Qt.ArrowCursor
                                     onClicked: {
-                                        if (modelData && canSelect) {
-                                            root.selectedDate = modelData.date
+                                        // Do not write selectedDate here — parent owns it via
+                                        // binding; only emit so checkpoints load once.
+                                        if (modelData && canSelect)
                                             root.dateSelected(modelData.date)
-                                        }
                                     }
                                 }
                             }
@@ -398,7 +400,11 @@ Item {
                         Layout.fillHeight: true
                         clip: true
                         spacing: 4
-                        model: root.demoCheckpoints
+                        // Depend on epoch so a fresh QVariantList always reloads the view.
+                        model: {
+                            var _e = root.checkpointsEpoch
+                            return root.checkpoints
+                        }
                         delegate: Rectangle {
                             required property var modelData
                             width: cpList.width
@@ -412,8 +418,7 @@ Item {
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: {
                                     root.checkpointSelected(modelData)
-                                    root.open = false
-                                    root.closed()
+                                    root.requestClose()
                                 }
                             }
                             RowLayout {
@@ -445,9 +450,13 @@ Item {
                         }
                         Text {
                             anchors.centerIn: parent
-                            visible: cpList.count === 0
-                            //% "Select a date with backups"
-                            text: qsTrId("aegra.restore.select_date_with_backups")
+                            visible: cpList.count === 0 && !root.loading
+                            width: parent.width - 24
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.WordWrap
+                            text: root.selectedDate.length === 0
+                                  ? qsTrId("aegra.restore.select_date_with_backups")
+                                  : qsTrId("aegra.restore.no_recovery_points_on_date")
                             color: Theme.colorTextGrey
                             font.pixelSize: 13
                             font.family: Theme.fontFamily

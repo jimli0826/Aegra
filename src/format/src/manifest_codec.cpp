@@ -43,6 +43,9 @@ using Json = nlohmann::json;
             {"size", partition.size},
             {"partition_style", partition.style},
             {"is_active", partition.is_active},
+            {"mbr_type", partition.mbr_type},
+            {"gpt_type_guid", partition.gpt_type_guid},
+            {"gpt_name", partition.gpt_name},
             {"volume_label", partition.volume_label},
             {"filesystem", partition.filesystem},
             {"volume_guid", partition.volume_guid}};
@@ -55,6 +58,9 @@ using Json = nlohmann::json;
     value.at("size").get_to(result.size);
     result.style = static_cast<PartitionStyle>(value.at("partition_style").get<std::uint8_t>());
     value.at("is_active").get_to(result.is_active);
+    value.at("mbr_type").get_to(result.mbr_type);
+    value.at("gpt_type_guid").get_to(result.gpt_type_guid);
+    value.at("gpt_name").get_to(result.gpt_name);
     value.at("volume_label").get_to(result.volume_label);
     value.at("filesystem").get_to(result.filesystem);
     value.at("volume_guid").get_to(result.volume_guid);

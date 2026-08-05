@@ -2,6 +2,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 
 add_library(aegra_app_service STATIC
     src/backup_catalog_registrar.cpp
+    src/recovery_point_layout_service.cpp
     src/schedule_service.cpp
     src/service_host.cpp
     src/service_log_formatter.cpp
@@ -33,7 +34,11 @@ target_link_libraries(
         Aegra::Contracts
         Aegra::Ports
         Aegra::AdapterWindowsIpc
-    PRIVATE nlohmann_json::nlohmann_json Advapi32
+    PRIVATE
+        Aegra::AdapterPersonalArchive
+        Aegra::PersonalRepository
+        nlohmann_json::nlohmann_json
+        Advapi32
 )
 aegra_configure_target(aegra_app_service)
 

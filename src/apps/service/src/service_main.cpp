@@ -501,6 +501,7 @@ create_runtime(const ServiceArguments& arguments) {
         .schedules = components.schedules.get(),
         .worker_supervisor = components.supervisor.get(),
         .control_plane = components.control_plane.get(),
+        .storage_factory = components.storage_factory.get(),
     };
     components.logger->write(service::ServiceLogLevel::kInfo, "service.runtime_ready",
                              "status=ready");

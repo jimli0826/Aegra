@@ -2,9 +2,22 @@
 
 #include "locale/locale_format.h"
 
+#include <QDateTime>
+#include <QSet>
+#include <QTimeZone>
+#include <QVariantMap>
+
+#include <algorithm>
 #include <utility>
 
 namespace aegra::desktop {
+namespace {
+
+[[nodiscard]] QDateTime local_from_utc_ms(const std::int64_t created_utc_ms) {
+    return QDateTime::fromMSecsSinceEpoch(created_utc_ms, QTimeZone::UTC).toLocalTime();
+}
+
+} // namespace
 
 RecoveryPointModel::RecoveryPointModel(QObject* parent) : QAbstractListModel(parent) {}
 
@@ -124,6 +137,70 @@ QString RecoveryPointModel::chain_state_text(const std::int64_t chain_state) con
     }
     //% "Incomplete"
     return qtTrId("aegra.repository.chain.incomplete");
+}
+
+QString RecoveryPointModel::local_date_ymd(const std::int64_t created_utc_ms) {
+    if (created_utc_ms <= 0) {
+        return {};
+    }
+    return local_from_utc_ms(created_utc_ms).date().toString(QStringLiteral("yyyy-MM-dd"));
+}
+
+QString RecoveryPointModel::local_time_hm(const std::int64_t created_utc_ms) {
+    if (created_utc_ms <= 0) {
+        return {};
+    }
+    return local_from_utc_ms(created_utc_ms).time().toString(QStringLiteral("HH:mm"));
+}
+
+QStringList RecoveryPointModel::backupDateYmds() const {
+    QSet<QString> unique;
+    for (const auto& row : rows_) {
+        const auto ymd = local_date_ymd(row.created_utc_ms);
+        if (!ymd.isEmpty()) {
+            unique.insert(ymd);
+        }
+    }
+    QStringList list = unique.values();
+    std::sort(list.begin(), list.end());
+    return list;
+}
+
+QVariantList RecoveryPointModel::checkpointsForDate(const QString& date_ymd) const {
+    if (date_ymd.isEmpty()) {
+        return {};
+    }
+    QVector<const RecoveryPointRow*> matches;
+    matches.reserve(rows_.size());
+    for (const auto& row : rows_) {
+        if (local_date_ymd(row.created_utc_ms) == date_ymd) {
+            matches.push_back(&row);
+        }
+    }
+    std::sort(matches.begin(), matches.end(), [](const RecoveryPointRow* left,
+                                                 const RecoveryPointRow* right) {
+        return left->created_utc_ms > right->created_utc_ms;
+    });
+    QVariantList out;
+    out.reserve(matches.size());
+    for (const auto* row : matches) {
+        QVariantMap map;
+        map.insert(QStringLiteral("fileUuid"), row->file_uuid);
+        map.insert(QStringLiteral("backupSetUuid"), row->backup_set_uuid);
+        map.insert(QStringLiteral("timeText"), local_time_hm(row->created_utc_ms));
+        map.insert(QStringLiteral("backupType"), backup_type_text(row->backup_type));
+        map.insert(QStringLiteral("sizeText"),
+                   format_ != nullptr ? format_->format_bytes(row->logical_size_bytes) : QString{});
+        map.insert(QStringLiteral("logicalSizeBytes"), static_cast<qint64>(row->logical_size_bytes));
+        map.insert(QStringLiteral("sourceCount"), static_cast<qint64>(row->source_count));
+        map.insert(QStringLiteral("createdUtcMs"), static_cast<qint64>(row->created_utc_ms));
+        map.insert(QStringLiteral("createdText"),
+                   format_ != nullptr ? format_->format_date_time_utc_ms(row->created_utc_ms)
+                                      : QString{});
+        map.insert(QStringLiteral("chainComplete"), row->chain_state == 1);
+        out.push_back(std::move(map));
+    }
+    return out;
 }
 
 QVector<RecoveryPointRow> recovery_points_from_variant_list(const QVariantList& items) {

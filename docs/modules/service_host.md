@@ -23,6 +23,7 @@ src/apps/service/
 │   ├── worker_job_service.h
 │   └── worker_supervisor.h
 └── src/
+    ├── recovery_point_layout_service.cpp  # GetRecoveryPointLayout：Catalog → Archive Manifest volumes
     ├── service_host.cpp
     ├── service_log_formatter.cpp
     ├── service_main.cpp
@@ -63,10 +64,11 @@ Accept -> Receive Frame -> Decode/Validate -> Dispatch -> Encode -> Send -> Rece
   [ADR-0013](../adr/0013-service-control-protocol-v3.md)。
 - `request_id` 用于请求响应对账，不作为权限或幂等凭据；查询不携带幂等键，命令必须携带幂等键。
 - V3 已对外执行 `service.info`、Inventory、Repository connection/query、Job list、Backup start、Job
-  cancel 与 Schedule。Backup Start 和 Schedule 使用完整有序 `source_ids[]`，一个命令只创建一个 Job。
-  Recovery Point chain、delete plan/execute 与 Verify start 的 handler 已接线，但 S5 完成门禁前不在
-  runtime capability 列表中；dispatcher 必须在调用 handler 前返回 `service.capability_unavailable`。尚未接入的
-  Restore/Mount/Event 请求同样返回 capability unavailable。
+  cancel、Schedule 与 `GetRecoveryPointLayout`（kind 12：按 connection + recovery_point_id 打开 Archive
+  Manifest，返回真实源卷 letter/label/filesystem/size）。Backup Start 和 Schedule 使用完整有序
+  `source_ids[]`，一个命令只创建一个 Job。Recovery Point chain、delete plan/execute 与 Verify start 的
+  handler 已接线，但 S5 完成门禁前不在 runtime capability 列表中；dispatcher 必须在调用 handler 前返回
+  `service.capability_unavailable`。尚未接入的 Restore/Mount/Event 命令同样返回 capability unavailable。
 - Repository 响应只包含 Repository UUID 和不含客户 Metadata 的 Catalog 摘要，不包含根路径、Archive key、
   主机名、SID、SecretRef 或原始 Adapter 错误。
 - frame 最大 64 KiB，JSON 根必须是 object，整数必须先检查范围。
@@ -130,3 +132,7 @@ Chunk Index、Manifest 或 Archive metadata 的权威副本；Repository 仍是�
 S0-S4 已完成；S5 进行中并已部分接入 composition：chain/delete/verify contracts、Application 用例、
 delete-plan 核心和 Host dispatch 已存在，但 capability 保持关闭。完整 Verify Worker 人工进程验证、持久化
 per-file Archive Credential 映射与 Local Storage 故障恢复验证仍待补齐。
+
+`GetRecoveryPointLayout` 已实现：Catalog 定位 Archive → `PersonalArchiveReader` 读取 Manifest →
+返回 hierarchical `disks[]`（分区表）+ `volumes[]`（letter/label/fs/size + extents）。无 `disks[]`
+的 Archive（布局写入前产生）返回 `recovery_point.layout_failed`。个人本地密码仍为 `aegra-local`。

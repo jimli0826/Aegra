@@ -20,6 +20,7 @@ class ISourceInventoryQuery;
 
 namespace aegra::ports {
 class IControlPlaneDatabase;
+class IRepositoryStorageFactory;
 }
 
 namespace aegra::apps::service {
@@ -62,6 +63,7 @@ struct ServiceRuntimeInfo final {
     ScheduleService* schedules{nullptr};
     WorkerSupervisor* worker_supervisor{nullptr};
     ports::IControlPlaneDatabase* control_plane{nullptr};
+    ports::IRepositoryStorageFactory* storage_factory{nullptr};
 };
 
 [[nodiscard]] base::Result<contracts::ServiceResponse>

@@ -227,7 +227,8 @@ QByteArray encode_upsert_schedule_request(const QString& request_id, const QStri
                                           const QString& repository_connection_id,
                                           const int backup_type, const int trigger_kind,
                                           const int local_minute_of_day, const int weekday_mask,
-                                          const QString& timezone_id) {
+                                          const QString& timezone_id,
+                                          const bool exclude_page_and_hibernation_files) {
     const QJsonObject trigger{{QStringLiteral("kind"), trigger_kind},
                               {QStringLiteral("local_minute_of_day"), local_minute_of_day},
                               {QStringLiteral("weekday_mask"), weekday_mask},
@@ -240,7 +241,8 @@ QByteArray encode_upsert_schedule_request(const QString& request_id, const QStri
         {QStringLiteral("source_ids"), QJsonArray::fromVariantList(source_ids)},
         {QStringLiteral("repository_connection_id"), repository_connection_id},
         {QStringLiteral("backup_type"), backup_type},
-        {QStringLiteral("trigger"), trigger}};
+        {QStringLiteral("trigger"), trigger},
+        {QStringLiteral("exclude_page_and_hibernation_files"), exclude_page_and_hibernation_files}};
     return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
                                       static_cast<qint64>(kServiceSchemaVersion)},
                                      {QStringLiteral("message_type"), 1},
@@ -281,14 +283,16 @@ QByteArray encode_start_backup_request(const QString& request_id, const QString&
                                        const QVariantList& source_ids,
                                        const QString& repository_connection_id,
                                        const int backup_type,
-                                       const QString& parent_recovery_point_id) {
+                                       const QString& parent_recovery_point_id,
+                                       const bool exclude_page_and_hibernation_files) {
     const QJsonObject payload{
         {QStringLiteral("source_ids"), QJsonArray::fromVariantList(source_ids)},
         {QStringLiteral("repository_connection_id"), repository_connection_id},
         {QStringLiteral("backup_type"), backup_type},
         {QStringLiteral("parent_recovery_point_id"), parent_recovery_point_id.isEmpty()
                                                          ? QJsonValue(QJsonValue::Null)
-                                                         : QJsonValue(parent_recovery_point_id)}};
+                                                         : QJsonValue(parent_recovery_point_id)},
+        {QStringLiteral("exclude_page_and_hibernation_files"), exclude_page_and_hibernation_files}};
     return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
                                       static_cast<qint64>(kServiceSchemaVersion)},
                                      {QStringLiteral("message_type"), 1},
@@ -372,9 +376,10 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
         return false;
     }
     const auto object = value.toObject();
+    // Must match Service encode_schedule / ScheduleSummary wire fields (9 keys).
     if (!has_exact_keys(object, {"schedule_id", "display_name", "enabled", "source_ids",
                                  "repository_connection_id", "backup_type", "trigger",
-                                 "next_run_utc_ms"})) {
+                                 "next_run_utc_ms", "exclude_page_and_hibernation_files"})) {
         return false;
     }
     const auto schedule_id = object.value(QStringLiteral("schedule_id")).toString();
@@ -400,7 +405,8 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
         !object.value(QStringLiteral("repository_connection_id")).isString() ||
         !stable_code(object.value(QStringLiteral("repository_connection_id")).toString(), 128) ||
         !integer_in_range(object.value(QStringLiteral("backup_type")), 1, 3, backup_type) ||
-        !object.value(QStringLiteral("trigger")).isObject()) {
+        !object.value(QStringLiteral("trigger")).isObject() ||
+        !object.value(QStringLiteral("exclude_page_and_hibernation_files")).isBool()) {
         return false;
     }
     const auto trigger = object.value(QStringLiteral("trigger")).toObject();
@@ -446,6 +452,8 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
               {QStringLiteral("weekdayMask"), weekday_mask},
               {QStringLiteral("timezoneId"), trigger.value(QStringLiteral("timezone_id")).toString()},
               {QStringLiteral("nextRunUtcMs"), has_next ? next_run : QVariant{}},
+              {QStringLiteral("excludePageAndHibernation"),
+               object.value(QStringLiteral("exclude_page_and_hibernation_files")).toBool()},
               {QStringLiteral("lastRun"), QString{}},
               {QStringLiteral("destinationName"), QString{}},
               {QStringLiteral("destinationPath"), QString{}}};

@@ -42,6 +42,8 @@ struct WindowsPersonalBackupRequest final {
     std::string created_utc;
     std::string application_version;
     std::string hostname;
+    /// When true, pagefile.sys / hiberfil.sys / swapfile.sys extents are zero-filled without I/O.
+    bool exclude_page_and_hibernation_files{true};
 };
 
 struct WindowsPersonalBackupResult final {

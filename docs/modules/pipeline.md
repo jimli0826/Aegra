@@ -34,11 +34,18 @@ Recovery Point Reader -> Manifest Validation -> Chunk Resolver
 - `IBackupSession`：写 Chunk、Commit、Abort。
 - `IRecoveryPointReader`：Manifest 与批量 Chunk 解析。
 
+多 Volume 备份：`BackupPlan` 可携带 `progress_total_logical_bytes` 与
+`progress_base_*`，进度按**整 job** 逻辑字节聚合；仅 `commit_mode=kCommit`（最后一卷）
+发布 `TaskPhase::kCompleted`，中间卷 `kDefer` 只保持 `kWriting` 且不 `session.commit`。
+累计使用 checked-add，且 `base_processed + volume_size ≤ total`；字节计数不得超过 Service
+有符号 64 位 wire 上限（`INT64_MAX`），溢出则失败，不发布非法进度。
+
 ## 不变量
 
 - 队列有界；内存预算可配置并可观测。
 - 取消在有界时间生效；资源由 RAII 清理。
 - Commit 前失败必须 Abort，且不会产生可见 Recovery Point。
+- 中间 Volume（`kDefer`）不得发布 `kCompleted`，也不得单独 Commit。
 - Restore 在第一次破坏性写入前完成源、目标、容量和映射验证。
 - 相同逻辑输入和策略产生确定的 Manifest/Chunk 顺序。
 

@@ -75,6 +75,13 @@ std::optional<contracts::BackupOptions> optional_backup(const Json& root) {
     result.file_uuid = required<std::string>(*iterator, "file_uuid");
     result.backup_set_uuid = required<std::string>(*iterator, "backup_set_uuid");
     result.created_utc_ms = required<std::int64_t>(*iterator, "created_utc_ms");
+    // Required field — no default for omitted keys (unreleased; no wire compatibility path).
+    const auto exclude = iterator->find("exclude_page_and_hibernation_files");
+    if (exclude == iterator->end() || !exclude->is_boolean()) {
+        throw std::invalid_argument(
+            "worker request backup.exclude_page_and_hibernation_files is required");
+    }
+    result.exclude_page_and_hibernation_files = exclude->get<bool>();
     return result;
 }
 

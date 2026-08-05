@@ -60,7 +60,8 @@
   view 只在对象生命周期内有效，Resolver 实现负责受控内存与析构清零。
 - `IRandomSource::fill()` 填充调用方提供的缓冲区并支持取消，不暴露随机库或操作系统类型。
 - `IClock::now_utc_ms()` 提供 UTC 毫秒时间；人工验证场景可以注入确定性时钟。
-- `IProgressSink::publish()` 不得抛出异常；事件拥有 job/trace 关联字段且不得包含 Secret 或客户数据。
+- `IProgressSink::publish()` 不得抛出异常；事件拥有 job/trace 关联字段，可包含诊断所需用户数据，但不得
+  包含密码、密钥、Secret、Credential、SecretRef、Authorization、Cookie、令牌或其他认证材料。
 - `IMessageChannel` 传递拥有所有权的 UTF-8 消息；一个 Reader 和一个 Writer可以并发，挂起 I/O 必须
   响应取消，Adapter 必须执行帧大小限制。消息 schema 与状态机不属于 Port。
 

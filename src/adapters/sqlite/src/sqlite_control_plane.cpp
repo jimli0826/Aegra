@@ -42,6 +42,9 @@ namespace {
         (void)detail::exec_sql(db, "ROLLBACK");
         return base::Result<void>::failure(version.error());
     }
+    // Unreleased product: no schema migration/compat path (Agents.md / engineering standard).
+    // version 0 = brand-new file after CREATE IF NOT EXISTS; any other version must already
+    // equal the current schema or the developer deletes the local control-plane.db.
     if (version.value() == 0) {
         auto written = detail::write_schema_version(db, ports::kControlPlaneSchemaVersion);
         if (!written) {
@@ -51,7 +54,8 @@ namespace {
     } else if (version.value() != ports::kControlPlaneSchemaVersion) {
         (void)detail::exec_sql(db, "ROLLBACK");
         return base::Result<void>::failure(detail::make_error(
-            base::ErrorCode::kUnsupportedVersion, "control plane schema version is unsupported"));
+            base::ErrorCode::kUnsupportedVersion,
+            "control plane schema version is unsupported; delete the local database and recreate"));
     }
     auto commit = detail::exec_sql(db, "COMMIT");
     if (!commit) {
@@ -301,7 +305,8 @@ SqliteControlPlaneDatabase::get_job_by_idempotency_key(const std::string_view id
         "SELECT job_id, trace_id, operation, state, created_utc_ms, started_utc_ms, "
         "completed_utc_ms, source_ids, repository_connection_id, target_source_id, backup_type, "
         "parent_recovery_point_id, preflight_token, message_code, idempotency_key, "
-        "result_error_code, result_outcome, result_message_code FROM jobs "
+        "result_error_code, result_outcome, result_message_code, "
+        "exclude_page_and_hibernation_files FROM jobs "
         "WHERE idempotency_key = ?");
     if (!statement) {
         return base::Result<std::optional<ports::JobRecord>>::failure(statement.error());
@@ -334,7 +339,8 @@ SqliteControlPlaneDatabase::get_job_by_preflight_token(const std::string_view pr
         "SELECT job_id, trace_id, operation, state, created_utc_ms, started_utc_ms, "
         "completed_utc_ms, source_ids, repository_connection_id, target_source_id, backup_type, "
         "parent_recovery_point_id, preflight_token, message_code, idempotency_key, "
-        "result_error_code, result_outcome, result_message_code FROM jobs "
+        "result_error_code, result_outcome, result_message_code, "
+        "exclude_page_and_hibernation_files FROM jobs "
         "WHERE preflight_token = ?");
     if (!statement) {
         return base::Result<std::optional<ports::JobRecord>>::failure(statement.error());

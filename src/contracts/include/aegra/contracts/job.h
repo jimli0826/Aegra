@@ -37,6 +37,9 @@ struct BackupOptions final {
     std::string file_uuid;
     std::string backup_set_uuid;
     std::int64_t created_utc_ms{0};
+    /// When true (default), pagefile.sys / hiberfil.sys / swapfile.sys extents are zero-filled
+    /// without reading (aligned with Desktop "Exclude pagefile / hiberfil / swapfile").
+    bool exclude_page_and_hibernation_files{true};
 };
 
 struct JobRequest final {

@@ -797,6 +797,30 @@ Server: %1</translation>
         <source>Scheduling is not available yet</source>
         <translation>Zeitplanung ist noch nicht verfügbar</translation>
     </message>
+    <message id="aegra.backup.schedule.missing_source">
+        <source>Select at least one backup source</source>
+        <translation>Mindestens eine Sicherungsquelle auswählen</translation>
+    </message>
+    <message id="aegra.backup.schedule.missing_target">
+        <source>Select a repository destination (Locations)</source>
+        <translation>Repository-Ziel (Locations) auswählen</translation>
+    </message>
+    <message id="aegra.backup.schedule.save_failed">
+        <source>Could not save schedule</source>
+        <translation>Zeitplan konnte nicht gespeichert werden</translation>
+    </message>
+    <message id="aegra.backup.schedule.update_failed">
+        <source>Could not update schedule</source>
+        <translation>Zeitplan konnte nicht aktualisiert werden</translation>
+    </message>
+    <message id="aegra.backup.schedule.delete_failed">
+        <source>Could not delete schedule</source>
+        <translation>Zeitplan konnte nicht gelöscht werden</translation>
+    </message>
+    <message id="aegra.backup.destination.empty">
+        <source>No repository connection yet. Add a location in Repository first.</source>
+        <translation>Noch keine Repository-Verbindung. Zuerst unter Repository ein Ziel hinzufügen.</translation>
+    </message>
     <message id="aegra.backup.credential.service_managed">
         <source>Repository credentials are managed by Service. Passwords are never entered in Desktop.</source>
         <translation>Repository-Anmeldeinformationen verwaltet der Service. Desktop nimmt keine Kennwörter entgegen.</translation>

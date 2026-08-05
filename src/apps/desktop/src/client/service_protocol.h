@@ -101,7 +101,8 @@ encode_schedule_list_request(const QString& request_id,
                                                      const QVariantList& source_ids,
                                                      const QString& repository_connection_id,
                                                      int backup_type = kBackupTypeFull,
-                                                     const QString& parent_recovery_point_id = {});
+                                                     const QString& parent_recovery_point_id = {},
+                                                     bool exclude_page_and_hibernation_files = true);
 [[nodiscard]] QByteArray encode_cancel_job_request(const QString& request_id,
                                                    const QString& idempotency_key,
                                                    const QString& job_id);
@@ -118,7 +119,8 @@ encode_repository_connection_resource_request(const QString& request_id,
     const QString& request_id, const QString& idempotency_key, const QString& schedule_id,
     const QString& display_name, bool enabled, const QVariantList& source_ids,
     const QString& repository_connection_id, int backup_type, int trigger_kind,
-    int local_minute_of_day, int weekday_mask, const QString& timezone_id);
+    int local_minute_of_day, int weekday_mask, const QString& timezone_id,
+    bool exclude_page_and_hibernation_files = true);
 [[nodiscard]] QByteArray encode_delete_schedule_request(const QString& request_id,
                                                         const QString& idempotency_key,
                                                         const QString& schedule_id);

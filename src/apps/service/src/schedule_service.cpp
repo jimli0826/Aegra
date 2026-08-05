@@ -122,6 +122,8 @@ namespace {
     fingerprint += std::to_string(command.trigger.weekday_mask);
     fingerprint += "|";
     fingerprint += command.trigger.timezone_id;
+    fingerprint += "|";
+    fingerprint += command.exclude_page_and_hibernation_files ? "1" : "0";
     return fingerprint;
 }
 
@@ -201,6 +203,7 @@ ScheduleService::upsert_schedule(const contracts::UpsertScheduleCommand& command
     record.repository_connection_id = command.repository_connection_id;
     record.backup_type = command.backup_type;
     record.trigger = command.trigger;
+    record.exclude_page_and_hibernation_files = command.exclude_page_and_hibernation_files;
     if (record.trigger.timezone_id.empty()) {
         record.trigger.timezone_id = "UTC";
     }

@@ -16,7 +16,7 @@ namespace aegra::ports {
 
 // Personal-edition control-plane schema version for durable local SQLite.
 // Not Recovery Point / Archive / Chunk Index authority.
-inline constexpr std::uint32_t kControlPlaneSchemaVersion = 3;
+inline constexpr std::uint32_t kControlPlaneSchemaVersion = 5;
 
 // ---- Durable records (control-plane only; no plaintext secrets, no RP authority) ----
 
@@ -51,6 +51,9 @@ struct JobRecord final {
     std::optional<std::uint32_t> result_error_code;
     std::optional<std::uint32_t> result_outcome;
     std::optional<std::string> result_message_code;
+    /// Durable start-backup option; required for idempotent replay matching.
+    /// nullopt for non-backup jobs (verify/restore/cancel).
+    std::optional<bool> exclude_page_and_hibernation_files;
 };
 
 struct ScheduleRecord final {
@@ -62,6 +65,7 @@ struct ScheduleRecord final {
     contracts::BackupType backup_type{contracts::BackupType::kFull};
     contracts::ScheduleTrigger trigger;
     std::optional<std::uint64_t> next_run_utc_ms;
+    bool exclude_page_and_hibernation_files{true};
     std::uint64_t created_utc_ms{0};
     std::uint64_t updated_utc_ms{0};
 };

@@ -797,6 +797,30 @@ Server: %1</source>
         <source>Scheduling is not available yet</source>
         <translation>スケジュールはまだ利用できません</translation>
     </message>
+    <message id="aegra.backup.schedule.missing_source">
+        <source>Select at least one backup source</source>
+        <translation>バックアップソースを1つ以上選択してください</translation>
+    </message>
+    <message id="aegra.backup.schedule.missing_target">
+        <source>Select a repository destination (Locations)</source>
+        <translation>リポジトリ接続先（Locations）を選択してください</translation>
+    </message>
+    <message id="aegra.backup.schedule.save_failed">
+        <source>Could not save schedule</source>
+        <translation>スケジュールを保存できませんでした</translation>
+    </message>
+    <message id="aegra.backup.schedule.update_failed">
+        <source>Could not update schedule</source>
+        <translation>スケジュールを更新できませんでした</translation>
+    </message>
+    <message id="aegra.backup.schedule.delete_failed">
+        <source>Could not delete schedule</source>
+        <translation>スケジュールを削除できませんでした</translation>
+    </message>
+    <message id="aegra.backup.destination.empty">
+        <source>No repository connection yet. Add a location in Repository first.</source>
+        <translation>リポジトリ接続がありません。先に Repository で接続を追加してください。</translation>
+    </message>
     <message id="aegra.backup.credential.service_managed">
         <source>Repository credentials are managed by Service. Passwords are never entered in Desktop.</source>
         <translation>リポジトリ資格情報は Service が管理します。Desktop にパスワードは入力しません。</translation>

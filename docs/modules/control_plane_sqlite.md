@@ -52,10 +52,15 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
 
 ## Schema 与不变量
 
-- `schema_meta.version` 当前为 `3`（`ports::kControlPlaneSchemaVersion`）。产品未发布，schema V3 直接定义当前
-  表结构，不提供旧 schema 迁移或兼容读取；旧开发数据库必须删除后重建。
-- 打开时在 `BEGIN IMMEDIATE` 事务中 `CREATE IF NOT EXISTS` 并写入版本；未知更高版本返回
-  `kUnsupportedVersion`。
+- `schema_meta.version` 当前为 `5`（`ports::kControlPlaneSchemaVersion`）。产品未发布：
+  - 新库 `CREATE IF NOT EXISTS` 即为当前完整表结构，再写入 version=5；
+  - **不提供** V3/V4 等历史 schema 的 `ALTER` 迁移或兼容读取；旧开发库必须删除后重建；
+  - 非 0 且非当前版本 → `kUnsupportedVersion`。
+- `jobs.exclude_page_and_hibernation_files` 可空（非 backup job）；backup job 必须写入，
+  `same_backup` 幂等重放比较该字段。
+- `schedules.exclude_page_and_hibernation_files` 必填；upsert command 的 idempotency fingerprint
+  必须包含该选项。
+- 打开时在 `BEGIN IMMEDIATE` 事务中 `CREATE IF NOT EXISTS` 并写入版本。
 - 外键：`jobs.repository_connection_id` → `ON DELETE SET NULL`；
   `schedules.repository_connection_id` → `ON DELETE CASCADE`。
 - 唯一：Repository `locator`、Job `idempotency_key`（非空）、Command `idempotency_key`、至多一个

@@ -24,6 +24,7 @@ src/apps/service/
 │   └── worker_supervisor.h
 └── src/
     ├── service_host.cpp
+    ├── service_log_formatter.cpp
     ├── service_main.cpp
     ├── service_protocol.cpp
     ├── service_protocol_request_json.cpp
@@ -88,6 +89,21 @@ Accept -> Receive Frame -> Decode/Validate -> Dispatch -> Encode -> Send -> Rece
 - Worker session listener 使用独立 `aegra-worker-*` namespace、1 MiB frame limit 和每 session 一个
   `std::jthread`；Service control pipe 继续使用 Service namespace 与 64 KiB frame limit。
 - `--repository-root` 仅保留为显式开发诊断直连查询；常规路径通过持久化 Repository connection 打开。
+
+## 日志与交互追踪
+
+- `<data-dir>/logs/service.log` 使用 spdlog rotating file sink（单文件 10 MiB、保留 5 个），最低级别为
+  `trace`；日志仍携带稳定 `event` code，便于机器筛选。
+- `info/warning/error` 使用完整请求名称、自然语言结果、可读 response/error/message 名称，不输出裸
+  `kind_value`、`response_kind` 或 `error_code` 数字。Job 终态同样输出 `Succeeded/Failed/Cancelled` 等名称。
+- 每个 64 KiB 内的 Service IPC 请求和响应在编解码边界记录一条 `trace` JSON，分别标记 `Inbound` 和
+  `Outbound`，用于关联 `request_id` 并检查实际交互字段。
+- trace JSON 在写盘前使用结构化解析递归脱敏：credential、password、secret、token、`*_key` 等认证、
+  授权或会话材料的值替换为 `[REDACTED]`。路径、locator、显示名、卷标签、主机名和 message arguments
+  等诊断所需用户数据允许保留。解析失败的 frame 不得原样记录，避免无法确认其中是否含认证信息。
+- 任何日志级别都不得记录密码、密钥、Secret、Credential、SecretRef、访问/刷新令牌、会话令牌、Cookie、
+  Authorization 内容或可用于恢复、派生、重放认证状态的材料。用户数据日志遵循最小必要原则，并受日志
+  文件 ACL、轮转和保留策略约束。
 
 ## 验证与完成标准
 

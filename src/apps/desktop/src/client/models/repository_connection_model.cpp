@@ -81,6 +81,20 @@ QString RepositoryConnectionModel::default_connection_id() const {
     return {};
 }
 
+QString RepositoryConnectionModel::connectionIdAt(const int row) const {
+    if (row < 0 || row >= rows_.size()) {
+        return {};
+    }
+    return rows_.at(row).connection_id;
+}
+
+bool RepositoryConnectionModel::isAvailableAt(const int row) const {
+    if (row < 0 || row >= rows_.size()) {
+        return false;
+    }
+    return is_available_state(rows_.at(row).state);
+}
+
 int RepositoryConnectionModel::rowCount(const QModelIndex& parent) const {
     return parent.isValid() ? 0 : rows_.size();
 }

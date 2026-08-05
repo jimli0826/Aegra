@@ -103,11 +103,18 @@ acknowledgement(std::string command_id, const contracts::CommandDisposition disp
 
 [[nodiscard]] bool same_backup(const ports::JobRecord& record,
                                const contracts::StartBackupCommand& command) noexcept {
-    return record.operation == contracts::JobOperation::kBackup &&
-           record.source_ids == command.source_ids &&
-           record.repository_connection_id == command.repository_connection_id &&
-           record.backup_type == command.backup_type &&
-           record.parent_recovery_point_id == command.parent_recovery_point_id;
+    if (record.operation != contracts::JobOperation::kBackup ||
+        record.source_ids != command.source_ids ||
+        record.repository_connection_id != command.repository_connection_id ||
+        record.backup_type != command.backup_type ||
+        record.parent_recovery_point_id != command.parent_recovery_point_id) {
+        return false;
+    }
+    // Exclude option is part of the request identity (true vs false must not replay).
+    if (!record.exclude_page_and_hibernation_files) {
+        return false;
+    }
+    return *record.exclude_page_and_hibernation_files == command.exclude_page_and_hibernation_files;
 }
 
 template <typename Command, typename Matcher>
@@ -220,6 +227,7 @@ prepare_backup(const contracts::StartBackupCommand& command,
     backup.file_uuid = file_uuid.value();
     backup.backup_set_uuid = backup_set_uuid.value();
     backup.created_utc_ms = created_utc_ms;
+    backup.exclude_page_and_hibernation_files = command.exclude_page_and_hibernation_files;
     worker.backup = std::move(backup);
     worker.trace_id = trace_id.value();
     WorkerJobRequest request{std::move(worker),

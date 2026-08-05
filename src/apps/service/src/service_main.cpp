@@ -9,6 +9,7 @@
 #include "aegra/application/recovery_point_operations.h"
 #include "aegra/application/repository_connection_service.h"
 #include "aegra/application/source_inventory_query.h"
+#include "aegra/base/error.h"
 #include "aegra/apps/service/backup_catalog_registrar.h"
 #include "aegra/apps/service/schedule_service.h"
 #include "aegra/apps/service/service_host.h"
@@ -17,6 +18,7 @@
 #include "aegra/apps/service/windows_service_scm_host.h"
 #include "aegra/apps/service/worker_job_service.h"
 #include "aegra/apps/service/worker_supervisor.h"
+#include "service_log_formatter.h"
 
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/spdlog.h>
@@ -57,6 +59,8 @@ enum class ServiceExitCode : int {
 
 [[nodiscard]] spdlog::level::level_enum log_level(const service::ServiceLogLevel level) noexcept {
     switch (level) {
+    case service::ServiceLogLevel::kTrace:
+        return spdlog::level::trace;
     case service::ServiceLogLevel::kInfo:
         return spdlog::level::info;
     case service::ServiceLogLevel::kWarning:
@@ -67,21 +71,43 @@ enum class ServiceExitCode : int {
     return spdlog::level::info;
 }
 
+[[nodiscard]] std::string_view
+job_state_name(const aegra::contracts::ServiceJobState state) noexcept {
+    switch (state) {
+    case aegra::contracts::ServiceJobState::kQueued:
+        return "Queued";
+    case aegra::contracts::ServiceJobState::kRunning:
+        return "Running";
+    case aegra::contracts::ServiceJobState::kCancelling:
+        return "Cancelling";
+    case aegra::contracts::ServiceJobState::kSucceeded:
+        return "Succeeded";
+    case aegra::contracts::ServiceJobState::kFailed:
+        return "Failed";
+    case aegra::contracts::ServiceJobState::kCancelled:
+        return "Cancelled";
+    case aegra::contracts::ServiceJobState::kInterrupted:
+        return "Interrupted";
+    }
+    return "Unknown";
+}
+
 class SpdlogServiceLog final : public service::IServiceLog {
   public:
     explicit SpdlogServiceLog(std::shared_ptr<spdlog::logger> logger) : logger_(std::move(logger)) {
-        logger_->info("service.log_started");
+        logger_->info("Service log started. [event=service.log_started]");
     }
 
     ~SpdlogServiceLog() override {
-        logger_->info("service.log_stopped");
+        logger_->info("Service log stopped. [event=service.log_stopped]");
         logger_->flush();
     }
 
     void write(const service::ServiceLogLevel level, const std::string_view message_code,
                const std::string_view detail) noexcept override {
         try {
-            logger_->log(log_level(level), "{} {}", message_code, detail);
+            logger_->log(log_level(level), "{}: {} [event={}]",
+                         service::detail::readable_code(message_code), detail, message_code);
         } catch (...) {
         }
     }
@@ -283,7 +309,7 @@ create_service_log(const std::filesystem::path& data_dir, const bool service_mod
         auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
             log_path.value(), 10U * 1024U * 1024U, 5U);
         auto logger = std::make_shared<spdlog::logger>("aegra_service", std::move(file_sink));
-        logger->set_level(spdlog::level::info);
+        logger->set_level(spdlog::level::trace);
         logger->flush_on(spdlog::level::info);
         logger->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] %v");
         (void)service_mode; // retained for future SCM-specific log policy
@@ -414,8 +440,11 @@ create_runtime(const ServiceArguments& arguments) {
             if (response != nullptr && catalog_registrar != nullptr) {
                 auto registered = catalog_registrar->publish(request, *response, {});
                 if (!registered && log != nullptr) {
-                    std::string failure = "job_id=" + job_id + " error=";
-                    failure += registered.error().message;
+                    std::string failure = "Catalog publication failed for job ";
+                    failure += job_id;
+                    failure += "; error=";
+                    failure += service::detail::readable_code(
+                        aegra::base::error_code_name(registered.error().code));
                     log->write(service::ServiceLogLevel::kError,
                                "repository.catalog_publish_failed", failure);
                 }
@@ -423,22 +452,29 @@ create_runtime(const ServiceArguments& arguments) {
             if (log == nullptr) {
                 return;
             }
-            std::string detail = "job_id=";
+            std::string detail = "Job ";
             detail += job_id;
-            detail += " state=";
-            detail += std::to_string(static_cast<int>(final_state));
+            detail += " finished; state=";
+            detail += job_state_name(final_state);
             if (jobs_db != nullptr) {
                 auto job = jobs_db->get_job(job_id, {});
                 if (job && job.value()) {
-                    detail += " message_code=";
+                    detail += "; status=";
+                    detail += service::detail::readable_code(job.value()->message_code);
+                    detail += " [";
                     detail += job.value()->message_code;
+                    detail += ']';
                     if (job.value()->result_message_code) {
-                        detail += " result_message_code=";
+                        detail += "; result=";
+                        detail += service::detail::readable_code(*job.value()->result_message_code);
+                        detail += " [";
                         detail += *job.value()->result_message_code;
+                        detail += ']';
                     }
                     if (job.value()->result_error_code) {
-                        detail += " result_error_code=";
-                        detail += std::to_string(*job.value()->result_error_code);
+                        detail += "; error=";
+                        detail += service::detail::readable_code(aegra::base::error_code_name(
+                            static_cast<aegra::base::ErrorCode>(*job.value()->result_error_code)));
                     }
                 }
             }

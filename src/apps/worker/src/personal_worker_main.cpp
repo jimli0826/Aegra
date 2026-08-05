@@ -53,9 +53,13 @@ std::string hostname() {
 
 aegra::apps::worker::WindowsPersonalBackupTaskOptions trusted_options() {
     aegra::apps::worker::WindowsPersonalBackupTaskOptions options;
-    options.block_size_bytes = 4U * 1024U;
-    options.chunk_size_bytes = 1024U * 1024U;
-    options.memory_budget_bytes = std::size_t{16} * 1024U * 1024U;
+    // Match old AegraImage engine constants (backup_format.h / constants.h):
+    // BLOCK_SIZE=64KiB, READ_CHUNK_SIZE=64MiB. Hash/compress still fan out across
+    // hardware_concurrency workers inside PersonalArchive chunk preparation.
+    options.block_size_bytes = 64U * 1024U;
+    options.chunk_size_bytes = 64U * 1024U * 1024U;
+    // Keep several 64MiB chunks in flight without approaching old 512MiB DEFAULT_CHUNK.
+    options.memory_budget_bytes = std::size_t{256} * 1024U * 1024U;
     options.application_version = AEGRA_APPLICATION_VERSION;
     options.hostname = hostname();
     return options;

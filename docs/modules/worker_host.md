@@ -18,6 +18,11 @@
 | 内容 | 起止分隔线、job/trace、源/目标路径、几何参数、完成/失败摘要与容量指标 |
 | 禁止 | 密码、SecretRef 明文、凭据材料 |
 
+Worker 任务日志允许记录诊断所需的源/目标路径、Volume GUID、卷标、主机名和 Archive 信息，但不得记录
+密码、密钥、Secret、Credential、SecretRef、访问/刷新令牌、会话令牌、Cookie、Authorization 内容或其他
+可用于恢复、派生、重放认证状态的材料。记录用户数据时遵循最小必要原则，并受日志文件 ACL、轮转和保留
+策略约束。
+
 Service 在 composition root 设置 `AEGRA_DATA_DIR`，Worker 子进程通过环境继承同一数据目录，保证
 task log 与 `service.log` 同树。
 

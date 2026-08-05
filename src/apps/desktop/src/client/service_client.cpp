@@ -310,8 +310,8 @@ void ServiceClient::on_request_failed(const QString& message_code) {
         // is in flight — keep the socket and mark the domain error instead of full disconnect.
         if (handshake_complete_ && first_ready_seen_ &&
             (repository_loading_ || jobs_loading_ || inventory_loading_ || connections_loading_ ||
-             repository_command_busy_ || schedule_command_busy_ || backup_command_busy_ ||
-             cancel_command_busy_) &&
+             schedules_loading_ || repository_command_busy_ || schedule_command_busy_ ||
+             backup_command_busy_ || cancel_command_busy_) &&
             message_code == QLatin1String("service.protocol_invalid")) {
             if (repository_loading_) {
                 finish_repository_failure(QStringLiteral("repository.query_failed"));
@@ -324,6 +324,9 @@ void ServiceClient::on_request_failed(const QString& message_code) {
             }
             if (connections_loading_) {
                 finish_connection_failure(QStringLiteral("connection.query_failed"));
+            }
+            if (schedules_loading_) {
+                finish_schedule_failure(QStringLiteral("schedule.query_failed"));
             }
             if (repository_command_busy_) {
                 finish_repository_command_failure(QStringLiteral("service.request_failed"));
@@ -358,6 +361,9 @@ void ServiceClient::on_request_failed(const QString& message_code) {
     }
     if (connections_loading_) {
         finish_connection_failure(QStringLiteral("connection.query_failed"));
+    }
+    if (schedules_loading_) {
+        finish_schedule_failure(QStringLiteral("schedule.query_failed"));
     }
     if (repository_command_busy_) {
         finish_repository_command_failure(QStringLiteral("service.request_failed"));

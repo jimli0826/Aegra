@@ -797,6 +797,30 @@ Server: %1</source>
         <source>Scheduling is not available yet</source>
         <translation>计划任务尚不可用</translation>
     </message>
+    <message id="aegra.backup.schedule.missing_source">
+        <source>Select at least one backup source</source>
+        <translation>请至少选择一个备份源</translation>
+    </message>
+    <message id="aegra.backup.schedule.missing_target">
+        <source>Select a repository destination (Locations)</source>
+        <translation>请选择备份目标（Locations 中的 Repository 连接）</translation>
+    </message>
+    <message id="aegra.backup.schedule.save_failed">
+        <source>Could not save schedule</source>
+        <translation>无法保存计划任务</translation>
+    </message>
+    <message id="aegra.backup.schedule.update_failed">
+        <source>Could not update schedule</source>
+        <translation>无法更新计划任务</translation>
+    </message>
+    <message id="aegra.backup.schedule.delete_failed">
+        <source>Could not delete schedule</source>
+        <translation>无法删除计划任务</translation>
+    </message>
+    <message id="aegra.backup.destination.empty">
+        <source>No repository connection yet. Add a location in Repository first.</source>
+        <translation>尚无 Repository 连接。请先在 Repository 页面添加目标。</translation>
+    </message>
     <message id="aegra.backup.credential.service_managed">
         <source>Repository credentials are managed by Service. Passwords are never entered in Desktop.</source>
         <translation>Repository 凭据由 Service 管理。Desktop 从不输入密码。</translation>

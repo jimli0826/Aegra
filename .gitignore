@@ -14,3 +14,5 @@
 *.lib
 *.exp
 /docs/migration/evidence
+/build
+/src/apps/desktop/build

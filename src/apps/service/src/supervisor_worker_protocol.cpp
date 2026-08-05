@@ -57,6 +57,8 @@ encode_supervisor_job_request(const contracts::JobRequest& request) {
             backup["file_uuid"] = request.backup->file_uuid;
             backup["backup_set_uuid"] = request.backup->backup_set_uuid;
             backup["created_utc_ms"] = request.backup->created_utc_ms;
+            backup["exclude_page_and_hibernation_files"] =
+                request.backup->exclude_page_and_hibernation_files;
             root["backup"] = backup;
         }
 

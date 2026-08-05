@@ -53,6 +53,7 @@ class IWindowsPersonalBackupRuntime {
 
     [[nodiscard]] virtual base::Result<PreparedVolumeSources>
     prepare_sources(const std::vector<std::filesystem::path>& volume_guid_paths,
+                    bool exclude_page_and_hibernation_files,
                     const base::CancellationToken& cancellation) = 0;
     [[nodiscard]] virtual base::Result<std::unique_ptr<ports::IBackupSession>>
     create_archive(const WindowsPersonalBackupRequest& request,

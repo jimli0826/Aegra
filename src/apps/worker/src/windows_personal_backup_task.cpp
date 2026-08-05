@@ -4,6 +4,7 @@
 #include "worker_task_log.h"
 
 #include "aegra/apps/worker/windows_personal_backup.h"
+#include "aegra/base/error.h"
 #include "aegra/base/uuid.h"
 #include "aegra/contracts/service_control.h"
 
@@ -236,6 +237,7 @@ WindowsPersonalBackupRequest make_backup_request(
     request.created_utc = std::move(created_utc);
     request.application_version = options.application_version;
     request.hostname = options.hostname;
+    request.exclude_page_and_hibernation_files = job.backup->exclude_page_and_hibernation_files;
     return request;
 }
 
@@ -281,6 +283,8 @@ void log_backup_start(WorkerTaskLog* log, const contracts::JobRequest& job,
     log->info(std::string("trace_id=") + job.trace_id);
     log->info(std::string("backup_type=") +
               (request.backup_type == WindowsPersonalBackupType::kFull ? "full" : "incremental"));
+    log->info(std::string("exclude_page_and_hibernation_files=") +
+              (request.exclude_page_and_hibernation_files ? "true" : "false"));
     for (const auto& source_ref : job.source_refs) {
         log->info(std::string("Volume path: ") + source_ref);
     }
@@ -374,6 +378,13 @@ run_accepted_task(const contracts::JobRequest& job, const WindowsPersonalBackupT
     }
     auto backup = backend.run(request, cancellation, context.progress);
     if (!backup) {
+        if (log != nullptr) {
+            // TaskResult stays code-only; the file log keeps the operator-facing failure detail.
+            std::ostringstream detail;
+            detail << "failure detail: code=" << base::error_code_name(backup.error().code)
+                   << " message=" << backup.error().message;
+            log->error(detail.str());
+        }
         return finish_logged(log, validated_task_result(failed_result(job, backup.error().code)));
     }
     return finish_logged(log, validated_task_result(completed_result(job, backup.value())));

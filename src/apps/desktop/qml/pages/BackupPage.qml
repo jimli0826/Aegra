@@ -170,8 +170,27 @@ Item {
         return sources
     }
 
+    /// Selected repository connection id for the wizard DESTINATION row, or empty.
+    function selectedConnectionId() {
+        var conns = serviceClient.connections
+        if (!conns || conns.count <= 0)
+            return ""
+        var idx = selectedLocationIndex
+        if (idx < 0 || idx >= conns.count)
+            return ""
+        if (typeof conns.isAvailableAt === "function" && !conns.isAvailableAt(idx))
+            return ""
+        if (typeof conns.connectionIdAt === "function") {
+            var id = conns.connectionIdAt(idx)
+            return id ? ("" + id) : ""
+        }
+        return ""
+    }
+
     function canGoNext() {
-        return selectedSources().length > 0 && selectedLocationIndex >= 0
+        // Require at least one backup source and an available destination connection.
+        // Empty Locations list (screenshot) must keep Next disabled.
+        return selectedSources().length > 0 && selectedConnectionId().length > 0
     }
 
     function freqLabel(f) {
@@ -190,22 +209,24 @@ Item {
 
     function createScheduleFromWizard() {
         var sources = selectedSources()
-        var connId = serviceClient.defaultConnectionId
-                     ? serviceClient.defaultConnectionId() : ""
-        if (serviceClient.connections.count > 0) {
-            // Prefer default; if wizard selected a specific connection, keep default for now
-            // (location row maps to connections via index when model is live).
-            connId = serviceClient.defaultConnectionId()
+        var connId = selectedConnectionId()
+        if (connId.length === 0 && serviceClient.defaultConnectionId)
+            connId = serviceClient.defaultConnectionId() || ""
+        if (sources.length === 0) {
+            //% "Select at least one backup source"
+            serviceClient.showToast(qsTrId("aegra.backup.schedule.missing_source"))
+            return
         }
-        if (sources.length === 0 || !connId || connId.length === 0) {
-            //% "Select a backup source and repository connection"
+        if (!connId || connId.length === 0) {
+            //% "Select a repository destination (Locations)"
             serviceClient.showToast(qsTrId("aegra.backup.schedule.missing_target"))
             return
         }
         var s2 = wizardStep2
         var frequency = s2 ? s2.frequency : "daily"
         var timeOfDay = s2 ? s2.timeOfDay : "02:00"
-        if (!serviceClient.createSchedule(sources, connId, frequency, timeOfDay)) {
+        var excludePage = s2 ? s2.excludePageHibernation : true
+        if (!serviceClient.createSchedule(sources, connId, frequency, timeOfDay, excludePage)) {
             //% "Could not save schedule"
             serviceClient.showToast(qsTrId("aegra.backup.schedule.save_failed"))
             return
@@ -269,7 +290,8 @@ Item {
                 connectionId = serviceClient.defaultConnectionId()
             if (sourceIds.length > 0 && connectionId.length > 0) {
                 root.pendingRunScheduleId = item.scheduleId || item.id || ""
-                if (serviceClient.startBackup(sourceIds, connectionId))
+                var excludePage = item.excludePageAndHibernation !== false
+                if (serviceClient.startBackup(sourceIds, connectionId, excludePage))
                     return
                 root.pendingRunScheduleId = ""
                 return
@@ -1044,6 +1066,21 @@ Item {
                                             spacing: 2
                                             // Real Service repository.connection list only.
                                             model: serviceClient.connections
+
+                                            // Empty Locations: keep Next disabled (canGoNext).
+                                            Text {
+                                                anchors.centerIn: parent
+                                                width: parent.width - 24
+                                                horizontalAlignment: Text.AlignHCenter
+                                                wrapMode: Text.WordWrap
+                                                visible: !serviceClient.connections
+                                                         || serviceClient.connections.count === 0
+                                                //% "No repository connection yet. Add a location in Repository first."
+                                                text: qsTrId("aegra.backup.destination.empty")
+                                                color: Theme.colorTextDim
+                                                font.pixelSize: 12
+                                                font.family: Theme.fontFamily
+                                            }
 
                                             delegate: Rectangle {
                                                 id: locRow

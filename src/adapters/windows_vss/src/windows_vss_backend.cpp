@@ -572,4 +572,48 @@ std::unique_ptr<IVssSnapshotBackend> make_windows_vss_backend() {
     return std::make_unique<WindowsVssBackend>();
 }
 
+base::Result<bool>
+probe_volume_snapshot_supported(const std::filesystem::path& volume_guid_path) {
+    if (!is_canonical_volume_guid_path(volume_guid_path)) {
+        return base::Result<bool>::failure(base::Error{
+            base::ErrorCode::kInvalidArgument,
+            "VSS volume path is not a canonical Volume GUID path",
+        });
+    }
+    try {
+        auto apartment = ComApartment::enter();
+        if (!apartment) {
+            return base::Result<bool>::failure(apartment.error());
+        }
+        auto security = initialize_com_security();
+        if (!security) {
+            return base::Result<bool>::failure(security.error());
+        }
+        ComPtr<IVssBackupComponents> components;
+        auto result = CreateVssBackupComponents(components.put());
+        if (FAILED(result)) {
+            return base::Result<bool>::failure(
+                hresult_error(result, "CreateVssBackupComponents"));
+        }
+        result = components->InitializeForBackup();
+        if (FAILED(result)) {
+            return base::Result<bool>::failure(hresult_error(result, "InitializeForBackup"));
+        }
+        result = components->SetContext(VSS_CTX_BACKUP);
+        if (FAILED(result)) {
+            return base::Result<bool>::failure(hresult_error(result, "SetContext"));
+        }
+        BOOL supported = FALSE;
+        auto volume = volume_guid_path.native();
+        result = components->IsVolumeSupported(GUID_NULL, volume.data(), &supported);
+        if (FAILED(result)) {
+            return base::Result<bool>::failure(hresult_error(result, "IsVolumeSupported"));
+        }
+        return base::Result<bool>::success(supported == TRUE);
+    } catch (...) {
+        return base::Result<bool>::failure(
+            base::Error{base::ErrorCode::kInternal, "VSS support probe failed unexpectedly"});
+    }
+}
+
 } // namespace aegra::adapters::windows_vss::detail

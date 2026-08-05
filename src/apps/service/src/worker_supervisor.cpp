@@ -454,6 +454,10 @@ base::Result<void> WorkerSupervisor::Impl::launch_worker(
     record.backup_type =
         worker_request.backup ? std::optional(worker_request.backup->type) : std::nullopt;
     record.parent_recovery_point_id = request.parent_recovery_point_id;
+    if (worker_request.backup) {
+        record.exclude_page_and_hibernation_files =
+            worker_request.backup->exclude_page_and_hibernation_files;
+    }
     record.message_code = "job.queued";
     record.idempotency_key = request.idempotency_key;
     auto inserted = unit.value()->jobs().insert(record, cancellation);

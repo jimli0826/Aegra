@@ -52,5 +52,7 @@ class VssSnapshotSessionCore final {
 
 [[nodiscard]] bool is_canonical_volume_guid_path(const std::filesystem::path& path) noexcept;
 [[nodiscard]] std::unique_ptr<IVssSnapshotBackend> make_windows_vss_backend();
+[[nodiscard]] base::Result<bool>
+probe_volume_snapshot_supported(const std::filesystem::path& volume_guid_path);
 
 } // namespace aegra::adapters::windows_vss::detail

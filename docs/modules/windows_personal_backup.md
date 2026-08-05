@@ -29,10 +29,15 @@ Validate Request
 -> Require a reliable nonzero logical size for every Volume
 -> Put all VSS-capable Volumes into one Snapshot Set
 -> Open VSS Snapshot Devices and non-VSS canonical Volumes as ordered WindowsBlockSources
+-> Classify volumes: FS candidate + IsVolumeSupported → VSS set; others raw
+-> Optionally wrap each source with Volume Bitmap free-cluster skip (same device path as read)
+-> pagefile/hiber/swap exclusion on the same read root (live GUID or VSS snapshot; AipCopy style)
 -> Build one V6 Manifest containing all selected Volumes
+-> Log worker thread count; hash/compress fan-out in PersonalArchive (exception-safe)
 -> For incremental, authenticate parent Archive and Sidecar
 -> Create PersonalArchiveSession
 -> Run one BackupPipeline per Volume against the shared Session
+   (progress aggregated over all volumes; kCompleted only after final commit)
 -> Commit once after the final Volume
 -> Destroy all Block Source handles
 -> BackupComplete and delete VSS Snapshot Set
@@ -94,8 +99,9 @@ Validate JobRequest and trusted options
 - 每个 Source 对应一个 Volume，`volume_index` 按请求顺序从 0 连续递增；
 - `volume_id` 和 `volume_guid` 使用 Inventory 返回的 Volume GUID Path；
 - 系统卷、EFI/FAT、RAW、未知文件系统和只读卷均允许作为备份源；
-- NTFS/ReFS Volume 设置 `vss_required=true`、`vss_used=true`，Writer Status 全部成功后标记 application
-  consistency；其他 Volume 设置 `vss_required=false`、`vss_used=false` 并标记 crash consistency；
+- NTFS/ReFS/FAT/FAT32/exFAT Volume 设置 `vss_required=true`、`vss_used=true`，Writer Status 全部成功后
+  标记 application consistency（整盘系统盘可把 EFI 与 OS 卷放进同一 Snapshot Set）；RAW/未知文件系统
+  Volume 设置 `vss_required=false`、`vss_used=false` 并标记 crash consistency；
 - `backup_job.backup_type` 来自受校验的 Job；增量 Session 认证父 Archive/Sidecar 后继承 backup-set UUID，
   并令 `parent_uuid` 指向父 `file_uuid`；
 - total size 优先使用 `IOCTL_DISK_GET_LENGTH_INFO`，不可用时使用受溢出检查的 extent 总长度；

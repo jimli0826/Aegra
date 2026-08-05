@@ -24,6 +24,11 @@ struct BackupPlan final {
     std::size_t memory_budget_bytes{0};
     std::uint32_t source_index{0};
     BackupCommitMode commit_mode{BackupCommitMode::kCommit};
+    /// Multi-volume job totals for progress (0 = use this source size only).
+    std::uint64_t progress_total_logical_bytes{0};
+    /// Bytes already finished on prior volumes (processed / stored).
+    std::uint64_t progress_base_processed_bytes{0};
+    std::uint64_t progress_base_stored_bytes{0};
 };
 
 struct BackupSummary final {

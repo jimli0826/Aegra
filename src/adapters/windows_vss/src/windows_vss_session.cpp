@@ -42,4 +42,8 @@ bool WindowsVssSnapshotSession::active() const noexcept { return impl_->core->ac
 
 base::Result<void> WindowsVssSnapshotSession::close() { return impl_->core->close(); }
 
+base::Result<bool> is_volume_snapshot_supported(const std::filesystem::path& volume_guid_path) {
+    return detail::probe_volume_snapshot_supported(volume_guid_path);
+}
+
 } // namespace aegra::adapters::windows_vss

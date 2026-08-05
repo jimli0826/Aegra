@@ -2,6 +2,7 @@ add_library(aegra_adapter_windows_disk STATIC
     src/windows_block_source.cpp
     src/windows_block_sink.cpp
     src/windows_volume_enumerator.cpp
+    src/windows_volume_free_skip.cpp
 )
 
 add_library(Aegra::AdapterWindowsDisk ALIAS aegra_adapter_windows_disk)

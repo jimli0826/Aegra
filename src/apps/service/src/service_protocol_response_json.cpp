@@ -289,13 +289,14 @@ parse_repository_connection(const Json& payload) {
                 {"repository_connection_id", summary.repository_connection_id},
                 {"backup_type", static_cast<std::uint8_t>(summary.backup_type)},
                 {"trigger", encode_schedule_trigger(summary.trigger)},
-                {"next_run_utc_ms", optional_uint64_json(summary.next_run_utc_ms)}};
+                {"next_run_utc_ms", optional_uint64_json(summary.next_run_utc_ms)},
+                {"exclude_page_and_hibernation_files", summary.exclude_page_and_hibernation_files}};
 }
 
 [[nodiscard]] contracts::ScheduleSummary parse_schedule(const Json& payload) {
-    constexpr std::array<std::string_view, 8> keys{
-        "schedule_id", "display_name", "enabled",       "source_ids", "repository_connection_id",
-        "backup_type", "trigger",      "next_run_utc_ms"};
+    constexpr std::array<std::string_view, 9> keys{
+        "schedule_id", "display_name", "enabled", "source_ids", "repository_connection_id",
+        "backup_type", "trigger", "next_run_utc_ms", "exclude_page_and_hibernation_files"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("schedule summary fields are invalid");
     }
@@ -309,6 +310,8 @@ parse_repository_connection(const Json& payload) {
         static_cast<contracts::BackupType>(unsigned_value<std::uint8_t>(payload, "backup_type"));
     summary.trigger = parse_schedule_trigger(payload.at("trigger"));
     summary.next_run_utc_ms = optional_uint64(payload.at("next_run_utc_ms"));
+    summary.exclude_page_and_hibernation_files =
+        payload.at("exclude_page_and_hibernation_files").get<bool>();
     return summary;
 }
 

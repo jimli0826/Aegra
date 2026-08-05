@@ -9,6 +9,7 @@
 #include "aegra/apps/service/service_protocol.h"
 #include "aegra/apps/service/worker_job_service.h"
 #include "aegra/apps/service/worker_supervisor.h"
+#include "service_log_formatter.h"
 #include "aegra/contracts/progress.h"
 #include "aegra/ports/control_plane.h"
 
@@ -24,27 +25,6 @@ namespace {
 [[nodiscard]] base::Result<contracts::ServiceResponse>
 capability_unavailable(const contracts::ServiceRequest& request);
 
-[[nodiscard]] std::string_view request_kind_name(const contracts::ServiceRequestKind kind) {
-    switch (kind) {
-    case contracts::ServiceRequestKind::kGetServiceInfo:
-        return "service.info";
-    case contracts::ServiceRequestKind::kListRecoveryPoints:
-        return "repository.list_recovery_points";
-    case contracts::ServiceRequestKind::kListRepositoryConnections:
-        return "repository.list_connections";
-    case contracts::ServiceRequestKind::kListSourceInventory:
-        return "source.inventory";
-    case contracts::ServiceRequestKind::kListJobs:
-        return "job.list";
-    case contracts::ServiceRequestKind::kStartBackup:
-        return "backup.start";
-    case contracts::ServiceRequestKind::kCancelJob:
-        return "job.cancel";
-    default:
-        return "service.request";
-    }
-}
-
 void write_log(const ServiceRuntimeInfo& runtime, const ServiceLogLevel level,
                const std::string_view message_code, const std::string_view detail) noexcept {
     if (runtime.logger != nullptr) {
@@ -53,24 +33,19 @@ void write_log(const ServiceRuntimeInfo& runtime, const ServiceLogLevel level,
 }
 
 [[nodiscard]] std::string request_detail(const contracts::ServiceRequest& request) {
-    std::ostringstream stream;
-    stream << "request_id=" << request.request_id
-           << " kind=" << request_kind_name(request.kind)
-           << " kind_value=" << static_cast<int>(request.kind);
-    if (request.idempotency_key) {
-        stream << " command=true";
-    }
-    return stream.str();
+    return detail::request_log_detail(request);
 }
 
 [[nodiscard]] std::string response_detail(const contracts::ServiceResponse& response) {
-    std::ostringstream stream;
-    stream << "request_id=" << response.request_id
-           << " kind=" << request_kind_name(response.request_kind)
-           << " response_kind=" << static_cast<int>(response.kind)
-           << " error_code=" << static_cast<int>(response.boundary_error_code)
-           << " message_code=" << response.message_code;
-    return stream.str();
+    return detail::response_log_detail(response);
+}
+
+void write_interaction_log(const ServiceRuntimeInfo& runtime, const std::string_view direction,
+                           const std::string_view encoded) noexcept {
+    const auto message_code = direction == "Inbound" ? "service.interaction.request"
+                                                       : "service.interaction.response";
+    write_log(runtime, ServiceLogLevel::kTrace, message_code,
+              detail::sanitized_interaction_detail(direction, encoded));
 }
 
 [[nodiscard]] std::string_view required_capability(const contracts::ServiceRequestKind kind) {
@@ -523,22 +498,30 @@ dispatch_service_request(const contracts::ServiceRequest& request,
 base::Result<std::string> handle_service_message(const std::string_view encoded_request,
                                                  const ServiceRuntimeInfo& runtime,
                                                  const base::CancellationToken cancellation) {
+    write_interaction_log(runtime, "Inbound", encoded_request);
     auto request = decode_service_request(encoded_request);
     if (!request) {
         const auto code = request.error().code == base::ErrorCode::kUnsupportedVersion
                               ? base::ErrorCode::kUnsupportedVersion
                               : base::ErrorCode::kInvalidArgument;
-        std::ostringstream detail;
-        detail << "error_code=" << static_cast<int>(code);
         write_log(runtime, ServiceLogLevel::kWarning, "service.request_decode_failed",
-                  detail.str());
-        return encode_service_response(failure(code));
+                  "Request could not be decoded; error=" +
+                      detail::readable_code(base::error_code_name(code)));
+        auto encoded_response = encode_service_response(failure(code));
+        if (encoded_response) {
+            write_interaction_log(runtime, "Outbound", encoded_response.value());
+        }
+        return encoded_response;
     }
     auto response = dispatch_service_request(request.value(), runtime, cancellation);
     if (!response) {
         return base::Result<std::string>::failure(response.error());
     }
-    return encode_service_response(response.value());
+    auto encoded_response = encode_service_response(response.value());
+    if (encoded_response) {
+        write_interaction_log(runtime, "Outbound", encoded_response.value());
+    }
+    return encoded_response;
 }
 
 base::Result<void> run_service_session(ports::IMessageChannel& channel,

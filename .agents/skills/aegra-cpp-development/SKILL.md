@@ -34,7 +34,10 @@ Before changing production code:
 - Keep `base`, `contracts`, `ports`, `format`, and `pipeline` independent of Windows, databases, network SDKs, UI frameworks, and vendor SDKs unless the architecture document explicitly assigns that dependency.
 - Put concrete infrastructure in `adapters`; construct it only in `apps` composition roots.
 - Never expose STL types or vendor objects across a C ABI, plugin ABI, DLL ABI, or process boundary.
-- Never store plaintext secrets or log credentials, keys, tokens, or customer data.
+- Never store plaintext secrets or log authentication material, including credentials, secret
+  references, keys, passwords, authorization/session data, or tokens. Logs may contain user data
+  needed for diagnosis, such as paths, labels, host names, repository locators, and business
+  parameters, subject to least-necessary scope and the product log access/retention policy.
 - Never use global mutable state, owning raw pointers, hidden singleton dependencies, or output-directory link ordering.
 
 ## Verification report

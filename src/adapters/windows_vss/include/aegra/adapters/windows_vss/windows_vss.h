@@ -48,4 +48,9 @@ class WindowsVssSnapshotSession final {
     std::unique_ptr<Impl> impl_;
 };
 
+/// Probe whether the volume can be added to a VSS backup snapshot set (IsVolumeSupported).
+/// Does not create a snapshot. Failures return Result error; false means provider rejects the volume.
+[[nodiscard]] base::Result<bool>
+is_volume_snapshot_supported(const std::filesystem::path& volume_guid_path);
+
 } // namespace aegra::adapters::windows_vss

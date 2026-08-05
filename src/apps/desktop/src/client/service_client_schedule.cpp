@@ -122,11 +122,14 @@ RequestDisposition ServiceClient::handle_schedule_list_frame(const QByteArray& b
     }
     SchedulePage page;
     if (!parse_schedule_list_response(root, page)) {
-        return RequestDisposition::kProtocolError;
+        // Soft-fail the schedule domain; do not escalate to a transport protocol drop.
+        finish_schedule_failure(QStringLiteral("schedule.query_failed"));
+        return RequestDisposition::kFinished;
     }
     if ((page.continuation_token && page.continuation_token == schedule_requested_token_) ||
         pending_schedules_.size() + page.items.size() > kMaximumSchedules) {
-        return RequestDisposition::kProtocolError;
+        finish_schedule_failure(QStringLiteral("schedule.query_failed"));
+        return RequestDisposition::kFinished;
     }
     QSet<QString> seen_ids;
     for (const auto& existing : pending_schedules_) {
@@ -135,7 +138,8 @@ RequestDisposition ServiceClient::handle_schedule_list_frame(const QByteArray& b
     for (auto& item : page.items) {
         const auto schedule_id = item.toMap().value(QStringLiteral("scheduleId")).toString();
         if (seen_ids.contains(schedule_id)) {
-            return RequestDisposition::kProtocolError;
+            finish_schedule_failure(QStringLiteral("schedule.query_failed"));
+            return RequestDisposition::kFinished;
         }
         seen_ids.insert(schedule_id);
         pending_schedules_.push_back(std::move(item));
@@ -145,7 +149,8 @@ RequestDisposition ServiceClient::handle_schedule_list_frame(const QByteArray& b
         const auto next_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
         const auto next_body = encode_schedule_list_request(next_id, schedule_requested_token_);
         if (!coordinator_->continue_request(request_id, next_id, next_body)) {
-            return RequestDisposition::kProtocolError;
+            finish_schedule_failure(QStringLiteral("schedule.query_failed"));
+            return RequestDisposition::kFinished;
         }
         schedule_request_id_ = next_id;
         return RequestDisposition::kContinue;
@@ -186,7 +191,8 @@ void ServiceClient::reset_schedules() {
 bool ServiceClient::upsertSchedule(const QString& schedule_id, const QString& display_name,
                                    const bool enabled, const QVariantList& source_ids,
                                    const QString& connection_id, const QString& frequency,
-                                   const QString& time_of_day) {
+                                   const QString& time_of_day,
+                                   const bool exclude_page_and_hibernation_files) {
     if (state_ != State::kReady || !schedules_available_ || schedule_command_busy_ ||
         source_ids.isEmpty() || source_ids.size() > 100 || connection_id.isEmpty() ||
         display_name.isEmpty()) {
@@ -205,7 +211,8 @@ bool ServiceClient::upsertSchedule(const QString& schedule_id, const QString& di
     schedule_command_busy_ = true;
     const auto body = encode_upsert_schedule_request(
         request_id, idempotency_key, schedule_id, display_name, enabled, source_ids, connection_id,
-        kBackupTypeFull, trigger_kind, local_minute, 0, QStringLiteral("UTC"));
+        kBackupTypeFull, trigger_kind, local_minute, 0, QStringLiteral("UTC"),
+        exclude_page_and_hibernation_files);
     const auto started =
         coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
             return handle_schedule_command_frame(frame_body);
@@ -218,7 +225,8 @@ bool ServiceClient::upsertSchedule(const QString& schedule_id, const QString& di
 }
 
 bool ServiceClient::createSchedule(const QVariantList& sources, const QString& connection_id,
-                                   const QString& frequency, const QString& time_of_day) {
+                                   const QString& frequency, const QString& time_of_day,
+                                   const bool exclude_page_and_hibernation_files) {
     if (state_ != State::kReady || !schedules_available_ || schedule_command_busy_ ||
         sources.isEmpty() || sources.size() > 100 || connection_id.isEmpty()) {
         return false;
@@ -238,7 +246,7 @@ bool ServiceClient::createSchedule(const QVariantList& sources, const QString& c
         display_names.push_back(display_name);
     }
     return upsertSchedule({}, display_names.join(QStringLiteral(", ")), true, source_ids,
-                          connection_id, frequency, time_of_day);
+                          connection_id, frequency, time_of_day, exclude_page_and_hibernation_files);
 }
 
 bool ServiceClient::deleteSchedule(const QString& schedule_id) {
@@ -276,11 +284,12 @@ bool ServiceClient::setScheduleEnabled(const QString& schedule_id, const bool en
     if (found.isEmpty()) {
         return false;
     }
+    const auto exclude = found.value(QStringLiteral("excludePageAndHibernation"), true).toBool();
     return upsertSchedule(schedule_id, found.value(QStringLiteral("displayName")).toString(),
                           enabled, found.value(QStringLiteral("sourceIds")).toList(),
                           found.value(QStringLiteral("connectionId")).toString(),
                           found.value(QStringLiteral("frequency")).toString(),
-                          found.value(QStringLiteral("timeOfDay")).toString());
+                          found.value(QStringLiteral("timeOfDay")).toString(), exclude);
 }
 
 RequestDisposition ServiceClient::handle_schedule_command_frame(const QByteArray& body) {

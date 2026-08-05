@@ -7,14 +7,37 @@
 #include "aegra/format/manifest.h"
 
 #include <algorithm>
-#include <sstream>
+#include <limits>
 #include <set>
+#include <sstream>
 #include <string>
+#include <thread>
 #include <utility>
 
 namespace aegra::apps::worker {
 namespace detail {
 namespace {
+
+// Service wire integers are signed 64-bit (same bound as contracts/service validation).
+constexpr std::uint64_t kMaximumWireInteger =
+    static_cast<std::uint64_t>((std::numeric_limits<std::int64_t>::max)());
+
+[[nodiscard]] base::Result<std::uint64_t> checked_add_wire(const std::uint64_t left,
+                                                           const std::uint64_t right) {
+    if (left > kMaximumWireInteger || right > kMaximumWireInteger) {
+        return base::Result<std::uint64_t>::failure(base::Error{
+            base::ErrorCode::kInvalidArgument,
+            "volume size exceeds the signed 64-bit wire range",
+        });
+    }
+    if (right > kMaximumWireInteger - left) {
+        return base::Result<std::uint64_t>::failure(base::Error{
+            base::ErrorCode::kInvalidArgument,
+            "multi-volume logical size accumulation overflow",
+        });
+    }
+    return base::Result<std::uint64_t>::success(left + right);
+}
 
 bool is_zero_uuid(const std::array<std::byte, 16>& value) noexcept {
     return std::ranges::all_of(value, [](const std::byte item) { return item == std::byte{0}; });
@@ -137,6 +160,14 @@ run_volume_pipelines(const WindowsPersonalBackupRequest& request, PreparedVolume
                      ports::IBackupSession& session, ports::IProgressSink* progress,
                      const base::CancellationToken& cancellation) {
     pipeline::BackupSummary total;
+    std::uint64_t job_logical_bytes = 0;
+    for (const auto& metadata : prepared.metadata) {
+        auto summed = checked_add_wire(job_logical_bytes, metadata.logical_size_bytes);
+        if (!summed) {
+            return base::Result<pipeline::BackupSummary>::failure(summed.error());
+        }
+        job_logical_bytes = summed.value();
+    }
     for (std::size_t index = 0; index < prepared.sources.size(); ++index) {
         const auto& metadata = prepared.metadata[index];
         std::ostringstream line;
@@ -150,13 +181,36 @@ run_volume_pipelines(const WindowsPersonalBackupRequest& request, PreparedVolume
         plan.commit_mode = index + 1 == prepared.sources.size()
                                ? pipeline::BackupCommitMode::kCommit
                                : pipeline::BackupCommitMode::kDefer;
+        plan.progress_total_logical_bytes = job_logical_bytes;
+        plan.progress_base_processed_bytes = total.logical_bytes;
+        plan.progress_base_stored_bytes = total.stored_bytes;
+        // base + this volume must stay within the precomputed job total (and wire range).
+        auto window_end =
+            checked_add_wire(total.logical_bytes, metadata.logical_size_bytes);
+        if (!window_end) {
+            return base::Result<pipeline::BackupSummary>::failure(window_end.error());
+        }
+        if (window_end.value() > job_logical_bytes) {
+            return base::Result<pipeline::BackupSummary>::failure(base::Error{
+                base::ErrorCode::kInternal,
+                "volume progress window exceeds precomputed job logical total",
+            });
+        }
         pipeline::BackupPipeline pipeline(*prepared.sources[index], session, progress);
         auto backup = pipeline.run(plan, cancellation);
         if (!backup) {
             return base::Result<pipeline::BackupSummary>::failure(backup.error());
         }
-        total.logical_bytes += backup.value().logical_bytes;
-        total.stored_bytes += backup.value().stored_bytes;
+        auto next_logical = checked_add_wire(total.logical_bytes, backup.value().logical_bytes);
+        if (!next_logical) {
+            return base::Result<pipeline::BackupSummary>::failure(next_logical.error());
+        }
+        auto next_stored = checked_add_wire(total.stored_bytes, backup.value().stored_bytes);
+        if (!next_stored) {
+            return base::Result<pipeline::BackupSummary>::failure(next_stored.error());
+        }
+        total.logical_bytes = next_logical.value();
+        total.stored_bytes = next_stored.value();
         total.chunk_count += backup.value().chunk_count;
         total.peak_buffered_bytes =
             (std::max)(total.peak_buffered_bytes, backup.value().peak_buffered_bytes);
@@ -171,7 +225,8 @@ base::Result<WindowsPersonalBackupResult> backup_windows_personal_volumes_with_r
     if (!validation) {
         return base::Result<WindowsPersonalBackupResult>::failure(validation.error());
     }
-    auto prepared = runtime.prepare_sources(request.volume_guid_paths, cancellation);
+    auto prepared = runtime.prepare_sources(request.volume_guid_paths,
+                                            request.exclude_page_and_hibernation_files, cancellation);
     if (!prepared) {
         return base::Result<WindowsPersonalBackupResult>::failure(prepared.error());
     }
@@ -184,6 +239,12 @@ base::Result<WindowsPersonalBackupResult> backup_windows_personal_volumes_with_r
     }
     log_runtime_info(std::string("Archive destination: ") + utf8_path(request.destination));
     log_runtime_info("Prepared VSS and raw volume sources; starting backup pipelines");
+    {
+        const auto hardware = std::thread::hardware_concurrency();
+        const auto workers = hardware == 0 ? 4U : hardware;
+        log_runtime_info(std::string("Using ") + std::to_string(workers) +
+                         " worker threads for backup processing");
+    }
 
     auto backup = run_volume_pipelines(request, prepared.value(), *session.value(), progress,
                                        cancellation);

@@ -8,6 +8,8 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace aegra::adapters::windows_disk {
@@ -112,6 +114,64 @@ struct WindowsVolumeInfo final {
 };
 
 [[nodiscard]] bool supports_vss_snapshot(const WindowsVolumeInfo& volume) noexcept;
+
+/// Free-cluster skip plan built from FSCTL_GET_VOLUME_BITMAP (old BackupEngine free-skip).
+/// free_ranges are sorted, non-overlapping [start, end) byte ranges that may be synthesized as
+/// zeros without reading the underlying device.
+struct FreeSkipPlan final {
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> free_ranges;
+    std::uint64_t free_bytes{0};
+    std::uint64_t total_bytes{0};
+    std::uint64_t protected_prefix_bytes{0};
+    std::string filesystem;
+    bool applied{false};
+};
+
+/// Builds a free-skip plan for a volume or VSS snapshot device path.
+/// On unsupported filesystem or bitmap failure, returns applied=false (caller backs up all bytes).
+[[nodiscard]] FreeSkipPlan build_free_skip_plan(const std::filesystem::path& device_path,
+                                                std::string_view filesystem,
+                                                std::uint64_t total_size_bytes,
+                                                std::uint32_t cluster_size_bytes);
+
+/// Adds pagefile.sys / hiberfil.sys / swapfile.sys extent ranges into the free-skip plan
+/// (AipCopy ExcludeJunkFiles / AddFileToExcludedClusters).
+///
+/// `read_device_path` must be the **same** device namespace used for block reads:
+/// - raw live volume: canonical Volume GUID path;
+/// - VSS: snapshot device object (`\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopyN`).
+/// Extents are resolved on that root (FSCTL_GET_RETRIEVAL_POINTERS, then MFT fallback).
+/// Never pass a live Volume GUID when the plan applies to a snapshot device.
+/// Returns total excluded bytes newly covered (best-effort).
+[[nodiscard]] std::uint64_t
+merge_page_and_hibernation_exclusions(FreeSkipPlan& plan,
+                                      const std::filesystem::path& read_device_path,
+                                      std::uint32_t cluster_size_bytes);
+
+/// IBlockSource that zero-fills free ranges without I/O and forwards used ranges to an inner source.
+class FreeSkipBlockSource final : public ports::IBlockSource {
+  public:
+    ~FreeSkipBlockSource() override;
+    FreeSkipBlockSource(const FreeSkipBlockSource&) = delete;
+    FreeSkipBlockSource& operator=(const FreeSkipBlockSource&) = delete;
+    FreeSkipBlockSource(FreeSkipBlockSource&&) = delete;
+    FreeSkipBlockSource& operator=(FreeSkipBlockSource&&) = delete;
+
+    [[nodiscard]] static base::Result<std::unique_ptr<FreeSkipBlockSource>>
+    wrap(std::unique_ptr<ports::IBlockSource> inner, FreeSkipPlan plan);
+
+    [[nodiscard]] std::uint64_t size_bytes() const noexcept override;
+    [[nodiscard]] base::Result<std::size_t> read(std::uint64_t offset,
+                                                 std::span<std::byte> destination,
+                                                 base::CancellationToken cancellation) override;
+
+    [[nodiscard]] const FreeSkipPlan& plan() const noexcept;
+
+  private:
+    struct Impl;
+    explicit FreeSkipBlockSource(std::unique_ptr<Impl> impl);
+    std::unique_ptr<Impl> impl_;
+};
 
 class WindowsVolumeEnumerator final {
   public:

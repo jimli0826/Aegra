@@ -156,6 +156,7 @@ struct ScheduleSummary final {
     BackupType backup_type{BackupType::kFull};
     ScheduleTrigger trigger;
     std::optional<std::uint64_t> next_run_utc_ms;
+    bool exclude_page_and_hibernation_files{true};
 };
 
 struct ScheduleListRequest final {
@@ -242,6 +243,8 @@ struct StartBackupCommand final {
     std::string repository_connection_id;
     BackupType backup_type{BackupType::kFull};
     std::optional<std::string> parent_recovery_point_id;
+    /// Desktop Options: exclude pagefile / hiberfil / swapfile (default true).
+    bool exclude_page_and_hibernation_files{true};
 };
 
 struct StartVerifyCommand final {
@@ -345,6 +348,7 @@ struct UpsertScheduleCommand final {
     std::string repository_connection_id;
     BackupType backup_type{BackupType::kFull};
     ScheduleTrigger trigger;
+    bool exclude_page_and_hibernation_files{true};
 };
 
 struct EventSubscriptionRequest final {

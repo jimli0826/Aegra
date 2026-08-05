@@ -123,16 +123,36 @@ bool load_filesystem_metadata(const wchar_t* volume_name, WindowsVolumeInfo& inf
 
     info.label = std::move(utf8_label).value();
     info.filesystem = std::move(utf8_filesystem).value();
-    info.total_size_bytes = total_bytes.QuadPart;
+    // Free space is filesystem-scoped. Do not set total_size_bytes here: GetDiskFreeSpaceEx
+    // capacity often differs from the raw partition length (EFI/FAT and some NTFS layouts).
+    // Authoritative size comes from IOCTL_DISK_GET_LENGTH_INFO / extents / partition length.
     info.free_size_bytes = total_free_bytes.QuadPart;
+    info.cluster_size_bytes = static_cast<std::uint32_t>(cluster_size);
+    info.filesystem_metadata_available = true;
+    info.is_read_only = (flags & FILE_READ_ONLY_VOLUME) != 0;
+    // Stash filesystem capacity in total_size only as a last-resort seed; inspect_volume clears
+    // volume_size_available until a raw size source confirms it (see apply_filesystem_capacity_fallback).
+    if (total_bytes.QuadPart > 0) {
+        info.total_size_bytes = total_bytes.QuadPart;
+    }
+    return true;
+}
+
+void apply_filesystem_capacity_fallback(WindowsVolumeInfo& info) {
+    if (info.volume_size_available) {
+        if (info.free_size_bytes > info.total_size_bytes) {
+            info.free_size_bytes = info.total_size_bytes;
+        }
+        return;
+    }
+    if (info.total_size_bytes == 0) {
+        return;
+    }
+    // Last resort for inventory display when raw length APIs are unavailable.
+    info.volume_size_available = true;
     if (info.free_size_bytes > info.total_size_bytes) {
         info.free_size_bytes = info.total_size_bytes;
     }
-    info.cluster_size_bytes = static_cast<std::uint32_t>(cluster_size);
-    info.filesystem_metadata_available = true;
-    info.volume_size_available = true;
-    info.is_read_only = (flags & FILE_READ_ONLY_VOLUME) != 0;
-    return true;
 }
 
 struct PhysicalDiskInfo final {
@@ -364,11 +384,15 @@ void load_volume_size(const HANDLE handle, WindowsVolumeInfo& info) {
     DWORD bytes_returned = 0;
     if (!DeviceIoControl(handle, IOCTL_DISK_GET_LENGTH_INFO, nullptr, 0, &length, sizeof(length),
                          &bytes_returned, nullptr) ||
-        bytes_returned < sizeof(length) || length.Length.QuadPart < 0) {
+        bytes_returned < sizeof(length) || length.Length.QuadPart <= 0) {
         return;
     }
+    // Always prefer raw partition length over any earlier filesystem capacity estimate.
     info.total_size_bytes = static_cast<std::uint64_t>(length.Length.QuadPart);
     info.volume_size_available = true;
+    if (info.free_size_bytes > info.total_size_bytes) {
+        info.free_size_bytes = info.total_size_bytes;
+    }
 }
 
 [[nodiscard]] detail::UniqueHandle open_volume_device(const std::wstring& device_path) {
@@ -473,6 +497,7 @@ WindowsVolumeInfo inspect_volume(const wchar_t* volume_name) {
     load_filesystem_metadata(volume_name, info);
     load_disk_extents(volume_name, info);
     load_partition_identity(volume_name, info);
+    apply_filesystem_capacity_fallback(info);
     return info;
 }
 
@@ -524,7 +549,11 @@ bool supports_vss_snapshot(const WindowsVolumeInfo& volume) noexcept {
     std::ranges::transform(normalized, normalized.begin(), [](const unsigned char character) {
         return static_cast<char>(std::toupper(character));
     });
-    return normalized == "NTFS" || normalized == "REFS";
+    // NTFS/ReFS are the primary VSS targets. FAT/FAT32/exFAT are included so whole-disk system
+    // backups (EFI System Partition + OS volume) can share one snapshot set, matching the prior
+    // product path that successfully shadow-copied both. RAW/unknown stay on the raw path.
+    return normalized == "NTFS" || normalized == "REFS" || normalized == "FAT" ||
+           normalized == "FAT32" || normalized == "EXFAT";
 }
 
 [[nodiscard]] ports::SourceInventoryRecord

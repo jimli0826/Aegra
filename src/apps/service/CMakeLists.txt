@@ -4,6 +4,7 @@ add_library(aegra_app_service STATIC
     src/backup_catalog_registrar.cpp
     src/schedule_service.cpp
     src/service_host.cpp
+    src/service_log_formatter.cpp
     src/service_protocol.cpp
     src/service_protocol_request_json.cpp
     src/service_protocol_response_json.cpp

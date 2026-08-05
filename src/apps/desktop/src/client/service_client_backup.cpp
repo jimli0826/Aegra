@@ -82,7 +82,8 @@ validated_backup_sources(const QVariantList& source_ids, const SourceInventoryMo
 
 QString ServiceClient::defaultConnectionId() const { return connections_.default_connection_id(); }
 
-bool ServiceClient::startBackup(const QVariantList& source_ids, const QString& connection_id) {
+bool ServiceClient::startBackup(const QVariantList& source_ids, const QString& connection_id,
+                                const bool exclude_page_and_hibernation_files) {
     if (state_ != State::kReady) {
         //% "Service is not connected"
         const auto msg = qtTrId("aegra.error.service.disconnected");
@@ -138,8 +139,9 @@ bool ServiceClient::startBackup(const QVariantList& source_ids, const QString& c
 
     const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     start_backup_request_id_ = request_id;
-    const auto body = encode_start_backup_request(request_id, start_backup_idempotency_key_,
-                                                   source_ids, connection_id, kBackupTypeFull, {});
+    const auto body = encode_start_backup_request(
+        request_id, start_backup_idempotency_key_, source_ids, connection_id, kBackupTypeFull, {},
+        exclude_page_and_hibernation_files);
     const auto started =
         coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
             return handle_start_backup_frame(frame_body);

@@ -6,12 +6,45 @@
 #include <limits>
 #include <optional>
 #include <stop_token>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
 
 namespace aegra::pipeline {
 namespace {
+
+// Service / worker wire integers are signed 64-bit; progress must stay in that range.
+constexpr std::uint64_t kMaximumWireInteger =
+    static_cast<std::uint64_t>((std::numeric_limits<std::int64_t>::max)());
+
+[[nodiscard]] base::Result<std::uint64_t> checked_add_wire(const std::uint64_t left,
+                                                           const std::uint64_t right) {
+    if (left > kMaximumWireInteger || right > kMaximumWireInteger) {
+        return base::Result<std::uint64_t>::failure(base::Error{
+            base::ErrorCode::kInvalidArgument,
+            "progress byte count exceeds the signed 64-bit wire range",
+        });
+    }
+    if (right > kMaximumWireInteger - left) {
+        return base::Result<std::uint64_t>::failure(base::Error{
+            base::ErrorCode::kInvalidArgument,
+            "progress byte accumulation overflow",
+        });
+    }
+    return base::Result<std::uint64_t>::success(left + right);
+}
+
+[[nodiscard]] base::Result<void> require_wire_range(const std::uint64_t value,
+                                                    const char* field) {
+    if (value > kMaximumWireInteger) {
+        return base::Result<void>::failure(base::Error{
+            base::ErrorCode::kInvalidArgument,
+            std::string(field) + " exceeds the signed 64-bit wire range",
+        });
+    }
+    return base::Result<void>::success();
+}
 
 class SessionGuard final {
   public:
@@ -62,6 +95,49 @@ base::Result<void> validate_plan(const BackupPlan& plan) {
         return base::Result<void>::failure(base::Error{
             base::ErrorCode::kInsufficientSpace,
             "backup chunk size exceeds memory budget",
+        });
+    }
+    auto total_ok = require_wire_range(plan.progress_total_logical_bytes, "progress total logical");
+    if (!total_ok) {
+        return total_ok;
+    }
+    auto base_processed_ok =
+        require_wire_range(plan.progress_base_processed_bytes, "progress base processed");
+    if (!base_processed_ok) {
+        return base_processed_ok;
+    }
+    auto base_stored_ok =
+        require_wire_range(plan.progress_base_stored_bytes, "progress base stored");
+    if (!base_stored_ok) {
+        return base_stored_ok;
+    }
+    if (plan.progress_total_logical_bytes != 0 &&
+        plan.progress_base_processed_bytes > plan.progress_total_logical_bytes) {
+        return base::Result<void>::failure(base::Error{
+            base::ErrorCode::kInvalidArgument,
+            "progress base processed exceeds job total logical bytes",
+        });
+    }
+    return base::Result<void>::success();
+}
+
+[[nodiscard]] base::Result<void> validate_progress_window(const BackupPlan& plan,
+                                                          const std::uint64_t source_size) {
+    auto source_ok = require_wire_range(source_size, "volume logical size");
+    if (!source_ok) {
+        return source_ok;
+    }
+    if (plan.progress_total_logical_bytes == 0) {
+        return base::Result<void>::success();
+    }
+    auto volume_end = checked_add_wire(plan.progress_base_processed_bytes, source_size);
+    if (!volume_end) {
+        return base::Result<void>::failure(volume_end.error());
+    }
+    if (volume_end.value() > plan.progress_total_logical_bytes) {
+        return base::Result<void>::failure(base::Error{
+            base::ErrorCode::kInvalidArgument,
+            "volume progress window exceeds job total logical bytes",
         });
     }
     return base::Result<void>::success();
@@ -169,22 +245,51 @@ void produce_chunks(BackupProducerContext& context) {
     return "backup.running";
 }
 
-void publish_progress(ports::IProgressSink* sink, const BackupPlan& plan,
-                      const contracts::TaskPhase phase, const BackupSummary& summary,
-                      const std::uint64_t processed_bytes) {
+base::Result<void> publish_progress(ports::IProgressSink* sink, const BackupPlan& plan,
+                                    const contracts::TaskPhase phase, const BackupSummary& summary,
+                                    const std::uint64_t volume_processed_bytes) {
     if (sink == nullptr) {
-        return;
+        return base::Result<void>::success();
+    }
+    auto processed =
+        checked_add_wire(plan.progress_base_processed_bytes, volume_processed_bytes);
+    if (!processed) {
+        return base::Result<void>::failure(processed.error());
+    }
+    auto stored = checked_add_wire(plan.progress_base_stored_bytes, summary.stored_bytes);
+    if (!stored) {
+        return base::Result<void>::failure(stored.error());
+    }
+    std::uint64_t logical = summary.logical_bytes;
+    if (plan.progress_total_logical_bytes != 0) {
+        logical = plan.progress_total_logical_bytes;
+        if (processed.value() > logical) {
+            return base::Result<void>::failure(base::Error{
+                base::ErrorCode::kInvalidArgument,
+                "aggregated processed_bytes exceeds job total logical bytes",
+            });
+        }
+    } else {
+        auto logical_ok = require_wire_range(logical, "volume logical bytes");
+        if (!logical_ok) {
+            return logical_ok;
+        }
+    }
+    auto stored_ok = require_wire_range(stored.value(), "stored bytes");
+    if (!stored_ok) {
+        return stored_ok;
     }
     sink->publish(contracts::TaskProgress{
         contracts::kTaskProgressSchemaVersion,
         plan.job_id,
         plan.trace_id,
         phase,
-        summary.logical_bytes,
-        processed_bytes,
-        summary.stored_bytes,
+        logical,
+        processed.value(),
+        stored.value(),
         backup_phase_message(phase),
     });
+    return base::Result<void>::success();
 }
 
 base::Result<BackupSummary> consume_chunks(BackupConsumerContext& context) {
@@ -207,24 +312,52 @@ base::Result<BackupSummary> consume_chunks(BackupConsumerContext& context) {
         if (!written) {
             return base::Result<BackupSummary>::failure(written.error());
         }
-        processed_bytes += chunk.descriptor.logical_size;
-        summary.stored_bytes += chunk.descriptor.stored_size;
+        auto next_processed = checked_add_wire(processed_bytes, chunk.descriptor.logical_size);
+        if (!next_processed) {
+            return base::Result<BackupSummary>::failure(next_processed.error());
+        }
+        processed_bytes = next_processed.value();
+        auto next_stored = checked_add_wire(summary.stored_bytes, chunk.descriptor.stored_size);
+        if (!next_stored) {
+            return base::Result<BackupSummary>::failure(next_stored.error());
+        }
+        summary.stored_bytes = next_stored.value();
         ++summary.chunk_count;
-        publish_progress(context.progress, context.plan, contracts::TaskPhase::kWriting, summary,
-                         processed_bytes);
+        auto published = publish_progress(context.progress, context.plan,
+                                          contracts::TaskPhase::kWriting, summary, processed_bytes);
+        if (!published) {
+            return base::Result<BackupSummary>::failure(published.error());
+        }
     }
-    publish_progress(context.progress, context.plan, contracts::TaskPhase::kCommitting, summary,
-                     processed_bytes);
+    summary.peak_buffered_bytes = context.queue.peak_buffered_bytes();
+    // Only the final volume (kCommit) commits the archive and publishes kCompleted.
+    // Intermediate volumes use kDefer: keep session open and stay in kWriting.
     if (context.plan.commit_mode == BackupCommitMode::kCommit) {
+        auto committing =
+            publish_progress(context.progress, context.plan, contracts::TaskPhase::kCommitting,
+                             summary, processed_bytes);
+        if (!committing) {
+            return base::Result<BackupSummary>::failure(committing.error());
+        }
         auto committed = context.session.commit(context.cancellation);
         if (!committed) {
             return base::Result<BackupSummary>::failure(committed.error());
         }
+        guard.mark_committed();
+        auto completed =
+            publish_progress(context.progress, context.plan, contracts::TaskPhase::kCompleted,
+                             summary, processed_bytes);
+        if (!completed) {
+            return base::Result<BackupSummary>::failure(completed.error());
+        }
+    } else {
+        guard.mark_committed(); // do not abort shared multi-volume session
+        auto writing = publish_progress(context.progress, context.plan,
+                                        contracts::TaskPhase::kWriting, summary, processed_bytes);
+        if (!writing) {
+            return base::Result<BackupSummary>::failure(writing.error());
+        }
     }
-    guard.mark_committed();
-    summary.peak_buffered_bytes = context.queue.peak_buffered_bytes();
-    publish_progress(context.progress, context.plan, contracts::TaskPhase::kCompleted, summary,
-                     processed_bytes);
     return base::Result<BackupSummary>::success(summary);
 }
 
@@ -256,6 +389,12 @@ base::Result<BackupSummary> BackupPipeline::run(const BackupPlan& plan,
         session_.abort();
         return base::Result<BackupSummary>::failure(validation.error());
     }
+    const auto source_size = source_.size_bytes();
+    auto window = validate_progress_window(plan, source_size);
+    if (!window) {
+        session_.abort();
+        return base::Result<BackupSummary>::failure(window.error());
+    }
     auto chunker_result = FixedSizeChunker::create(plan.chunk_size_bytes);
     if (!chunker_result) {
         session_.abort();
@@ -267,8 +406,8 @@ base::Result<BackupSummary> BackupPipeline::run(const BackupPlan& plan,
     std::stop_callback external_cancel(cancellation, [&local_stop] { local_stop.request_stop(); });
     BackupProducerContext producer_context{source_, chunker_result.value(), queue,
                                            local_stop.get_token(), plan.source_index};
-    BackupConsumerContext consumer_context{
-        plan, session_, progress_, queue, local_stop.get_token(), source_.size_bytes()};
+    BackupConsumerContext consumer_context{plan, session_, progress_, queue, local_stop.get_token(),
+                                           source_size};
     std::jthread producer([&producer_context] { produce_chunks(producer_context); });
 
     return consume_safely(consumer_context, local_stop);

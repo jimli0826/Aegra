@@ -156,10 +156,12 @@ class ServiceClient final : public QObject {
     Q_INVOKABLE bool upsertSchedule(const QString& schedule_id, const QString& display_name,
                                      bool enabled, const QVariantList& source_ids,
                                      const QString& connection_id, const QString& frequency,
-                                     const QString& time_of_day);
+                                     const QString& time_of_day,
+                                     bool exclude_page_and_hibernation_files = true);
     /// Creates one schedule containing all selected volumes.
     Q_INVOKABLE bool createSchedule(const QVariantList& sources, const QString& connection_id,
-                                    const QString& frequency, const QString& time_of_day);
+                                    const QString& frequency, const QString& time_of_day,
+                                    bool exclude_page_and_hibernation_files = true);
     Q_INVOKABLE bool deleteSchedule(const QString& schedule_id);
     Q_INVOKABLE bool setScheduleEnabled(const QString& schedule_id, bool enabled);
     Q_INVOKABLE void selectRepositoryConnection(const QString& connection_id);
@@ -170,7 +172,9 @@ class ServiceClient final : public QObject {
     Q_INVOKABLE void setDefaultRepositoryConnection(const QString& connection_id);
     Q_INVOKABLE void removeRepositoryConnection(const QString& connection_id);
     /// Returns true if the start request was accepted for send (not yet Service ack).
-    Q_INVOKABLE bool startBackup(const QVariantList& source_ids, const QString& connection_id);
+    /// exclude_page_and_hibernation_files maps to Options "Exclude pagefile / hiberfil / swapfile".
+    Q_INVOKABLE bool startBackup(const QVariantList& source_ids, const QString& connection_id,
+                                 bool exclude_page_and_hibernation_files = true);
     Q_INVOKABLE void cancelActiveBackup();
     Q_INVOKABLE void dismissToast();
     /// Show a top toast (success/info). Safe for QML schedule Run feedback.

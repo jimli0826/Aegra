@@ -29,6 +29,7 @@ class ScheduleService;
 class WorkerSupervisor;
 
 enum class ServiceLogLevel {
+    kTrace,
     kInfo,
     kWarning,
     kError,

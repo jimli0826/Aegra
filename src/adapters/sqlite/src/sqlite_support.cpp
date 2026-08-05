@@ -644,6 +644,9 @@ base::Result<ports::JobRecord> read_job(sqlite3_stmt* const stmt) {
         record.result_outcome = static_cast<std::uint32_t>(sqlite3_column_int64(stmt, 16));
     }
     record.result_message_code = column_text_optional(stmt, 17);
+    if (sqlite3_column_type(stmt, 18) != SQLITE_NULL) {
+        record.exclude_page_and_hibernation_files = sqlite3_column_int(stmt, 18) != 0;
+    }
     auto valid = validate_job_record(record);
     if (!valid) {
         return base::Result<ports::JobRecord>::failure(valid.error());
@@ -668,8 +671,9 @@ base::Result<ports::ScheduleRecord> read_schedule(sqlite3_stmt* const stmt) {
     record.trigger.weekday_mask = static_cast<std::uint8_t>(sqlite3_column_int(stmt, 8));
     record.trigger.timezone_id = column_text_required(stmt, 9);
     record.next_run_utc_ms = column_uint64_optional(stmt, 10);
-    record.created_utc_ms = column_uint64(stmt, 11);
-    record.updated_utc_ms = column_uint64(stmt, 12);
+    record.exclude_page_and_hibernation_files = sqlite3_column_int(stmt, 11) != 0;
+    record.created_utc_ms = column_uint64(stmt, 12);
+    record.updated_utc_ms = column_uint64(stmt, 13);
     auto valid = validate_schedule_record(record);
     if (!valid) {
         return base::Result<ports::ScheduleRecord>::failure(valid.error());
@@ -760,7 +764,8 @@ contracts::ScheduleSummary to_schedule_summary(const ports::ScheduleRecord& reco
             record.repository_connection_id,
             record.backup_type,
             record.trigger,
-            record.next_run_utc_ms};
+            record.next_run_utc_ms,
+            record.exclude_page_and_hibernation_files};
 }
 
 contracts::AuditEventSummary to_audit_summary(const ports::AuditEventRecord& record) {

@@ -54,7 +54,9 @@ false。只有 Volume 枚举本身无法启动或异常终止时，整个调用�
 
 备份源可选性与恢复目标安全规则分离：Windows 系统卷（通常为 C:）、只读卷、EFI/FAT、RAW 和未知
 文件系统卷均允许作为备份源；在线恢复仍按 ADR-0009 拒绝系统目标。具备 stable Volume GUID 和可靠
-非零容量的 Volume 标记为可选。NTFS/ReFS 使用 VSS，其余 Volume 使用 raw block source。
+非零容量的 Volume 标记为可选。NTFS/ReFS/FAT/FAT32/exFAT 使用 VSS（整盘系统盘备份时 EFI 与 OS
+卷进入同一 Snapshot Set）；RAW 与未知文件系统使用 raw block source。逻辑大小优先
+`IOCTL_DISK_GET_LENGTH_INFO`，其次 extent/分区长度，最后才回退到 `GetDiskFreeSpaceEx` 容量（仅展示）。
 
 ### `WindowsBlockSource`
 
@@ -66,6 +68,53 @@ false。只有 Volume 枚举本身无法启动或异常终止时，整个调用�
 
 Source 独占 Handle，可以并发调用 `read()`。每次读取使用独立重叠 I/O 状态；取消会中止本次 I/O，
 不会关闭 Source Handle。`size_bytes()` 在对象生命周期内稳定。
+
+对 `kVssSnapshot` / `kRawVolume`（对齐旧 `DiskDevice` + `BackupEngine` trailing pad）：
+
+- `size_bytes()` 始终等于 Inventory/Manifest 的逻辑卷长度（`expected_size_bytes`）；
+- 打开时用 `IOCTL_DISK_GET_LENGTH_INFO`，失败再 `GetFileSizeEx` 探测设备可读长度；
+  若探测值为 0 或大于逻辑长度，则按逻辑长度视为全部可读；若 `0 < readable < logical`，
+  仅 **[readable, logical)** 允许零填充（trailing），并保留可读边界；
+- raw / VSS 设备读：`ReadFile` 允许 partial IRP，**循环读满**请求长度；单次 IRP 上限 1 MiB。
+  循环后仍读不满可读区间才失败（真 EOF / 设备截断），**不得**把 partial 当成致命 short read；
+- raw 与 VSS 均尝试 `FSCTL_ALLOW_EXTENDED_DASD_IO`（VSS 拒绝时继续，raw 失败则打开失败）；
+- Free-skip / 已验证排除区间的零填充由 `FreeSkipBlockSource` 负责，不与设备 short read 混用。
+
+`kStableFile` 保持严格语义：short/EOF 原样返回，不零填充。
+
+### Volume Bitmap 空闲簇跳过（`FreeSkipPlan` / `FreeSkipBlockSource`）
+
+对齐旧 `BackupEngine::BuildFreeBlockMap`：
+
+- `build_free_skip_plan(device_path, filesystem, total_size, cluster_size)` 对 VSS 快照设备或 raw
+  Volume GUID 调用 `FSCTL_GET_VOLUME_BITMAP`；
+- **NTFS/ReFS**：线性 LCN；前 64 MiB 系统区永不视为空闲；
+- **FAT/FAT32**：解析 BPB 得到 data area 起点，按 AipCopy 方式把 bitmap 映射到数据区；保留区与 FAT
+  始终读取；
+- **exFAT/RAW/未知**：不启用，整卷读取；
+- bitmap 失败时 `applied=false`，调用方退回全量读取（宁可备份变大，不可漏数据）。
+
+`FreeSkipBlockSource` 包装底层 `IBlockSource`：空闲区间直接零填充且不发起设备 I/O，已用区间转发。
+全量 Archive 仍写出完整逻辑长度；空闲簇在 Personal Archive 中会落成 `ZERO` 块（无 payload），
+既省读盘也省存储。Pipeline 不感知 bitmap。
+
+`merge_page_and_hibernation_exclusions`（Desktop Options「Exclude pagefile / hiberfil / swapfile」）：
+对齐 AipCopy `ExcludeJunkFiles` / `AddFileToExcludedClusters`。在与块读取**相同**的设备根上解析
+pagefile.sys / hiberfil.sys / swapfile.sys 的 LCN，并入 free-skip plan（零填充且不读盘）：
+
+- **raw**：canonical Volume GUID 根；
+- **VSS**：`snapshot_device_path`（`\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopyN`）根，与
+  AipCopy `swStaticVolume` 同源；直接 `CreateFile` 失败时用临时 `DefineDosDevice(DDD_RAW_TARGET_PATH)`
+  映射后再取 extent（AipCopy MapDriveLetter 模式）；
+- 优先 `FSCTL_GET_RETRIEVAL_POINTERS`，失败再 MFT 回退；
+- **禁止**把 live Volume 上的 LCN 套到快照设备上（Composition Root 只传入当前读路径）。
+
+VSS：`supports_vss_snapshot` 仅按文件系统筛候选；真正加入 Snapshot Set 前调用
+`is_volume_snapshot_supported`（`IsVolumeSupported`）。不支持的卷走 raw，`vss_used=false`。
+
+Worker 默认几何与旧引擎对齐：`block=64KiB`、`chunk=64MiB`、`memory_budget=256MiB`。
+Archive 块准备对 hash/Zstd 使用 `hardware_concurrency` 并行；线程内异常捕获后返回 `Result`，
+禁止未 join 的 `std::thread` 析构。
 
 ### `WindowsVssSnapshotSession`
 
@@ -151,13 +200,15 @@ Target：`aegra_adapter_windows_vss` / `Aegra::AdapterWindowsVss`，仅在 Windo
 - 构建 Windows Disk、VSS、System 和 IPC 生产 Target。
 - 审查读取、offset、EOF、越界、取消、路径拒绝、VSS 清理、Credential 生命周期和 IPC framing 边界。
 - 真实 Volume、跨盘 Volume、无介质设备、访问拒绝、VSS 与临时 Credential 仅在隔离环境人工验证。
-- IPC 人工验证使用临时本地 Pipe，不记录 frame body、路径、凭据或客户数据。
+- IPC 人工验证使用临时本地 Pipe；日志可记录诊断所需的 frame 字段、路径和其他用户数据，但不得记录
+  密码、密钥、SecretRef、Credential、Authorization、Cookie、令牌或其他认证材料。
 
 ## 安全与可观测性
 
 - 错误不得输出完整源路径。
 - 不请求写权限，不使用 `FILE_FLAG_NO_BUFFERING`，不要求调用方提供对齐缓冲区。
-- Application 后续接入可记录 Snapshot Set ID、Snapshot ID、阶段耗时和清理结果，但不记录客户数据。
+- Application 后续接入可记录 Snapshot Set ID、Snapshot ID、阶段耗时、清理结果及诊断所需用户数据，
+  但不得记录认证信息；记录范围遵循最小必要原则。
 - `apps/worker` 的个人卷备份装配见
   [Windows 个人卷备份 Composition Root](windows_personal_backup.md)。
 

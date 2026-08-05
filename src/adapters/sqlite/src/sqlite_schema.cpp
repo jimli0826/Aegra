@@ -43,6 +43,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     result_error_code INTEGER,
     result_outcome INTEGER,
     result_message_code TEXT,
+    exclude_page_and_hibernation_files INTEGER
+        CHECK (exclude_page_and_hibernation_files IS NULL
+               OR exclude_page_and_hibernation_files IN (0, 1)),
     FOREIGN KEY (repository_connection_id)
         REFERENCES repository_connections(connection_id) ON DELETE SET NULL
 );
@@ -64,6 +67,8 @@ CREATE TABLE IF NOT EXISTS schedules (
     weekday_mask INTEGER NOT NULL CHECK (weekday_mask >= 0 AND weekday_mask <= 127),
     timezone_id TEXT NOT NULL,
     next_run_utc_ms INTEGER CHECK (next_run_utc_ms IS NULL OR next_run_utc_ms >= 0),
+    exclude_page_and_hibernation_files INTEGER NOT NULL DEFAULT 1
+        CHECK (exclude_page_and_hibernation_files IN (0, 1)),
     created_utc_ms INTEGER NOT NULL CHECK (created_utc_ms >= 0),
     updated_utc_ms INTEGER NOT NULL CHECK (updated_utc_ms >= 0),
     CHECK (updated_utc_ms >= created_utc_ms),

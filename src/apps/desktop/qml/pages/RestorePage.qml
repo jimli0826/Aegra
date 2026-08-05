@@ -74,14 +74,18 @@ Item {
         root.reloadPanelCheckpoints()
     }
 
+    property string pendingLayoutPassword: ""
+
     function applySelectedCheckpoint(item) {
         if (!item) {
             root.selectedCheckpointId = ""
             root.selectedCheckpointLabel = ""
+            root.pendingLayoutPassword = ""
             serviceClient.loadRecoveryPointLayout("")
             return
         }
         root.selectedCheckpointId = item.fileUuid || ""
+        root.pendingLayoutPassword = ""
         var bits = []
         if (item.createdText)
             bits.push(item.createdText)
@@ -96,8 +100,41 @@ Item {
         if (item.sizeText)
             bits.push(item.sizeText)
         root.selectedCheckpointLabel = bits.join("  ·  ")
-        // Real volume geometry comes from Service Manifest via GetRecoveryPointLayout.
-        serviceClient.loadRecoveryPointLayout(root.selectedCheckpointId)
+        // Try empty password first (unencrypted). Encrypted archives prompt for password.
+        serviceClient.loadRecoveryPointLayout(root.selectedCheckpointId, "")
+    }
+
+    function submitLayoutPassword(password) {
+        if (!root.selectedCheckpointId || root.selectedCheckpointId.length === 0)
+            return
+        root.pendingLayoutPassword = password || ""
+        serviceClient.loadRecoveryPointLayout(root.selectedCheckpointId, root.pendingLayoutPassword)
+    }
+
+    Connections {
+        target: serviceClient
+        function onRecoveryPointLayoutChanged() {
+            if (serviceClient.recoveryPointLayoutLoading)
+                return
+            if (serviceClient.recoveryPointSourceDisks
+                    && serviceClient.recoveryPointSourceDisks.length > 0)
+                return
+            if (root.selectedCheckpointId.length === 0)
+                return
+            // Layout failed: likely encrypted archive needing a password.
+            if (serviceClient.recoveryPointLayoutErrorText
+                    && serviceClient.recoveryPointLayoutErrorText.length > 0) {
+                passwordDialog.errorText = serviceClient.recoveryPointLayoutErrorText
+                passwordDialog.open()
+            }
+        }
+    }
+
+    BackupPasswordDialog {
+        id: passwordDialog
+        parent: Overlay.overlay
+        onAccepted: function(password) { root.submitLayoutPassword(password) }
+        onCancelled: { root.pendingLayoutPassword = "" }
     }
 
     Component.onCompleted: {

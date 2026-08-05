@@ -23,7 +23,10 @@ struct ArchiveKdfParameters final {
 struct ArchiveCreateRequest final {
     std::filesystem::path destination;
     const format::Manifest& manifest;
+    /// Required when encryption_enabled; empty when encryption is off.
     std::string_view password;
+    /// When false, metadata and payloads are stored without AEAD (no password).
+    bool encryption_enabled{false};
     std::array<std::byte, 16> file_uuid{};
     std::array<std::byte, 16> backup_set_uuid{};
     std::uint32_t block_size{0};

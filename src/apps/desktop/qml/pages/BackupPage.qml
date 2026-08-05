@@ -226,11 +226,28 @@ Item {
         var frequency = s2 ? s2.frequency : "daily"
         var timeOfDay = s2 ? s2.timeOfDay : "02:00"
         var excludePage = s2 ? s2.excludePageHibernation : true
-        if (!serviceClient.createSchedule(sources, connId, frequency, timeOfDay, excludePage)) {
+        var encryption = s2 ? s2.encryption : false
+        var password = s2 ? (s2.password || "") : ""
+        var passwordConfirm = s2 ? (s2.passwordConfirm || "") : ""
+        if (encryption) {
+            if (password.length === 0 || password.length > 32) {
+                serviceClient.showToast(qsTrId("aegra.backup.opt.password_required"))
+                return
+            }
+            if (password !== passwordConfirm) {
+                serviceClient.showToast(qsTrId("aegra.backup.opt.password_mismatch"))
+                return
+            }
+        }
+        if (!serviceClient.createSchedule(sources, connId, frequency, timeOfDay, excludePage,
+                                          encryption, encryption ? password : "")) {
             //% "Could not save schedule"
             serviceClient.showToast(qsTrId("aegra.backup.schedule.save_failed"))
             return
         }
+        // First run uses wizard password; later Run uses schedule_id + wincred.
+        serviceClient.startBackup(sources, connId, excludePage, encryption,
+                                  encryption ? password : "")
         closeWizard()
     }
 
@@ -291,7 +308,10 @@ Item {
             if (sourceIds.length > 0 && connectionId.length > 0) {
                 root.pendingRunScheduleId = item.scheduleId || item.id || ""
                 var excludePage = item.excludePageAndHibernation !== false
-                if (serviceClient.startBackup(sourceIds, connectionId, excludePage))
+                var encryption = item.encryptionEnabled === true
+                var scheduleId = item.scheduleId || item.id || ""
+                if (serviceClient.startBackup(sourceIds, connectionId, excludePage, encryption,
+                                              "", encryption ? scheduleId : ""))
                     return
                 root.pendingRunScheduleId = ""
                 return

@@ -1,5 +1,7 @@
 #include "aegra/apps/service/schedule_service.h"
 
+#include "aegra/adapters/windows_system/windows_system.h"
+
 #include <array>
 #include <cstddef>
 #include <string>
@@ -124,6 +126,9 @@ namespace {
     fingerprint += command.trigger.timezone_id;
     fingerprint += "|";
     fingerprint += command.exclude_page_and_hibernation_files ? "1" : "0";
+    fingerprint += "|";
+    fingerprint += command.encryption_enabled ? "1" : "0";
+    // Password is not part of the fingerprint (not durable; never logged).
     return fingerprint;
 }
 
@@ -204,8 +209,17 @@ ScheduleService::upsert_schedule(const contracts::UpsertScheduleCommand& command
     record.backup_type = command.backup_type;
     record.trigger = command.trigger;
     record.exclude_page_and_hibernation_files = command.exclude_page_and_hibernation_files;
+    record.encryption_enabled = command.encryption_enabled;
     if (record.trigger.timezone_id.empty()) {
         record.trigger.timezone_id = "UTC";
+    }
+    if (command.encryption_enabled && !command.archive_password.empty()) {
+        auto stored = adapters::windows_system::store_generic_windows_credential(
+            std::string("aegra/schedule/") + schedule_id, command.archive_password);
+        if (!stored) {
+            unit.value()->rollback();
+            return base::Result<contracts::CommandAcknowledgement>::failure(stored.error());
+        }
     }
     if (record.enabled) {
         record.next_run_utc_ms = compute_next_run_utc_ms(record.trigger, now);

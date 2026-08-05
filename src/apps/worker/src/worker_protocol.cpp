@@ -82,6 +82,11 @@ std::optional<contracts::BackupOptions> optional_backup(const Json& root) {
             "worker request backup.exclude_page_and_hibernation_files is required");
     }
     result.exclude_page_and_hibernation_files = exclude->get<bool>();
+    const auto encryption = iterator->find("encryption_enabled");
+    if (encryption == iterator->end() || !encryption->is_boolean()) {
+        throw std::invalid_argument("worker request backup.encryption_enabled is required");
+    }
+    result.encryption_enabled = encryption->get<bool>();
     return result;
 }
 

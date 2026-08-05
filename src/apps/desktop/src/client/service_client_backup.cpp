@@ -83,7 +83,9 @@ validated_backup_sources(const QVariantList& source_ids, const SourceInventoryMo
 QString ServiceClient::defaultConnectionId() const { return connections_.default_connection_id(); }
 
 bool ServiceClient::startBackup(const QVariantList& source_ids, const QString& connection_id,
-                                const bool exclude_page_and_hibernation_files) {
+                                const bool exclude_page_and_hibernation_files,
+                                const bool encryption_enabled, const QString& archive_password,
+                                const QString& schedule_id) {
     if (state_ != State::kReady) {
         //% "Service is not connected"
         const auto msg = qtTrId("aegra.error.service.disconnected");
@@ -122,6 +124,17 @@ bool ServiceClient::startBackup(const QVariantList& source_ids, const QString& c
         finish_backup_command_failure(QStringLiteral("backup.repository_unavailable"));
         return false;
     }
+    if (encryption_enabled) {
+        const bool has_password = !archive_password.isEmpty() && archive_password.size() <= 32;
+        const bool has_schedule = !schedule_id.isEmpty();
+        if (!has_password && !has_schedule) {
+            finish_backup_command_failure(QStringLiteral("backup.preflight_failed"));
+            return false;
+        }
+    } else if (!archive_password.isEmpty()) {
+        finish_backup_command_failure(QStringLiteral("backup.preflight_failed"));
+        return false;
+    }
     // Fresh attempt after terminal or first click: mint a new idempotency key.
     // Mid-flight retry (key set, no job yet) reuses the key so Service can replay.
     if (start_backup_idempotency_key_.isEmpty() || active_backup_terminal_) {
@@ -141,7 +154,7 @@ bool ServiceClient::startBackup(const QVariantList& source_ids, const QString& c
     start_backup_request_id_ = request_id;
     const auto body = encode_start_backup_request(
         request_id, start_backup_idempotency_key_, source_ids, connection_id, kBackupTypeFull, {},
-        exclude_page_and_hibernation_files);
+        exclude_page_and_hibernation_files, encryption_enabled, archive_password, schedule_id);
     const auto started =
         coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
             return handle_start_backup_frame(frame_body);

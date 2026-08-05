@@ -50,10 +50,16 @@ bool is_zero_uuid(const std::array<std::byte, 16>& value) noexcept {
 base::Result<void> validate_request(const WindowsPersonalBackupRequest& request) {
     if (request.job_id.empty() || request.trace_id.empty() || request.volume_guid_paths.empty() ||
         request.volume_guid_paths.size() > contracts::kMaximumBackupSources ||
-        request.destination.empty() || request.password.empty() || request.created_utc.empty()) {
+        request.destination.empty() || request.created_utc.empty()) {
         return base::Result<void>::failure(base::Error{
             base::ErrorCode::kInvalidArgument,
             "Windows personal volume backup request is incomplete",
+        });
+    }
+    if (request.encryption_enabled == request.password.empty()) {
+        return base::Result<void>::failure(base::Error{
+            base::ErrorCode::kInvalidArgument,
+            "Windows personal backup encryption and password are inconsistent",
         });
     }
     std::set<std::filesystem::path> unique_sources;
@@ -75,7 +81,9 @@ base::Result<void> validate_request(const WindowsPersonalBackupRequest& request)
     const bool full = request.backup_type == WindowsPersonalBackupType::kFull;
     const bool incremental = request.backup_type == WindowsPersonalBackupType::kIncremental;
     const bool parent_empty = request.parent_source.empty() && request.parent_password.empty();
-    const bool parent_complete = !request.parent_source.empty() && !request.parent_password.empty();
+    const bool parent_complete =
+        !request.parent_source.empty() &&
+        (request.encryption_enabled ? !request.parent_password.empty() : true);
     if ((!full && !incremental) || (full && !parent_empty) ||
         (incremental && !parent_complete)) {
         return base::Result<void>::failure(base::Error{

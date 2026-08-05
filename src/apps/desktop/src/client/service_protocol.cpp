@@ -252,9 +252,11 @@ QByteArray encode_recovery_point_request(const QString& request_id,
 
 QByteArray encode_recovery_point_layout_request(const QString& request_id,
                                                 const QString& repository_connection_id,
-                                                const QString& recovery_point_id) {
+                                                const QString& recovery_point_id,
+                                                const QString& archive_password) {
     const QJsonObject payload{{QStringLiteral("repository_connection_id"), repository_connection_id},
-                              {QStringLiteral("recovery_point_id"), recovery_point_id}};
+                              {QStringLiteral("recovery_point_id"), recovery_point_id},
+                              {QStringLiteral("archive_password"), archive_password}};
     return QJsonDocument(
                QJsonObject{
                    {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},

@@ -69,6 +69,8 @@ CREATE TABLE IF NOT EXISTS schedules (
     next_run_utc_ms INTEGER CHECK (next_run_utc_ms IS NULL OR next_run_utc_ms >= 0),
     exclude_page_and_hibernation_files INTEGER NOT NULL DEFAULT 1
         CHECK (exclude_page_and_hibernation_files IN (0, 1)),
+    encryption_enabled INTEGER NOT NULL DEFAULT 0
+        CHECK (encryption_enabled IN (0, 1)),
     created_utc_ms INTEGER NOT NULL CHECK (created_utc_ms >= 0),
     updated_utc_ms INTEGER NOT NULL CHECK (updated_utc_ms >= 0),
     CHECK (updated_utc_ms >= created_utc_ms),

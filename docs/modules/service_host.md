@@ -135,4 +135,6 @@ per-file Archive Credential 映射与 Local Storage 故障恢复验证仍待补�
 
 `GetRecoveryPointLayout` 已实现：Catalog 定位 Archive → `PersonalArchiveReader` 读取 Manifest →
 返回 hierarchical `disks[]`（分区表）+ `volumes[]`（letter/label/fs/size + extents）。无 `disks[]`
-的 Archive（布局写入前产生）返回 `recovery_point.layout_failed`。个人本地密码仍为 `aegra-local`。
+的 Archive（布局写入前产生）返回 `recovery_point.layout_failed`。个人备份加密：`encryption_enabled=false`
+  时写入无加密 Archive；为 true 时要求 `archive_password`，Service 写入 `wincred://aegra/job/<id>` 供
+  Worker 解析。Layout 当前优先打开无加密 Archive（空密码）。

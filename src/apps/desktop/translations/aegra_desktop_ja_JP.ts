@@ -131,6 +131,22 @@
         <source>Unable to load source volumes for this checkpoint</source>
         <translation>このチェックポイントのソースボリュームを読み込めません</translation>
     </message>
+    <message id="aegra.backup.opt.password">
+        <source>Password</source>
+        <translation>パスワード</translation>
+    </message>
+    <message id="aegra.backup.opt.password_confirm">
+        <source>Confirm password</source>
+        <translation>パスワード（確認）</translation>
+    </message>
+    <message id="aegra.backup.opt.password_required">
+        <source>Enter and confirm a password for encryption</source>
+        <translation>暗号化パスワードを入力して確認してください</translation>
+    </message>
+    <message id="aegra.backup.opt.password_mismatch">
+        <source>Passwords do not match</source>
+        <translation>パスワードが一致しません</translation>
+    </message>
     <message id="aegra.error.service.disconnected">
         <source>Service connection lost</source>
         <translation>Service 接続が切断されました</translation>

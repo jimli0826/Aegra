@@ -19,6 +19,6 @@ protect_archive_chunk(PreparedArchiveChunk& chunk,
 unprotect_archive_chunk(const format::personal_archive::ChunkHeader& header,
                         std::span<const format::personal_archive::BlockEntry> entries,
                         std::span<const std::byte> ciphertext,
-                        const crypto_sodium::PayloadCipher& payload_cipher);
+                        const crypto_sodium::PayloadCipher* payload_cipher);
 
 } // namespace aegra::adapters::personal_archive::detail

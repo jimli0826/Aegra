@@ -369,6 +369,10 @@ base::Result<void> validate_recovery_point_ref(const RecoveryPointRef& reference
         !valid_stable_value(reference.recovery_point_id, kMaximumIdentifierBytes)) {
         return invalid("recovery point reference is invalid");
     }
+    constexpr std::size_t kMaximumArchivePasswordBytes = 32;
+    if (reference.archive_password.size() > kMaximumArchivePasswordBytes) {
+        return invalid("recovery point archive password is too long");
+    }
     return base::Result<void>::success();
 }
 
@@ -381,6 +385,24 @@ base::Result<void> validate_start_backup_command(const StartBackupCommand& comma
         (command.parent_recovery_point_id &&
          !valid_stable_value(*command.parent_recovery_point_id, kMaximumIdentifierBytes))) {
         return invalid("start backup command is invalid");
+    }
+    if (command.schedule_id &&
+        !valid_stable_value(*command.schedule_id, kMaximumIdentifierBytes)) {
+        return invalid("start backup schedule id is invalid");
+    }
+    constexpr std::size_t kMaximumArchivePasswordBytes = 32;
+    if (command.encryption_enabled) {
+        const bool has_password = !command.archive_password.empty() &&
+                                  command.archive_password.size() <= kMaximumArchivePasswordBytes;
+        const bool has_schedule = command.schedule_id.has_value();
+        if (!has_password && !has_schedule) {
+            return invalid("encrypted backup requires a password or schedule credential");
+        }
+        if (has_password && command.archive_password.size() > kMaximumArchivePasswordBytes) {
+            return invalid("encrypted backup requires a password of 1 to 32 characters");
+        }
+    } else if (!command.archive_password.empty()) {
+        return invalid("unencrypted backup must not include a password");
     }
     return base::Result<void>::success();
 }
@@ -444,6 +466,21 @@ base::Result<void> validate_upsert_schedule_command(const UpsertScheduleCommand&
         !valid_stable_value(command.repository_connection_id, kMaximumIdentifierBytes) ||
         !known_backup_type(command.backup_type)) {
         return invalid("upsert schedule command is invalid");
+    }
+    constexpr std::size_t kMaximumArchivePasswordBytes = 32;
+    if (command.encryption_enabled) {
+        // Create requires password; update may keep existing wincred when password empty.
+        if (!command.schedule_id &&
+            (command.archive_password.empty() ||
+             command.archive_password.size() > kMaximumArchivePasswordBytes)) {
+            return invalid("encrypted schedule requires a password of 1 to 32 characters");
+        }
+        if (!command.archive_password.empty() &&
+            command.archive_password.size() > kMaximumArchivePasswordBytes) {
+            return invalid("encrypted schedule password is too long");
+        }
+    } else if (!command.archive_password.empty()) {
+        return invalid("unencrypted schedule must not include a password");
     }
     return validate_schedule_trigger(command.trigger);
 }

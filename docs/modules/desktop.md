@@ -149,7 +149,8 @@ Password 在 Service 没有对应能力时不显示。布局必须在 900x600、
   Home/Splash/Toast/Loading/Shell 已接入真实生产状态和导航。
 - D3（已完成，按生产功能范围）：Backup 页面与 Inventory/Connection model/codec、`StartBackup`/`CancelJob` 门面；
   Source 仅绑定 Service Inventory 稳定 ID；Target 仅绑定 Repository connection；全量备份真实启动；
-  增量/差异禁用；凭据仅 SecretRef/Service 侧，QML 无明文密码；页面进度复用 D2 Job 观察；
+  增量/差异禁用；Backup Options 支持无密码（不加密 Archive）与加密（向导密码 1–32 字符，经
+  StartBackup 一次性交给 Service，再写入 wincred SecretRef 供 Worker）；页面进度复用 D2 Job 观察；
   五语言翻译与 Home↔Backup↔Repository 导航已接线。
   Schedule 向导允许选择多个 Volume；Desktop 把有序、去重的稳定 `source_ids[]` 保存为一条 Schedule。
   Run 一次提交完整 Source 列表，只生成一个 Job 和一个包含全部 Volume 的 Archive；不得回退到首个可选

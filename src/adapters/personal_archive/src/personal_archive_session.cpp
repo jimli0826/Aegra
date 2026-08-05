@@ -65,9 +65,17 @@ struct SourceWriteState final {
 }
 
 [[nodiscard]] base::Result<void> validate_create_geometry(const ArchiveCreateRequest& request) {
-    if (request.destination.empty() || request.password.empty()) {
+    if (request.destination.empty()) {
         return base::Result<void>::failure(
-            error(base::ErrorCode::kInvalidArgument, "archive path and password are required"));
+            error(base::ErrorCode::kInvalidArgument, "archive path is required"));
+    }
+    if (request.encryption_enabled && request.password.empty()) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kInvalidArgument, "encrypted archive requires a password"));
+    }
+    if (!request.encryption_enabled && !request.password.empty()) {
+        return base::Result<void>::failure(error(
+            base::ErrorCode::kInvalidArgument, "unencrypted archive must not supply a password"));
     }
     if (request.block_size == 0 || request.chunk_size < request.block_size) {
         return base::Result<void>::failure(
@@ -108,7 +116,8 @@ struct SourceWriteState final {
         return base::Result<void>::failure(
             error(base::ErrorCode::kInvalidArgument, "full archive must not specify a parent"));
     }
-    if (request.parent_source.empty() || request.parent_password.empty()) {
+    if (request.parent_source.empty() ||
+        (request.encryption_enabled && request.parent_password.empty())) {
         return base::Result<void>::failure(error(base::ErrorCode::kInvalidArgument,
                                                  "incremental archive requires a complete parent"));
     }
@@ -215,7 +224,7 @@ make_envelope(const crypto_sodium::MetadataProtectionContext& context,
 }
 
 [[nodiscard]] archive::BackupHeader
-make_header(const ArchiveCreateRequest& request, const std::uint64_t metadata_size,
+make_header(const ArchiveCreateRequest& request, const std::uint64_t metadata_wire_size,
             const std::optional<IncrementalBaseline>& baseline) {
     archive::BackupHeader header;
     header.file_uuid = request.file_uuid;
@@ -223,18 +232,21 @@ make_header(const ArchiveCreateRequest& request, const std::uint64_t metadata_si
         baseline ? baseline->identity.backup_set_uuid : request.backup_set_uuid;
     header.parent_uuid = baseline ? baseline->identity.file_uuid : std::array<std::byte, 16>{};
     header.block_size = request.block_size;
-    header.flags = archive::kBackupFlagEncrypted |
-                   (baseline ? archive::kBackupFlagIncremental : archive::kBackupFlagFull);
+    header.flags = baseline ? archive::kBackupFlagIncremental : archive::kBackupFlagFull;
+    if (request.encryption_enabled) {
+        header.flags |= archive::kBackupFlagEncrypted;
+        header.encryption_method = archive::PayloadEncryptionMethod::kXChaCha20Poly1305;
+    } else {
+        header.encryption_method = archive::PayloadEncryptionMethod::kNone;
+    }
     if (request.split_size_bytes != 0) {
         header.flags |= archive::kBackupFlagSplit;
         header.split_size_bytes = request.split_size_bytes;
     }
-    header.cbor_size =
-        archive::kMetadataEnvelopeHeaderSize + metadata_size + crypto_sodium::kMetadataTagSize;
+    header.cbor_size = metadata_wire_size;
     header.first_chunk_offset = header.cbor_offset + header.cbor_size;
     header.default_chunk_size = request.chunk_size;
     header.compression_method = archive::CompressionMethod::kZstandard;
-    header.encryption_method = archive::PayloadEncryptionMethod::kXChaCha20Poly1305;
     return header;
 }
 
@@ -249,6 +261,30 @@ prepare_preamble(const ArchiveCreateRequest& request,
         return base::Result<ArchivePreamble>::failure(
             error(base::ErrorCode::kInvalidArgument, "archive metadata exceeds product limit"));
     }
+    if (!request.encryption_enabled) {
+        archive::MetadataEnvelopeHeader logical_envelope;
+        logical_envelope.flags = 0;
+        logical_envelope.encryption_method = archive::MetadataEncryptionMethod::kNone;
+        logical_envelope.kdf_method = archive::MetadataKdfMethod::kNone;
+        logical_envelope.nonce_size = 0;
+        logical_envelope.tag_size = 0;
+        logical_envelope.plaintext_size = cbor.value().size();
+        logical_envelope.ciphertext_size = cbor.value().size();
+        logical_envelope.kdf_parameters_version = 0;
+        const auto wire_size =
+            archive::kMetadataEnvelopeHeaderSize + cbor.value().size(); // no tag
+        auto logical_header = make_header(request, wire_size, baseline);
+        auto header = archive::encode_backup_header(logical_header);
+        auto envelope = archive::encode_metadata_envelope_header(logical_envelope);
+        if (!header || !envelope) {
+            return base::Result<ArchivePreamble>::failure(!header ? header.error()
+                                                                  : envelope.error());
+        }
+        crypto_sodium::ProtectedMetadata metadata;
+        metadata.ciphertext = std::move(cbor).value();
+        return base::Result<ArchivePreamble>::success(
+            {logical_header, header.value(), envelope.value(), std::move(metadata)});
+    }
     const crypto_sodium::KdfParameters kdf{request.kdf_parameters.opslimit,
                                            request.kdf_parameters.memlimit_bytes,
                                            crypto_sodium::kKdfParametersVersion};
@@ -256,7 +292,9 @@ prepare_preamble(const ArchiveCreateRequest& request,
     if (!context) {
         return base::Result<ArchivePreamble>::failure(context.error());
     }
-    auto logical_header = make_header(request, cbor.value().size(), baseline);
+    const auto wire_size = archive::kMetadataEnvelopeHeaderSize + cbor.value().size() +
+                           crypto_sodium::kMetadataTagSize;
+    auto logical_header = make_header(request, wire_size, baseline);
     auto logical_envelope = make_envelope(context.value(), cbor.value().size());
     auto header = archive::encode_backup_header(logical_header);
     auto envelope = archive::encode_metadata_envelope_header(logical_envelope);
@@ -275,6 +313,9 @@ prepare_preamble(const ArchiveCreateRequest& request,
 
 [[nodiscard]] base::Result<std::unique_ptr<crypto_sodium::PayloadCipher>>
 create_payload_cipher(const ArchiveCreateRequest& request, const ArchivePreamble& preamble) {
+    if (!request.encryption_enabled) {
+        return base::Result<std::unique_ptr<crypto_sodium::PayloadCipher>>::success({});
+    }
     return crypto_sodium::PayloadCipher::create(request.password, preamble.metadata.kdf,
                                                 preamble.metadata.salt);
 }
@@ -293,12 +334,16 @@ create_payload_cipher(const ArchiveCreateRequest& request, const ArchivePreamble
                                                 const ArchivePreamble& preamble) {
     for (const auto bytes : {std::span<const std::byte>(preamble.header),
                              std::span<const std::byte>(preamble.envelope),
-                             std::span<const std::byte>(preamble.metadata.ciphertext),
-                             std::span<const std::byte>(preamble.metadata.tag)}) {
+                             std::span<const std::byte>(preamble.metadata.ciphertext)}) {
         auto written = write_bytes(output, bytes);
         if (!written) {
             return written;
         }
+    }
+    const bool encrypted =
+        (preamble.logical_header.flags & archive::kBackupFlagEncrypted) != 0;
+    if (encrypted) {
+        return write_bytes(output, preamble.metadata.tag);
     }
     return base::Result<void>::success();
 }
@@ -408,8 +453,10 @@ validate_output_paths(const std::filesystem::path& destination,
 
 struct PersonalArchiveSession::Impl final {
     Impl(const std::string_view archive_password,
-         std::unique_ptr<crypto_sodium::PayloadCipher> archive_payload_cipher)
-        : password(archive_password), payload_cipher(std::move(archive_payload_cipher)) {}
+         std::unique_ptr<crypto_sodium::PayloadCipher> archive_payload_cipher,
+         const bool archive_encryption_enabled)
+        : password(archive_password), payload_cipher(std::move(archive_payload_cipher)),
+          encryption_enabled(archive_encryption_enabled) {}
 
     archive::BackupHeader primary_header;
     std::filesystem::path destination;
@@ -419,6 +466,7 @@ struct PersonalArchiveSession::Impl final {
     std::ofstream output;
     crypto_sodium::SecureString password;
     std::unique_ptr<crypto_sodium::PayloadCipher> payload_cipher;
+    bool encryption_enabled{false};
     std::array<std::byte, 16> file_uuid{};
     crypto_sodium::KdfParameters kdf;
     std::array<std::byte, crypto_sodium::kMetadataSaltSize> salt{};
@@ -499,9 +547,18 @@ struct PersonalArchiveSession::Impl final {
 
     [[nodiscard]] base::Result<void> persist_chunks(detail::PreparedArchiveInput& prepared) {
         for (auto& chunk : prepared.chunks) {
-            auto protected_payload = detail::protect_archive_chunk(chunk, *payload_cipher);
-            if (!protected_payload) {
-                return protected_payload;
+            if (encryption_enabled) {
+                if (payload_cipher == nullptr) {
+                    return base::Result<void>::failure(
+                        error(base::ErrorCode::kInternal, "payload cipher is missing"));
+                }
+                auto protected_payload = detail::protect_archive_chunk(chunk, *payload_cipher);
+                if (!protected_payload) {
+                    return protected_payload;
+                }
+            } else {
+                chunk.header.payload_nonce.fill(std::byte{0});
+                chunk.header.payload_authentication_tag.fill(std::byte{0});
             }
             auto rotated = rotate_if_needed(chunk);
             if (!rotated) {
@@ -553,8 +610,8 @@ PersonalArchiveSession::create(const ArchiveCreateRequest& request) {
         return base::Result<std::unique_ptr<PersonalArchiveSession>>::failure(
             payload_cipher.error());
     }
-    auto implementation =
-        std::make_unique<Impl>(request.password, std::move(payload_cipher).value());
+    auto implementation = std::make_unique<Impl>(
+        request.password, std::move(payload_cipher).value(), request.encryption_enabled);
     implementation->primary_header = preamble.value().logical_header;
     implementation->destination = request.destination;
     implementation->sidecar_destination = sidecar_destination;
@@ -678,6 +735,7 @@ base::Result<void> PersonalArchiveSession::commit(const base::CancellationToken 
     const detail::SidecarWriteRequest sidecar_request{
         implementation_->sidecar_partial,
         implementation_->password.view(),
+        implementation_->encryption_enabled,
         implementation_->file_uuid,
         implementation_->block_size,
         sidecar_payload,

@@ -19,6 +19,9 @@ Item {
     property int splitSize: 1
     property string splitUnit: "GB"
     property bool encryption: false
+    property string password: ""
+    property string passwordConfirm: ""
+    readonly property int passwordMaxLength: 32
     property string compression: "normal"
 
     signal backRequested()
@@ -118,6 +121,8 @@ Item {
         splitSize = 1
         splitUnit = "GB"
         encryption = false
+        password = ""
+        passwordConfirm = ""
         compression = "normal"
         if (hourCombo) {
             var hIdx = hourOptions.indexOf(timeHour())
@@ -749,7 +754,13 @@ Item {
                                 MouseArea {
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.encryption = !root.encryption
+                                    onClicked: {
+                                        root.encryption = !root.encryption
+                                        if (!root.encryption) {
+                                            root.password = ""
+                                            root.passwordConfirm = ""
+                                        }
+                                    }
                                 }
                             }
                             Text {
@@ -763,7 +774,90 @@ Item {
                                 MouseArea {
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.encryption = !root.encryption
+                                    onClicked: {
+                                        root.encryption = !root.encryption
+                                        if (!root.encryption) {
+                                            root.password = ""
+                                            root.passwordConfirm = ""
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+                            visible: root.encryption
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 34
+                                color: Theme.colorInput
+                                radius: 4
+                                border.width: 1
+                                border.color: Theme.colorBorder
+                                TextInput {
+                                    id: passwordInput
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 10
+                                    anchors.rightMargin: 10
+                                    verticalAlignment: Text.AlignVCenter
+                                    color: Theme.colorTextWhite
+                                    font.pixelSize: 13
+                                    font.family: Theme.fontFamily
+                                    echoMode: TextInput.Password
+                                    maximumLength: root.passwordMaxLength
+                                    clip: true
+                                    selectByMouse: true
+                                    text: root.password
+                                    onTextChanged: root.password = text
+                                    Text {
+                                        anchors.fill: parent
+                                        verticalAlignment: Text.AlignVCenter
+                                        //% "Password"
+                                        text: qsTrId("aegra.backup.opt.password")
+                                        color: Theme.colorTextGrey
+                                        font.pixelSize: 12
+                                        font.family: Theme.fontFamily
+                                        visible: !passwordInput.text && !passwordInput.activeFocus
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 34
+                                color: Theme.colorInput
+                                radius: 4
+                                border.width: 1
+                                border.color: (root.passwordConfirm.length > 0
+                                              && root.passwordConfirm !== root.password)
+                                             ? Theme.colorAccentRed : Theme.colorBorder
+                                TextInput {
+                                    id: passwordConfirmInput
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 10
+                                    anchors.rightMargin: 10
+                                    verticalAlignment: Text.AlignVCenter
+                                    color: Theme.colorTextWhite
+                                    font.pixelSize: 13
+                                    font.family: Theme.fontFamily
+                                    echoMode: TextInput.Password
+                                    maximumLength: root.passwordMaxLength
+                                    clip: true
+                                    selectByMouse: true
+                                    text: root.passwordConfirm
+                                    onTextChanged: root.passwordConfirm = text
+                                    Text {
+                                        anchors.fill: parent
+                                        verticalAlignment: Text.AlignVCenter
+                                        //% "Confirm password"
+                                        text: qsTrId("aegra.backup.opt.password_confirm")
+                                        color: Theme.colorTextGrey
+                                        font.pixelSize: 12
+                                        font.family: Theme.fontFamily
+                                        visible: !passwordConfirmInput.text
+                                                 && !passwordConfirmInput.activeFocus
+                                    }
                                 }
                             }
                         }

@@ -87,7 +87,8 @@ struct CommandAck final {
     const std::optional<QString>& repository_connection_id = std::nullopt);
 [[nodiscard]] QByteArray encode_recovery_point_layout_request(const QString& request_id,
                                                               const QString& repository_connection_id,
-                                                              const QString& recovery_point_id);
+                                                              const QString& recovery_point_id,
+                                                              const QString& archive_password = {});
 [[nodiscard]] QByteArray encode_job_list_request(const QString& request_id,
                                                  const std::optional<QString>& continuation_token);
 [[nodiscard]] QByteArray
@@ -106,7 +107,10 @@ encode_schedule_list_request(const QString& request_id,
                                                      const QString& repository_connection_id,
                                                      int backup_type = kBackupTypeFull,
                                                      const QString& parent_recovery_point_id = {},
-                                                     bool exclude_page_and_hibernation_files = true);
+                                                     bool exclude_page_and_hibernation_files = true,
+                                                     bool encryption_enabled = false,
+                                                     const QString& archive_password = {},
+                                                     const QString& schedule_id = {});
 [[nodiscard]] QByteArray encode_cancel_job_request(const QString& request_id,
                                                    const QString& idempotency_key,
                                                    const QString& job_id);
@@ -124,7 +128,8 @@ encode_repository_connection_resource_request(const QString& request_id,
     const QString& display_name, bool enabled, const QVariantList& source_ids,
     const QString& repository_connection_id, int backup_type, int trigger_kind,
     int local_minute_of_day, int weekday_mask, const QString& timezone_id,
-    bool exclude_page_and_hibernation_files = true);
+    bool exclude_page_and_hibernation_files = true, bool encryption_enabled = false,
+    const QString& archive_password = {});
 [[nodiscard]] QByteArray encode_delete_schedule_request(const QString& request_id,
                                                         const QString& idempotency_key,
                                                         const QString& schedule_id);

@@ -15,6 +15,7 @@ namespace aegra::adapters::personal_archive::detail {
 struct SidecarWriteRequest final {
     std::filesystem::path destination;
     std::string_view password;
+    bool encryption_enabled{false};
     std::array<std::byte, 16> file_uuid{};
     std::uint32_t block_size{0};
     const format::personal_archive::SidecarPayload& payload;

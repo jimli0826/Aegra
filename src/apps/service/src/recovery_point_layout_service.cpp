@@ -12,7 +12,8 @@
 namespace aegra::apps::service {
 namespace {
 
-constexpr std::string_view kDefaultLocalArchivePassword = "aegra-local";
+// Prefer empty password first (unencrypted archives). Encrypted archives require a connection
+// credential or user-supplied password in a later Restore UX pass.
 
 [[nodiscard]] base::Result<std::filesystem::path> path_from_utf8(const std::string_view value) {
     try {
@@ -136,11 +137,10 @@ load_recovery_point_layout(ports::IControlPlaneDatabase& control_plane,
     if (!archive_path) {
         return base::Result<contracts::RecoveryPointLayout>::failure(archive_path.error());
     }
-    // Personal local archives use the same fixed password material as the worker when no
-    // repository SecretRef is mapped (aegra-local).
     adapters::personal_archive::ArchiveOpenRequest open_request;
     open_request.source = std::move(archive_path).value();
-    open_request.password = kDefaultLocalArchivePassword;
+    // Empty password opens unencrypted archives; encrypted archives need archive_password.
+    open_request.password = reference.archive_password;
     auto reader = adapters::personal_archive::PersonalArchiveReader::open(open_request);
     if (!reader) {
         return base::Result<contracts::RecoveryPointLayout>::failure(reader.error());

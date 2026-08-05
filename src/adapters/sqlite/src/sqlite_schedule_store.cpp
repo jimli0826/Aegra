@@ -24,9 +24,9 @@ base::Result<void> ScheduleStore::upsert(const ports::ScheduleRecord& record,
         state_.db,
         "INSERT INTO schedules(schedule_id, display_name, enabled, source_ids, "
         "repository_connection_id, backup_type, trigger_kind, local_minute_of_day, weekday_mask, "
-        "timezone_id, next_run_utc_ms, exclude_page_and_hibernation_files, created_utc_ms, "
-        "updated_utc_ms) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+        "timezone_id, next_run_utc_ms, exclude_page_and_hibernation_files, encryption_enabled, "
+        "created_utc_ms, updated_utc_ms) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(schedule_id) DO UPDATE SET "
         "display_name=excluded.display_name, enabled=excluded.enabled, source_ids=excluded.source_ids, "
         "repository_connection_id=excluded.repository_connection_id, "
@@ -34,6 +34,7 @@ base::Result<void> ScheduleStore::upsert(const ports::ScheduleRecord& record,
         "local_minute_of_day=excluded.local_minute_of_day, weekday_mask=excluded.weekday_mask, "
         "timezone_id=excluded.timezone_id, next_run_utc_ms=excluded.next_run_utc_ms, "
         "exclude_page_and_hibernation_files=excluded.exclude_page_and_hibernation_files, "
+        "encryption_enabled=excluded.encryption_enabled, "
         "updated_utc_ms=excluded.updated_utc_ms");
     if (!statement) {
         return base::Result<void>::failure(statement.error());
@@ -76,10 +77,13 @@ base::Result<void> ScheduleStore::upsert(const ports::ScheduleRecord& record,
             stmt.bind_int64(12, record.exclude_page_and_hibernation_files ? 1 : 0); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_int64(13, static_cast<std::int64_t>(record.created_utc_ms)); !bound) {
+    if (auto bound = stmt.bind_int64(13, record.encryption_enabled ? 1 : 0); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_int64(14, static_cast<std::int64_t>(record.updated_utc_ms)); !bound) {
+    if (auto bound = stmt.bind_int64(14, static_cast<std::int64_t>(record.created_utc_ms)); !bound) {
+        return bound;
+    }
+    if (auto bound = stmt.bind_int64(15, static_cast<std::int64_t>(record.updated_utc_ms)); !bound) {
         return bound;
     }
     auto stepped = stmt.step();

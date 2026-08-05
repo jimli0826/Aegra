@@ -1,5 +1,6 @@
 #include "aegra/apps/service/worker_job_service.h"
 
+#include "aegra/adapters/windows_system/windows_system.h"
 #include "aegra/application/source_inventory_query.h"
 #include "aegra/apps/service/worker_supervisor.h"
 #include "aegra/base/uuid.h"
@@ -219,15 +220,33 @@ prepare_backup(const contracts::StartBackupCommand& command,
     worker.operation = contracts::JobOperation::kBackup;
     worker.source_refs = std::move(stable_source_refs);
     worker.target_ref = path_to_utf8(archive_path);
-    if (repository.value()->credential_ref && !repository.value()->credential_ref->value.empty()) {
-        worker.credential_refs = {*repository.value()->credential_ref};
-    }
     contracts::BackupOptions backup;
     backup.type = contracts::BackupType::kFull;
     backup.file_uuid = file_uuid.value();
     backup.backup_set_uuid = backup_set_uuid.value();
     backup.created_utc_ms = created_utc_ms;
     backup.exclude_page_and_hibernation_files = command.exclude_page_and_hibernation_files;
+    backup.encryption_enabled = command.encryption_enabled;
+    if (command.encryption_enabled) {
+        if (!command.archive_password.empty()) {
+            // One-shot personal password: store in wincred for Worker resolve only (not SQLite).
+            const auto target = std::string("aegra/job/") + job_id.value();
+            auto stored = adapters::windows_system::store_generic_windows_credential(
+                target, command.archive_password);
+            if (!stored) {
+                return base::Result<PreparedBackup>::failure(stored.error());
+            }
+            worker.credential_refs = {std::move(stored).value()};
+        } else if (command.schedule_id) {
+            // Reuse schedule-bound credential created at upsert time.
+            contracts::SecretRef reference;
+            reference.value = std::string("wincred://aegra/schedule/") + *command.schedule_id;
+            worker.credential_refs = {std::move(reference)};
+        } else {
+            return base::Result<PreparedBackup>::failure(
+                {base::ErrorCode::kUnauthorized, "encrypted backup requires a password"});
+        }
+    }
     worker.backup = std::move(backup);
     worker.trace_id = trace_id.value();
     WorkerJobRequest request{std::move(worker),

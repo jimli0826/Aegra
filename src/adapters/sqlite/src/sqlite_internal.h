@@ -286,7 +286,7 @@ inline constexpr const char* kSelectCommandSql =
 inline constexpr const char* kSelectScheduleSql =
     "SELECT schedule_id, display_name, enabled, source_ids, repository_connection_id, backup_type, "
     "trigger_kind, local_minute_of_day, weekday_mask, timezone_id, next_run_utc_ms, "
-    "exclude_page_and_hibernation_files, created_utc_ms, updated_utc_ms FROM schedules "
+    "exclude_page_and_hibernation_files, encryption_enabled, created_utc_ms, updated_utc_ms FROM schedules "
     "WHERE schedule_id = ?";
 
 } // namespace aegra::adapters::sqlite::detail

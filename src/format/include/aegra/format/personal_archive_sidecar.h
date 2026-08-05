@@ -25,6 +25,7 @@ enum class SidecarCompressionMethod : std::uint8_t {
 };
 
 enum class SidecarEncryptionMethod : std::uint8_t {
+    kNone = 0,
     kXChaCha20Poly1305 = 2,
 };
 

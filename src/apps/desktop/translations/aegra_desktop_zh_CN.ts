@@ -131,6 +131,22 @@
         <source>Unable to load source volumes for this checkpoint</source>
         <translation>无法加载此检查点的源卷信息</translation>
     </message>
+    <message id="aegra.backup.opt.password">
+        <source>Password</source>
+        <translation>密码</translation>
+    </message>
+    <message id="aegra.backup.opt.password_confirm">
+        <source>Confirm password</source>
+        <translation>确认密码</translation>
+    </message>
+    <message id="aegra.backup.opt.password_required">
+        <source>Enter and confirm a password for encryption</source>
+        <translation>请输入并确认加密密码</translation>
+    </message>
+    <message id="aegra.backup.opt.password_mismatch">
+        <source>Passwords do not match</source>
+        <translation>两次输入的密码不一致</translation>
+    </message>
     <message id="aegra.error.service.disconnected">
         <source>Service connection lost</source>
         <translation>Service 连接已断开</translation>

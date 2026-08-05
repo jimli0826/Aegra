@@ -57,13 +57,17 @@ base::Result<std::vector<std::byte>>
 unprotect_archive_chunk(const archive::ChunkHeader& header,
                         const std::span<const archive::BlockEntry> entries,
                         const std::span<const std::byte> ciphertext,
-                        const crypto_sodium::PayloadCipher& payload_cipher) {
+                        const crypto_sodium::PayloadCipher* payload_cipher) {
+    if (payload_cipher == nullptr) {
+        return base::Result<std::vector<std::byte>>::success(
+            std::vector<std::byte>(ciphertext.begin(), ciphertext.end()));
+    }
     auto authenticated_data = make_authenticated_data(header, entries);
     if (!authenticated_data) {
         return base::Result<std::vector<std::byte>>::failure(authenticated_data.error());
     }
-    return payload_cipher.unprotect(ciphertext, authenticated_data.value(), header.payload_nonce,
-                                    header.payload_authentication_tag);
+    return payload_cipher->unprotect(ciphertext, authenticated_data.value(), header.payload_nonce,
+                                     header.payload_authentication_tag);
 }
 
 } // namespace aegra::adapters::personal_archive::detail

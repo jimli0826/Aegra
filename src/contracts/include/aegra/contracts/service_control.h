@@ -157,6 +157,7 @@ struct ScheduleSummary final {
     ScheduleTrigger trigger;
     std::optional<std::uint64_t> next_run_utc_ms;
     bool exclude_page_and_hibernation_files{true};
+    bool encryption_enabled{false};
 };
 
 struct ScheduleListRequest final {
@@ -236,6 +237,9 @@ struct ResourceRef final {
 struct RecoveryPointRef final {
     std::string repository_connection_id;
     std::string recovery_point_id;
+    /// Optional one-shot password to open an encrypted Archive (layout / inspect).
+    /// Empty for unencrypted archives. Never logged.
+    std::string archive_password;
 };
 
 struct StartBackupCommand final {
@@ -245,6 +249,16 @@ struct StartBackupCommand final {
     std::optional<std::string> parent_recovery_point_id;
     /// Desktop Options: exclude pagefile / hiberfil / swapfile (default true).
     bool exclude_page_and_hibernation_files{true};
+    /// When true, archive is encrypted; archive_password must be non-empty (1–32 chars)
+    /// unless schedule_id is set (password loaded from wincred for that schedule).
+    /// When false, archive is stored without encryption and archive_password must be empty.
+    bool encryption_enabled{false};
+    /// One-shot password material for this command only. Never logged; never stored in SQLite.
+    /// Service immediately places it into a wincred SecretRef for the Worker.
+    std::string archive_password;
+    /// When set with encryption_enabled and empty archive_password, Service loads
+    /// wincred://aegra/schedule/<schedule_id>.
+    std::optional<std::string> schedule_id;
 };
 
 struct StartVerifyCommand final {
@@ -399,6 +413,9 @@ struct UpsertScheduleCommand final {
     BackupType backup_type{BackupType::kFull};
     ScheduleTrigger trigger;
     bool exclude_page_and_hibernation_files{true};
+    bool encryption_enabled{false};
+    /// One-shot on create/update when encryption_enabled; stored as wincred, not SQLite.
+    std::string archive_password;
 };
 
 struct EventSubscriptionRequest final {

@@ -672,8 +672,9 @@ base::Result<ports::ScheduleRecord> read_schedule(sqlite3_stmt* const stmt) {
     record.trigger.timezone_id = column_text_required(stmt, 9);
     record.next_run_utc_ms = column_uint64_optional(stmt, 10);
     record.exclude_page_and_hibernation_files = sqlite3_column_int(stmt, 11) != 0;
-    record.created_utc_ms = column_uint64(stmt, 12);
-    record.updated_utc_ms = column_uint64(stmt, 13);
+    record.encryption_enabled = sqlite3_column_int(stmt, 12) != 0;
+    record.created_utc_ms = column_uint64(stmt, 13);
+    record.updated_utc_ms = column_uint64(stmt, 14);
     auto valid = validate_schedule_record(record);
     if (!valid) {
         return base::Result<ports::ScheduleRecord>::failure(valid.error());
@@ -765,7 +766,8 @@ contracts::ScheduleSummary to_schedule_summary(const ports::ScheduleRecord& reco
             record.backup_type,
             record.trigger,
             record.next_run_utc_ms,
-            record.exclude_page_and_hibernation_files};
+            record.exclude_page_and_hibernation_files,
+            record.encryption_enabled};
 }
 
 contracts::AuditEventSummary to_audit_summary(const ports::AuditEventRecord& record) {

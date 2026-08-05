@@ -332,7 +332,8 @@ QString ServiceClient::recoveryPointLayoutErrorText() const {
                : localize_message_code(recovery_point_layout_error_code_);
 }
 
-void ServiceClient::loadRecoveryPointLayout(const QString& recovery_point_id) {
+void ServiceClient::loadRecoveryPointLayout(const QString& recovery_point_id,
+                                            const QString& archive_password) {
     if (recovery_point_id.isEmpty()) {
         reset_recovery_point_layout();
         return;
@@ -352,7 +353,7 @@ void ServiceClient::loadRecoveryPointLayout(const QString& recovery_point_id) {
     const auto request_id = new_request_id();
     recovery_point_layout_request_id_ = request_id;
     const auto body = encode_recovery_point_layout_request(
-        request_id, selected_repository_connection_id_, recovery_point_id);
+        request_id, selected_repository_connection_id_, recovery_point_id, archive_password);
     const auto started =
         coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
             return handle_recovery_point_layout_frame(frame_body);

@@ -16,7 +16,7 @@ namespace aegra::ports {
 
 // Personal-edition control-plane schema version for durable local SQLite.
 // Not Recovery Point / Archive / Chunk Index authority.
-inline constexpr std::uint32_t kControlPlaneSchemaVersion = 5;
+inline constexpr std::uint32_t kControlPlaneSchemaVersion = 6;
 
 // ---- Durable records (control-plane only; no plaintext secrets, no RP authority) ----
 
@@ -66,6 +66,7 @@ struct ScheduleRecord final {
     contracts::ScheduleTrigger trigger;
     std::optional<std::uint64_t> next_run_utc_ms;
     bool exclude_page_and_hibernation_files{true};
+    bool encryption_enabled{false};
     std::uint64_t created_utc_ms{0};
     std::uint64_t updated_utc_ms{0};
 };

@@ -131,6 +131,22 @@
         <source>Unable to load source volumes for this checkpoint</source>
         <translation>Unable to load source volumes for this checkpoint</translation>
     </message>
+    <message id="aegra.backup.opt.password">
+        <source>Password</source>
+        <translation>Password</translation>
+    </message>
+    <message id="aegra.backup.opt.password_confirm">
+        <source>Confirm password</source>
+        <translation>Confirm password</translation>
+    </message>
+    <message id="aegra.backup.opt.password_required">
+        <source>Enter and confirm a password for encryption</source>
+        <translation>Enter and confirm a password for encryption</translation>
+    </message>
+    <message id="aegra.backup.opt.password_mismatch">
+        <source>Passwords do not match</source>
+        <translation>Passwords do not match</translation>
+    </message>
     <message id="aegra.error.service.disconnected">
         <source>Service connection lost</source>
         <translation>Service connection lost</translation>

@@ -626,7 +626,7 @@ read_entry_payload(const std::span<const std::byte> chunk_payload, const archive
 [[nodiscard]] base::Result<std::vector<std::byte>>
 read_record_payload(const ChunkRecord& record, const std::uint32_t block_size,
                     const std::uint64_t logical_size, const base::CancellationToken& cancellation,
-                    const crypto_sodium::PayloadCipher& payload_cipher) {
+                    const crypto_sodium::PayloadCipher* payload_cipher) {
     std::ifstream input(record.part_path, std::ios::binary);
     if (!input) {
         return base::Result<std::vector<std::byte>>::failure(
@@ -681,7 +681,7 @@ PersonalArchiveReader::~PersonalArchiveReader() = default;
 base::Result<std::unique_ptr<PersonalArchiveReader>>
 PersonalArchiveReader::open(const ArchiveOpenRequest& request) {
     constexpr std::uint32_t maximum_supported_split_parts = 100'000;
-    if (request.source.empty() || request.password.empty() || request.maximum_metadata_size == 0 ||
+    if (request.source.empty() || request.maximum_metadata_size == 0 ||
         request.maximum_chunk_payload_size == 0 || request.maximum_chunk_logical_size == 0 ||
         request.maximum_split_parts == 0 ||
         request.maximum_split_parts > maximum_supported_split_parts) {
@@ -716,11 +716,21 @@ PersonalArchiveReader::open(const ArchiveOpenRequest& request) {
     if (!shape) {
         return base::Result<std::unique_ptr<PersonalArchiveReader>>::failure(shape.error());
     }
-    auto payload_cipher = crypto_sodium::PayloadCipher::create(
-        request.password, preamble.value().kdf, preamble.value().salt);
-    if (!payload_cipher) {
-        return base::Result<std::unique_ptr<PersonalArchiveReader>>::failure(
-            payload_cipher.error());
+    const bool encrypted =
+        (preamble.value().header.flags & format::personal_archive::kBackupFlagEncrypted) != 0;
+    if (encrypted == request.password.empty()) {
+        return base::Result<std::unique_ptr<PersonalArchiveReader>>::failure(error(
+            base::ErrorCode::kUnauthorized,
+            encrypted ? "encrypted archive requires a password" : "unencrypted archive has no password"));
+    }
+    std::unique_ptr<crypto_sodium::PayloadCipher> payload_cipher;
+    if (encrypted) {
+        auto cipher = crypto_sodium::PayloadCipher::create(request.password, preamble.value().kdf,
+                                                           preamble.value().salt);
+        if (!cipher) {
+            return base::Result<std::unique_ptr<PersonalArchiveReader>>::failure(cipher.error());
+        }
+        payload_cipher = std::move(cipher).value();
     }
     auto parsed = std::move(preamble).value();
     auto scanned = std::move(scan).value();
@@ -739,7 +749,7 @@ PersonalArchiveReader::open(const ArchiveOpenRequest& request) {
         implementation->logical_size += volume.total_size;
     }
     implementation->records = std::move(scanned.records);
-    implementation->payload_cipher = std::move(payload_cipher).value();
+    implementation->payload_cipher = std::move(payload_cipher);
     return base::Result<std::unique_ptr<PersonalArchiveReader>>::success(
         std::unique_ptr<PersonalArchiveReader>(
             new PersonalArchiveReader(std::move(implementation))));
@@ -784,8 +794,9 @@ PersonalArchiveReader::read_chunk(const std::uint64_t chunk_index,
         return base::Result<ports::ChunkData>::failure(
             error(base::ErrorCode::kCorruptData, "archive chunk references an unknown volume"));
     }
-    auto payload = read_record_payload(record, implementation_->block_size, volume->total_size,
-                                       cancellation, *implementation_->payload_cipher);
+    auto payload =
+        read_record_payload(record, implementation_->block_size, volume->total_size, cancellation,
+                            implementation_->payload_cipher.get());
     if (!payload) {
         return base::Result<ports::ChunkData>::failure(payload.error());
     }

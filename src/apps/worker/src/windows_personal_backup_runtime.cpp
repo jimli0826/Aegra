@@ -261,6 +261,7 @@ class WindowsPersonalBackupRuntime final : public IWindowsPersonalBackupRuntime 
             manifest,
             request.password,
         };
+        archive_request.encryption_enabled = request.encryption_enabled;
         archive_request.file_uuid = request.file_uuid;
         archive_request.backup_set_uuid = request.backup_set_uuid;
         archive_request.block_size = request.block_size_bytes;

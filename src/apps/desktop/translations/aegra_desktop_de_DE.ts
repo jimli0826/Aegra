@@ -131,6 +131,22 @@
         <source>Unable to load source volumes for this checkpoint</source>
         <translation>Quellvolumes für diesen Prüfpunkt konnten nicht geladen werden</translation>
     </message>
+    <message id="aegra.backup.opt.password">
+        <source>Password</source>
+        <translation>Passwort</translation>
+    </message>
+    <message id="aegra.backup.opt.password_confirm">
+        <source>Confirm password</source>
+        <translation>Passwort bestätigen</translation>
+    </message>
+    <message id="aegra.backup.opt.password_required">
+        <source>Enter and confirm a password for encryption</source>
+        <translation>Passwort für die Verschlüsselung eingeben und bestätigen</translation>
+    </message>
+    <message id="aegra.backup.opt.password_mismatch">
+        <source>Passwords do not match</source>
+        <translation>Passwörter stimmen nicht überein</translation>
+    </message>
     <message id="aegra.error.service.disconnected">
         <source>Service connection lost</source>
         <translation>Service-Verbindung getrennt</translation>

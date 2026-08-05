@@ -27,10 +27,6 @@ namespace {
 
 using BackupIds = std::pair<std::array<std::byte, 16>, std::array<std::byte, 16>>;
 
-// Personal edition allows jobs without wincred:// credentials; archive crypto still needs a
-// non-empty password material (personal_archive_session rejects empty passwords).
-constexpr std::string_view kDefaultLocalArchivePassword = "aegra-local";
-
 class FixedPasswordSecret final : public ports::IResolvedSecret {
   public:
     explicit FixedPasswordSecret(const std::string_view password) noexcept : password_(password) {}
@@ -43,6 +39,7 @@ class FixedPasswordSecret final : public ports::IResolvedSecret {
 struct ResolvedBackupSecrets final {
     std::unique_ptr<ports::IResolvedSecret> archive;
     std::unique_ptr<ports::IResolvedSecret> parent;
+    bool encryption_enabled{false};
 };
 
 base::Result<void> invalid(const char* message) {
@@ -219,6 +216,7 @@ WindowsPersonalBackupRequest make_backup_request(
     }
     request.destination = path_from_utf8(job.target_ref);
     request.password = secrets.archive->view();
+    request.encryption_enabled = secrets.encryption_enabled;
     request.backup_type = job.backup->type == contracts::BackupType::kFull
                               ? WindowsPersonalBackupType::kFull
                               : WindowsPersonalBackupType::kIncremental;
@@ -245,21 +243,33 @@ base::Result<ResolvedBackupSecrets>
 resolve_backup_secrets(const contracts::JobRequest& job, ports::ICredentialResolver& credentials,
                        const base::CancellationToken& cancellation) {
     ResolvedBackupSecrets result;
-    if (!job.credential_refs.empty() && !job.credential_refs.front().value.empty()) {
-        auto archive = credentials.resolve(job.credential_refs.front(), cancellation);
-        if (!archive || archive.value() == nullptr || archive.value()->view().empty()) {
-            const auto code = !archive ? archive.error().code : base::ErrorCode::kUnauthorized;
-            return base::Result<ResolvedBackupSecrets>::failure({code, "archive credential failed"});
+    result.encryption_enabled = job.backup->encryption_enabled;
+    if (!result.encryption_enabled) {
+        if (!job.credential_refs.empty()) {
+            return base::Result<ResolvedBackupSecrets>::failure(
+                {base::ErrorCode::kInvalidArgument,
+                 "unencrypted backup must not supply credentials"});
         }
-        result.archive = std::move(archive).value();
-    } else {
-        // No credential on the job: use the fixed personal-local password material.
-        result.archive = std::make_unique<FixedPasswordSecret>(kDefaultLocalArchivePassword);
+        // Empty password view for unencrypted archives.
+        result.archive = std::make_unique<FixedPasswordSecret>(std::string_view{});
+        if (job.backup->type != contracts::BackupType::kFull) {
+            result.parent = std::make_unique<FixedPasswordSecret>(std::string_view{});
+        }
+        return base::Result<ResolvedBackupSecrets>::success(std::move(result));
     }
+    if (job.credential_refs.empty() || job.credential_refs.front().value.empty()) {
+        return base::Result<ResolvedBackupSecrets>::failure(
+            {base::ErrorCode::kUnauthorized, "encrypted backup requires a password credential"});
+    }
+    auto archive = credentials.resolve(job.credential_refs.front(), cancellation);
+    if (!archive || archive.value() == nullptr || archive.value()->view().empty()) {
+        const auto code = !archive ? archive.error().code : base::ErrorCode::kUnauthorized;
+        return base::Result<ResolvedBackupSecrets>::failure({code, "archive credential failed"});
+    }
+    result.archive = std::move(archive).value();
     if (job.backup->type == contracts::BackupType::kFull) {
         return base::Result<ResolvedBackupSecrets>::success(std::move(result));
     }
-    // Incremental: parent credential optional; fall back to the same local password.
     if (!job.backup->parent_credential_ref.value.empty()) {
         auto parent = credentials.resolve(job.backup->parent_credential_ref, cancellation);
         if (!parent || parent.value() == nullptr || parent.value()->view().empty()) {
@@ -268,7 +278,8 @@ resolve_backup_secrets(const contracts::JobRequest& job, ports::ICredentialResol
         }
         result.parent = std::move(parent).value();
     } else {
-        result.parent = std::make_unique<FixedPasswordSecret>(kDefaultLocalArchivePassword);
+        // Parent uses the same archive password when not specified separately.
+        result.parent = std::make_unique<FixedPasswordSecret>(result.archive->view());
     }
     return base::Result<ResolvedBackupSecrets>::success(std::move(result));
 }

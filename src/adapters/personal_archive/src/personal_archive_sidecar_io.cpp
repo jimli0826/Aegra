@@ -135,23 +135,33 @@ decode_sidecar_payload_data(const archive::SidecarHeader& header,
                             const std::span<const std::byte> ciphertext,
                             const ArchiveKeyContext& archive_context,
                             const std::string_view password, const std::uint64_t maximum_size) {
-    auto aad = make_sidecar_aad(header);
-    if (!aad) {
-        return base::Result<archive::SidecarPayload>::failure(aad.error());
-    }
-    crypto_sodium::SidecarProtectionContext protection;
-    protection.kdf = {archive_context.envelope.kdf_opslimit,
-                      archive_context.envelope.kdf_memlimit_bytes,
-                      archive_context.envelope.kdf_parameters_version};
-    protection.salt = archive_context.envelope.salt;
-    protection.nonce = header.nonce;
-    auto compressed = crypto_sodium::unprotect_sidecar_payload(
-        ciphertext, header.authentication_tag, password, aad.value(), protection);
-    if (!compressed) {
-        return base::Result<archive::SidecarPayload>::failure(compressed.error());
+    std::vector<std::byte> compressed;
+    if ((header.flags & archive::kSidecarFlagEncrypted) != 0) {
+        if (password.empty()) {
+            return base::Result<archive::SidecarPayload>::failure(
+                error(base::ErrorCode::kUnauthorized, "encrypted sidecar requires a password"));
+        }
+        auto aad = make_sidecar_aad(header);
+        if (!aad) {
+            return base::Result<archive::SidecarPayload>::failure(aad.error());
+        }
+        crypto_sodium::SidecarProtectionContext protection;
+        protection.kdf = {archive_context.envelope.kdf_opslimit,
+                          archive_context.envelope.kdf_memlimit_bytes,
+                          archive_context.envelope.kdf_parameters_version};
+        protection.salt = archive_context.envelope.salt;
+        protection.nonce = header.nonce;
+        auto unlocked = crypto_sodium::unprotect_sidecar_payload(
+            ciphertext, header.authentication_tag, password, aad.value(), protection);
+        if (!unlocked) {
+            return base::Result<archive::SidecarPayload>::failure(unlocked.error());
+        }
+        compressed = std::move(unlocked).value();
+    } else {
+        compressed.assign(ciphertext.begin(), ciphertext.end());
     }
     auto plaintext = compression_zstd::decompress(
-        compressed.value(), static_cast<std::size_t>(header.payload_uncompressed_size),
+        compressed, static_cast<std::size_t>(header.payload_uncompressed_size),
         static_cast<std::size_t>(maximum_size));
     if (!plaintext) {
         return base::Result<archive::SidecarPayload>::failure(plaintext.error());
@@ -200,10 +210,6 @@ base::Result<void> write_sidecar(const SidecarWriteRequest& request) {
     if (!compressed) {
         return base::Result<void>::failure(compressed.error());
     }
-    auto protection = crypto_sodium::create_sidecar_protection_context(request.kdf, request.salt);
-    if (!protection) {
-        return base::Result<void>::failure(protection.error());
-    }
     archive::SidecarHeader header;
     header.block_size = request.block_size;
     header.file_uuid = request.file_uuid;
@@ -214,24 +220,44 @@ base::Result<void> write_sidecar(const SidecarWriteRequest& request) {
     header.volume_count = static_cast<std::uint32_t>(request.payload.volumes.size());
     header.payload_uncompressed_size = encoded_payload.value().size();
     header.payload_stored_size = compressed.value().size();
-    header.nonce = protection.value().nonce;
-    auto aad = make_sidecar_aad(header);
-    if (!aad) {
-        return base::Result<void>::failure(aad.error());
+    std::vector<std::byte> stored_payload = std::move(compressed).value();
+    if (request.encryption_enabled) {
+        if (request.password.empty()) {
+            return base::Result<void>::failure(
+                error(base::ErrorCode::kInvalidArgument, "encrypted sidecar requires a password"));
+        }
+        auto protection =
+            crypto_sodium::create_sidecar_protection_context(request.kdf, request.salt);
+        if (!protection) {
+            return base::Result<void>::failure(protection.error());
+        }
+        header.flags = archive::kSidecarFlagEncrypted;
+        header.encryption_method = archive::SidecarEncryptionMethod::kXChaCha20Poly1305;
+        header.nonce = protection.value().nonce;
+        auto aad = make_sidecar_aad(header);
+        if (!aad) {
+            return base::Result<void>::failure(aad.error());
+        }
+        auto protected_payload = crypto_sodium::protect_sidecar_payload(
+            stored_payload, request.password, aad.value(), protection.value());
+        if (!protected_payload) {
+            return base::Result<void>::failure(protected_payload.error());
+        }
+        header.authentication_tag = protected_payload.value().tag;
+        stored_payload = std::move(protected_payload).value().ciphertext;
+    } else {
+        header.flags = 0;
+        header.encryption_method = archive::SidecarEncryptionMethod::kNone;
+        header.nonce.fill(std::byte{0});
+        header.authentication_tag.fill(std::byte{0});
     }
-    auto protected_payload = crypto_sodium::protect_sidecar_payload(
-        compressed.value(), request.password, aad.value(), protection.value());
-    if (!protected_payload) {
-        return base::Result<void>::failure(protected_payload.error());
-    }
-    header.authentication_tag = protected_payload.value().tag;
     auto encoded_header = archive::encode_sidecar_header(header);
     if (!encoded_header) {
         return base::Result<void>::failure(encoded_header.error());
     }
     std::ofstream output(request.destination, std::ios::binary | std::ios::trunc);
     auto header_written = write_bytes(output, encoded_header.value());
-    auto payload_written = write_bytes(output, protected_payload.value().ciphertext);
+    auto payload_written = write_bytes(output, stored_payload);
     output.flush();
     if (!header_written || !payload_written || !output) {
         return base::Result<void>::failure(
@@ -245,7 +271,7 @@ base::Result<void> write_sidecar(const SidecarWriteRequest& request) {
 base::Result<ArchiveSidecar> load_archive_sidecar(const std::filesystem::path& archive_path,
                                                   const std::string_view password,
                                                   const std::uint64_t maximum_uncompressed_size) {
-    if (archive_path.empty() || password.empty() || maximum_uncompressed_size == 0 ||
+    if (archive_path.empty() || maximum_uncompressed_size == 0 ||
         maximum_uncompressed_size > (std::numeric_limits<std::size_t>::max)()) {
         return base::Result<ArchiveSidecar>::failure(
             error(base::ErrorCode::kInvalidArgument, "sidecar open request is invalid"));

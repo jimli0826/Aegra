@@ -176,4 +176,34 @@ WindowsCredentialResolver::resolve(const contracts::SecretRef& secret_ref,
     return LockedSecret::create(bytes);
 }
 
+base::Result<contracts::SecretRef>
+store_generic_windows_credential(const std::string_view target_name,
+                                 const std::string_view secret_material) {
+    if (target_name.empty() || target_name.size() > CRED_MAX_GENERIC_TARGET_NAME_LENGTH ||
+        secret_material.empty() || secret_material.size() > CRED_MAX_CREDENTIAL_BLOB_SIZE) {
+        return base::Result<contracts::SecretRef>::failure(
+            base::Error{base::ErrorCode::kInvalidArgument, "credential material is invalid"});
+    }
+    auto target = to_wide(std::string(target_name));
+    if (!target) {
+        return base::Result<contracts::SecretRef>::failure(target.error());
+    }
+    CREDENTIALW credential{};
+    credential.Type = CRED_TYPE_GENERIC;
+    credential.TargetName = target.value().data();
+    credential.CredentialBlobSize = static_cast<DWORD>(secret_material.size());
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast) CredWriteW requires LPBYTE.
+    credential.CredentialBlob =
+        reinterpret_cast<LPBYTE>(const_cast<char*>(secret_material.data()));
+    credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
+    credential.UserName = nullptr;
+    if (!CredWriteW(&credential, 0)) {
+        return base::Result<contracts::SecretRef>::failure(
+            base::Error{base::ErrorCode::kIoFailure, "Windows credential store failed"});
+    }
+    contracts::SecretRef reference;
+    reference.value = std::string(kCredentialPrefix) + std::string(target_name);
+    return base::Result<contracts::SecretRef>::success(std::move(reference));
+}
+
 } // namespace aegra::adapters::windows_system

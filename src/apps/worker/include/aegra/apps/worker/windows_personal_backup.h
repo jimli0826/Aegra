@@ -28,6 +28,7 @@ struct WindowsPersonalBackupRequest final {
     std::vector<std::filesystem::path> volume_guid_paths;
     std::filesystem::path destination;
     std::string_view password;
+    bool encryption_enabled{false};
     WindowsPersonalBackupType backup_type{WindowsPersonalBackupType::kFull};
     std::filesystem::path parent_source;
     std::string_view parent_password;

@@ -1,8 +1,11 @@
 #pragma once
 
+#include "aegra/contracts/job.h"
 #include "aegra/ports/clock.h"
 #include "aegra/ports/credential.h"
 #include "aegra/ports/random.h"
+
+#include <string_view>
 
 namespace aegra::adapters::windows_system {
 
@@ -25,5 +28,10 @@ class WindowsCredentialResolver final : public ports::ICredentialResolver {
     resolve(const contracts::SecretRef& secret_ref,
             const base::CancellationToken& cancellation) override;
 };
+
+/// Stores a generic Windows credential as wincred://<target_name> and returns that SecretRef.
+/// Overwrites an existing target. Used for one-shot personal archive passwords.
+[[nodiscard]] base::Result<contracts::SecretRef>
+store_generic_windows_credential(std::string_view target_name, std::string_view secret_material);
 
 } // namespace aegra::adapters::windows_system

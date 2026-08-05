@@ -37,6 +37,7 @@ target_link_libraries(
     PRIVATE
         Aegra::AdapterPersonalArchive
         Aegra::PersonalRepository
+        Aegra::AdapterWindowsSystem
         nlohmann_json::nlohmann_json
         Advapi32
 )

@@ -59,6 +59,7 @@ encode_supervisor_job_request(const contracts::JobRequest& request) {
             backup["created_utc_ms"] = request.backup->created_utc_ms;
             backup["exclude_page_and_hibernation_files"] =
                 request.backup->exclude_page_and_hibernation_files;
+            backup["encryption_enabled"] = request.backup->encryption_enabled;
             root["backup"] = backup;
         }
 

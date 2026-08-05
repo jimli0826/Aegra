@@ -40,6 +40,9 @@ struct BackupOptions final {
     /// When true (default), pagefile.sys / hiberfil.sys / swapfile.sys extents are zero-filled
     /// without reading (aligned with Desktop "Exclude pagefile / hiberfil / swapfile").
     bool exclude_page_and_hibernation_files{true};
+    /// When true, archive metadata/payload use AEAD with credential_refs password.
+    /// When false, archive is written unencrypted and password must be empty.
+    bool encryption_enabled{false};
 };
 
 struct JobRequest final {

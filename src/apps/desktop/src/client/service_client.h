@@ -157,7 +157,8 @@ class ServiceClient final : public QObject {
     Q_INVOKABLE void refreshSchedules();
     /// Loads Manifest volumes for a recovery point (Restore Source Disks). Async; emits
     /// recoveryPointLayoutChanged when finished. Pass empty recovery_point_id to clear.
-    Q_INVOKABLE void loadRecoveryPointLayout(const QString& recovery_point_id);
+    Q_INVOKABLE void loadRecoveryPointLayout(const QString& recovery_point_id,
+                                             const QString& archive_password = {});
     Q_PROPERTY(bool recoveryPointLayoutLoading READ recoveryPointLayoutLoading NOTIFY
                    recoveryPointLayoutChanged)
     Q_PROPERTY(QVariantList recoveryPointSourceDisks READ recoveryPointSourceDisks NOTIFY
@@ -169,11 +170,15 @@ class ServiceClient final : public QObject {
                                      bool enabled, const QVariantList& source_ids,
                                      const QString& connection_id, const QString& frequency,
                                      const QString& time_of_day,
-                                     bool exclude_page_and_hibernation_files = true);
+                                     bool exclude_page_and_hibernation_files = true,
+                                     bool encryption_enabled = false,
+                                     const QString& archive_password = {});
     /// Creates one schedule containing all selected volumes.
     Q_INVOKABLE bool createSchedule(const QVariantList& sources, const QString& connection_id,
                                     const QString& frequency, const QString& time_of_day,
-                                    bool exclude_page_and_hibernation_files = true);
+                                    bool exclude_page_and_hibernation_files = true,
+                                    bool encryption_enabled = false,
+                                    const QString& archive_password = {});
     Q_INVOKABLE bool deleteSchedule(const QString& schedule_id);
     Q_INVOKABLE bool setScheduleEnabled(const QString& schedule_id, bool enabled);
     Q_INVOKABLE void selectRepositoryConnection(const QString& connection_id);
@@ -185,8 +190,12 @@ class ServiceClient final : public QObject {
     Q_INVOKABLE void removeRepositoryConnection(const QString& connection_id);
     /// Returns true if the start request was accepted for send (not yet Service ack).
     /// exclude_page_and_hibernation_files maps to Options "Exclude pagefile / hiberfil / swapfile".
+    /// encryption_enabled + archive_password map to Options "Encryption (password required)".
     Q_INVOKABLE bool startBackup(const QVariantList& source_ids, const QString& connection_id,
-                                 bool exclude_page_and_hibernation_files = true);
+                                 bool exclude_page_and_hibernation_files = true,
+                                 bool encryption_enabled = false,
+                                 const QString& archive_password = {},
+                                 const QString& schedule_id = {});
     Q_INVOKABLE void cancelActiveBackup();
     Q_INVOKABLE void dismissToast();
     /// Show a top toast (success/info). Safe for QML schedule Run feedback.

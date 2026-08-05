@@ -446,13 +446,22 @@ parse_recovery_point_source_volume(const Json& payload) {
                 {"backup_type", static_cast<std::uint8_t>(summary.backup_type)},
                 {"trigger", encode_schedule_trigger(summary.trigger)},
                 {"next_run_utc_ms", optional_uint64_json(summary.next_run_utc_ms)},
-                {"exclude_page_and_hibernation_files", summary.exclude_page_and_hibernation_files}};
+                {"exclude_page_and_hibernation_files", summary.exclude_page_and_hibernation_files},
+                {"encryption_enabled", summary.encryption_enabled}};
 }
 
 [[nodiscard]] contracts::ScheduleSummary parse_schedule(const Json& payload) {
-    constexpr std::array<std::string_view, 9> keys{
-        "schedule_id", "display_name", "enabled", "source_ids", "repository_connection_id",
-        "backup_type", "trigger", "next_run_utc_ms", "exclude_page_and_hibernation_files"};
+    constexpr std::array<std::string_view, 10> keys{
+        "schedule_id",
+        "display_name",
+        "enabled",
+        "source_ids",
+        "repository_connection_id",
+        "backup_type",
+        "trigger",
+        "next_run_utc_ms",
+        "exclude_page_and_hibernation_files",
+        "encryption_enabled"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("schedule summary fields are invalid");
     }
@@ -468,6 +477,7 @@ parse_recovery_point_source_volume(const Json& payload) {
     summary.next_run_utc_ms = optional_uint64(payload.at("next_run_utc_ms"));
     summary.exclude_page_and_hibernation_files =
         payload.at("exclude_page_and_hibernation_files").get<bool>();
+    summary.encryption_enabled = payload.at("encryption_enabled").get<bool>();
     return summary;
 }
 

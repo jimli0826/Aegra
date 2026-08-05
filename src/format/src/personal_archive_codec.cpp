@@ -103,11 +103,19 @@ template <std::size_t Size>
     const auto backup_type =
         header.flags & (kBackupFlagFull | kBackupFlagIncremental | kBackupFlagDifferential);
     if (header.block_size == 0 || header.default_chunk_size == 0 ||
-        (header.flags & kBackupFlagEncrypted) == 0 || (header.flags & ~known_flags) != 0) {
+        (header.flags & ~known_flags) != 0) {
         return base::Result<void>::failure(corrupt("backup header fields are invalid"));
     }
-    if (header.compression_method != CompressionMethod::kZstandard ||
-        header.encryption_method != PayloadEncryptionMethod::kXChaCha20Poly1305) {
+    const bool encrypted = (header.flags & kBackupFlagEncrypted) != 0;
+    if (encrypted) {
+        if (header.encryption_method != PayloadEncryptionMethod::kXChaCha20Poly1305) {
+            return base::Result<void>::failure(corrupt("backup algorithms are unsupported"));
+        }
+    } else if (header.encryption_method != PayloadEncryptionMethod::kNone) {
+        return base::Result<void>::failure(corrupt("unencrypted backup has invalid method"));
+    }
+    if (header.compression_method != CompressionMethod::kZstandard &&
+        header.compression_method != CompressionMethod::kNone) {
         return base::Result<void>::failure(corrupt("backup algorithms are unsupported"));
     }
     if (backup_type != kBackupFlagFull && backup_type != kBackupFlagIncremental &&
@@ -165,18 +173,25 @@ template <std::size_t Size>
 }
 
 [[nodiscard]] base::Result<void> validate_envelope(const MetadataEnvelopeHeader& header) {
-    if ((header.flags & kCborMetadataFlagEncrypted) == 0 ||
-        header.encryption_method != MetadataEncryptionMethod::kXChaCha20Poly1305 ||
-        header.kdf_method != MetadataKdfMethod::kArgon2Id) {
-        return base::Result<void>::failure(corrupt("metadata envelope is not formally encrypted"));
+    if (header.key_slot_count != 0 || header.plaintext_size == 0 ||
+        header.plaintext_size != header.ciphertext_size) {
+        return base::Result<void>::failure(corrupt("metadata envelope sizes are invalid"));
     }
-    if (header.nonce_size != 24 || header.tag_size != 16 || header.key_slot_count != 0) {
-        return base::Result<void>::failure(corrupt("metadata envelope sizes are unsupported"));
+    const bool encrypted = (header.flags & kCborMetadataFlagEncrypted) != 0;
+    if (encrypted) {
+        if (header.encryption_method != MetadataEncryptionMethod::kXChaCha20Poly1305 ||
+            header.kdf_method != MetadataKdfMethod::kArgon2Id || header.nonce_size != 24 ||
+            header.tag_size != 16 || header.kdf_opslimit == 0 || header.kdf_memlimit_bytes == 0 ||
+            header.kdf_parameters_version != 1) {
+            return base::Result<void>::failure(corrupt("metadata envelope is not formally encrypted"));
+        }
+        return base::Result<void>::success();
     }
-    if (header.plaintext_size == 0 || header.plaintext_size != header.ciphertext_size ||
-        header.kdf_opslimit == 0 || header.kdf_memlimit_bytes == 0 ||
-        header.kdf_parameters_version != 1) {
-        return base::Result<void>::failure(corrupt("metadata envelope KDF fields are invalid"));
+    if (header.encryption_method != MetadataEncryptionMethod::kNone ||
+        header.kdf_method != MetadataKdfMethod::kNone || header.tag_size != 0 ||
+        header.kdf_opslimit != 0 || header.kdf_memlimit_bytes != 0 ||
+        header.kdf_parameters_version != 0) {
+        return base::Result<void>::failure(corrupt("unencrypted metadata envelope is invalid"));
     }
     return base::Result<void>::success();
 }

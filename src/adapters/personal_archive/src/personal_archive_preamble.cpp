@@ -124,6 +124,21 @@ make_protected_metadata(const archive::MetadataEnvelopeHeader& envelope,
                                                               const std::string_view password) {
     const auto ciphertext = std::span<const std::byte>(encoded.payload)
                                 .first(static_cast<std::size_t>(encoded.envelope.ciphertext_size));
+    const bool encrypted =
+        (encoded.envelope.flags & archive::kCborMetadataFlagEncrypted) != 0;
+    if (!encrypted) {
+        if (!password.empty()) {
+            return base::Result<format::Manifest>::failure(
+                corrupt("unencrypted archive opened with a password"));
+        }
+        return format::decode_manifest_cbor(ciphertext);
+    }
+    if (encoded.envelope.tag_size == 0 ||
+        encoded.payload.size() <
+            static_cast<std::size_t>(encoded.envelope.ciphertext_size + encoded.envelope.tag_size)) {
+        return base::Result<format::Manifest>::failure(
+            corrupt("encrypted metadata payload is truncated"));
+    }
     const auto tag = std::span<const std::byte>(encoded.payload).last(encoded.envelope.tag_size);
     auto protected_metadata = make_protected_metadata(encoded.envelope, ciphertext, tag);
     const auto aad = make_authenticated_data(encoded.header_bytes, encoded.envelope_bytes);

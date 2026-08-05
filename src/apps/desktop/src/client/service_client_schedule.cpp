@@ -195,10 +195,20 @@ bool ServiceClient::upsertSchedule(const QString& schedule_id, const QString& di
                                    const bool enabled, const QVariantList& source_ids,
                                    const QString& connection_id, const QString& frequency,
                                    const QString& time_of_day,
-                                   const bool exclude_page_and_hibernation_files) {
+                                   const bool exclude_page_and_hibernation_files,
+                                   const bool encryption_enabled,
+                                   const QString& archive_password) {
     if (state_ != State::kReady || !schedules_available_ || schedule_command_busy_ ||
         source_ids.isEmpty() || source_ids.size() > 100 || connection_id.isEmpty() ||
         display_name.isEmpty()) {
+        return false;
+    }
+    if (encryption_enabled) {
+        if (schedule_id.isEmpty() &&
+            (archive_password.isEmpty() || archive_password.size() > 32)) {
+            return false;
+        }
+    } else if (!archive_password.isEmpty()) {
         return false;
     }
     const auto trigger_kind =
@@ -215,7 +225,7 @@ bool ServiceClient::upsertSchedule(const QString& schedule_id, const QString& di
     const auto body = encode_upsert_schedule_request(
         request_id, idempotency_key, schedule_id, display_name, enabled, source_ids, connection_id,
         kBackupTypeFull, trigger_kind, local_minute, 0, QStringLiteral("UTC"),
-        exclude_page_and_hibernation_files);
+        exclude_page_and_hibernation_files, encryption_enabled, archive_password);
     const auto started =
         coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
             return handle_schedule_command_frame(frame_body);
@@ -229,7 +239,9 @@ bool ServiceClient::upsertSchedule(const QString& schedule_id, const QString& di
 
 bool ServiceClient::createSchedule(const QVariantList& sources, const QString& connection_id,
                                    const QString& frequency, const QString& time_of_day,
-                                   const bool exclude_page_and_hibernation_files) {
+                                   const bool exclude_page_and_hibernation_files,
+                                   const bool encryption_enabled,
+                                   const QString& archive_password) {
     if (state_ != State::kReady || !schedules_available_ || schedule_command_busy_ ||
         sources.isEmpty() || sources.size() > 100 || connection_id.isEmpty()) {
         return false;
@@ -249,7 +261,8 @@ bool ServiceClient::createSchedule(const QVariantList& sources, const QString& c
         display_names.push_back(display_name);
     }
     return upsertSchedule({}, display_names.join(QStringLiteral(", ")), true, source_ids,
-                          connection_id, frequency, time_of_day, exclude_page_and_hibernation_files);
+                          connection_id, frequency, time_of_day, exclude_page_and_hibernation_files,
+                          encryption_enabled, archive_password);
 }
 
 bool ServiceClient::deleteSchedule(const QString& schedule_id) {

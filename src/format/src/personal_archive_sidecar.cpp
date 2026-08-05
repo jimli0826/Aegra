@@ -70,12 +70,19 @@ template <std::size_t Size>
 }
 
 [[nodiscard]] base::Result<void> validate_header(const SidecarHeader& header) {
-    if (header.flags != kSidecarFlagEncrypted || header.block_size == 0 ||
-        header.hash_algorithm != SidecarHashAlgorithm::kSha256 ||
+    if (header.block_size == 0 || header.hash_algorithm != SidecarHashAlgorithm::kSha256 ||
         header.hash_size != kSidecarHashSize ||
-        header.compression_method != SidecarCompressionMethod::kZstandard ||
-        header.encryption_method != SidecarEncryptionMethod::kXChaCha20Poly1305) {
+        header.compression_method != SidecarCompressionMethod::kZstandard) {
         return base::Result<void>::failure(corrupt("sidecar algorithms are invalid"));
+    }
+    const bool encrypted = (header.flags & kSidecarFlagEncrypted) != 0;
+    if (encrypted) {
+        if (header.flags != kSidecarFlagEncrypted ||
+            header.encryption_method != SidecarEncryptionMethod::kXChaCha20Poly1305) {
+            return base::Result<void>::failure(corrupt("sidecar encryption is invalid"));
+        }
+    } else if (header.flags != 0 || header.encryption_method != SidecarEncryptionMethod::kNone) {
+        return base::Result<void>::failure(corrupt("unencrypted sidecar flags are invalid"));
     }
     if (header.volume_count == 0 || header.payload_uncompressed_size == 0 ||
         header.payload_stored_size == 0) {

@@ -1,9 +1,13 @@
 #include "client/service_client.h"
 #include "locale/locale_controller.h"
 
+#include <QDir>
 #include <QFile>
 #include <QGuiApplication>
 #include <QIcon>
+#include <QLocalServer>
+#include <QLocalSocket>
+#include <QLockFile>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQmlError>
@@ -12,8 +16,13 @@
 #include <QStandardPaths>
 #include <QTextStream>
 #include <QUrl>
+#include <QWindow>
 
 namespace {
+
+// Per-user lock + local socket (same pattern as old AegraImage GUI).
+constexpr char kSingleInstanceLockName[] = "Aegra.Desktop.singleinstance.lock";
+constexpr char kSingleInstanceServerName[] = "Aegra.Desktop.IPC";
 
 [[nodiscard]] QIcon load_product_icon() {
     QIcon icon;
@@ -49,11 +58,62 @@ void write_qml_errors(const QList<QQmlError>& errors) {
     }
 }
 
+void raise_main_windows(QQmlApplicationEngine& engine) {
+    for (QObject* object : engine.rootObjects()) {
+        auto* window = qobject_cast<QWindow*>(object);
+        if (window == nullptr) {
+            continue;
+        }
+        if (window->windowState() & Qt::WindowMinimized) {
+            window->showNormal();
+        } else {
+            window->show();
+        }
+        window->raise();
+        window->requestActivate();
+    }
+}
+
+/// True if this process is the primary UI. Secondary instance asks primary to raise and exits.
+[[nodiscard]] bool acquire_single_instance(QLockFile& lock_file) {
+    // Reclaim lock after crash (stale holder).
+    lock_file.setStaleLockTime(10000);
+    if (lock_file.tryLock(200)) {
+        return true;
+    }
+    QLocalSocket socket;
+    socket.connectToServer(QLatin1String(kSingleInstanceServerName));
+    if (socket.waitForConnected(800)) {
+        socket.write("raise\n");
+        socket.flush();
+        socket.waitForBytesWritten(500);
+        socket.disconnectFromServer();
+    }
+    return false;
+}
+
 } // namespace
 
 int main(int argument_count, char* arguments[]) {
     QGuiApplication application(argument_count, arguments);
     configure_application(application);
+
+    const QString lock_path =
+        QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
+            .filePath(QLatin1String(kSingleInstanceLockName));
+    QLockFile single_instance_lock(lock_path);
+    if (!acquire_single_instance(single_instance_lock)) {
+        return 0;
+    }
+
+    QLocalServer::removeServer(QLatin1String(kSingleInstanceServerName));
+    QLocalServer ipc_server;
+    ipc_server.setSocketOptions(QLocalServer::UserAccessOption);
+    if (!ipc_server.listen(QLatin1String(kSingleInstanceServerName))) {
+        // Non-fatal: lock still enforces single instance; raise IPC may fail.
+        qWarning("Single-instance IPC server failed to listen: %s",
+                 qPrintable(ipc_server.errorString()));
+    }
 
     QQmlApplicationEngine engine;
     aegra::desktop::LocaleController locale_controller(&engine);
@@ -75,5 +135,16 @@ int main(int argument_count, char* arguments[]) {
         },
         Qt::QueuedConnection);
     engine.load(root);
-    return engine.rootObjects().isEmpty() ? EXIT_FAILURE : application.exec();
+    if (engine.rootObjects().isEmpty()) {
+        return EXIT_FAILURE;
+    }
+
+    QObject::connect(&ipc_server, &QLocalServer::newConnection, &application, [&]() {
+        while (QLocalSocket* client = ipc_server.nextPendingConnection()) {
+            client->deleteLater();
+            raise_main_windows(engine);
+        }
+    });
+
+    return application.exec();
 }

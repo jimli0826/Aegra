@@ -14,6 +14,9 @@
 直接执行备份、恢复、挂载和 Repository I/O 的代码。旧 Backend 的所有数据访问改写为版本化 Service IPC；
 旧 UI 需要但 Service 尚未提供的操作保持禁用，不用本地直连临时补齐。不迁移旧 `I18n.qml` JavaScript 字典。
 
+进程模型对齐旧 GUI：`main.cpp` 使用 per-user `QLockFile` + `QLocalServer` 保证 **仅一个 Desktop
+实例**。二次启动不打开第二窗口，而是向首实例发送 raise 并退出。
+
 ## 旧 UI 显示一致性
 
 - 开发或返工任何 Desktop 页面前，必须运行或检查旧 `D:\Work\OpenSource\backup\src\gui` 对应页面，并保存旧 UI

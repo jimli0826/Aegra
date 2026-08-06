@@ -1113,6 +1113,66 @@ Server: %1</source>
         <source>Volume %1</source>
         <translation>磁碟區 %1</translation>
     </message>
+    <message id="aegra.restore.mode_disk">
+        <source>Disk</source>
+        <translation>整碟</translation>
+    </message>
+    <message id="aegra.restore.mode_volume">
+        <source>Volume</source>
+        <translation>磁碟區</translation>
+    </message>
+    <message id="aegra.restore.source_volumes">
+        <source>Source Volumes</source>
+        <translation>來源磁碟區</translation>
+    </message>
+    <message id="aegra.restore.source_volume_hint">
+        <source>(drag onto a target volume, or use Restore to)</source>
+        <translation>（拖放到目標磁碟區，或使用「還原到」）</translation>
+    </message>
+    <message id="aegra.restore.target_volumes">
+        <source>Target Volumes</source>
+        <translation>目標磁碟區</translation>
+    </message>
+    <message id="aegra.restore.target_volume_hint">
+        <source>(this PC — drop a source volume here)</source>
+        <translation>（此電腦 — 將來源磁碟區拖放到此處）</translation>
+    </message>
+    <message id="aegra.restore.target_volume_empty">
+        <source>Local volumes will appear when inventory is available</source>
+        <translation>清單可用時會顯示本機磁碟區</translation>
+    </message>
+    <message id="aegra.restore.select_checkpoint_source_volumes">
+        <source>Select a checkpoint to view source volumes</source>
+        <translation>選擇檢查點以檢視來源磁碟區</translation>
+    </message>
+    <message id="aegra.restore.volume_map_required">
+        <source>Choose “Restore to” on a source volume</source>
+        <translation>請在來源磁碟區上選擇「還原到」</translation>
+    </message>
+    <message id="aegra.restore.volume_target_too_small">
+        <source>Target volume is smaller than the source volume</source>
+        <translation>目標磁碟區小於來源磁碟區</translation>
+    </message>
+    <message id="aegra.restore.volume_target_in_use">
+        <source>That target is already mapped by another source volume</source>
+        <translation>該目標已被另一個來源磁碟區對應</translation>
+    </message>
+    <message id="aegra.restore.volume_system_target_blocked">
+        <source>System volume restore requires PE (not available online)</source>
+        <translation>系統磁碟區還原需要 PE（線上不可用）</translation>
+    </message>
+    <message id="aegra.restore.volume_target_read_only">
+        <source>Restore target volume is read-only</source>
+        <translation>還原目標磁碟區為唯讀</translation>
+    </message>
+    <message id="aegra.restore.read_only_tag">
+        <source>— read-only</source>
+        <translation>— 唯讀</translation>
+    </message>
+    <message id="aegra.restore.volume_options_hint">
+        <source>Volume restore writes one backup volume onto an existing non-system volume of equal or larger size. Partition layout is not changed.</source>
+        <translation>磁碟區還原會將一個備份磁碟區寫入既有、容量不小於來源的非系統磁碟區。不變更分割區配置。</translation>
+    </message>
     <message id="aegra.restore.no_recovery_points_on_date">
         <source>No recovery points on this date</source>
         <translation>此日期沒有還原點</translation>
@@ -1157,9 +1217,21 @@ Server: %1</source>
         <source>Image</source>
         <translation>映像</translation>
     </message>
+    <message id="aegra.mount.col.size">
+        <source>Size</source>
+        <translation>大小</translation>
+    </message>
     <message id="aegra.mount.drive_letter">
-        <source>Preferred drive letter</source>
-        <translation>偏好磁碟機代號</translation>
+        <source>Drive letter</source>
+        <translation>磁碟機代號</translation>
+    </message>
+    <message id="aegra.mount.drive_letter_auto">
+        <source>Auto</source>
+        <translation>自動</translation>
+    </message>
+    <message id="aegra.mount.drive_letter_hint">
+        <source>Preferred letter for the first volume. Choose Auto to pick the next free letter. Additional volumes are assigned automatically.</source>
+        <translation>優先用於第一個磁碟區的代號。選擇「自動」則使用下一個空閒代號；其餘磁碟區自動分配。</translation>
     </message>
     <message id="aegra.mount.unmount">
         <source>Unmount</source>

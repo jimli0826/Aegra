@@ -27,9 +27,14 @@ Item {
     property string panelSelectedDate: ""
     property var panelCheckpoints: []
     property int panelCheckpointsEpoch: 0
+    /// "disk" = full-disk restore; "volume" = volume→volume restore.
+    property string restoreMode: "disk"
+    readonly property bool isVolumeMode: root.restoreMode === "volume"
+
     /// Source disks from Service GetRecoveryPointLayout (Manifest volumes). Empty until a
     /// checkpoint is selected and the layout query succeeds.
     readonly property var sourceDisks: serviceClient.recoveryPointSourceDisks
+    readonly property var sourceVolumes: serviceClient.recoveryPointSourceVolumes
     readonly property bool sourceLayoutLoading: serviceClient.recoveryPointLayoutLoading
     readonly property string sourceLayoutError: serviceClient.recoveryPointLayoutErrorText
 
@@ -42,8 +47,27 @@ Item {
         return []
     }
 
+    /// Flat inventory volumes (vol.*) for volume-mode targets.
+    readonly property var targetVolumes: {
+        var _dep = serviceClient.sources ? serviceClient.sources.count : 0
+        var out = []
+        var disks = root.targetDisks || []
+        for (var i = 0; i < disks.length; ++i) {
+            var vols = disks[i].volumes || []
+            for (var j = 0; j < vols.length; ++j) {
+                var v = vols[j]
+                if (!v || !v.sourceId)
+                    continue
+                out.push(v)
+            }
+        }
+        return out
+    }
+
     /// Source disk_number (string key) → target disk_number, or -1 when unmapped.
     property var diskMappings: ({})
+    /// Source volumeIndex (string key) → target sourceId, or "" when unmapped.
+    property var volumeMappings: ({})
     /// Bumped on every mapping change so ComboBox/model bindings refresh.
     property int mappingEpoch: 0
     /// True while a source-disk drag hovers a target that fails restore checks.
@@ -61,13 +85,37 @@ Item {
         root.mappingDropBlockReason = ""
     }
 
+    function setRestoreMode(mode) {
+        if (mode !== "disk" && mode !== "volume")
+            return
+        if (root.restoreMode === mode)
+            return
+        root.restoreMode = mode
+        root.clearDiskMappings()
+        root.clearVolumeMappings()
+        if (root.hasCheckpoint && !root.sourceLayoutLoading) {
+            if (mode === "disk")
+                root.initDefaultMappings()
+            else
+                root.initDefaultVolumeMappings()
+        }
+    }
+
     readonly property int mappedCount: {
         var _e = root.mappingEpoch
         var n = 0
-        var map = root.diskMappings || {}
-        for (var k in map) {
-            if (Number(map[k]) >= 0)
-                ++n
+        if (root.isVolumeMode) {
+            var vmap = root.volumeMappings || {}
+            for (var vk in vmap) {
+                if ((vmap[vk] || "").length > 0)
+                    ++n
+            }
+        } else {
+            var map = root.diskMappings || {}
+            for (var k in map) {
+                if (Number(map[k]) >= 0)
+                    ++n
+            }
         }
         return n
     }
@@ -97,8 +145,11 @@ Item {
             //% "Loading source disks..."
             return qsTrId("aegra.restore.loading_source")
         if (!root.hasMapping)
-            //% "Choose “Restore to” on a source disk"
-            return qsTrId("aegra.restore.map_required")
+            return root.isVolumeMode
+                   //% "Choose “Restore to” on a source volume"
+                   ? qsTrId("aegra.restore.volume_map_required")
+                   //% "Choose “Restore to” on a source disk"
+                   : qsTrId("aegra.restore.map_required")
         return ""
     }
 
@@ -117,6 +168,11 @@ Item {
         root.mappingEpoch++
     }
 
+    function clearVolumeMappings() {
+        root.volumeMappings = ({})
+        root.mappingEpoch++
+    }
+
     function mappedTarget(sourceNum) {
         var _e = root.mappingEpoch
         var map = root.diskMappings || {}
@@ -124,6 +180,15 @@ Item {
         if (map[key] === undefined || map[key] === null)
             return -1
         return Number(map[key])
+    }
+
+    function mappedTargetVolume(sourceVolumeIndex) {
+        var _e = root.mappingEpoch
+        var map = root.volumeMappings || {}
+        var key = String(sourceVolumeIndex)
+        if (map[key] === undefined || map[key] === null)
+            return ""
+        return String(map[key] || "")
     }
 
     function isTargetMappedByOther(sourceNum, targetNum) {
@@ -137,6 +202,18 @@ Item {
         return false
     }
 
+    function isVolumeTargetMappedByOther(sourceVolumeIndex, targetSourceId) {
+        if (!targetSourceId || targetSourceId.length === 0)
+            return false
+        var map = root.volumeMappings || {}
+        for (var k in map) {
+            if (Number(k) !== Number(sourceVolumeIndex)
+                    && String(map[k] || "") === String(targetSourceId))
+                return true
+        }
+        return false
+    }
+
     function isDiskMappedAsTarget(diskNum) {
         var _e = root.mappingEpoch
         if (diskNum === undefined || diskNum === null)
@@ -144,6 +221,18 @@ Item {
         var map = root.diskMappings || {}
         for (var k in map) {
             if (Number(map[k]) === Number(diskNum))
+                return true
+        }
+        return false
+    }
+
+    function isVolumeMappedAsTarget(sourceId) {
+        var _e = root.mappingEpoch
+        if (!sourceId || sourceId.length === 0)
+            return false
+        var map = root.volumeMappings || {}
+        for (var k in map) {
+            if (String(map[k] || "") === String(sourceId))
                 return true
         }
         return false
@@ -162,6 +251,29 @@ Item {
         var targets = root.targetDisks || []
         for (var j = 0; j < targets.length; ++j) {
             if (Number(targets[j].diskNumber) === Number(targetNum)) {
+                tgtBytes = Number(targets[j].capacityBytes) || 0
+                break
+            }
+        }
+        if (srcBytes <= 0 || tgtBytes <= 0)
+            return true
+        var tol = 1024 * 1024
+        return tgtBytes + tol >= srcBytes
+    }
+
+    function targetVolumeLargeEnough(sourceVolumeIndex, targetSourceId) {
+        var srcBytes = 0
+        var sources = root.sourceVolumes || []
+        for (var i = 0; i < sources.length; ++i) {
+            if (Number(sources[i].volumeIndex) === Number(sourceVolumeIndex)) {
+                srcBytes = Number(sources[i].capacityBytes) || 0
+                break
+            }
+        }
+        var tgtBytes = 0
+        var targets = root.targetVolumes || []
+        for (var j = 0; j < targets.length; ++j) {
+            if (String(targets[j].sourceId) === String(targetSourceId)) {
                 tgtBytes = Number(targets[j].capacityBytes) || 0
                 break
             }
@@ -192,6 +304,30 @@ Item {
         return ""
     }
 
+    function volumeMappingBlockReason(sourceVolumeIndex, targetSourceId) {
+        if (sourceVolumeIndex < 0 || !targetSourceId || targetSourceId.length === 0)
+            return ""
+        if (!root.targetVolumeLargeEnough(sourceVolumeIndex, targetSourceId))
+            //% "Target volume is smaller than the source volume"
+            return qsTrId("aegra.restore.volume_target_too_small")
+        if (root.isVolumeTargetMappedByOther(sourceVolumeIndex, targetSourceId))
+            //% "That target is already mapped by another source volume"
+            return qsTrId("aegra.restore.volume_target_in_use")
+        var targets = root.targetVolumes || []
+        for (var i = 0; i < targets.length; ++i) {
+            if (String(targets[i].sourceId) !== String(targetSourceId))
+                continue
+            if (targets[i].isSystem === true)
+                //% "System volume restore requires PE (not available online)"
+                return qsTrId("aegra.restore.volume_system_target_blocked")
+            if (targets[i].isReadOnly === true)
+                //% "Restore target volume is read-only"
+                return qsTrId("aegra.restore.volume_target_read_only")
+            break
+        }
+        return ""
+    }
+
     function setDiskMapping(sourceNum, targetNum) {
         if (sourceNum < 0)
             return
@@ -201,6 +337,19 @@ Item {
         var map = Object.assign({}, root.diskMappings || {})
         map[String(sourceNum)] = targetNum
         root.diskMappings = map
+        root.mappingEpoch++
+    }
+
+    function setVolumeMapping(sourceVolumeIndex, targetSourceId) {
+        if (sourceVolumeIndex < 0)
+            return
+        var tid = targetSourceId || ""
+        if (tid.length > 0
+                && root.volumeMappingBlockReason(sourceVolumeIndex, tid).length > 0)
+            return
+        var map = Object.assign({}, root.volumeMappings || {})
+        map[String(sourceVolumeIndex)] = tid
+        root.volumeMappings = map
         root.mappingEpoch++
     }
 
@@ -264,11 +413,22 @@ Item {
         root.mappingEpoch++
     }
 
-    /// Queued multi-disk restore: one Job per source→target mapping (base-first chain each).
+    function initDefaultVolumeMappings() {
+        var map = ({})
+        var sources = root.sourceVolumes || []
+        for (var j = 0; j < sources.length; ++j) {
+            var vi = Number(sources[j].volumeIndex)
+            map[String(vi)] = ""
+        }
+        root.volumeMappings = map
+        root.mappingEpoch++
+    }
+
+    /// Queued multi-disk / multi-volume restore: one Job per mapping.
     property var pendingRestoreQueue: []
     property bool multiRestoreActive: false
 
-    /// All source→target pairs with target >= 0, source source-disk order.
+    /// All source→target pairs with target >= 0, stable source-disk order.
     function allMappedPairs() {
         var pairs = []
         var sources = root.sourceDisks || []
@@ -281,22 +441,99 @@ Item {
         return pairs
     }
 
+    function allMappedVolumePairs() {
+        var pairs = []
+        var sources = root.sourceVolumes || []
+        for (var i = 0; i < sources.length; ++i) {
+            var vi = Number(sources[i].volumeIndex)
+            var tid = root.mappedTargetVolume(vi)
+            if (tid && tid.length > 0)
+                pairs.push({ sourceVolumeIndex: vi, targetSourceId: tid })
+        }
+        return pairs
+    }
+
+    /// Options for source volume → target volume ComboBox.
+    function targetVolumeOptions(sourceVolumeIndex) {
+        var _e = root.mappingEpoch
+        var _t = root.targetVolumes
+        var out = []
+        out.push({
+            //% "Not mapped"
+            label: qsTrId("aegra.restore.not_mapped"),
+            value: "",
+            tooSmall: false,
+            inUse: false,
+            isSystem: false,
+            isReadOnly: false,
+            enabled: true
+        })
+        var targets = root.targetVolumes || []
+        for (var i = 0; i < targets.length; ++i) {
+            var v = targets[i]
+            var sid = String(v.sourceId || "")
+            if (sid.length === 0)
+                continue
+            var lab = v.letter ? (v.letter + ": ") : ""
+            lab += (v.name || sid)
+            if (v.size)
+                lab += "  (" + v.size + ")"
+            var isSystem = v.isSystem === true
+            var isReadOnly = v.isReadOnly === true
+            if (isSystem)
+                //% "[System]"
+                lab += "  " + qsTrId("aegra.restore.system_tag")
+            var tooSmall = !root.targetVolumeLargeEnough(sourceVolumeIndex, sid)
+            var inUse = root.isVolumeTargetMappedByOther(sourceVolumeIndex, sid)
+            if (tooSmall)
+                //% "— too small"
+                lab += "  " + qsTrId("aegra.restore.target_too_small_tag")
+            else if (inUse)
+                //% "— in use"
+                lab += "  " + qsTrId("aegra.restore.target_in_use_tag")
+            else if (isSystem)
+                //% "— PE only"
+                lab += "  " + qsTrId("aegra.restore.pe_only_tag")
+            else if (isReadOnly)
+                //% "— read-only"
+                lab += "  " + qsTrId("aegra.restore.read_only_tag")
+            out.push({
+                label: lab,
+                value: sid,
+                tooSmall: tooSmall,
+                inUse: inUse,
+                isSystem: isSystem,
+                isReadOnly: isReadOnly,
+                enabled: !tooSmall && !inUse && !isSystem && !isReadOnly
+            })
+        }
+        return out
+    }
+
     function startNextQueuedRestore() {
         var q = root.pendingRestoreQueue || []
         if (q.length === 0) {
             root.multiRestoreActive = false
-            // All disk Jobs accepted — show them on Home Tasks.
+            // All Jobs accepted — show them on Home Tasks.
             root.navigateHomeRequested()
             return
         }
         var pair = q[0]
         // Copy remainder so QML binding sees a new array.
         root.pendingRestoreQueue = q.slice(1)
-        var ok = serviceClient.startDiskRestore(pair.source, pair.target,
+        var ok = false
+        if (root.isVolumeMode) {
+            ok = serviceClient.startVolumeRestore(pair.sourceVolumeIndex,
+                                                  pair.targetSourceId,
+                                                  root.selectedCheckpointId,
+                                                  root.pendingLayoutPassword)
+        } else {
+            ok = serviceClient.startDiskRestore(pair.source, pair.target,
                                                root.selectedCheckpointId,
                                                root.pendingLayoutPassword,
                                                root.preserveSignature,
                                                root.autoExtend)
+        }
         if (!ok) {
             root.pendingRestoreQueue = []
             root.multiRestoreActive = false
@@ -306,10 +543,14 @@ Item {
     function startMappedRestore() {
         if (!root.canRestore)
             return
-        var pairs = root.allMappedPairs()
+        var pairs = root.isVolumeMode ? root.allMappedVolumePairs()
+                                      : root.allMappedPairs()
         if (pairs.length === 0) {
-            //% "Choose “Restore to” on a source disk"
-            serviceClient.showToast(qsTrId("aegra.restore.map_required"))
+            serviceClient.showToast(root.isVolumeMode
+                //% "Choose “Restore to” on a source volume"
+                ? qsTrId("aegra.restore.volume_map_required")
+                //% "Choose “Restore to” on a source disk"
+                : qsTrId("aegra.restore.map_required"))
             return
         }
         root.pendingRestoreQueue = pairs
@@ -368,12 +609,14 @@ Item {
             root.selectedCheckpointLabel = ""
             root.pendingLayoutPassword = ""
             root.clearDiskMappings()
+            root.clearVolumeMappings()
             serviceClient.loadRecoveryPointLayout("")
             return
         }
         root.selectedCheckpointId = item.fileUuid || ""
         root.pendingLayoutPassword = ""
         root.clearDiskMappings()
+        root.clearVolumeMappings()
         var bits = []
         if (item.createdText)
             bits.push(item.createdText)
@@ -397,6 +640,7 @@ Item {
             return
         root.pendingLayoutPassword = password || ""
         root.clearDiskMappings()
+        root.clearVolumeMappings()
         serviceClient.loadRecoveryPointLayout(root.selectedCheckpointId, root.pendingLayoutPassword)
     }
 
@@ -407,8 +651,11 @@ Item {
                 return
             if (serviceClient.recoveryPointSourceDisks
                     && serviceClient.recoveryPointSourceDisks.length > 0) {
-                // Layout loaded — default same-number mapping when target exists and is large enough.
-                root.initDefaultMappings()
+                // Layout loaded — reset mappings for the active restore mode.
+                if (root.isVolumeMode)
+                    root.initDefaultVolumeMappings()
+                else
+                    root.initDefaultMappings()
                 return
             }
             if (root.selectedCheckpointId.length === 0)
@@ -424,8 +671,12 @@ Item {
             // Re-validate defaults when target inventory arrives after layout.
             if (serviceClient.recoveryPointSourceDisks
                     && serviceClient.recoveryPointSourceDisks.length > 0
-                    && root.mappedCount === 0)
-                root.initDefaultMappings()
+                    && root.mappedCount === 0) {
+                if (root.isVolumeMode)
+                    root.initDefaultVolumeMappings()
+                else
+                    root.initDefaultMappings()
+            }
         }
     }
 
@@ -967,6 +1218,362 @@ Item {
         }
     }
 
+
+    // Volume row — source (map + drag) or target (drop).
+    component VolumeRow: Rectangle {
+        id: volRoot
+        property var volumeData: ({})
+        property bool showMapping: false
+        property bool highlightAsTarget: false
+        readonly property int volumeIndex: volumeData && volumeData.volumeIndex !== undefined
+                                           ? Number(volumeData.volumeIndex) : -1
+        readonly property string sourceId: volumeData && volumeData.sourceId
+                                          ? String(volumeData.sourceId) : ""
+        property bool dropHover: false
+        property bool dropAccepted: false
+        width: parent ? parent.width : 100
+        height: showMapping ? 72 : 52
+        radius: 6
+        color: Theme.colorListItem
+        border.width: {
+            if ((volRoot.dropHover && volRoot.dropAccepted) || volRoot.highlightAsTarget)
+                return 2
+            return 1
+        }
+        border.color: {
+            if (volRoot.dropHover && volRoot.dropAccepted)
+                return Theme.colorAccentBlue
+            if (volRoot.highlightAsTarget)
+                return root.restoreTargetBorder
+            return Theme.colorBorder
+        }
+
+        MouseArea {
+            id: volDragMouse
+            anchors.fill: parent
+            anchors.margins: 2
+            anchors.bottomMargin: volRoot.showMapping ? 30 : 2
+            z: 20
+            enabled: volRoot.showMapping && volRoot.volumeIndex >= 0
+            hoverEnabled: true
+            cursorShape: {
+                if (!enabled)
+                    return Qt.ArrowCursor
+                return pressed || drag.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+            }
+            drag.target: volDragProxy
+            drag.threshold: 6
+            drag.axis: Drag.XAndYAxis
+            onPressed: function(mouse) {
+                root.clearMappingDropBlocked()
+                var overlay = Overlay.overlay
+                if (!overlay)
+                    return
+                volDragProxy.parent = overlay
+                var g = mapToItem(overlay, mouse.x, mouse.y)
+                volDragProxy.x = g.x - volDragProxy.Drag.hotSpot.x
+                volDragProxy.y = g.y - volDragProxy.Drag.hotSpot.y
+            }
+            onReleased: {
+                if (volDragProxy.Drag.active)
+                    volDragProxy.Drag.drop()
+                root.clearMappingDropBlocked()
+            }
+            onCanceled: root.clearMappingDropBlocked()
+        }
+
+        Rectangle {
+            id: volDragProxy
+            width: root.mappingDropBlocked ? 320 : 200
+            height: 36
+            radius: 6
+            z: 100000
+            visible: Drag.active
+            opacity: 0.92
+            color: root.mappingDropBlocked ? Theme.colorAccentRed : Theme.colorAccentBlue
+            border.width: 1
+            border.color: Theme.colorBorder
+            property int sourceVolumeIndex: volRoot.volumeIndex
+            Drag.keys: ["aegra.restore.sourceVolume"]
+            Drag.active: volDragMouse.drag.active
+            Drag.hotSpot.x: width / 2
+            Drag.hotSpot.y: height / 2
+            Drag.source: volDragProxy
+
+            Row {
+                anchors.fill: parent
+                anchors.leftMargin: 10
+                anchors.rightMargin: 10
+                spacing: 8
+                Item {
+                    width: 18
+                    height: 18
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: root.mappingDropBlocked
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: width / 2
+                        color: Theme.colorTextWhite
+                        border.width: 2
+                        border.color: Theme.colorAccentRed
+                    }
+                    Rectangle {
+                        width: parent.width * 0.78
+                        height: 2
+                        radius: 1
+                        color: Theme.colorAccentRed
+                        anchors.centerIn: parent
+                        rotation: -45
+                    }
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width - (root.mappingDropBlocked ? 18 + parent.spacing : 0)
+                    elide: Text.ElideRight
+                    text: {
+                        if (root.mappingDropBlocked && root.mappingDropBlockReason.length > 0)
+                            return root.mappingDropBlockReason
+                        if (volRoot.volumeData && volRoot.volumeData.title)
+                            return volRoot.volumeData.title
+                        return qsTrId("aegra.restore.source_volume").arg(volRoot.volumeIndex)
+                    }
+                    color: Theme.colorTextWhite
+                    font.pixelSize: root.mappingDropBlocked ? 11 : 12
+                    font.bold: true
+                    font.family: Theme.fontFamily
+                }
+            }
+        }
+
+        DropArea {
+            id: volDrop
+            anchors.fill: parent
+            z: 15
+            keys: ["aegra.restore.sourceVolume"]
+            enabled: !volRoot.showMapping && volRoot.sourceId.length > 0
+            onEntered: function(drag) {
+                var src = -1
+                if (drag.source && drag.source.sourceVolumeIndex !== undefined)
+                    src = Number(drag.source.sourceVolumeIndex)
+                var reason = (src >= 0)
+                             ? root.volumeMappingBlockReason(src, volRoot.sourceId) : ""
+                var ok = src >= 0 && reason.length === 0
+                volRoot.dropHover = ok
+                volRoot.dropAccepted = ok
+                root.setMappingDropFeedback(!ok, reason)
+                drag.accept(Qt.CopyAction)
+            }
+            onPositionChanged: function(drag) {
+                var src = -1
+                if (drag.source && drag.source.sourceVolumeIndex !== undefined)
+                    src = Number(drag.source.sourceVolumeIndex)
+                var reason = (src >= 0)
+                             ? root.volumeMappingBlockReason(src, volRoot.sourceId) : ""
+                var ok = src >= 0 && reason.length === 0
+                volRoot.dropHover = ok
+                volRoot.dropAccepted = ok
+                root.setMappingDropFeedback(!ok, reason)
+                drag.accept(Qt.CopyAction)
+            }
+            onExited: {
+                volRoot.dropHover = false
+                volRoot.dropAccepted = false
+                root.clearMappingDropBlocked()
+            }
+            onDropped: function(drop) {
+                volRoot.dropHover = false
+                volRoot.dropAccepted = false
+                root.clearMappingDropBlocked()
+                var src = -1
+                if (drop.source && drop.source.sourceVolumeIndex !== undefined)
+                    src = Number(drop.source.sourceVolumeIndex)
+                drop.acceptProposedAction()
+                if (src < 0 || volRoot.sourceId.length === 0)
+                    return
+                root.setVolumeMapping(src, volRoot.sourceId)
+            }
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 8
+            spacing: 4
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 10
+                Rectangle {
+                    Layout.preferredWidth: 28
+                    Layout.preferredHeight: 28
+                    radius: 4
+                    color: Theme.colorInput
+                    border.width: 1
+                    border.color: Theme.colorBorder
+                    Text {
+                        anchors.centerIn: parent
+                        text: volRoot.showMapping
+                              ? String(volRoot.volumeIndex)
+                              : (volRoot.volumeData && volRoot.volumeData.letter
+                                 ? String(volRoot.volumeData.letter) : "V")
+                        color: Theme.colorAccentBlue
+                        font.pixelSize: 11
+                        font.bold: true
+                        font.family: Theme.fontFamily
+                    }
+                }
+                Column {
+                    Layout.fillWidth: true
+                    spacing: 1
+                    Text {
+                        width: parent.width
+                        elide: Text.ElideRight
+                        text: {
+                            if (!volRoot.volumeData)
+                                return ""
+                            if (volRoot.showMapping)
+                                return volRoot.volumeData.title
+                                       || qsTrId("aegra.restore.source_volume").arg(volRoot.volumeIndex)
+                            var lab = volRoot.volumeData.letter
+                                      ? (volRoot.volumeData.letter + ": ") : ""
+                            return lab + (volRoot.volumeData.name || volRoot.sourceId)
+                        }
+                        color: Theme.colorTextWhite
+                        font.pixelSize: 12
+                        font.bold: true
+                        font.family: Theme.fontFamily
+                    }
+                    Text {
+                        width: parent.width
+                        elide: Text.ElideRight
+                        text: {
+                            if (!volRoot.volumeData)
+                                return ""
+                            var bits = []
+                            if (volRoot.volumeData.size)
+                                bits.push(volRoot.volumeData.size)
+                            var fs = volRoot.volumeData.fs || volRoot.volumeData.fileSystem || ""
+                            if (fs)
+                                bits.push(fs)
+                            if (volRoot.volumeData.isSystem === true)
+                                bits.push(qsTrId("aegra.restore.system_tag"))
+                            return bits.join("  ·  ")
+                        }
+                        color: Theme.colorTextGrey
+                        font.pixelSize: 10
+                        font.family: Theme.fontFamily
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                visible: volRoot.showMapping
+                spacing: 8
+                Text {
+                    //% "Restore to"
+                    text: qsTrId("aegra.restore.restore_to")
+                    color: Theme.colorTextGrey
+                    font.pixelSize: 11
+                    font.family: Theme.fontFamily
+                }
+                ComboBox {
+                    id: volMapCombo
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 28
+                    property int sourceVol: volRoot.volumeIndex
+                    model: {
+                        var _e = root.mappingEpoch
+                        var _t = root.targetVolumes
+                        return root.targetVolumeOptions(volMapCombo.sourceVol)
+                    }
+                    textRole: "label"
+                    function syncIndex() {
+                        var want = root.mappedTargetVolume(volMapCombo.sourceVol)
+                        if (!model)
+                            return
+                        for (var i = 0; i < model.length; ++i) {
+                            if (String(model[i].value || "") === String(want)) {
+                                currentIndex = i
+                                return
+                            }
+                        }
+                        currentIndex = 0
+                    }
+                    Component.onCompleted: syncIndex()
+                    onModelChanged: Qt.callLater(syncIndex)
+                    onActivated: function(index) {
+                        if (index < 0 || !model || index >= model.length) {
+                            syncIndex()
+                            return
+                        }
+                        var item = model[index]
+                        if (!item || item.enabled === false
+                                || item.tooSmall || item.inUse
+                                || item.isSystem || item.isReadOnly) {
+                            syncIndex()
+                            return
+                        }
+                        root.setVolumeMapping(volMapCombo.sourceVol, String(item.value || ""))
+                        Qt.callLater(syncIndex)
+                    }
+                    background: Rectangle {
+                        color: Theme.colorInput
+                        radius: 4
+                        border.width: 1
+                        border.color: Theme.colorBorder
+                    }
+                    indicator: ComboBoxIndicator { combo: volMapCombo }
+                    contentItem: Text {
+                        leftPadding: 8
+                        rightPadding: volMapCombo.indicator ? volMapCombo.indicator.width + 12 : 8
+                        text: volMapCombo.displayText
+                        color: Theme.colorTextWhite
+                        font.pixelSize: 11
+                        font.family: Theme.fontFamily
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
+                    }
+                    popup: Popup {
+                        y: volMapCombo.height
+                        width: volMapCombo.width
+                        implicitHeight: Math.min(contentItem.implicitHeight + 4, 220)
+                        padding: 2
+                        contentItem: ListView {
+                            clip: true
+                            implicitHeight: contentHeight
+                            model: volMapCombo.popup.visible ? volMapCombo.delegateModel : null
+                            currentIndex: volMapCombo.highlightedIndex
+                            ScrollIndicator.vertical: ScrollIndicator { }
+                        }
+                        background: Rectangle {
+                            color: Theme.colorCard
+                            radius: 4
+                            border.width: 1
+                            border.color: Theme.colorBorder
+                        }
+                    }
+                    delegate: ItemDelegate {
+                        width: volMapCombo.width
+                        height: 28
+                        enabled: modelData && modelData.enabled !== false
+                        highlighted: volMapCombo.highlightedIndex === index
+                        contentItem: Text {
+                            text: modelData ? modelData.label : ""
+                            color: parent.enabled ? Theme.colorTextWhite : Theme.colorTextGrey
+                            font.pixelSize: 11
+                            font.family: Theme.fontFamily
+                            elide: Text.ElideRight
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            color: parent.highlighted ? Theme.colorHover : "transparent"
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 16
@@ -994,6 +1601,57 @@ Item {
                 }
             }
             Item { Layout.fillWidth: true }
+            // Disk / Volume restore mode
+            Row {
+                spacing: 0
+                Layout.alignment: Qt.AlignVCenter
+                Rectangle {
+                    width: Math.max(88, diskModeLabel.implicitWidth + 20)
+                    height: 28
+                    radius: 4
+                    color: !root.isVolumeMode ? Theme.colorAccentBlue : Theme.colorInput
+                    border.width: 1
+                    border.color: Theme.colorBorder
+                    Text {
+                        id: diskModeLabel
+                        anchors.centerIn: parent
+                        //% "Disk"
+                        text: qsTrId("aegra.restore.mode_disk")
+                        color: Theme.colorTextWhite
+                        font.pixelSize: 12
+                        font.bold: !root.isVolumeMode
+                        font.family: Theme.fontFamily
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.setRestoreMode("disk")
+                    }
+                }
+                Rectangle {
+                    width: Math.max(88, volModeLabel.implicitWidth + 20)
+                    height: 28
+                    radius: 4
+                    color: root.isVolumeMode ? Theme.colorAccentBlue : Theme.colorInput
+                    border.width: 1
+                    border.color: Theme.colorBorder
+                    Text {
+                        id: volModeLabel
+                        anchors.centerIn: parent
+                        //% "Volume"
+                        text: qsTrId("aegra.restore.mode_volume")
+                        color: Theme.colorTextWhite
+                        font.pixelSize: 12
+                        font.bold: root.isVolumeMode
+                        font.family: Theme.fontFamily
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.setRestoreMode("volume")
+                    }
+                }
+            }
         }
 
         // Main: Source + Target (left) | Options (right) — old 2/3 | 1/3
@@ -1039,16 +1697,22 @@ Item {
                                 Layout.alignment: Qt.AlignVCenter
                             }
                             Text {
-                                //% "Source Disks"
-                                text: qsTrId("aegra.restore.source_disks")
+                                text: root.isVolumeMode
+                                      //% "Source Volumes"
+                                      ? qsTrId("aegra.restore.source_volumes")
+                                      //% "Source Disks"
+                                      : qsTrId("aegra.restore.source_disks")
                                 color: Theme.colorTextWhite
                                 font.pixelSize: 14
                                 font.bold: true
                                 font.family: Theme.fontFamily
                             }
                             Text {
-                                //% "(drag onto a target disk, or use Restore to)"
-                                text: qsTrId("aegra.restore.source_hint")
+                                text: root.isVolumeMode
+                                      //% "(drag onto a target volume, or use Restore to)"
+                                      ? qsTrId("aegra.restore.source_volume_hint")
+                                      //% "(drag onto a target disk, or use Restore to)"
+                                      : qsTrId("aegra.restore.source_hint")
                                 color: Theme.colorTextGrey
                                 font.pixelSize: 11
                                 font.family: Theme.fontFamily
@@ -1084,6 +1748,7 @@ Item {
                             Layout.fillHeight: true
                             clip: true
                             spacing: 10
+                            visible: !root.isVolumeMode
                             model: root.sourceDisks
                             delegate: DiskRow {
                                 required property var modelData
@@ -1109,6 +1774,44 @@ Item {
                                         return qsTrId("aegra.restore.no_source_volumes")
                                     //% "Select a checkpoint to view source disks"
                                     return qsTrId("aegra.restore.select_checkpoint_source")
+                                }
+                                color: root.sourceLayoutError.length > 0
+                                       ? Theme.colorAccentRed : Theme.colorTextGrey
+                                font.pixelSize: 12
+                                font.family: Theme.fontFamily
+                            }
+                        }
+                        ListView {
+                            id: sourceVolumeList
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            clip: true
+                            spacing: 8
+                            visible: root.isVolumeMode
+                            model: root.sourceVolumes
+                            delegate: VolumeRow {
+                                required property var modelData
+                                width: sourceVolumeList.width
+                                volumeData: modelData
+                                showMapping: true
+                            }
+                            Text {
+                                anchors.centerIn: parent
+                                width: parent.width - 32
+                                horizontalAlignment: Text.AlignHCenter
+                                wrapMode: Text.WordWrap
+                                visible: sourceVolumeList.count === 0
+                                text: {
+                                    if (root.sourceLayoutLoading)
+                                        //% "Loading source disks..."
+                                        return qsTrId("aegra.restore.loading_source")
+                                    if (root.sourceLayoutError.length > 0)
+                                        return root.sourceLayoutError
+                                    if (root.selectedCheckpointId.length > 0)
+                                        //% "No source volumes in this checkpoint"
+                                        return qsTrId("aegra.restore.no_source_volumes")
+                                    //% "Select a checkpoint to view source volumes"
+                                    return qsTrId("aegra.restore.select_checkpoint_source_volumes")
                                 }
                                 color: root.sourceLayoutError.length > 0
                                        ? Theme.colorAccentRed : Theme.colorTextGrey
@@ -1188,16 +1891,22 @@ Item {
                                 Layout.alignment: Qt.AlignVCenter
                             }
                             Text {
-                                //% "Target Disks"
-                                text: qsTrId("aegra.restore.target_disks")
+                                text: root.isVolumeMode
+                                      //% "Target Volumes"
+                                      ? qsTrId("aegra.restore.target_volumes")
+                                      //% "Target Disks"
+                                      : qsTrId("aegra.restore.target_disks")
                                 color: Theme.colorTextWhite
                                 font.pixelSize: 14
                                 font.bold: true
                                 font.family: Theme.fontFamily
                             }
                             Text {
-                                //% "(this PC — drop a source disk here)"
-                                text: qsTrId("aegra.restore.target_hint")
+                                text: root.isVolumeMode
+                                      //% "(this PC — drop a source volume here)"
+                                      ? qsTrId("aegra.restore.target_volume_hint")
+                                      //% "(this PC — drop a source disk here)"
+                                      : qsTrId("aegra.restore.target_hint")
                                 color: Theme.colorTextGrey
                                 font.pixelSize: 11
                                 font.family: Theme.fontFamily
@@ -1212,6 +1921,7 @@ Item {
                             Layout.fillHeight: true
                             clip: true
                             spacing: 10
+                            visible: !root.isVolumeMode
                             boundsBehavior: Flickable.StopAtBounds
                             readonly property bool needsScroll: contentHeight > height + 1
                             model: root.targetDisks
@@ -1236,6 +1946,42 @@ Item {
                                 visible: targetList.count === 0
                                 //% "Local disks will appear when inventory is available"
                                 text: qsTrId("aegra.restore.target_empty")
+                                color: Theme.colorTextGrey
+                                font.pixelSize: 12
+                                font.family: Theme.fontFamily
+                            }
+                        }
+                        ListView {
+                            id: targetVolumeList
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            clip: true
+                            spacing: 8
+                            visible: root.isVolumeMode
+                            boundsBehavior: Flickable.StopAtBounds
+                            readonly property bool needsScroll: contentHeight > height + 1
+                            model: root.targetVolumes
+                            delegate: VolumeRow {
+                                required property var modelData
+                                width: targetVolumeList.width - (targetVolumeList.needsScroll ? 12 : 0)
+                                volumeData: modelData
+                                showMapping: false
+                                highlightAsTarget: root.isVolumeMappedAsTarget(
+                                                       modelData ? modelData.sourceId : "")
+                            }
+                            ScrollBar.vertical: ScrollBar {
+                                policy: targetVolumeList.needsScroll ? ScrollBar.AlwaysOn
+                                                                     : ScrollBar.AlwaysOff
+                                width: 8
+                            }
+                            Text {
+                                anchors.centerIn: parent
+                                width: parent.width - 24
+                                horizontalAlignment: Text.AlignHCenter
+                                wrapMode: Text.WordWrap
+                                visible: targetVolumeList.count === 0
+                                //% "Local volumes will appear when inventory is available"
+                                text: qsTrId("aegra.restore.target_volume_empty")
                                 color: Theme.colorTextGrey
                                 font.pixelSize: 12
                                 font.family: Theme.fontFamily
@@ -1403,6 +2149,7 @@ Item {
                     CheckBox {
                         id: preserveBox
                         Layout.fillWidth: true
+                        visible: !root.isVolumeMode
                         //% "Preserve disk signature"
                         text: qsTrId("aegra.restore.preserve_signature")
                         checked: root.preserveSignature
@@ -1438,6 +2185,7 @@ Item {
                     }
                     Text {
                         Layout.fillWidth: true
+                        visible: !root.isVolumeMode
                         //% "Keep MBR signature / GPT DiskId (recommended for bootable disks). Uncheck only when cloning a data disk while the source remains online."
                         text: qsTrId("aegra.restore.preserve_signature_hint")
                         color: Theme.colorTextGrey
@@ -1450,6 +2198,7 @@ Item {
                         id: extendBox
                         Layout.fillWidth: true
                         Layout.topMargin: 8
+                        visible: !root.isVolumeMode
                         //% "Auto expand last partition"
                         text: qsTrId("aegra.restore.auto_extend")
                         checked: root.autoExtend
@@ -1485,8 +2234,20 @@ Item {
                     }
                     Text {
                         Layout.fillWidth: true
+                        visible: !root.isVolumeMode
                         //% "When the target disk is larger than the source, grow the last data partition (and filesystem) into free space so no large unallocated region remains. Uncheck to leave free space unallocated. Note: FAT/FAT32 volumes cannot be auto-expanded (Windows does not support online extend); free space stays unallocated."
                         text: qsTrId("aegra.restore.auto_extend_hint")
+                        color: Theme.colorTextGrey
+                        font.pixelSize: 11
+                        font.family: Theme.fontFamily
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        visible: root.isVolumeMode
+                        //% "Volume restore writes one backup volume onto an existing non-system volume of equal or larger size. Partition layout is not changed."
+                        text: qsTrId("aegra.restore.volume_options_hint")
                         color: Theme.colorTextGrey
                         font.pixelSize: 11
                         font.family: Theme.fontFamily

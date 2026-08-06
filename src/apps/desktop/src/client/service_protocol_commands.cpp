@@ -301,11 +301,13 @@ QByteArray encode_prepare_restore_request(const QString& request_id, const QStri
                                           const QString& recovery_point_id,
                                           const QString& target_source_id,
                                           const int source_disk_number,
+                                          const int source_volume_index,
                                           const QString& archive_password) {
     const QJsonObject payload{{QStringLiteral("repository_connection_id"), connection_id},
                               {QStringLiteral("recovery_point_id"), recovery_point_id},
                               {QStringLiteral("target_source_id"), target_source_id},
                               {QStringLiteral("source_disk_number"), source_disk_number},
+                              {QStringLiteral("source_volume_index"), source_volume_index},
                               {QStringLiteral("archive_password"), archive_password}};
     return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
                                       static_cast<qint64>(kServiceSchemaVersion)},

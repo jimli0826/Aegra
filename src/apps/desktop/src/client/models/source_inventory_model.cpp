@@ -203,6 +203,7 @@ QVariantList SourceInventoryModel::disksTree() const {
              row.health_status.isEmpty() ? QStringLiteral("Healthy") : row.health_status},
             {QStringLiteral("selectable"), row.is_selectable},
             {QStringLiteral("isSystem"), row.is_system},
+            {QStringLiteral("isReadOnly"), row.is_read_only},
         });
     }
 

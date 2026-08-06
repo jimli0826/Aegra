@@ -46,13 +46,18 @@ struct BackupOptions final {
     bool encryption_enabled{false};
 };
 
-/// Optional restore-mode options. Omitted means volume restore (existing path).
+/// Optional restore-mode options.
+/// - Omitted or `disk_restore=false`: volume → volume (target_ref = Volume GUID path).
+/// - `disk_restore=true`: disk → disk (target_ref = `\\.\PhysicalDriveN`).
 struct RestoreOptions final {
     /// When true, restore a disk image to `\\.\PhysicalDriveN` target_ref.
     /// source_refs must be the base-first Full→…→tip chain.
     bool disk_restore{false};
     /// Source `disk_number` from archive Manifest.disks[] (required when disk_restore).
     std::uint32_t source_disk_number{0};
+    /// Source `volume_index` from archive Manifest.volumes[] (volume restore path).
+    /// When restore options are omitted, Worker treats this as 0.
+    std::uint32_t source_volume_index{0};
     /// After successful disk restore, clear OFFLINE/READ_ONLY (data-disk path; default true).
     bool bring_target_online{true};
     /// Keep MBR signature / GPT DiskId from the source (default true; recommended for bootable).

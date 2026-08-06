@@ -1113,6 +1113,66 @@ Server: %1</source>
         <source>Volume %1</source>
         <translation>卷 %1</translation>
     </message>
+    <message id="aegra.restore.mode_disk">
+        <source>Disk</source>
+        <translation>整盘</translation>
+    </message>
+    <message id="aegra.restore.mode_volume">
+        <source>Volume</source>
+        <translation>卷</translation>
+    </message>
+    <message id="aegra.restore.source_volumes">
+        <source>Source Volumes</source>
+        <translation>源卷</translation>
+    </message>
+    <message id="aegra.restore.source_volume_hint">
+        <source>(drag onto a target volume, or use Restore to)</source>
+        <translation>（拖放到目标卷，或使用“恢复到”）</translation>
+    </message>
+    <message id="aegra.restore.target_volumes">
+        <source>Target Volumes</source>
+        <translation>目标卷</translation>
+    </message>
+    <message id="aegra.restore.target_volume_hint">
+        <source>(this PC — drop a source volume here)</source>
+        <translation>（此电脑 — 将源卷拖放到此处）</translation>
+    </message>
+    <message id="aegra.restore.target_volume_empty">
+        <source>Local volumes will appear when inventory is available</source>
+        <translation>清单可用时将显示本地卷</translation>
+    </message>
+    <message id="aegra.restore.select_checkpoint_source_volumes">
+        <source>Select a checkpoint to view source volumes</source>
+        <translation>选择检查点以查看源卷</translation>
+    </message>
+    <message id="aegra.restore.volume_map_required">
+        <source>Choose “Restore to” on a source volume</source>
+        <translation>请在源卷上选择“恢复到”</translation>
+    </message>
+    <message id="aegra.restore.volume_target_too_small">
+        <source>Target volume is smaller than the source volume</source>
+        <translation>目标卷小于源卷</translation>
+    </message>
+    <message id="aegra.restore.volume_target_in_use">
+        <source>That target is already mapped by another source volume</source>
+        <translation>该目标已被另一个源卷映射</translation>
+    </message>
+    <message id="aegra.restore.volume_system_target_blocked">
+        <source>System volume restore requires PE (not available online)</source>
+        <translation>系统卷恢复需要 PE（在线不可用）</translation>
+    </message>
+    <message id="aegra.restore.volume_target_read_only">
+        <source>Restore target volume is read-only</source>
+        <translation>恢复目标卷为只读</translation>
+    </message>
+    <message id="aegra.restore.read_only_tag">
+        <source>— read-only</source>
+        <translation>— 只读</translation>
+    </message>
+    <message id="aegra.restore.volume_options_hint">
+        <source>Volume restore writes one backup volume onto an existing non-system volume of equal or larger size. Partition layout is not changed.</source>
+        <translation>卷恢复将一个备份卷写入已有的、容量不小于源的非系统卷。不修改分区布局。</translation>
+    </message>
     <message id="aegra.restore.no_recovery_points_on_date">
         <source>No recovery points on this date</source>
         <translation>此日期没有恢复点</translation>
@@ -1157,9 +1217,21 @@ Server: %1</source>
         <source>Image</source>
         <translation>镜像</translation>
     </message>
+    <message id="aegra.mount.col.size">
+        <source>Size</source>
+        <translation>大小</translation>
+    </message>
     <message id="aegra.mount.drive_letter">
-        <source>Preferred drive letter</source>
-        <translation>首选盘符</translation>
+        <source>Drive letter</source>
+        <translation>盘符</translation>
+    </message>
+    <message id="aegra.mount.drive_letter_auto">
+        <source>Auto</source>
+        <translation>自动</translation>
+    </message>
+    <message id="aegra.mount.drive_letter_hint">
+        <source>Preferred letter for the first volume. Choose Auto to pick the next free letter. Additional volumes are assigned automatically.</source>
+        <translation>优先用于第一个卷的盘符。选择“自动”则使用下一个空闲盘符；其余卷自动分配。</translation>
     </message>
     <message id="aegra.mount.unmount">
         <source>Unmount</source>

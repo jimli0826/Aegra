@@ -113,6 +113,15 @@ std::optional<contracts::RestoreOptions> optional_restore(const Json& root) {
         throw std::out_of_range("worker request restore.source_disk_number is out of range");
     }
     result.source_disk_number = static_cast<std::uint32_t>(source_disk_value);
+    const auto source_volume = iterator->find("source_volume_index");
+    if (source_volume == iterator->end() || !source_volume->is_number_unsigned()) {
+        throw std::invalid_argument("worker request restore.source_volume_index is required");
+    }
+    const auto source_volume_value = source_volume->get<std::uint64_t>();
+    if (source_volume_value > (std::numeric_limits<std::uint32_t>::max)()) {
+        throw std::out_of_range("worker request restore.source_volume_index is out of range");
+    }
+    result.source_volume_index = static_cast<std::uint32_t>(source_volume_value);
     const auto bring_online = iterator->find("bring_target_online");
     if (bring_online == iterator->end() || !bring_online->is_boolean()) {
         throw std::invalid_argument("worker request restore.bring_target_online is required");

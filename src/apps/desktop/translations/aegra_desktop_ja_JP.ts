@@ -1113,6 +1113,66 @@ Server: %1</source>
         <source>Volume %1</source>
         <translation>ボリューム %1</translation>
     </message>
+    <message id="aegra.restore.mode_disk">
+        <source>Disk</source>
+        <translation>ディスク</translation>
+    </message>
+    <message id="aegra.restore.mode_volume">
+        <source>Volume</source>
+        <translation>ボリューム</translation>
+    </message>
+    <message id="aegra.restore.source_volumes">
+        <source>Source Volumes</source>
+        <translation>ソースボリューム</translation>
+    </message>
+    <message id="aegra.restore.source_volume_hint">
+        <source>(drag onto a target volume, or use Restore to)</source>
+        <translation>（ターゲットボリュームへドラッグ、または「復元先」）</translation>
+    </message>
+    <message id="aegra.restore.target_volumes">
+        <source>Target Volumes</source>
+        <translation>ターゲットボリューム</translation>
+    </message>
+    <message id="aegra.restore.target_volume_hint">
+        <source>(this PC — drop a source volume here)</source>
+        <translation>（この PC — ソースボリュームをここにドロップ）</translation>
+    </message>
+    <message id="aegra.restore.target_volume_empty">
+        <source>Local volumes will appear when inventory is available</source>
+        <translation>インベントリが利用可能になるとローカルボリュームが表示されます</translation>
+    </message>
+    <message id="aegra.restore.select_checkpoint_source_volumes">
+        <source>Select a checkpoint to view source volumes</source>
+        <translation>チェックポイントを選択してソースボリュームを表示</translation>
+    </message>
+    <message id="aegra.restore.volume_map_required">
+        <source>Choose “Restore to” on a source volume</source>
+        <translation>ソースボリュームで「復元先」を選択してください</translation>
+    </message>
+    <message id="aegra.restore.volume_target_too_small">
+        <source>Target volume is smaller than the source volume</source>
+        <translation>ターゲットボリュームがソースより小さいです</translation>
+    </message>
+    <message id="aegra.restore.volume_target_in_use">
+        <source>That target is already mapped by another source volume</source>
+        <translation>そのターゲットは別のソースボリュームに既に割り当てられています</translation>
+    </message>
+    <message id="aegra.restore.volume_system_target_blocked">
+        <source>System volume restore requires PE (not available online)</source>
+        <translation>システムボリュームの復元には PE が必要です（オンライン不可）</translation>
+    </message>
+    <message id="aegra.restore.volume_target_read_only">
+        <source>Restore target volume is read-only</source>
+        <translation>復元ターゲットボリュームは読み取り専用です</translation>
+    </message>
+    <message id="aegra.restore.read_only_tag">
+        <source>— read-only</source>
+        <translation>— 読み取り専用</translation>
+    </message>
+    <message id="aegra.restore.volume_options_hint">
+        <source>Volume restore writes one backup volume onto an existing non-system volume of equal or larger size. Partition layout is not changed.</source>
+        <translation>ボリューム復元は、ソース以上のサイズの既存の非システムボリュームへ書き込みます。パーティション配置は変更しません。</translation>
+    </message>
     <message id="aegra.restore.no_recovery_points_on_date">
         <source>No recovery points on this date</source>
         <translation>この日に回復ポイントはありません</translation>
@@ -1157,9 +1217,21 @@ Server: %1</source>
         <source>Image</source>
         <translation>イメージ</translation>
     </message>
+    <message id="aegra.mount.col.size">
+        <source>Size</source>
+        <translation>サイズ</translation>
+    </message>
     <message id="aegra.mount.drive_letter">
-        <source>Preferred drive letter</source>
-        <translation>希望のドライブレター</translation>
+        <source>Drive letter</source>
+        <translation>ドライブレター</translation>
+    </message>
+    <message id="aegra.mount.drive_letter_auto">
+        <source>Auto</source>
+        <translation>自動</translation>
+    </message>
+    <message id="aegra.mount.drive_letter_hint">
+        <source>Preferred letter for the first volume. Choose Auto to pick the next free letter. Additional volumes are assigned automatically.</source>
+        <translation>最初のボリュームに使う希望のレター。「自動」で空きレターを自動割当。追加ボリュームは自動で割り当てられます。</translation>
     </message>
     <message id="aegra.mount.unmount">
         <source>Unmount</source>

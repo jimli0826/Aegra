@@ -36,18 +36,28 @@ prepare/rebuild/online API 和通用 `RestorePipeline`。Pipeline 只依赖 `IRe
 ```text
 Validate Restore Job and trusted chain-depth limit
 -> Resolve every SecretRef while retaining all Secret lifetimes
--> Open and authenticate every base-first Archive layer
--> Validate full base, UUID chain, backup set and volume geometry
--> Open canonical target Volume GUID
+-> Open PersonalArchiveChainReader (Full base + Incremental overlays)
+-> PersonalArchiveVolumeReader(tip Manifest, source_volume_index)
+   (rewrites descriptors to source_index=0 for RestorePipeline)
+-> Open canonical target Volume GUID path (WindowsVolumeBlockSink)
 -> Reject system volume
 -> Reject any chain Archive located on target volume
 -> Lock and dismount target volume
 -> Preflight descriptors, capacity and memory budget
--> Read/authenticate/decompress each Chunk
+-> Read/authenticate/decompress each Chunk for that volume only
 -> Write by logical offset
 -> Flush target
 -> Unlock and close target
 ```
+
+Worker 数据面（Phase A）、Service Prepare/Start（Phase B）与 Desktop 卷映射 UI
+（Phase C）均已支持卷路径：`target_source_id=vol.…` + `source_volume_index`，
+指纹 `volc|…`，Start 解析 Inventory `stable_key` 为 Volume GUID Path。
+
+Desktop Restore 页提供 **Disk / Volume** 模式切换：
+- Disk：源磁盘 → 目标 `disk.N`（Preserve signature / Auto expand 可用）；
+- Volume：源 Manifest 卷 → 目标 Inventory `vol.*`（拖放或 “Restore to”；多卷可排队
+  逐个 StartRestore）。
 
 ## 整盘恢复流程
 
@@ -74,11 +84,19 @@ Validate restore.disk_restore + base-first source_refs + PhysicalDrive target
 Service Prepare/Start：
 
 ```text
+// 整盘 disk.N
 resolve_chain(tip) → base-first Catalog entries
 -> Open tip with password for disk size / capacity check
 -> Preflight fingerprint diskc|… binds source_disk, size, and every layer key/uuid
 -> Start re-resolves chain, rejects if keys/uuids/depth/size changed
--> Job source_refs = absolute .bkf paths base-first; credential_refs same length
+-> Job: disk_restore=true, target_ref=\\.\PhysicalDriveN
+
+// 卷 vol.…
+resolve_chain(tip) → base-first Catalog entries
+-> Open tip for volume total_size at source_volume_index
+-> Preflight fingerprint volc|… binds volume_index, size, and every layer key/uuid
+-> Start re-resolves chain; resolve_source → stable_key (Volume GUID Path)
+-> Job: disk_restore=false, source_volume_index, target_ref=GUID path
 ```
 
 对齐旧项目 `RestoreEngine` 全盘路径：先清布局写 raw 数据，再写 MBR/GPT，联机，再按需扩容。
@@ -89,9 +107,27 @@ resolve_chain(tip) → base-first Catalog entries
 ### 卷恢复
 
 - `operation = kRestore`；
-- `source_refs` 按 base-first 顺序包含完整 `.bkf` 链；
-- `target_ref` 是 canonical Volume GUID Path；
-- 无 `restore` 对象，或未设置 `disk_restore`。
+- `source_refs` 按 base-first 顺序包含完整 `.bkf` 链（至少 1 个 Full；tip 可为 Incremental）；
+- `target_ref` 是 canonical Volume GUID Path：
+  `\\?\Volume{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}\`（UTF-8）；
+- `restore` 推荐显式给出（Service 贯通后必填）：
+
+```json
+{
+  "disk_restore": false,
+  "source_disk_number": 0,
+  "source_volume_index": 0,
+  "bring_target_online": true,
+  "preserve_disk_signature": true,
+  "auto_expand_last_partition": true
+}
+```
+
+- `source_volume_index`：tip Manifest `volumes[].volume_index`；省略 `restore` 时 Worker 按 `0` 处理。
+- `bring_target_online` / `preserve_disk_signature` / `auto_expand_last_partition` 在卷模式由
+  Worker **忽略**（仅整盘路径使用）。
+- 多卷 Archive 必须用 `PersonalArchiveVolumeReader` 限定单卷；不得把整链多 `source_index`
+  直接交给 `RestorePipeline`。
 
 ### 整盘恢复
 

@@ -34,7 +34,7 @@ class IWorkerJobService {
     [[nodiscard]] virtual base::Result<contracts::CommandAcknowledgement>
     start_verify(const contracts::StartVerifyCommand& command, std::string_view idempotency_key,
                  base::CancellationToken cancellation) = 0;
-    /// Disk→disk restore preflight (target_source_id = disk.N; tip may be Full or Incremental).
+    /// Restore preflight: `disk.N` (whole disk) or `vol.…` (single volume); tip Full or Incremental.
     [[nodiscard]] virtual base::Result<contracts::RestorePreflight>
     prepare_restore(const contracts::RestorePreflightRequest& request,
                     base::CancellationToken cancellation) = 0;

@@ -9,13 +9,13 @@
 #include "aegra/contracts/service_control.h"
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <ctime>
 #include <filesystem>
 #include <memory>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -284,72 +284,102 @@ resolve_backup_secrets(const contracts::JobRequest& job, ports::ICredentialResol
     return base::Result<ResolvedBackupSecrets>::success(std::move(result));
 }
 
-void log_backup_start(WorkerTaskLog* log, const contracts::JobRequest& job,
-                      const WindowsPersonalBackupRequest& request) {
-    if (log == nullptr) {
-        return;
+[[nodiscard]] std::string_view backup_hint_for(const base::ErrorCode code,
+                                               const std::string_view message) noexcept {
+    if (message.find("VSS") != std::string_view::npos) {
+        return "Check VSS service health and that volumes support snapshots; raw fallback may apply";
     }
-    log->info("=== Backup Starting ===");
-    log->info(std::string("job_id=") + job.job_id);
-    log->info(std::string("trace_id=") + job.trace_id);
-    log->info(std::string("backup_type=") +
-              (request.backup_type == WindowsPersonalBackupType::kFull ? "full" : "incremental"));
-    log->info(std::string("exclude_page_and_hibernation_files=") +
-              (request.exclude_page_and_hibernation_files ? "true" : "false"));
-    for (const auto& source_ref : job.source_refs) {
-        log->info(std::string("Volume path: ") + source_ref);
+    if (message.find("space") != std::string_view::npos ||
+        code == base::ErrorCode::kInsufficientSpace) {
+        return "Free space on the repository volume or choose another destination";
     }
-    log->info(std::string("Backup file: ") + job.target_ref);
-    if (!request.parent_source.empty()) {
-        log->info(std::string("Parent archive: ") +
-                  [&request] {
-                      const auto encoded = request.parent_source.generic_u8string();
-                      std::string text;
-                      text.reserve(encoded.size());
-                      for (const auto value : encoded) {
-                          text.push_back(static_cast<char>(value));
-                      }
-                      return text;
-                  }());
-    }
-    {
-        std::ostringstream geometry;
-        geometry << "Geometry: block=" << request.block_size_bytes
-                 << " chunk=" << request.chunk_size_bytes
-                 << " memory_budget=" << request.memory_budget_bytes;
-        log->info(geometry.str());
+    switch (code) {
+    case base::ErrorCode::kUnauthorized:
+        return "Re-enter the archive password and retry";
+    case base::ErrorCode::kNotFound:
+        return "Refresh source inventory and confirm selected volumes still exist";
+    case base::ErrorCode::kCancelled:
+        return "Job was cancelled or deadline expired";
+    case base::ErrorCode::kInvalidArgument:
+        return "Verify backup type, source volumes, and repository destination";
+    default:
+        return "Check volume access, repository path, disk health, and Service privileges";
     }
 }
 
-void log_backup_result(WorkerTaskLog* log, const contracts::TaskResult& result) {
+void log_backup_request(WorkerTaskLog* log, const contracts::JobRequest& job,
+                        const WindowsPersonalBackupRequest& request) {
     if (log == nullptr) {
         return;
     }
+    log->section("Job");
+    log->field("job_id", job.job_id);
+    log->field("trace_id", job.trace_id);
+    log->field("backup_type", request.backup_type == WindowsPersonalBackupType::kFull
+                                  ? "full"
+                                  : "incremental");
+    log->field_u64("volume_count", job.source_refs.size());
+
+    log->section("Request");
+    log->field("destination", job.target_ref);
+    log->field_bool("encryption_enabled", request.encryption_enabled);
+    log->field_bool("exclude_page_and_hibernation_files",
+                    request.exclude_page_and_hibernation_files);
+    log->field_bytes("block_size", request.block_size_bytes);
+    log->field_bytes("chunk_size", request.chunk_size_bytes);
+    log->field_bytes("memory_budget", request.memory_budget_bytes);
+    if (!request.parent_source.empty()) {
+        log->field("parent_archive", path_display(request.parent_source));
+    }
+    for (std::size_t index = 0; index < job.source_refs.size(); ++index) {
+        log->field("volume[" + std::to_string(index) + "]", job.source_refs[index]);
+    }
+}
+
+void log_backup_result(WorkerTaskLog* log, const contracts::TaskResult& result,
+                       const base::Error* error,
+                       const std::chrono::steady_clock::time_point started) {
+    if (log == nullptr) {
+        return;
+    }
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started);
+    log->section("Result");
     if (result.outcome == contracts::TaskOutcome::kSucceeded ||
         result.outcome == contracts::TaskOutcome::kSucceededWithWarning) {
-        log->info("=== Backup Complete ===");
-        std::ostringstream stats;
-        stats << "logical_bytes=" << result.logical_bytes << " stored_bytes=" << result.stored_bytes
-              << " chunks=" << result.chunk_count << " message=" << result.message_code;
-        log->info(stats.str());
-        for (const auto& warning : result.warning_codes) {
-            log->warn(std::string("warning=") + warning);
+        log->field("outcome", result.outcome == contracts::TaskOutcome::kSucceededWithWarning
+                                  ? "succeeded_with_warning"
+                                  : "succeeded");
+        log->field("message_code", result.message_code);
+        log->field_bytes("logical_bytes", result.logical_bytes);
+        log->field_bytes("stored_bytes", result.stored_bytes);
+        log->field_u64("chunks", result.chunk_count);
+        if (elapsed.count() > 0 && result.logical_bytes > 0) {
+            const auto bps = static_cast<std::uint64_t>(
+                (static_cast<double>(result.logical_bytes) * 1000.0) /
+                static_cast<double>(elapsed.count()));
+            log->field_bytes("throughput", bps);
         }
+        for (const auto& warning : result.warning_codes) {
+            log->warn(std::string("  warning                 : ") + warning);
+        }
+        log->field("elapsed", format_duration_ms(elapsed));
         return;
     }
-    if (result.outcome == contracts::TaskOutcome::kCancelled) {
-        log->warn(std::string("=== Backup Cancelled === message=") + result.message_code);
-        return;
+    log->field("outcome",
+               result.outcome == contracts::TaskOutcome::kCancelled ? "cancelled" : "failed");
+    log->field("message_code", result.message_code);
+    if (error != nullptr) {
+        log->field("error_code", base::error_code_name(error->code));
+        if (!error->message.empty()) {
+            log->field("error_message", error->message);
+        }
+        const auto hint = backup_hint_for(error->code, error->message);
+        if (!hint.empty()) {
+            log->field("hint", hint);
+        }
     }
-    log->error(std::string("=== Backup Failed === message=") + result.message_code);
-}
-
-base::Result<contracts::TaskResult> finish_logged(WorkerTaskLog* log,
-                                                  base::Result<contracts::TaskResult> result) {
-    if (result) {
-        log_backup_result(log, result.value());
-    }
-    return result;
+    log->field("elapsed", format_duration_ms(elapsed));
 }
 
 base::Result<contracts::TaskResult>
@@ -357,48 +387,61 @@ run_accepted_task(const contracts::JobRequest& job, const WindowsPersonalBackupT
                   const WindowsPersonalBackupTaskContext& context,
                   const base::CancellationToken& cancellation,
                   IWindowsPersonalBackupTaskBackend& backend) {
-    auto task_log = WorkerTaskLog::open("backup");
+    const auto started = std::chrono::steady_clock::now();
+    auto task_log = WorkerTaskLog::open("backup", job.job_id);
     WorkerTaskLogScope log_scope(task_log.get());
     WorkerTaskLog* log = task_log.get();
     publish_preparing(job, context.progress);
-    if (cancellation.stop_requested()) {
-        return finish_logged(log, validated_task_result(failed_result(job, base::ErrorCode::kCancelled)));
-    }
-    const auto now_utc_ms = context.clock.now_utc_ms();
-    if (job.deadline_utc_ms > 0 && now_utc_ms >= job.deadline_utc_ms) {
-        return finish_logged(log, validated_task_result(failed_result(job, base::ErrorCode::kCancelled)));
+
+    auto fail = [&](const base::ErrorCode code,
+                    const base::Error* detail = nullptr) -> base::Result<contracts::TaskResult> {
+        auto result = validated_task_result(failed_result(job, code));
+        if (result) {
+            log_backup_result(log, result.value(), detail, started);
+        }
+        return result;
+    };
+
+    if (cancellation.stop_requested() ||
+        (job.deadline_utc_ms > 0 && context.clock.now_utc_ms() >= job.deadline_utc_ms)) {
+        const base::Error error{base::ErrorCode::kCancelled, "backup cancelled before start"};
+        return fail(base::ErrorCode::kCancelled, &error);
     }
     auto created_utc = format_utc(job.backup->created_utc_ms);
     if (!created_utc) {
-        return finish_logged(log, validated_task_result(failed_result(job, created_utc.error().code)));
+        return fail(created_utc.error().code, &created_utc.error());
     }
     auto ids = requested_ids(*job.backup);
     if (!ids) {
-        return finish_logged(log, validated_task_result(failed_result(job, ids.error().code)));
+        return fail(ids.error().code, &ids.error());
     }
-    auto secrets = resolve_backup_secrets(job, context.credentials, cancellation);
-    if (!secrets) {
-        return finish_logged(
-            log, validated_task_result(failed_result(job, credential_error_code(secrets.error().code))));
+
+    ResolvedBackupSecrets secrets;
+    {
+        ScopedStage stage(log, "resolve_credentials");
+        auto resolved = resolve_backup_secrets(job, context.credentials, cancellation);
+        if (!resolved) {
+            const auto code = credential_error_code(resolved.error().code);
+            const base::Error error{code, resolved.error().message};
+            stage.fail(error, "resolve_secret", backup_hint_for(code, error.message));
+            return fail(code, &error);
+        }
+        stage.note_bool("encryption_enabled", resolved.value().encryption_enabled);
+        secrets = std::move(resolved).value();
     }
-    const auto request = make_backup_request(job, options, secrets.value(), ids.value(),
+
+    const auto request = make_backup_request(job, options, secrets, ids.value(),
                                              std::move(created_utc).value());
-    log_backup_start(log, job, request);
-    if (log != nullptr) {
-        log->info("Opening volume / creating VSS snapshot");
-    }
+    log_backup_request(log, job, request);
     auto backup = backend.run(request, cancellation, context.progress);
     if (!backup) {
-        if (log != nullptr) {
-            // TaskResult stays code-only; the file log keeps the operator-facing failure detail.
-            std::ostringstream detail;
-            detail << "failure detail: code=" << base::error_code_name(backup.error().code)
-                   << " message=" << backup.error().message;
-            log->error(detail.str());
-        }
-        return finish_logged(log, validated_task_result(failed_result(job, backup.error().code)));
+        return fail(backup.error().code, &backup.error());
     }
-    return finish_logged(log, validated_task_result(completed_result(job, backup.value())));
+    auto result = validated_task_result(completed_result(job, backup.value()));
+    if (result) {
+        log_backup_result(log, result.value(), nullptr, started);
+    }
+    return result;
 }
 
 } // namespace

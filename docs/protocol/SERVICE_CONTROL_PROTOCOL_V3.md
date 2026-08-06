@@ -694,19 +694,24 @@
 
 **用途：** Restore 预检；返回短期 `preflight_token` 与容量/链信息。**不**接受路径/key/链数组。
 
-**请求 payload（5 字段）：**
+**请求 payload（6 字段）：**
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `repository_connection_id` | string | |
 | `recovery_point_id` | string | |
-| `target_source_id` | string | 目标 opaque ID：整盘还原为 `disk.N`；卷还原为 volume source_id |
-| `source_disk_number` | uint32 | 整盘还原时 Manifest 源盘号；卷还原传 `0` |
+| `target_source_id` | string | 整盘：`disk.N`；卷：`vol.{guid}`（Inventory opaque id） |
+| `source_disk_number` | uint32 | 整盘：Manifest 源盘号；卷还原传 `0` |
+| `source_volume_index` | uint32 | 卷：Manifest `volumes[].volume_index`；整盘传 `0` |
 | `archive_password` | string | 打开加密 Archive；未加密 `""`；不记日志 |
 
 **整盘还原（Full 或 Incremental tip）：** `target_source_id` 必须为 `disk.N`；Service 经
-`resolve_chain` 得到 base-first 链，校验目标非系统盘、容量 ≥ 源盘、链完整；Worker 再认证链并要求 tip
-含可用 `raw_layout`。`chain_depth` 为链长度（Full-only 为 1）。系统盘目标在线拒绝（需 PE）。
+`resolve_chain` 得到 base-first 链，校验目标非系统盘、容量 ≥ 源盘、链完整；指纹前缀 `diskc|…`。
+Worker 再认证链并要求 tip 含可用 `raw_layout`。`chain_depth` 为链长度（Full-only 为 1）。系统盘目标在线拒绝（需 PE）。
+
+**卷还原（Full 或 Incremental tip）：** `target_source_id` 必须为 `vol.…`；Service 校验目标非系统、
+非只读、Available、容量 ≥ 源卷 `total_size`；指纹前缀 `volc|{volume_index}|{size}|…`。
+Start 时 `target_ref` 为 Inventory `stable_key`（canonical Volume GUID Path）。
 
 **成功 payload — `RestorePreflight`（10 字段）：**
 
@@ -726,6 +731,27 @@
     "recovery_point_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
     "target_source_id": "disk.2",
     "source_disk_number": 0,
+    "source_volume_index": 0,
+    "archive_password": ""
+  }
+}
+```
+
+**示例请求（卷）：**
+
+```json
+{
+  "schema_version": 3,
+  "message_type": 1,
+  "request_id": "…",
+  "kind": 9,
+  "idempotency_key": null,
+  "payload": {
+    "repository_connection_id": "conn-01",
+    "recovery_point_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "target_source_id": "vol.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "source_disk_number": 0,
+    "source_volume_index": 1,
     "archive_password": ""
   }
 }
@@ -1002,8 +1028,10 @@ Service 展开：`source_ids`、`repository_connection_id`、`exclude_page_and_h
 | `preserve_disk_signature` | bool | 保留源盘 MBR signature / GPT DiskId（默认 true） |
 | `auto_expand_last_partition` | bool | 目标更大时扩展末数据分区 + NTFS/ReFS（默认 true） |
 
-整盘路径：Service 解析 preflight 指纹中的源盘号与 Archive key，向 Worker 提交
-`disk_restore=true` + `\\.\PhysicalDriveN` 目标，并透传上述两个选项。
+- **整盘（指纹 `diskc|…`）：** 向 Worker 提交 `disk_restore=true` + `\\.\PhysicalDriveN`，并透传
+  `preserve_disk_signature` / `auto_expand_last_partition`。
+- **卷（指纹 `volc|…`）：** 向 Worker 提交 `disk_restore=false` + `source_volume_index` +
+  Volume GUID Path `target_ref`；盘签名/扩容选项忽略。
 
 ```json
 {

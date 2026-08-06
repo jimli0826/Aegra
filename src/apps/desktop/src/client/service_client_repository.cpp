@@ -97,6 +97,7 @@ constexpr qsizetype kMaximumRecoveryPoints = 10'000;
     QHash<int, QString> label_by_part;
     QHash<int, QString> fs_by_part;
     QHash<int, qint64> size_by_part;
+    QHash<int, int> volume_index_by_part;
     for (const auto& item : all_volumes) {
         const auto volume = item.toMap();
         int part_num = -1;
@@ -126,6 +127,7 @@ constexpr qsizetype kMaximumRecoveryPoints = 10'000;
         if (size > 0) {
             size_by_part.insert(part_num, size);
         }
+        volume_index_by_part.insert(part_num, volume.value(QStringLiteral("volumeIndex")).toInt());
     }
 
     QVariantList ui_volumes;
@@ -162,10 +164,55 @@ constexpr qsizetype kMaximumRecoveryPoints = 10'000;
             {QStringLiteral("fileSystem"), fs},
             {QStringLiteral("fs"), fs},
             {QStringLiteral("partitionNumber"), part_num},
+            {QStringLiteral("volumeIndex"), volume_index_by_part.value(part_num, -1)},
         });
     }
     Q_UNUSED(disk_total);
     return ui_volumes;
+}
+
+/// Flat Manifest volumes for volume→volume restore (source_volume_index mapping).
+[[nodiscard]] QVariantList source_volumes_from_layout(const QVariantList& volumes,
+                                                     const LocaleFormat& format) {
+    QVariantList sorted = volumes;
+    std::sort(sorted.begin(), sorted.end(), [](const QVariant& left, const QVariant& right) {
+        return left.toMap().value(QStringLiteral("volumeIndex")).toInt() <
+               right.toMap().value(QStringLiteral("volumeIndex")).toInt();
+    });
+    QVariantList out;
+    out.reserve(sorted.size());
+    for (const auto& item : sorted) {
+        const auto volume = item.toMap();
+        const auto size = volume.value(QStringLiteral("totalSizeBytes")).toLongLong();
+        if (size <= 0) {
+            continue;
+        }
+        const int volume_index = volume.value(QStringLiteral("volumeIndex")).toInt();
+        if (volume_index < 0) {
+            continue;
+        }
+        const auto letter = volume.value(QStringLiteral("letter")).toString().trimmed();
+        auto name = volume.value(QStringLiteral("label")).toString().trimmed();
+        if (name.isEmpty()) {
+            name = QStringLiteral("New Volume");
+        }
+        const auto fs = volume.value(QStringLiteral("filesystem")).toString().trimmed();
+        QString title = name;
+        if (!letter.isEmpty()) {
+            title = letter + QStringLiteral(": ") + name;
+        }
+        out.push_back(QVariantMap{
+            {QStringLiteral("volumeIndex"), volume_index},
+            {QStringLiteral("letter"), letter},
+            {QStringLiteral("name"), name},
+            {QStringLiteral("title"), title},
+            {QStringLiteral("size"), format.format_bytes(size)},
+            {QStringLiteral("capacityBytes"), size},
+            {QStringLiteral("fileSystem"), fs},
+            {QStringLiteral("fs"), fs},
+        });
+    }
+    return out;
 }
 
 /// Hierarchical layout (disks + volumes) → Restore Source DiskRows (old project shape).
@@ -331,6 +378,10 @@ QVariantList ServiceClient::recoveryPointSourceDisks() const {
     return recovery_point_source_disks_;
 }
 
+QVariantList ServiceClient::recoveryPointSourceVolumes() const {
+    return recovery_point_source_volumes_;
+}
+
 QString ServiceClient::recoveryPointLayoutErrorText() const {
     return recovery_point_layout_error_code_.isEmpty()
                ? QString{}
@@ -350,6 +401,7 @@ void ServiceClient::loadRecoveryPointLayout(const QString& recovery_point_id,
     // Replace any in-flight layout query for a different checkpoint.
     recovery_point_layout_error_code_.clear();
     recovery_point_source_disks_.clear();
+    recovery_point_source_volumes_.clear();
     recovery_point_layout_loading_ = true;
     recovery_point_layout_recovery_point_id_ = recovery_point_id;
     emit recoveryPointLayoutChanged();
@@ -393,10 +445,11 @@ RequestDisposition ServiceClient::handle_recovery_point_layout_frame(const QByte
         finish_recovery_point_layout_failure(QStringLiteral("recovery_point.layout_failed"));
         return RequestDisposition::kFinished;
     }
-    recovery_point_source_disks_ =
-        source_disks_from_layout(layout.value(QStringLiteral("disks")).toList(),
-                                 layout.value(QStringLiteral("volumes")).toList(), format_);
-    if (recovery_point_source_disks_.isEmpty()) {
+    const auto layout_volumes = layout.value(QStringLiteral("volumes")).toList();
+    recovery_point_source_disks_ = source_disks_from_layout(
+        layout.value(QStringLiteral("disks")).toList(), layout_volumes, format_);
+    recovery_point_source_volumes_ = source_volumes_from_layout(layout_volumes, format_);
+    if (recovery_point_source_disks_.isEmpty() || recovery_point_source_volumes_.isEmpty()) {
         finish_recovery_point_layout_failure(QStringLiteral("recovery_point.layout_failed"));
         return RequestDisposition::kFinished;
     }
@@ -410,6 +463,7 @@ RequestDisposition ServiceClient::handle_recovery_point_layout_frame(const QByte
 
 void ServiceClient::finish_recovery_point_layout_failure(const QString& message_code) {
     recovery_point_source_disks_.clear();
+    recovery_point_source_volumes_.clear();
     recovery_point_layout_loading_ = false;
     recovery_point_layout_request_id_.clear();
     recovery_point_layout_error_code_ = message_code;
@@ -419,9 +473,11 @@ void ServiceClient::finish_recovery_point_layout_failure(const QString& message_
 
 void ServiceClient::reset_recovery_point_layout() {
     const bool had_state = recovery_point_layout_loading_ || !recovery_point_source_disks_.isEmpty() ||
+                           !recovery_point_source_volumes_.isEmpty() ||
                            !recovery_point_layout_error_code_.isEmpty() ||
                            !recovery_point_layout_recovery_point_id_.isEmpty();
     recovery_point_source_disks_.clear();
+    recovery_point_source_volumes_.clear();
     recovery_point_layout_loading_ = false;
     recovery_point_layout_request_id_.clear();
     recovery_point_layout_recovery_point_id_.clear();

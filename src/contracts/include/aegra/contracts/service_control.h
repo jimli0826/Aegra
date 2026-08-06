@@ -367,10 +367,12 @@ struct ExecuteDeletePlanCommand final {
 struct RestorePreflightRequest final {
     std::string repository_connection_id;
     std::string recovery_point_id;
-    /// Inventory opaque id: volume source_id for volume restore, or `disk.N` for disk restore.
+    /// Inventory opaque id: volume source_id (`vol.…`) for volume restore, or `disk.N` for disk.
     std::string target_source_id;
-    /// Manifest disk_number when restoring whole disk to a `disk.N` target (step-1 Full disk).
+    /// Manifest disk_number when restoring whole disk to a `disk.N` target.
     std::uint32_t source_disk_number{0};
+    /// Manifest volume_index when restoring one volume to a `vol.…` target.
+    std::uint32_t source_volume_index{0};
     /// Opens encrypted archives during preflight; empty for unencrypted. Never log.
     std::string archive_password;
 };

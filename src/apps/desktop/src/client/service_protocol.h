@@ -112,6 +112,7 @@ encode_schedule_list_request(const QString& request_id,
                                                         const QString& recovery_point_id,
                                                         const QString& target_source_id,
                                                         int source_disk_number,
+                                                        int source_volume_index = 0,
                                                         const QString& archive_password = {});
 [[nodiscard]] QByteArray encode_start_restore_request(const QString& request_id,
                                                       const QString& idempotency_key,

@@ -262,6 +262,49 @@ void unlock_volume(const HANDLE handle) noexcept {
     }
 }
 
+// Same FSCTL as raw volume backup reads: without it, writes near the end of the partition
+// can fail even after lock/dismount because the filesystem still bounds the handle.
+base::Result<void> enable_extended_raw_io(const HANDLE handle) {
+    auto result =
+        device_control(handle, FSCTL_ALLOW_EXTENDED_DASD_IO, nullptr, 0, "FSCTL_ALLOW_EXTENDED_DASD_IO");
+    if (!result) {
+        return base::Result<void>::failure(result.error());
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void> lock_and_dismount_volume(const HANDLE handle) {
+    auto lock = volume_control(handle, FSCTL_LOCK_VOLUME, "FSCTL_LOCK_VOLUME");
+    if (!lock) {
+        // Surface a stable product message for the common "volume busy" case (Win32 32/33).
+        if (lock.error().code == base::ErrorCode::kIoFailure &&
+            lock.error().message.find(" failed with Win32 error 32") != std::string::npos) {
+            return base::Result<void>::failure(
+                {base::ErrorCode::kConflict,
+                 "target volume is in use (FSCTL_LOCK_VOLUME sharing violation); close open "
+                 "handles and retry"});
+        }
+        if (lock.error().code == base::ErrorCode::kIoFailure &&
+            lock.error().message.find(" failed with Win32 error 33") != std::string::npos) {
+            return base::Result<void>::failure(
+                {base::ErrorCode::kConflict,
+                 "target volume is locked by another process (FSCTL_LOCK_VOLUME); retry later"});
+        }
+        return base::Result<void>::failure(lock.error());
+    }
+    auto dismount = volume_control(handle, FSCTL_DISMOUNT_VOLUME, "FSCTL_DISMOUNT_VOLUME");
+    if (!dismount) {
+        unlock_volume(handle);
+        return base::Result<void>::failure(dismount.error());
+    }
+    auto extended = enable_extended_raw_io(handle);
+    if (!extended) {
+        unlock_volume(handle);
+        return base::Result<void>::failure(extended.error());
+    }
+    return base::Result<void>::success();
+}
+
 base::Result<void> wait_for_write(const HANDLE handle, OVERLAPPED& overlapped,
                                   const DWORD expected,
                                   const base::CancellationToken& cancellation) {
@@ -330,16 +373,11 @@ WindowsBlockSink::open(const WindowsBlockSinkOpenRequest& request) {
     }
     bool locked = false;
     if (request.kind == WindowsBlockSinkKind::kVolume) {
-        auto lock = volume_control(handle.get(), FSCTL_LOCK_VOLUME, "FSCTL_LOCK_VOLUME");
-        if (!lock) {
-            return base::Result<std::unique_ptr<WindowsBlockSink>>::failure(lock.error());
+        auto prepared = lock_and_dismount_volume(handle.get());
+        if (!prepared) {
+            return base::Result<std::unique_ptr<WindowsBlockSink>>::failure(prepared.error());
         }
         locked = true;
-        auto dismount = volume_control(handle.get(), FSCTL_DISMOUNT_VOLUME, "FSCTL_DISMOUNT_VOLUME");
-        if (!dismount) {
-            unlock_volume(handle.get());
-            return base::Result<std::unique_ptr<WindowsBlockSink>>::failure(dismount.error());
-        }
     }
     auto capacity = (request.kind == WindowsBlockSinkKind::kVolume ||
                      request.kind == WindowsBlockSinkKind::kPhysicalDisk)

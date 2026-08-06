@@ -1113,6 +1113,66 @@ Server: %1</translation>
         <source>Volume %1</source>
         <translation>Volume %1</translation>
     </message>
+    <message id="aegra.restore.mode_disk">
+        <source>Disk</source>
+        <translation>Disk</translation>
+    </message>
+    <message id="aegra.restore.mode_volume">
+        <source>Volume</source>
+        <translation>Volume</translation>
+    </message>
+    <message id="aegra.restore.source_volumes">
+        <source>Source Volumes</source>
+        <translation>Source Volumes</translation>
+    </message>
+    <message id="aegra.restore.source_volume_hint">
+        <source>(drag onto a target volume, or use Restore to)</source>
+        <translation>(drag onto a target volume, or use Restore to)</translation>
+    </message>
+    <message id="aegra.restore.target_volumes">
+        <source>Target Volumes</source>
+        <translation>Target Volumes</translation>
+    </message>
+    <message id="aegra.restore.target_volume_hint">
+        <source>(this PC — drop a source volume here)</source>
+        <translation>(this PC — drop a source volume here)</translation>
+    </message>
+    <message id="aegra.restore.target_volume_empty">
+        <source>Local volumes will appear when inventory is available</source>
+        <translation>Local volumes will appear when inventory is available</translation>
+    </message>
+    <message id="aegra.restore.select_checkpoint_source_volumes">
+        <source>Select a checkpoint to view source volumes</source>
+        <translation>Select a checkpoint to view source volumes</translation>
+    </message>
+    <message id="aegra.restore.volume_map_required">
+        <source>Choose “Restore to” on a source volume</source>
+        <translation>Choose “Restore to” on a source volume</translation>
+    </message>
+    <message id="aegra.restore.volume_target_too_small">
+        <source>Target volume is smaller than the source volume</source>
+        <translation>Target volume is smaller than the source volume</translation>
+    </message>
+    <message id="aegra.restore.volume_target_in_use">
+        <source>That target is already mapped by another source volume</source>
+        <translation>That target is already mapped by another source volume</translation>
+    </message>
+    <message id="aegra.restore.volume_system_target_blocked">
+        <source>System volume restore requires PE (not available online)</source>
+        <translation>System volume restore requires PE (not available online)</translation>
+    </message>
+    <message id="aegra.restore.volume_target_read_only">
+        <source>Restore target volume is read-only</source>
+        <translation>Restore target volume is read-only</translation>
+    </message>
+    <message id="aegra.restore.read_only_tag">
+        <source>— read-only</source>
+        <translation>— read-only</translation>
+    </message>
+    <message id="aegra.restore.volume_options_hint">
+        <source>Volume restore writes one backup volume onto an existing non-system volume of equal or larger size. Partition layout is not changed.</source>
+        <translation>Volume restore writes one backup volume onto an existing non-system volume of equal or larger size. Partition layout is not changed.</translation>
+    </message>
     <message id="aegra.restore.no_recovery_points_on_date">
         <source>No recovery points on this date</source>
         <translation>No recovery points on this date</translation>
@@ -1157,9 +1217,21 @@ Server: %1</translation>
         <source>Image</source>
         <translation>Image</translation>
     </message>
+    <message id="aegra.mount.col.size">
+        <source>Size</source>
+        <translation>Size</translation>
+    </message>
     <message id="aegra.mount.drive_letter">
-        <source>Preferred drive letter</source>
-        <translation>Preferred drive letter</translation>
+        <source>Drive letter</source>
+        <translation>Drive letter</translation>
+    </message>
+    <message id="aegra.mount.drive_letter_auto">
+        <source>Auto</source>
+        <translation>Auto</translation>
+    </message>
+    <message id="aegra.mount.drive_letter_hint">
+        <source>Preferred letter for the first volume. Choose Auto to pick the next free letter. Additional volumes are assigned automatically.</source>
+        <translation>Preferred letter for the first volume. Choose Auto to pick the next free letter. Additional volumes are assigned automatically.</translation>
     </message>
     <message id="aegra.mount.unmount">
         <source>Unmount</source>

@@ -13,18 +13,25 @@
 | 项 | 规则 |
 | --- | --- |
 | 根目录 | 优先 `AEGRA_DATA_DIR`（Service 启动时注入）；否则 `%LOCALAPPDATA%\Aegra` 或 `%ProgramData%\Aegra` |
-| 路径 | `<data_dir>/logs/<operation>/YYYYMMDD_HHMMSS.log`，`operation` 为 `backup` / `restore` / `verify` |
-| 格式 | `[YYYY-MM-DD HH:MM:SS.mmm] [info] ...`，仅文件、无控制台 |
-| 内容 | 起止分隔线、job/trace、源/目标路径、几何参数、完成/失败摘要与容量指标 |
-| 禁止 | 密码、SecretRef 明文、凭据材料 |
+| 路径 | `<data_dir>/logs/<operation>/YYYYMMDD_HHMMSS[_job-id].log`，`operation` 为 `backup` / `restore` / `verify`；文件名附带 `job_id` 便于检索 |
+| 格式 | `[YYYY-MM-DD HH:MM:SS.mmm] [level] ...`，仅文件、无控制台；章节用 `[Section]`，字段用 `  key : value` |
+| 结构 | 文件头（operation/path）→ `[Job]` / `[Request]` → 若干 `[Stage: name] begin|OK|FAILED` → `[Result]` |
+| 字节/时长 | 人类可读双写，例如 `3.0 GiB (3203399680 bytes)`、`14 ms` / `2.136 s` |
+| 失败必填 | `step`、`error_code`（`error_code_name`）、`error_message`（含 Win32）、可选 `hint`；`[Result]` 再汇总 `message_code` / `elapsed` |
+| Backup 阶段 | `resolve_credentials` → `prepare_sources`（VSS/raw、bitmap、pagefile 排除）→ `create_archive` → `backup_pipeline`（按卷） |
+| Restore 阶段 | `resolve_credentials` → `open_chain_reader` → `open_volume_reader` 或 `plan_disk_volumes` → `open_volume_sink` / `prepare_target_disk`+`open_disk_sink` → `restore_pipeline` →（disk）`rebuild_partition_table` |
+| Verify 阶段 | `resolve_credentials` → `open_archive` → `verify_pipeline` |
+| 禁止 | 密码、SecretRef 明文、凭据材料；可记 `password=present|empty` 或层计数 |
 
 Worker 任务日志允许记录诊断所需的源/目标路径、Volume GUID、卷标、主机名和 Archive 信息，但不得记录
 密码、密钥、Secret、Credential、SecretRef、访问/刷新令牌、会话令牌、Cookie、Authorization 内容或其他
 可用于恢复、派生、重放认证状态的材料。记录用户数据时遵循最小必要原则，并受日志文件 ACL、轮转和保留
 策略约束。
 
+实现入口：`WorkerTaskLog` / `ScopedStage`（`apps/worker`）。Backup / Restore / Verify 均使用同一章节与 stage 模型。
+
 Service 在 composition root 设置 `AEGRA_DATA_DIR`，Worker 子进程通过环境继承同一数据目录，保证
-task log 与 `service.log` 同树。
+task log 与 Service 分级日志（`logs/trace.log` 等）同树。
 
 当前消息使用 UTF-8 JSON。JSON 依赖只存在于 `apps/worker`，`contracts` 保持与传输技术无关。
 `aegra_personal_worker.exe` 无参数时从 stdin 读取一个最大 1 MiB 的 Job，stdout 只写最终响应；正式父进程
@@ -46,7 +53,7 @@ task log 与 `service.log` 同树。
 | `target_ref` | string | Backup/Restore/Export 必填；Verify 为空 |
 | `credential_refs` | string array | 只允许 `SecretRef` 定位符 |
 | `backup` | object | Backup 必填；含 `type`，增量还含两个父引用 |
-| `restore` | object | 整盘 Restore 必填：`disk_restore`、`source_disk_number`、`bring_target_online`；卷恢复可省略 |
+| `restore` | object | Restore 选项：`disk_restore`、`source_disk_number`、`source_volume_index`、`bring_target_online`、`preserve_disk_signature`、`auto_expand_last_partition`。整盘必填 `disk_restore=true`；卷还原 `disk_restore=false` + `source_volume_index`（可省略整个 `restore`，则 volume_index=0） |
 | `trace_id` | string | 必填、非空 |
 | `deadline_utc_ms` | signed integer | 可选；`0` 表示无 deadline |
 
@@ -72,7 +79,8 @@ GUID Path，且**不**携带 `restore` 对象。整盘恢复：`source_refs` 为
 （Full，以及可选 Incremental 层），`target_ref` 为 `\\.\PhysicalDriveN`，且必须带：
 
 ```json
-{"restore":{"disk_restore":true,"source_disk_number":0,"bring_target_online":true,"preserve_disk_signature":true,"auto_expand_last_partition":true}}
+{"restore":{"disk_restore":true,"source_disk_number":0,"source_volume_index":0,"bring_target_online":true,"preserve_disk_signature":true,"auto_expand_last_partition":true}}
+{"restore":{"disk_restore":false,"source_disk_number":0,"source_volume_index":1,"bring_target_online":true,"preserve_disk_signature":true,"auto_expand_last_partition":true}}
 ```
 
 Worker 用 `PersonalArchiveChainReader` 合成 tip 视图，再按卷写入 PhysicalDrive。Service→Worker

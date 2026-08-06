@@ -274,14 +274,15 @@ encode_restore_preflight_request(const contracts::RestorePreflightRequest& reque
                 {"recovery_point_id", request.recovery_point_id},
                 {"target_source_id", request.target_source_id},
                 {"source_disk_number", request.source_disk_number},
+                {"source_volume_index", request.source_volume_index},
                 {"archive_password", request.archive_password}};
 }
 
 [[nodiscard]] contracts::RestorePreflightRequest
 parse_restore_preflight_request(const Json& payload) {
-    constexpr std::array<std::string_view, 5> keys{
+    constexpr std::array<std::string_view, 6> keys{
         "repository_connection_id", "recovery_point_id", "target_source_id", "source_disk_number",
-        "archive_password"};
+        "source_volume_index", "archive_password"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("restore preflight request fields are invalid");
     }
@@ -291,6 +292,8 @@ parse_restore_preflight_request(const Json& payload) {
     request.target_source_id = payload.at("target_source_id").get<std::string>();
     request.source_disk_number =
         unsigned_value<std::uint32_t>(payload, "source_disk_number");
+    request.source_volume_index =
+        unsigned_value<std::uint32_t>(payload, "source_volume_index");
     request.archive_password = payload.at("archive_password").get<std::string>();
     return request;
 }

@@ -14,6 +14,7 @@ add_library(aegra_app_service STATIC
     src/windows_service_control_win32.cpp
     src/windows_service_scm_host.cpp
     src/worker_job_service.cpp
+    src/worker_job_service_restore.cpp
     src/worker_supervisor.cpp
     src/supervisor_worker_protocol.cpp
 )

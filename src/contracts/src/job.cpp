@@ -81,12 +81,11 @@ base::Result<void> validate_restore_options(const JobRequest& request) {
                                : base::Result<void>::success();
     }
     if (!request.restore) {
+        // Volume restore may omit restore{} (source_volume_index defaults to 0).
         return base::Result<void>::success();
     }
-    if (!request.restore->disk_restore) {
-        return invalid("restore options currently only support disk_restore=true");
-    }
-    // Disk restore source_refs are base-first (Full, then Incremental layers).
+    // source_refs are always base-first (Full, then Incremental layers) for both modes.
+    // disk_restore=true → PhysicalDrive target; false → Volume GUID path + source_volume_index.
     return base::Result<void>::success();
 }
 

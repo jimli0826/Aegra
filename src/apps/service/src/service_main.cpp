@@ -27,11 +27,13 @@
 #include <shellapi.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -70,6 +72,50 @@ enum class ServiceExitCode : int {
     }
     return spdlog::level::info;
 }
+
+// One rotating file per level so operators can open error.log / warning.log without noise.
+// critical is folded into error.log (ServiceLogLevel has no critical).
+class LevelOnlyFileSink final : public spdlog::sinks::base_sink<std::mutex> {
+  public:
+    LevelOnlyFileSink(spdlog::filename_t path, const spdlog::level::level_enum only_level)
+        : only_level_(only_level),
+          file_(std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+              std::move(path), 10U * 1024U * 1024U, 5U)) {
+        set_level(only_level);
+        file_->set_level(spdlog::level::trace);
+    }
+
+  protected:
+    void sink_it_(const spdlog::details::log_msg& msg) override {
+        if (!accepts(msg.level)) {
+            return;
+        }
+        file_->log(msg);
+    }
+
+    void flush_() override { file_->flush(); }
+
+    void set_pattern_(const std::string& pattern) override {
+        file_->set_pattern(pattern);
+        spdlog::sinks::base_sink<std::mutex>::set_pattern_(pattern);
+    }
+
+    void set_formatter_(std::unique_ptr<spdlog::formatter> sink_formatter) override {
+        file_->set_formatter(sink_formatter->clone());
+        spdlog::sinks::base_sink<std::mutex>::set_formatter_(std::move(sink_formatter));
+    }
+
+  private:
+    [[nodiscard]] bool accepts(const spdlog::level::level_enum level) const noexcept {
+        if (level == only_level_) {
+            return true;
+        }
+        return only_level_ == spdlog::level::err && level == spdlog::level::critical;
+    }
+
+    spdlog::level::level_enum only_level_;
+    std::shared_ptr<spdlog::sinks::rotating_file_sink_mt> file_;
+};
 
 [[nodiscard]] std::string_view
 job_state_name(const aegra::contracts::ServiceJobState state) noexcept {
@@ -290,6 +336,22 @@ resolve_worker_path(const ServiceArguments& arguments) {
     return aegra::base::Result<std::string>::success(std::move(output));
 }
 
+[[nodiscard]] aegra::base::Result<std::shared_ptr<spdlog::sinks::sink>>
+make_level_log_sink(const std::filesystem::path& log_dir, const wchar_t* filename,
+                    const spdlog::level::level_enum only_level) {
+    auto path = path_to_utf8(log_dir / filename);
+    if (!path) {
+        return aegra::base::Result<std::shared_ptr<spdlog::sinks::sink>>::failure(path.error());
+    }
+    try {
+        return aegra::base::Result<std::shared_ptr<spdlog::sinks::sink>>::success(
+            std::make_shared<LevelOnlyFileSink>(path.value(), only_level));
+    } catch (const spdlog::spdlog_ex&) {
+        return aegra::base::Result<std::shared_ptr<spdlog::sinks::sink>>::failure(
+            {aegra::base::ErrorCode::kIoFailure, "failed to open Service level log file"});
+    }
+}
+
 [[nodiscard]] aegra::base::Result<std::unique_ptr<service::IServiceLog>>
 create_service_log(const std::filesystem::path& data_dir, const bool service_mode) {
     std::error_code error;
@@ -299,16 +361,26 @@ create_service_log(const std::filesystem::path& data_dir, const bool service_mod
         return aegra::base::Result<std::unique_ptr<service::IServiceLog>>::failure(
             {aegra::base::ErrorCode::kIoFailure, "failed to create Service log directory"});
     }
-    auto log_path = path_to_utf8(log_dir / L"service.log");
-    if (!log_path) {
-        return aegra::base::Result<std::unique_ptr<service::IServiceLog>>::failure(
-            log_path.error());
+    // Split by level: logs/trace.log, info.log, warning.log, error.log (no combined service.log).
+    const std::array<std::pair<const wchar_t*, spdlog::level::level_enum>, 4> level_files{{
+        {L"trace.log", spdlog::level::trace},
+        {L"info.log", spdlog::level::info},
+        {L"warning.log", spdlog::level::warn},
+        {L"error.log", spdlog::level::err},
+    }};
+    std::vector<spdlog::sink_ptr> sinks;
+    sinks.reserve(level_files.size());
+    for (const auto& [filename, level] : level_files) {
+        auto sink = make_level_log_sink(log_dir, filename, level);
+        if (!sink) {
+            return aegra::base::Result<std::unique_ptr<service::IServiceLog>>::failure(
+                sink.error());
+        }
+        sinks.push_back(std::move(sink).value());
     }
     try {
-        // File-only logging (no console). Rotating: 10 MiB × 5 files under data_dir/logs.
-        auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-            log_path.value(), 10U * 1024U * 1024U, 5U);
-        auto logger = std::make_shared<spdlog::logger>("aegra_service", std::move(file_sink));
+        auto logger =
+            std::make_shared<spdlog::logger>("aegra_service", sinks.begin(), sinks.end());
         logger->set_level(spdlog::level::trace);
         logger->flush_on(spdlog::level::info);
         logger->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] %v");

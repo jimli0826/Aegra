@@ -79,6 +79,8 @@ bool ServiceClient::startDiskRestore(const int source_disk_number, const int tar
     restore_command_busy_ = true;
     restore_source_disk_number_ = source_disk_number;
     restore_target_disk_number_ = target_disk_number;
+    restore_source_volume_index_ = -1;
+    restore_target_source_id_.clear();
     restore_preserve_disk_signature_ = preserve_disk_signature;
     restore_auto_expand_last_partition_ = auto_expand_last_partition;
     restore_recovery_point_id_ = recovery_point_id;
@@ -87,13 +89,73 @@ bool ServiceClient::startDiskRestore(const int source_disk_number, const int tar
     restore_start_idempotency_key_ = QUuid::createUuid().toString(QUuid::WithoutBraces);
     emit restoreCommandChanged();
 
-    const auto target_source_id =
-        QStringLiteral("disk.%1").arg(target_disk_number);
+    const auto target_source_id = QStringLiteral("disk.%1").arg(target_disk_number);
     const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     restore_prepare_request_id_ = request_id;
     const auto body =
         encode_prepare_restore_request(request_id, connection_id, recovery_point_id,
-                                       target_source_id, source_disk_number, archive_password);
+                                       target_source_id, source_disk_number, 0, archive_password);
+    const auto started =
+        coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
+            return handle_prepare_restore_frame(frame_body);
+        });
+    if (!started) {
+        finish_restore_command_failure(QStringLiteral("service.send_failed"));
+        return false;
+    }
+    return true;
+}
+
+bool ServiceClient::startVolumeRestore(const int source_volume_index,
+                                       const QString& target_source_id,
+                                       const QString& recovery_point_id,
+                                       const QString& archive_password) {
+    if (state_ != State::kReady) {
+        //% "Service is not connected"
+        show_toast(qtTrId("aegra.error.service.disconnected"));
+        return false;
+    }
+    if (!restore_start_available_ || !restore_preflight_available_) {
+        //% "Service does not support restore"
+        show_toast(qtTrId("aegra.restore.capability_missing"));
+        return false;
+    }
+    if (restore_command_busy_) {
+        //% "A restore command is already in progress"
+        show_toast(qtTrId("aegra.restore.busy"));
+        return false;
+    }
+    if (source_volume_index < 0 || target_source_id.isEmpty() || recovery_point_id.isEmpty() ||
+        !target_source_id.startsWith(QStringLiteral("vol."))) {
+        //% "Select a checkpoint and map a source volume to a target volume"
+        show_toast(qtTrId("aegra.restore.volume_map_required"));
+        return false;
+    }
+    const auto connection_id = defaultConnectionId();
+    if (connection_id.isEmpty()) {
+        //% "No repository connection is available"
+        show_toast(qtTrId("aegra.restore.no_repository"));
+        return false;
+    }
+
+    restore_command_busy_ = true;
+    restore_source_disk_number_ = -1;
+    restore_target_disk_number_ = -1;
+    restore_source_volume_index_ = source_volume_index;
+    restore_target_source_id_ = target_source_id;
+    restore_preserve_disk_signature_ = true;
+    restore_auto_expand_last_partition_ = true;
+    restore_recovery_point_id_ = recovery_point_id;
+    restore_archive_password_ = archive_password;
+    restore_preflight_token_.clear();
+    restore_start_idempotency_key_ = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    emit restoreCommandChanged();
+
+    const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    restore_prepare_request_id_ = request_id;
+    const auto body = encode_prepare_restore_request(
+        request_id, connection_id, recovery_point_id, target_source_id, 0, source_volume_index,
+        archive_password);
     const auto started =
         coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
             return handle_prepare_restore_frame(frame_body);

@@ -27,6 +27,8 @@ struct PersonalArchiveRestoreBackendRequest final {
     /// When true, restore disk image (layers are base-first Full→…→tip chain).
     bool disk_restore{false};
     std::uint32_t source_disk_number{0};
+    /// Manifest volume_index for volume→volume restore (ignored when disk_restore).
+    std::uint32_t source_volume_index{0};
     bool bring_target_online{true};
     bool preserve_disk_signature{true};
     bool auto_expand_last_partition{true};

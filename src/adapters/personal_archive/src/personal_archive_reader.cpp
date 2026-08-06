@@ -296,12 +296,19 @@ validate_chunk_sequence(const ChunkRecord& record, const ScanResult& scan, const
     }
     const auto& previous_record = scan.records.back();
     if (record.source_index != previous_record.source_index) {
+        // Sources must appear as contiguous runs (no interleaving). Each source has its own
+        // logical address space that restarts at 0; a later volume may begin mid-volume on
+        // sparse (incremental/differential) layers when leading blocks are unchanged.
         const bool source_seen = std::ranges::any_of(scan.records, [&record](const auto& prior) {
             return prior.source_index == record.source_index;
         });
-        if (source_seen || record.descriptor.logical_offset != 0) {
+        if (source_seen) {
             return base::Result<void>::failure(
-                error(base::ErrorCode::kCorruptData, "archive chunk source order is invalid"));
+                error(base::ErrorCode::kCorruptData, "archive chunk sources are interleaved"));
+        }
+        if (!sparse && record.descriptor.logical_offset != 0) {
+            return base::Result<void>::failure(error(
+                base::ErrorCode::kCorruptData, "archive volume data does not start at offset 0"));
         }
         return base::Result<void>::success();
     }

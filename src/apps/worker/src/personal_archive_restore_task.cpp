@@ -6,9 +6,12 @@
 #include "aegra/base/error.h"
 #include "aegra/contracts/progress.h"
 
+#include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -67,6 +70,43 @@ const char* message_code_for(const base::ErrorCode code) noexcept {
         return "restore.invalid_request";
     default:
         return "restore.failed";
+    }
+}
+
+[[nodiscard]] std::string_view restore_hint_for(const base::ErrorCode code,
+                                                const std::string_view message) noexcept {
+    if (message.find("sharing violation") != std::string_view::npos ||
+        message.find("Win32 error 32") != std::string_view::npos) {
+        return "Close Explorer windows and apps using the target volume, then retry";
+    }
+    if (message.find("Win32 error 33") != std::string_view::npos) {
+        return "Target volume is locked by another process; retry later";
+    }
+    if (message.find("system volume") != std::string_view::npos ||
+        message.find("system disk") != std::string_view::npos) {
+        return "Online system volume/disk restore is forbidden; use WinPE";
+    }
+    if (message.find("in use") != std::string_view::npos) {
+        return "Close open handles on the target, then retry";
+    }
+    switch (code) {
+    case base::ErrorCode::kInsufficientSpace:
+        return "Choose a larger target volume or disk";
+    case base::ErrorCode::kUnauthorized:
+        return "Re-enter the archive password and retry";
+    case base::ErrorCode::kCorruptData:
+        return "Re-backup the source or pick another recovery point";
+    case base::ErrorCode::kConflict:
+        return "Check that the target is not the archive volume/disk and is not system";
+    case base::ErrorCode::kNotFound:
+    case base::ErrorCode::kIoFailure:
+        return "Check repository path, target path, disk health, and permissions";
+    case base::ErrorCode::kInvalidArgument:
+        return "Verify restore mode, volume_index/disk_number, and target selection";
+    case base::ErrorCode::kCancelled:
+        return "Job was cancelled or deadline expired";
+    default:
+        return {};
     }
 }
 
@@ -159,8 +199,93 @@ make_backend_request(const contracts::JobRequest& job,
         request.bring_target_online = job.restore->bring_target_online;
         request.preserve_disk_signature = job.restore->preserve_disk_signature;
         request.auto_expand_last_partition = job.restore->auto_expand_last_partition;
+    } else if (job.restore) {
+        request.source_volume_index = job.restore->source_volume_index;
     }
     return request;
+}
+
+void log_restore_request(WorkerTaskLog* log, const contracts::JobRequest& job,
+                         const WindowsPersonalBackupTaskOptions& options) {
+    if (log == nullptr) {
+        return;
+    }
+    const bool disk = job.restore && job.restore->disk_restore;
+    log->section("Job");
+    log->field("job_id", job.job_id);
+    log->field("trace_id", job.trace_id);
+    log->field("mode", disk ? "disk" : "volume");
+    log->field_u64("layers", job.source_refs.size());
+
+    log->section("Request");
+    if (disk) {
+        log->field_u64("source_disk_number", job.restore->source_disk_number);
+        log->field_bool("preserve_disk_signature", job.restore->preserve_disk_signature);
+        log->field_bool("auto_expand_last_partition", job.restore->auto_expand_last_partition);
+        log->field_bool("bring_target_online", job.restore->bring_target_online);
+    } else {
+        const auto volume_index = job.restore ? job.restore->source_volume_index : std::uint32_t{0};
+        log->field_u64("source_volume_index", volume_index);
+    }
+    log->field("target", job.target_ref);
+    log->field_bytes("memory_budget", options.memory_budget_bytes);
+    log->field_u64("maximum_chain_depth", options.maximum_restore_chain_depth);
+    for (std::size_t index = 0; index < job.source_refs.size(); ++index) {
+        log->field("archive[" + std::to_string(index) + "]", job.source_refs[index]);
+    }
+    std::size_t empty_password_layers = 0;
+    for (const auto& credential : job.credential_refs) {
+        if (credential.value.empty()) {
+            ++empty_password_layers;
+        }
+    }
+    log->field_u64("password_layers", job.credential_refs.size() - empty_password_layers);
+    log->field_u64("empty_password_layers", empty_password_layers);
+}
+
+void log_restore_failure(WorkerTaskLog* log, const base::Error& error,
+                         const std::chrono::steady_clock::time_point started) {
+    if (log == nullptr) {
+        return;
+    }
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started);
+    const auto* message_code = message_code_for(error.code);
+    const auto hint = restore_hint_for(error.code, error.message);
+    log->section("Result");
+    log->field("outcome", error.code == base::ErrorCode::kCancelled ? "cancelled" : "failed");
+    log->field("message_code", message_code);
+    log->field("error_code", base::error_code_name(error.code));
+    if (!error.message.empty()) {
+        log->field("error_message", error.message);
+    }
+    if (!hint.empty()) {
+        log->field("hint", hint);
+    }
+    log->field("elapsed", format_duration_ms(elapsed));
+}
+
+void log_restore_success(WorkerTaskLog* log, const contracts::TaskResult& result,
+                         const pipeline::RestoreSummary& summary,
+                         const std::chrono::steady_clock::time_point started) {
+    if (log == nullptr) {
+        return;
+    }
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started);
+    log->section("Result");
+    log->field("outcome", "succeeded");
+    log->field("message_code", result.message_code);
+    log->field_bytes("restored_bytes", summary.restored_bytes);
+    log->field_u64("chunks", summary.chunk_count);
+    log->field_bytes("peak_buffer", summary.peak_buffered_bytes);
+    if (elapsed.count() > 0 && summary.restored_bytes > 0) {
+        const auto bps = static_cast<std::uint64_t>(
+            (static_cast<double>(summary.restored_bytes) * 1000.0) /
+            static_cast<double>(elapsed.count()));
+        log->field_bytes("throughput", bps);
+    }
+    log->field("elapsed", format_duration_ms(elapsed));
 }
 
 base::Result<contracts::TaskResult>
@@ -169,62 +294,45 @@ run_accepted_task(const contracts::JobRequest& job,
                   const WindowsPersonalBackupTaskContext& context,
                   const base::CancellationToken& cancellation,
                   IPersonalArchiveRestoreTaskBackend& backend) {
-    auto task_log = WorkerTaskLog::open("restore");
+    const auto started = std::chrono::steady_clock::now();
+    auto task_log = WorkerTaskLog::open("restore", job.job_id);
     WorkerTaskLogScope log_scope(task_log.get());
-    if (task_log) {
-        task_log->info("=== Restore Starting ===");
-        task_log->info(std::string("job_id=") + job.job_id);
-        task_log->info(std::string("trace_id=") + job.trace_id);
-        task_log->info(std::string("layers=") + std::to_string(job.source_refs.size()));
-        task_log->info(std::string("target=") + job.target_ref);
-        if (job.restore && job.restore->disk_restore) {
-            task_log->info("mode=disk");
-            task_log->info(std::string("source_disk_number=") +
-                           std::to_string(job.restore->source_disk_number));
-            task_log->info(std::string("preserve_disk_signature=") +
-                           (job.restore->preserve_disk_signature ? "true" : "false"));
-            task_log->info(std::string("auto_expand_last_partition=") +
-                           (job.restore->auto_expand_last_partition ? "true" : "false"));
-        } else {
-            task_log->info("mode=volume");
-        }
-    }
+    log_restore_request(task_log.get(), job, options);
     publish_preparing(job, context.progress);
     if (cancellation.stop_requested() ||
         (job.deadline_utc_ms > 0 && context.clock.now_utc_ms() >= job.deadline_utc_ms)) {
-        if (task_log) {
-            task_log->warn("=== Restore Cancelled ===");
-        }
+        log_restore_failure(task_log.get(),
+                            {base::ErrorCode::kCancelled, "restore cancelled before start"},
+                            started);
         return validated_result(failed_result(job, base::ErrorCode::kCancelled));
     }
-    auto secrets = resolve_secrets(job, context.credentials, cancellation);
-    if (!secrets) {
-        const auto code = secrets.error().code == base::ErrorCode::kCancelled
-                              ? base::ErrorCode::kCancelled
-                              : base::ErrorCode::kUnauthorized;
-        if (task_log) {
-            task_log->error(std::string("=== Restore Failed === message=") +
-                            (code == base::ErrorCode::kCancelled ? "restore.cancelled"
-                                                                 : "restore.credential_unavailable"));
+    ResolvedSecrets secrets;
+    {
+        ScopedStage stage(task_log.get(), "resolve_credentials");
+        auto resolved = resolve_secrets(job, context.credentials, cancellation);
+        if (!resolved) {
+            const auto code = resolved.error().code == base::ErrorCode::kCancelled
+                                  ? base::ErrorCode::kCancelled
+                                  : base::ErrorCode::kUnauthorized;
+            const base::Error error{code, resolved.error().message.empty()
+                                              ? std::string("credential resolve failed")
+                                              : resolved.error().message};
+            stage.fail(error, "resolve_secret", restore_hint_for(code, error.message));
+            log_restore_failure(task_log.get(), error, started);
+            return validated_result(failed_result(job, code));
         }
-        return validated_result(failed_result(job, code));
+        stage.note_u64("layers", resolved.value().size());
+        secrets = std::move(resolved).value();
     }
-    auto request = make_backend_request(job, options, context, secrets.value());
+    auto request = make_backend_request(job, options, context, secrets);
     auto restored = backend.run(request, cancellation);
     if (!restored) {
-        auto result = validated_result(failed_result(job, restored.error().code));
-        if (task_log && result) {
-            task_log->error(std::string("=== Restore Failed === message=") +
-                            result.value().message_code);
-        }
-        return result;
+        log_restore_failure(task_log.get(), restored.error(), started);
+        return validated_result(failed_result(job, restored.error().code));
     }
     auto result = validated_result(completed_result(job, restored.value()));
-    if (task_log && result) {
-        task_log->info(std::string("=== Restore Complete === message=") +
-                       result.value().message_code);
-        task_log->info(std::string("logical_bytes=") +
-                       std::to_string(result.value().logical_bytes));
+    if (result) {
+        log_restore_success(task_log.get(), result.value(), restored.value(), started);
     }
     return result;
 }

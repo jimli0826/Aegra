@@ -151,6 +151,7 @@ class ServiceClient final : public QObject {
     [[nodiscard]] bool globalLoading() const noexcept;
     [[nodiscard]] bool recoveryPointLayoutLoading() const noexcept;
     [[nodiscard]] QVariantList recoveryPointSourceDisks() const;
+    [[nodiscard]] QVariantList recoveryPointSourceVolumes() const;
     [[nodiscard]] QString recoveryPointLayoutErrorText() const;
 
     Q_INVOKABLE void reconnect();
@@ -166,6 +167,8 @@ class ServiceClient final : public QObject {
     Q_PROPERTY(bool recoveryPointLayoutLoading READ recoveryPointLayoutLoading NOTIFY
                    recoveryPointLayoutChanged)
     Q_PROPERTY(QVariantList recoveryPointSourceDisks READ recoveryPointSourceDisks NOTIFY
+                   recoveryPointLayoutChanged)
+    Q_PROPERTY(QVariantList recoveryPointSourceVolumes READ recoveryPointSourceVolumes NOTIFY
                    recoveryPointLayoutChanged)
     Q_PROPERTY(QString recoveryPointLayoutErrorText READ recoveryPointLayoutErrorText NOTIFY
                    recoveryPointLayoutChanged)
@@ -204,6 +207,10 @@ class ServiceClient final : public QObject {
                                       const QString& archive_password = {},
                                       bool preserve_disk_signature = true,
                                       bool auto_expand_last_partition = true);
+    /// Volume→volume restore: Manifest source_volume_index → inventory vol.* target_source_id.
+    Q_INVOKABLE bool startVolumeRestore(int source_volume_index, const QString& target_source_id,
+                                        const QString& recovery_point_id,
+                                        const QString& archive_password = {});
     Q_INVOKABLE void cancelActiveBackup();
     Q_INVOKABLE void dismissToast();
     /// Show a top toast (success/info). Safe for QML schedule Run feedback.
@@ -317,6 +324,7 @@ class ServiceClient final : public QObject {
     QString repository_error_code_;
     QString recovery_point_layout_error_code_;
     QVariantList recovery_point_source_disks_;
+    QVariantList recovery_point_source_volumes_;
     QString jobs_error_code_;
     QString inventory_error_code_;
     QString schedules_error_code_;
@@ -388,8 +396,10 @@ class ServiceClient final : public QObject {
     bool cancel_command_busy_{false};
     int restore_source_disk_number_{-1};
     int restore_target_disk_number_{-1};
+    int restore_source_volume_index_{-1};
     bool restore_preserve_disk_signature_{true};
     bool restore_auto_expand_last_partition_{true};
+    QString restore_target_source_id_;
     QString restore_recovery_point_id_;
     QString restore_archive_password_;
     QString restore_preflight_token_;

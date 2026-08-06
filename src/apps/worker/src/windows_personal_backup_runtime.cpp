@@ -104,8 +104,8 @@ vss_volume_indices(const std::vector<windows_disk::WindowsVolumeInfo>& volumes) 
         if (supported.value()) {
             result.push_back(index);
         } else if (auto* log = WorkerTaskLog::active(); log != nullptr) {
-            log->info(std::string("VSS not supported for volume; using raw: ") +
-                      utf8_or_empty(volumes[index].volume_guid_path));
+            log->field("vss_fallback", "not_supported");
+            log->field("volume", utf8_or_empty(volumes[index].volume_guid_path));
         }
     }
     return base::Result<std::vector<std::size_t>>::success(std::move(result));
@@ -128,20 +128,21 @@ create_vss_session(const std::vector<windows_disk::WindowsVolumeInfo>& volumes,
 }
 
 void log_free_skip(const windows_disk::FreeSkipPlan& plan, const bool applied) {
-    if (auto* log = WorkerTaskLog::active(); log != nullptr) {
-        if (!applied) {
-            log->info(std::string("Volume Bitmap optimization disabled for filesystem \"") +
-                      (plan.filesystem.empty() ? "?" : plan.filesystem) +
-                      "\"; reading all blocks");
-            return;
-        }
-        std::ostringstream line;
-        line << "Volume Bitmap optimization (" << plan.filesystem << "): free_bytes="
-             << plan.free_bytes << " / total_bytes=" << plan.total_bytes
-             << " free_ranges=" << plan.free_ranges.size()
-             << " protected_prefix=" << plan.protected_prefix_bytes;
-        log->info(line.str());
+    if (auto* log = WorkerTaskLog::active(); log == nullptr) {
+        return;
     }
+    auto* log = WorkerTaskLog::active();
+    if (!applied) {
+        log->field("bitmap_optimization", "disabled");
+        log->field("filesystem", plan.filesystem.empty() ? "?" : plan.filesystem);
+        return;
+    }
+    log->field("bitmap_optimization", "enabled");
+    log->field("filesystem", plan.filesystem);
+    log->field_bytes("free_bytes", plan.free_bytes);
+    log->field_bytes("total_bytes", plan.total_bytes);
+    log->field_u64("free_ranges", plan.free_ranges.size());
+    log->field_bytes("protected_prefix", plan.protected_prefix_bytes);
 }
 
 base::Result<std::unique_ptr<ports::IBlockSource>>
@@ -169,13 +170,12 @@ open_volume_source(const windows_disk::WindowsVolumeInfo& volume,
             free_plan, path, volume.cluster_size_bytes);
         if (auto* log = WorkerTaskLog::active(); log != nullptr) {
             if (excluded > 0) {
-                std::ostringstream line;
-                line << "Excluded page/hiber/swap coverage " << excluded << " byte(s) on "
-                     << utf8_or_empty(path) << (use_vss ? " (VSS snapshot root)" : " (live volume)");
-                log->info(line.str());
+                log->field_bytes("excluded_page_hiber_swap", excluded);
+                log->field("exclusion_root", utf8_or_empty(path));
+                log->field("exclusion_mode", use_vss ? "vss_snapshot" : "live_volume");
             } else if (use_vss) {
-                log->info("page/hiber/swap exclusion: no extents on snapshot root " +
-                          utf8_or_empty(path) + " (absent or unreadable; continuing)");
+                log->field("page_hiber_swap", "none_on_snapshot_root");
+                log->field("exclusion_root", utf8_or_empty(path));
             }
         }
     }

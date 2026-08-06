@@ -314,32 +314,47 @@ std::optional<base::Error> release_snapshot(PreparedVolumeSources& prepared) {
 
 } // namespace
 
-void log_runtime_info(const std::string& message) {
-    if (auto* log = WorkerTaskLog::active()) {
-        log->info(message);
+[[nodiscard]] std::string_view backup_stage_hint(const base::Error& error) noexcept {
+    if (error.message.find("VSS") != std::string::npos) {
+        return "Check VSS service health and volume snapshot support";
     }
+    if (error.code == base::ErrorCode::kInsufficientSpace) {
+        return "Free space on the repository volume or choose another destination";
+    }
+    if (error.message.find("parent") != std::string::npos ||
+        error.message.find("archive chunk") != std::string::npos ||
+        error.message.find("archive volume") != std::string::npos) {
+        return "Parent archive may be incomplete or unreadable; verify the parent .bkf "
+               "and sidecar, or run a new full backup";
+    }
+    return {};
 }
 
 base::Result<pipeline::BackupSummary>
 run_volume_pipelines(const WindowsPersonalBackupRequest& request, PreparedVolumeSources& prepared,
                      ports::IBackupSession& session, ports::IProgressSink* progress,
                      const base::CancellationToken& cancellation) {
+    ScopedStage stage(WorkerTaskLog::active(), "backup_pipeline");
     pipeline::BackupSummary total;
     std::uint64_t job_logical_bytes = 0;
     for (const auto& metadata : prepared.metadata) {
         auto summed = checked_add_wire(job_logical_bytes, metadata.logical_size_bytes);
         if (!summed) {
+            stage.fail(summed.error(), "sum_logical_sizes", backup_stage_hint(summed.error()));
             return base::Result<pipeline::BackupSummary>::failure(summed.error());
         }
         job_logical_bytes = summed.value();
     }
+    stage.note_bytes("job_logical_size", job_logical_bytes);
+    stage.note_u64("volume_count", prepared.sources.size());
     for (std::size_t index = 0; index < prepared.sources.size(); ++index) {
         const auto& metadata = prepared.metadata[index];
-        std::ostringstream line;
-        line << "Backing up volume " << utf8_path(metadata.volume_guid_path) << " size "
-             << metadata.logical_size_bytes << " bytes mode "
-             << (metadata.vss_used ? "vss" : "raw");
-        log_runtime_info(line.str());
+        if (auto* log = WorkerTaskLog::active(); log != nullptr) {
+            log->field("volume_index", std::to_string(index));
+            log->field("volume_path", utf8_path(metadata.volume_guid_path));
+            log->field_bytes("volume_size", metadata.logical_size_bytes);
+            log->field("read_mode", metadata.vss_used ? "vss" : "raw");
+        }
         pipeline::BackupPlan plan{request.job_id, request.trace_id, request.chunk_size_bytes,
                                   request.memory_budget_bytes};
         plan.source_index = static_cast<std::uint32_t>(index);
@@ -349,29 +364,31 @@ run_volume_pipelines(const WindowsPersonalBackupRequest& request, PreparedVolume
         plan.progress_total_logical_bytes = job_logical_bytes;
         plan.progress_base_processed_bytes = total.logical_bytes;
         plan.progress_base_stored_bytes = total.stored_bytes;
-        // base + this volume must stay within the precomputed job total (and wire range).
-        auto window_end =
-            checked_add_wire(total.logical_bytes, metadata.logical_size_bytes);
+        auto window_end = checked_add_wire(total.logical_bytes, metadata.logical_size_bytes);
         if (!window_end) {
+            stage.fail(window_end.error(), "progress_window", backup_stage_hint(window_end.error()));
             return base::Result<pipeline::BackupSummary>::failure(window_end.error());
         }
         if (window_end.value() > job_logical_bytes) {
-            return base::Result<pipeline::BackupSummary>::failure(base::Error{
-                base::ErrorCode::kInternal,
-                "volume progress window exceeds precomputed job logical total",
-            });
+            const base::Error error{base::ErrorCode::kInternal,
+                                    "volume progress window exceeds precomputed job logical total"};
+            stage.fail(error, "progress_window", {});
+            return base::Result<pipeline::BackupSummary>::failure(error);
         }
         pipeline::BackupPipeline pipeline(*prepared.sources[index], session, progress);
         auto backup = pipeline.run(plan, cancellation);
         if (!backup) {
+            stage.fail(backup.error(), "pipeline_volume", backup_stage_hint(backup.error()));
             return base::Result<pipeline::BackupSummary>::failure(backup.error());
         }
         auto next_logical = checked_add_wire(total.logical_bytes, backup.value().logical_bytes);
         if (!next_logical) {
+            stage.fail(next_logical.error(), "accumulate_logical", {});
             return base::Result<pipeline::BackupSummary>::failure(next_logical.error());
         }
         auto next_stored = checked_add_wire(total.stored_bytes, backup.value().stored_bytes);
         if (!next_stored) {
+            stage.fail(next_stored.error(), "accumulate_stored", {});
             return base::Result<pipeline::BackupSummary>::failure(next_stored.error());
         }
         total.logical_bytes = next_logical.value();
@@ -380,6 +397,10 @@ run_volume_pipelines(const WindowsPersonalBackupRequest& request, PreparedVolume
         total.peak_buffered_bytes =
             (std::max)(total.peak_buffered_bytes, backup.value().peak_buffered_bytes);
     }
+    stage.note_bytes("logical_bytes", total.logical_bytes);
+    stage.note_bytes("stored_bytes", total.stored_bytes);
+    stage.note_u64("chunks", total.chunk_count);
+    stage.note_bytes("peak_buffer", total.peak_buffered_bytes);
     return base::Result<pipeline::BackupSummary>::success(total);
 }
 
@@ -390,39 +411,66 @@ base::Result<WindowsPersonalBackupResult> backup_windows_personal_volumes_with_r
     if (!validation) {
         return base::Result<WindowsPersonalBackupResult>::failure(validation.error());
     }
-    auto prepared = runtime.prepare_sources(request.volume_guid_paths,
-                                            request.exclude_page_and_hibernation_files, cancellation);
-    if (!prepared) {
-        return base::Result<WindowsPersonalBackupResult>::failure(prepared.error());
+
+    PreparedVolumeSources prepared_sources;
+    {
+        ScopedStage stage(WorkerTaskLog::active(), "prepare_sources");
+        stage.note_u64("volume_count", request.volume_guid_paths.size());
+        stage.note_bool("exclude_page_and_hibernation_files",
+                        request.exclude_page_and_hibernation_files);
+        auto prepared = runtime.prepare_sources(
+            request.volume_guid_paths, request.exclude_page_and_hibernation_files, cancellation);
+        if (!prepared) {
+            stage.fail(prepared.error(), "open_volume_or_vss", backup_stage_hint(prepared.error()));
+            return base::Result<WindowsPersonalBackupResult>::failure(prepared.error());
+        }
+        prepared_sources = std::move(prepared).value();
+        std::size_t vss_count = 0;
+        for (const auto& metadata : prepared_sources.metadata) {
+            if (metadata.vss_used) {
+                ++vss_count;
+            }
+        }
+        stage.note_u64("vss_volumes", vss_count);
+        stage.note_u64("raw_volumes", prepared_sources.metadata.size() - vss_count);
     }
 
-    auto manifest = make_manifest(request, prepared.value().metadata);
+    auto manifest = make_manifest(request, prepared_sources.metadata);
     if (!manifest) {
-        (void)release_snapshot(prepared.value());
+        (void)release_snapshot(prepared_sources);
         return base::Result<WindowsPersonalBackupResult>::failure(manifest.error());
     }
-    auto session = runtime.create_archive(request, manifest.value());
-    if (!session) {
-        (void)release_snapshot(prepared.value());
-        return base::Result<WindowsPersonalBackupResult>::failure(session.error());
-    }
-    log_runtime_info(std::string("Archive destination: ") + utf8_path(request.destination));
-    log_runtime_info("Prepared VSS and raw volume sources; starting backup pipelines");
+
+    std::unique_ptr<ports::IBackupSession> session;
     {
+        ScopedStage stage(WorkerTaskLog::active(), "create_archive");
+        stage.note("destination", utf8_path(request.destination));
+        stage.note_bool("encryption_enabled", request.encryption_enabled);
+        if (!request.parent_source.empty()) {
+            stage.note("parent_archive", utf8_path(request.parent_source));
+        }
+        auto opened = runtime.create_archive(request, manifest.value());
+        if (!opened) {
+            (void)release_snapshot(prepared_sources);
+            stage.fail(opened.error(), "create_session", backup_stage_hint(opened.error()));
+            return base::Result<WindowsPersonalBackupResult>::failure(opened.error());
+        }
+        session = std::move(opened).value();
         const auto hardware = std::thread::hardware_concurrency();
-        const auto workers = hardware == 0 ? 4U : hardware;
-        log_runtime_info(std::string("Using ") + std::to_string(workers) +
-                         " worker threads for backup processing");
+        stage.note_u64("worker_threads", hardware == 0 ? 4U : hardware);
     }
 
-    auto backup = run_volume_pipelines(request, prepared.value(), *session.value(), progress,
-                                       cancellation);
-    auto cleanup_error = release_snapshot(prepared.value());
+    auto backup =
+        run_volume_pipelines(request, prepared_sources, *session, progress, cancellation);
+    auto cleanup_error = release_snapshot(prepared_sources);
     if (!backup) {
         return base::Result<WindowsPersonalBackupResult>::failure(backup.error());
     }
     if (cleanup_error) {
-        log_runtime_info("Snapshot cleanup reported a non-fatal error after commit");
+        if (auto* log = WorkerTaskLog::active(); log != nullptr) {
+            log->warn("Snapshot cleanup reported a non-fatal error after commit");
+            log->field("cleanup_error", cleanup_error->message);
+        }
     }
     return base::Result<WindowsPersonalBackupResult>::success(
         WindowsPersonalBackupResult{backup.value(), std::move(cleanup_error)});

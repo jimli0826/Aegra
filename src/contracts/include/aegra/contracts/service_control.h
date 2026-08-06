@@ -367,7 +367,12 @@ struct ExecuteDeletePlanCommand final {
 struct RestorePreflightRequest final {
     std::string repository_connection_id;
     std::string recovery_point_id;
+    /// Inventory opaque id: volume source_id for volume restore, or `disk.N` for disk restore.
     std::string target_source_id;
+    /// Manifest disk_number when restoring whole disk to a `disk.N` target (step-1 Full disk).
+    std::uint32_t source_disk_number{0};
+    /// Opens encrypted archives during preflight; empty for unencrypted. Never log.
+    std::string archive_password;
 };
 
 struct RestorePreflight final {
@@ -386,6 +391,12 @@ struct RestorePreflight final {
 struct StartRestoreCommand final {
     std::string preflight_token;
     bool confirmed{false};
+    /// Same password used for preflight when the archive is encrypted; empty otherwise. Never log.
+    std::string archive_password;
+    /// Keep MBR signature / GPT DiskId (default true).
+    bool preserve_disk_signature{true};
+    /// Grow last data partition into free space when target is larger (default true).
+    bool auto_expand_last_partition{true};
 };
 
 struct MountRecoveryPointCommand final {

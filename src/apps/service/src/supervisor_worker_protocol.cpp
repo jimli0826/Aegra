@@ -63,6 +63,15 @@ encode_supervisor_job_request(const contracts::JobRequest& request) {
             root["backup"] = backup;
         }
 
+        if (request.restore.has_value()) {
+            root["restore"] =
+                Json{{"disk_restore", request.restore->disk_restore},
+                     {"source_disk_number", request.restore->source_disk_number},
+                     {"bring_target_online", request.restore->bring_target_online},
+                     {"preserve_disk_signature", request.restore->preserve_disk_signature},
+                     {"auto_expand_last_partition", request.restore->auto_expand_last_partition}};
+        }
+
         return base::Result<std::string>::success(root.dump());
     } catch (const std::exception&) {
         return base::Result<std::string>::failure(

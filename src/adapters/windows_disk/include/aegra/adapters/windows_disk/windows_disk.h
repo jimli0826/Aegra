@@ -57,13 +57,20 @@ class WindowsBlockSource final : public ports::IBlockSource {
 enum class WindowsBlockSinkKind {
     kStableFile,
     kVolume,
+    /// `\\.\PhysicalDrive{N}` whole-disk restore target (non-system only).
+    kPhysicalDisk,
 };
 
 struct WindowsBlockSinkOpenRequest final {
     std::filesystem::path path;
     WindowsBlockSinkKind kind{WindowsBlockSinkKind::kStableFile};
     std::optional<std::uint64_t> expected_capacity_bytes;
+    /// Archive paths that must not live on the target volume/disk (required for volume/disk).
     std::vector<std::filesystem::path> protected_sources;
+    /// Expected source disk size for capacity preflight (physical disk only).
+    std::optional<std::uint64_t> minimum_capacity_bytes;
+    /// Expected sector size from backup metadata (physical disk only; 0 = skip check).
+    std::uint32_t expected_bytes_per_sector{0};
 };
 
 class WindowsBlockSink final : public ports::IBlockSink {
@@ -78,6 +85,11 @@ class WindowsBlockSink final : public ports::IBlockSink {
     open(const WindowsBlockSinkOpenRequest& request);
     [[nodiscard]] static bool
     is_canonical_volume_guid_path(const std::filesystem::path& path) noexcept;
+    [[nodiscard]] static bool
+    is_physical_drive_path(const std::filesystem::path& path) noexcept;
+    /// Parses N from `\\.\PhysicalDriveN` (case-insensitive). Returns nullopt on failure.
+    [[nodiscard]] static std::optional<std::uint32_t>
+    physical_drive_number(const std::filesystem::path& path) noexcept;
 
     [[nodiscard]] std::uint64_t capacity_bytes() const noexcept override;
     [[nodiscard]] base::Result<void> write(std::uint64_t offset, std::span<const std::byte> source,
@@ -195,6 +207,15 @@ struct WindowsPartitionLayout final {
     std::string volume_guid;
 };
 
+/// Raw MBR/GPT bytes captured for high-fidelity partition table restore.
+struct WindowsRawDiskLayout final {
+    std::vector<std::byte> mbr_sector;
+    std::vector<std::byte> gpt_primary_header;
+    std::vector<std::byte> gpt_partition_entries;
+    std::vector<std::byte> gpt_backup_header;
+    std::vector<std::byte> gpt_backup_entries;
+};
+
 /// Full physical disk layout for personal backup Manifest metadata.
 struct WindowsPhysicalDiskLayout final {
     std::uint32_t disk_number{0};
@@ -207,11 +228,50 @@ struct WindowsPhysicalDiskLayout final {
     std::string serial;
     std::string media_type;
     std::vector<WindowsPartitionLayout> partitions;
+    WindowsRawDiskLayout raw_layout;
 };
 
-/// Opens \\.\PhysicalDrive{N} and reads size, style, model, and all partitions.
+/// Opens \\.\PhysicalDrive{N} and reads size, style, model, partitions, and raw_layout.
 [[nodiscard]] base::Result<WindowsPhysicalDiskLayout>
 inspect_physical_disk_layout(std::uint32_t disk_number);
+
+/// True when disk_number hosts the Windows system volume.
+[[nodiscard]] base::Result<bool> is_system_physical_disk(std::uint32_t disk_number);
+
+/// Deletes existing partition layout and validates capacity/sector size for raw disk restore.
+[[nodiscard]] base::Result<void>
+prepare_target_disk_for_raw_restore(std::uint32_t disk_number, std::uint64_t source_disk_size_bytes,
+                                    std::uint32_t source_bytes_per_sector);
+
+/// Writes captured MBR/GPT raw_layout onto the target physical disk.
+[[nodiscard]] base::Result<void>
+rebuild_partition_table_from_raw_layout(std::uint32_t disk_number,
+                                        std::uint32_t source_bytes_per_sector,
+                                        std::uint64_t source_disk_size_bytes,
+                                        const WindowsRawDiskLayout& raw_layout,
+                                        const std::string& partition_style);
+
+/// When `preserve_disk_signature` is false, randomize MBR signature and/or GPT DiskId (and
+/// recompute GPT header CRCs). When true, returns `layout` unchanged.
+[[nodiscard]] base::Result<WindowsRawDiskLayout>
+apply_disk_signature_policy(WindowsRawDiskLayout layout, bool preserve_disk_signature,
+                            const std::string& partition_style);
+
+/// After layout rebuild + online: grow the last data partition into free space when the target
+/// is larger than `source_disk_size_bytes`, then extend NTFS/ReFS. FAT/exFAT leave free space
+/// unallocated (partition not grown). Best-effort; returns success when there is nothing to do.
+[[nodiscard]] base::Result<void>
+expand_last_data_partition_on_disk(std::uint32_t disk_number,
+                                   std::uint64_t source_disk_size_bytes,
+                                   std::uint32_t bytes_per_sector,
+                                   const std::string& partition_style);
+
+/// Clears OFFLINE/READ_ONLY attributes so restored volumes can mount (data-disk path).
+[[nodiscard]] base::Result<void> bring_target_disk_online(std::uint32_t disk_number);
+
+/// Resolves which physical disk hosts a file path (for archive-on-target rejection).
+[[nodiscard]] base::Result<std::uint32_t>
+physical_disk_number_for_path(const std::filesystem::path& path);
 
 class WindowsSourceInventory final : public ports::ISourceInventory {
   public:

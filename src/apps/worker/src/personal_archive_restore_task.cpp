@@ -109,17 +109,27 @@ void publish_preparing(const contracts::JobRequest& job, ports::IProgressSink* p
 
 using ResolvedSecrets = std::vector<std::unique_ptr<ports::IResolvedSecret>>;
 
+class EmptyPasswordSecret final : public ports::IResolvedSecret {
+  public:
+    [[nodiscard]] std::string_view view() const noexcept override { return {}; }
+};
+
 base::Result<ResolvedSecrets>
 resolve_secrets(const contracts::JobRequest& job, ports::ICredentialResolver& credentials,
                 const base::CancellationToken& cancellation) {
     ResolvedSecrets result;
     result.reserve(job.credential_refs.size());
     for (const auto& reference : job.credential_refs) {
+        // Empty SecretRef = unencrypted archive (empty password).
+        if (reference.value.empty()) {
+            result.push_back(std::make_unique<EmptyPasswordSecret>());
+            continue;
+        }
         auto secret = credentials.resolve(reference, cancellation);
         if (!secret) {
             return base::Result<ResolvedSecrets>::failure(secret.error());
         }
-        if (secret.value() == nullptr || secret.value()->view().empty()) {
+        if (secret.value() == nullptr) {
             return base::Result<ResolvedSecrets>::failure(
                 {base::ErrorCode::kUnauthorized, "archive credential is unavailable"});
         }
@@ -143,6 +153,13 @@ make_backend_request(const contracts::JobRequest& job,
     request.maximum_chunk_size = options.memory_budget_bytes;
     request.maximum_chain_depth = options.maximum_restore_chain_depth;
     request.progress = context.progress;
+    if (job.restore && job.restore->disk_restore) {
+        request.disk_restore = true;
+        request.source_disk_number = job.restore->source_disk_number;
+        request.bring_target_online = job.restore->bring_target_online;
+        request.preserve_disk_signature = job.restore->preserve_disk_signature;
+        request.auto_expand_last_partition = job.restore->auto_expand_last_partition;
+    }
     return request;
 }
 
@@ -160,6 +177,17 @@ run_accepted_task(const contracts::JobRequest& job,
         task_log->info(std::string("trace_id=") + job.trace_id);
         task_log->info(std::string("layers=") + std::to_string(job.source_refs.size()));
         task_log->info(std::string("target=") + job.target_ref);
+        if (job.restore && job.restore->disk_restore) {
+            task_log->info("mode=disk");
+            task_log->info(std::string("source_disk_number=") +
+                           std::to_string(job.restore->source_disk_number));
+            task_log->info(std::string("preserve_disk_signature=") +
+                           (job.restore->preserve_disk_signature ? "true" : "false"));
+            task_log->info(std::string("auto_expand_last_partition=") +
+                           (job.restore->auto_expand_last_partition ? "true" : "false"));
+        } else {
+            task_log->info("mode=volume");
+        }
     }
     publish_preparing(job, context.progress);
     if (cancellation.stop_requested() ||

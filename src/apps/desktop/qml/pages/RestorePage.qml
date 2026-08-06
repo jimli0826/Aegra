@@ -9,6 +9,8 @@ Item {
     id: root
     //% "Restore"
     Accessible.name: qsTrId("aegra.nav.restore")
+    /// Request Main to switch to Home after a restore job is accepted.
+    signal navigateHomeRequested()
 
     /// Options expanded by default (old RestorePage: optionsCollapsed: false).
     property bool optionsCollapsed: false
@@ -40,11 +42,295 @@ Item {
         return []
     }
 
+    /// Source disk_number (string key) → target disk_number, or -1 when unmapped.
+    property var diskMappings: ({})
+    /// Bumped on every mapping change so ComboBox/model bindings refresh.
+    property int mappingEpoch: 0
+    /// True while a source-disk drag hovers a target that fails restore checks.
+    property bool mappingDropBlocked: false
+    /// Localized block reason shown after the ban icon on the drag ghost.
+    property string mappingDropBlockReason: ""
+
+    function setMappingDropFeedback(blocked, reason) {
+        root.mappingDropBlocked = blocked
+        root.mappingDropBlockReason = blocked ? (reason || "") : ""
+    }
+
+    function clearMappingDropBlocked() {
+        root.mappingDropBlocked = false
+        root.mappingDropBlockReason = ""
+    }
+
+    readonly property int mappedCount: {
+        var _e = root.mappingEpoch
+        var n = 0
+        var map = root.diskMappings || {}
+        for (var k in map) {
+            if (Number(map[k]) >= 0)
+                ++n
+        }
+        return n
+    }
+
+    readonly property bool hasCheckpoint: root.selectedCheckpointId.length > 0
+    readonly property bool hasMapping: root.mappedCount > 0
+    readonly property bool canRestore: serviceClient.connected
+                                       && serviceClient.restoreStartAvailable
+                                       && !serviceClient.restoreCommandBusy
+                                       && root.hasCheckpoint
+                                       && root.hasMapping
+                                       && !root.sourceLayoutLoading
+    readonly property string restoreBlockReason: {
+        if (!serviceClient.connected)
+            //% "Service is not connected"
+            return qsTrId("aegra.error.service.disconnected")
+        if (!serviceClient.restoreStartAvailable)
+            //% "Service does not support restore"
+            return qsTrId("aegra.restore.capability_missing")
+        if (serviceClient.restoreCommandBusy)
+            //% "A restore command is already in progress"
+            return qsTrId("aegra.restore.busy")
+        if (!root.hasCheckpoint)
+            //% "Select a checkpoint first"
+            return qsTrId("aegra.restore.select_checkpoint_first")
+        if (root.sourceLayoutLoading)
+            //% "Loading source disks..."
+            return qsTrId("aegra.restore.loading_source")
+        if (!root.hasMapping)
+            //% "Choose “Restore to” on a source disk"
+            return qsTrId("aegra.restore.map_required")
+        return ""
+    }
+
+    readonly property color restoreTargetBorder: "#27ae60"
+    readonly property color systemDiskBorder: "#e74c3c"
+
     readonly property var backupDates: {
         var _dep = serviceClient.recoveryPointCount
         if (!serviceClient.recoveryPoints)
             return []
         return serviceClient.recoveryPoints.backupDateYmds()
+    }
+
+    function clearDiskMappings() {
+        root.diskMappings = ({})
+        root.mappingEpoch++
+    }
+
+    function mappedTarget(sourceNum) {
+        var _e = root.mappingEpoch
+        var map = root.diskMappings || {}
+        var key = String(sourceNum)
+        if (map[key] === undefined || map[key] === null)
+            return -1
+        return Number(map[key])
+    }
+
+    function isTargetMappedByOther(sourceNum, targetNum) {
+        if (targetNum < 0)
+            return false
+        var map = root.diskMappings || {}
+        for (var k in map) {
+            if (Number(k) !== Number(sourceNum) && Number(map[k]) === Number(targetNum))
+                return true
+        }
+        return false
+    }
+
+    function isDiskMappedAsTarget(diskNum) {
+        var _e = root.mappingEpoch
+        if (diskNum === undefined || diskNum === null)
+            return false
+        var map = root.diskMappings || {}
+        for (var k in map) {
+            if (Number(map[k]) === Number(diskNum))
+                return true
+        }
+        return false
+    }
+
+    function targetLargeEnoughForSource(sourceNum, targetNum) {
+        var srcBytes = 0
+        var sources = root.sourceDisks || []
+        for (var i = 0; i < sources.length; ++i) {
+            if (Number(sources[i].diskNumber) === Number(sourceNum)) {
+                srcBytes = Number(sources[i].capacityBytes) || 0
+                break
+            }
+        }
+        var tgtBytes = 0
+        var targets = root.targetDisks || []
+        for (var j = 0; j < targets.length; ++j) {
+            if (Number(targets[j].diskNumber) === Number(targetNum)) {
+                tgtBytes = Number(targets[j].capacityBytes) || 0
+                break
+            }
+        }
+        if (srcBytes <= 0 || tgtBytes <= 0)
+            return true
+        var tol = 1024 * 1024
+        return tgtBytes + tol >= srcBytes
+    }
+
+    /// Why a drop/map is rejected (empty = ok). Used by drag-drop highlight and setDiskMapping.
+    function mappingBlockReason(sourceNum, targetNum) {
+        if (sourceNum < 0 || targetNum < 0)
+            return ""
+        if (!root.targetLargeEnoughForSource(sourceNum, targetNum))
+            //% "Target disk is smaller than the source disk"
+            return qsTrId("aegra.restore.target_too_small")
+        if (root.isTargetMappedByOther(sourceNum, targetNum))
+            //% "That target is already mapped by another source disk"
+            return qsTrId("aegra.restore.target_in_use")
+        var targets = root.targetDisks || []
+        for (var i = 0; i < targets.length; ++i) {
+            if (Number(targets[i].diskNumber) === Number(targetNum)
+                    && targets[i].isSystemDisk === true)
+                //% "System disk restore requires PE (not available online)"
+                return qsTrId("aegra.restore.system_target_blocked")
+        }
+        return ""
+    }
+
+    function setDiskMapping(sourceNum, targetNum) {
+        if (sourceNum < 0)
+            return
+        // Invalid targets are rejected silently; drag ghost already shows the reason.
+        if (targetNum >= 0 && root.mappingBlockReason(sourceNum, targetNum).length > 0)
+            return
+        var map = Object.assign({}, root.diskMappings || {})
+        map[String(sourceNum)] = targetNum
+        root.diskMappings = map
+        root.mappingEpoch++
+    }
+
+    /// Options for source → target ComboBox (old RestoreBackend::targetDiskOptions).
+    function targetDiskOptions(sourceNum) {
+        var _e = root.mappingEpoch
+        var _t = root.targetDisks
+        var out = []
+        out.push({
+            //% "Not mapped"
+            label: qsTrId("aegra.restore.not_mapped"),
+            value: -1,
+            tooSmall: false,
+            inUse: false,
+            isSystem: false,
+            enabled: true
+        })
+        var targets = root.targetDisks || []
+        for (var i = 0; i < targets.length; ++i) {
+            var d = targets[i]
+            var num = Number(d.diskNumber)
+            var lab = d.name || ("Disk " + num)
+            if (d.size)
+                lab += "  (" + d.size + ")"
+            var isSystem = d.isSystemDisk === true
+            if (isSystem)
+                //% "[System]"
+                lab += "  " + qsTrId("aegra.restore.system_tag")
+            var tooSmall = !root.targetLargeEnoughForSource(sourceNum, num)
+            var inUse = root.isTargetMappedByOther(sourceNum, num)
+            if (tooSmall)
+                //% "— too small"
+                lab += "  " + qsTrId("aegra.restore.target_too_small_tag")
+            else if (inUse)
+                //% "— in use"
+                lab += "  " + qsTrId("aegra.restore.target_in_use_tag")
+            else if (isSystem)
+                //% "— PE only"
+                lab += "  " + qsTrId("aegra.restore.pe_only_tag")
+            out.push({
+                label: lab,
+                value: num,
+                tooSmall: tooSmall,
+                inUse: inUse,
+                isSystem: isSystem,
+                enabled: !tooSmall && !inUse && !isSystem
+            })
+        }
+        return out
+    }
+
+    /// Default every source to Not mapped; user maps via ComboBox or drag-drop.
+    function initDefaultMappings() {
+        var map = ({})
+        var sources = root.sourceDisks || []
+        for (var j = 0; j < sources.length; ++j) {
+            var sn = Number(sources[j].diskNumber)
+            map[String(sn)] = -1
+        }
+        root.diskMappings = map
+        root.mappingEpoch++
+    }
+
+    /// Queued multi-disk restore: one Job per source→target mapping (base-first chain each).
+    property var pendingRestoreQueue: []
+    property bool multiRestoreActive: false
+
+    /// All source→target pairs with target >= 0, source source-disk order.
+    function allMappedPairs() {
+        var pairs = []
+        var sources = root.sourceDisks || []
+        for (var i = 0; i < sources.length; ++i) {
+            var sn = Number(sources[i].diskNumber)
+            var tn = root.mappedTarget(sn)
+            if (tn >= 0)
+                pairs.push({ source: sn, target: tn })
+        }
+        return pairs
+    }
+
+    function startNextQueuedRestore() {
+        var q = root.pendingRestoreQueue || []
+        if (q.length === 0) {
+            root.multiRestoreActive = false
+            // All disk Jobs accepted — show them on Home Tasks.
+            root.navigateHomeRequested()
+            return
+        }
+        var pair = q[0]
+        // Copy remainder so QML binding sees a new array.
+        root.pendingRestoreQueue = q.slice(1)
+        var ok = serviceClient.startDiskRestore(pair.source, pair.target,
+                                               root.selectedCheckpointId,
+                                               root.pendingLayoutPassword,
+                                               root.preserveSignature,
+                                               root.autoExtend)
+        if (!ok) {
+            root.pendingRestoreQueue = []
+            root.multiRestoreActive = false
+        }
+    }
+
+    function startMappedRestore() {
+        if (!root.canRestore)
+            return
+        var pairs = root.allMappedPairs()
+        if (pairs.length === 0) {
+            //% "Choose “Restore to” on a source disk"
+            serviceClient.showToast(qsTrId("aegra.restore.map_required"))
+            return
+        }
+        root.pendingRestoreQueue = pairs
+        root.multiRestoreActive = true
+        root.startNextQueuedRestore()
+    }
+
+    Connections {
+        target: serviceClient
+        function onRestoreStartSucceeded() {
+            if (root.multiRestoreActive) {
+                // Start the next mapped disk (or navigate Home when the queue is empty).
+                root.startNextQueuedRestore()
+                return
+            }
+            root.navigateHomeRequested()
+        }
+        function onRestoreStartFailed(message) {
+            root.pendingRestoreQueue = []
+            root.multiRestoreActive = false
+        }
     }
 
     function openCheckpointPanel() {
@@ -81,11 +367,13 @@ Item {
             root.selectedCheckpointId = ""
             root.selectedCheckpointLabel = ""
             root.pendingLayoutPassword = ""
+            root.clearDiskMappings()
             serviceClient.loadRecoveryPointLayout("")
             return
         }
         root.selectedCheckpointId = item.fileUuid || ""
         root.pendingLayoutPassword = ""
+        root.clearDiskMappings()
         var bits = []
         if (item.createdText)
             bits.push(item.createdText)
@@ -108,6 +396,7 @@ Item {
         if (!root.selectedCheckpointId || root.selectedCheckpointId.length === 0)
             return
         root.pendingLayoutPassword = password || ""
+        root.clearDiskMappings()
         serviceClient.loadRecoveryPointLayout(root.selectedCheckpointId, root.pendingLayoutPassword)
     }
 
@@ -117,8 +406,11 @@ Item {
             if (serviceClient.recoveryPointLayoutLoading)
                 return
             if (serviceClient.recoveryPointSourceDisks
-                    && serviceClient.recoveryPointSourceDisks.length > 0)
+                    && serviceClient.recoveryPointSourceDisks.length > 0) {
+                // Layout loaded — default same-number mapping when target exists and is large enough.
+                root.initDefaultMappings()
                 return
+            }
             if (root.selectedCheckpointId.length === 0)
                 return
             // Layout failed: likely encrypted archive needing a password.
@@ -127,6 +419,13 @@ Item {
                 passwordDialog.errorText = serviceClient.recoveryPointLayoutErrorText
                 passwordDialog.open()
             }
+        }
+        function onInventoryChanged() {
+            // Re-validate defaults when target inventory arrives after layout.
+            if (serviceClient.recoveryPointSourceDisks
+                    && serviceClient.recoveryPointSourceDisks.length > 0
+                    && root.mappedCount === 0)
+                root.initDefaultMappings()
         }
     }
 
@@ -196,173 +495,473 @@ Item {
     }
 
     // Shared disk row — icon + name + proportional partition bar (old DiskRow).
+    // Source rows: drag body onto a Target row, or use "Restore to" ComboBox.
+    // Target rows: DropArea accepts source-disk drags.
     component DiskRow: Rectangle {
         id: rowRoot
         property var diskData: ({})
         property bool showSystem: false
+        property bool showMapping: false
+        property bool highlightAsTarget: false
+        readonly property int diskNumber: diskData && diskData.diskNumber !== undefined
+                                          ? Number(diskData.diskNumber) : -1
+        /// While a valid source→target drop is hovered (no red fill for invalid targets).
+        property bool dropHover: false
+        property bool dropAccepted: false
         width: parent ? parent.width : 100
-        height: 68
+        height: showMapping ? 96 : 68
         radius: 6
         color: Theme.colorListItem
-        border.width: (showSystem && diskData && diskData.isSystemDisk) ? 2 : 1
-        border.color: (showSystem && diskData && diskData.isSystemDisk)
-                      ? "#e74c3c" : Theme.colorBorder
+        border.width: {
+            if ((rowRoot.dropHover && rowRoot.dropAccepted) || rowRoot.highlightAsTarget)
+                return 2
+            return 1
+        }
+        border.color: {
+            // Only highlight droppable targets; invalid ones stay normal (toast on drop).
+            if (rowRoot.dropHover && rowRoot.dropAccepted)
+                return Theme.colorAccentBlue
+            if (rowRoot.highlightAsTarget)
+                return root.restoreTargetBorder
+            return Theme.colorBorder
+        }
 
         property var displayVolumes: root.displayVolumesForDisk(diskData)
 
-        RowLayout {
+        // Drag a source disk onto a target (ComboBox remains available below).
+        MouseArea {
+            id: sourceDragMouse
             anchors.fill: parent
-            anchors.margins: 8
-            spacing: 10
-
-            DiskIcon {
-                Layout.alignment: Qt.AlignVCenter
-                size: 28
-                variant: (rowRoot.diskData && rowRoot.diskData.isSystemDisk) ? "system" : "hdd"
+            anchors.margins: 2
+            anchors.bottomMargin: rowRoot.showMapping ? 34 : 2
+            z: 20
+            enabled: rowRoot.showMapping && rowRoot.diskNumber >= 0
+            hoverEnabled: true
+            cursorShape: {
+                if (!enabled)
+                    return Qt.ArrowCursor
+                return pressed || drag.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor
             }
+            drag.target: dragProxy
+            drag.threshold: 6
+            drag.axis: Drag.XAndYAxis
+            onPressed: function(mouse) {
+                root.clearMappingDropBlocked()
+                var overlay = Overlay.overlay
+                if (!overlay)
+                    return
+                dragProxy.parent = overlay
+                var g = mapToItem(overlay, mouse.x, mouse.y)
+                dragProxy.x = g.x - dragProxy.Drag.hotSpot.x
+                dragProxy.y = g.y - dragProxy.Drag.hotSpot.y
+            }
+            onReleased: {
+                if (dragProxy.Drag.active)
+                    dragProxy.Drag.drop()
+                root.clearMappingDropBlocked()
+            }
+            onCanceled: root.clearMappingDropBlocked()
+        }
 
-            Column {
-                Layout.preferredWidth: 100
-                Layout.alignment: Qt.AlignVCenter
-                spacing: 1
+        // Ghost follows the cursor while dragging (reparented to Overlay on press).
+        Rectangle {
+            id: dragProxy
+            // Wider when blocked so ban icon + reason fit on one line.
+            width: root.mappingDropBlocked ? 320 : 180
+            height: 36
+            radius: 6
+            z: 100000
+            visible: Drag.active
+            opacity: 0.92
+            color: root.mappingDropBlocked ? Theme.colorAccentRed : Theme.colorAccentBlue
+            border.width: 1
+            border.color: Theme.colorBorder
+            // Carried into DropArea via drag.source
+            property int sourceDiskNumber: rowRoot.diskNumber
+            Drag.keys: ["aegra.restore.sourceDisk"]
+            Drag.active: sourceDragMouse.drag.active
+            Drag.hotSpot.x: width / 2
+            Drag.hotSpot.y: height / 2
+            Drag.source: dragProxy
+
+            Row {
+                anchors.fill: parent
+                anchors.leftMargin: 10
+                anchors.rightMargin: 10
+                spacing: 8
+
+                // Prohibition mark: circle with diagonal slash.
+                Item {
+                    width: 18
+                    height: 18
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: root.mappingDropBlocked
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: width / 2
+                        color: Theme.colorTextWhite
+                        border.width: 2
+                        border.color: Theme.colorAccentRed
+                    }
+                    Rectangle {
+                        width: parent.width * 0.78
+                        height: 2
+                        radius: 1
+                        color: Theme.colorAccentRed
+                        anchors.centerIn: parent
+                        rotation: -45
+                    }
+                }
+
                 Text {
-                    text: (rowRoot.diskData && rowRoot.diskData.name)
-                          ? rowRoot.diskData.name : ""
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width
+                           - (root.mappingDropBlocked ? 18 + parent.spacing : 0)
+                    elide: Text.ElideRight
+                    // Blocked: reason after the ban icon. Otherwise: source disk name.
+                    text: {
+                        if (root.mappingDropBlocked && root.mappingDropBlockReason.length > 0)
+                            return root.mappingDropBlockReason
+                        var n = dragProxy.sourceDiskNumber
+                        if (rowRoot.diskData && rowRoot.diskData.name)
+                            return rowRoot.diskData.name
+                        return "Disk " + n
+                    }
                     color: Theme.colorTextWhite
-                    font.pixelSize: 12
+                    font.pixelSize: root.mappingDropBlocked ? 11 : 12
                     font.bold: true
                     font.family: Theme.fontFamily
                 }
-                Text {
-                    text: {
-                        if (!rowRoot.diskData)
-                            return ""
-                        var style = rowRoot.diskData.partitionStyle
-                                    || rowRoot.diskData.type || ""
-                        if (style.indexOf("GPT") >= 0 || style.indexOf("MBR") >= 0)
-                            return "Basic (" + (style.indexOf("GPT") >= 0 ? "GPT" : "MBR") + ")"
-                        return style.length > 0 ? style : "Basic (GPT)"
-                    }
-                    color: Theme.colorTextGrey
-                    font.pixelSize: 10
-                    font.family: Theme.fontFamily
-                }
-                Text {
-                    text: (rowRoot.diskData && rowRoot.diskData.size)
-                          ? rowRoot.diskData.size : ""
-                    color: Theme.colorTextGrey
-                    font.pixelSize: 10
-                    font.family: Theme.fontFamily
-                }
             }
+        }
 
-            Rectangle {
-                id: barBg
+        // Target drop zone: map source_disk → this disk.
+        DropArea {
+            id: targetDrop
+            anchors.fill: parent
+            z: 15
+            keys: ["aegra.restore.sourceDisk"]
+            enabled: !rowRoot.showMapping && rowRoot.diskNumber >= 0
+            onEntered: function(drag) {
+                var src = -1
+                if (drag.source && drag.source.sourceDiskNumber !== undefined)
+                    src = Number(drag.source.sourceDiskNumber)
+                var reason = (src >= 0)
+                             ? root.mappingBlockReason(src, rowRoot.diskNumber) : ""
+                var ok = src >= 0 && reason.length === 0
+                // Always accept so onDropped can map valid targets (invalid: silent no-op).
+                rowRoot.dropHover = ok
+                rowRoot.dropAccepted = ok
+                root.setMappingDropFeedback(!ok, reason)
+                drag.accept(Qt.CopyAction)
+            }
+            onPositionChanged: function(drag) {
+                var src = -1
+                if (drag.source && drag.source.sourceDiskNumber !== undefined)
+                    src = Number(drag.source.sourceDiskNumber)
+                var reason = (src >= 0)
+                             ? root.mappingBlockReason(src, rowRoot.diskNumber) : ""
+                var ok = src >= 0 && reason.length === 0
+                rowRoot.dropHover = ok
+                rowRoot.dropAccepted = ok
+                root.setMappingDropFeedback(!ok, reason)
+                drag.accept(Qt.CopyAction)
+            }
+            onExited: {
+                rowRoot.dropHover = false
+                rowRoot.dropAccepted = false
+                root.clearMappingDropBlocked()
+            }
+            onDropped: function(drop) {
+                rowRoot.dropHover = false
+                rowRoot.dropAccepted = false
+                root.clearMappingDropBlocked()
+                var src = -1
+                if (drop.source && drop.source.sourceDiskNumber !== undefined)
+                    src = Number(drop.source.sourceDiskNumber)
+                drop.acceptProposedAction()
+                if (src < 0 || rowRoot.diskNumber < 0)
+                    return
+                // Invalid mapping: silent reject (reason already shown on drag ghost).
+                root.setDiskMapping(src, rowRoot.diskNumber)
+            }
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 8
+            spacing: 4
+
+            RowLayout {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 44
-                Layout.alignment: Qt.AlignVCenter
-                radius: 3
-                color: Theme.colorInput
-                border.width: 1
-                border.color: Theme.colorBorder
-                clip: true
+                Layout.fillHeight: true
+                spacing: 10
 
-                Row {
-                    id: partsRow
-                    anchors.fill: parent
-                    anchors.margins: 1
+                DiskIcon {
+                    Layout.alignment: Qt.AlignVCenter
+                    size: 28
+                    variant: (rowRoot.diskData && rowRoot.diskData.isSystemDisk) ? "system" : "hdd"
+                }
+
+                Column {
+                    Layout.preferredWidth: 100
+                    Layout.alignment: Qt.AlignVCenter
                     spacing: 1
+                    Text {
+                        text: (rowRoot.diskData && rowRoot.diskData.name)
+                              ? rowRoot.diskData.name : ""
+                        color: Theme.colorTextWhite
+                        font.pixelSize: 12
+                        font.bold: true
+                        font.family: Theme.fontFamily
+                    }
+                    Text {
+                        text: {
+                            if (!rowRoot.diskData)
+                                return ""
+                            var style = rowRoot.diskData.partitionStyle
+                                        || rowRoot.diskData.type || ""
+                            if (style.indexOf("GPT") >= 0 || style.indexOf("MBR") >= 0)
+                                return "Basic (" + (style.indexOf("GPT") >= 0 ? "GPT" : "MBR") + ")"
+                            return style.length > 0 ? style : "Basic (GPT)"
+                        }
+                        color: Theme.colorTextGrey
+                        font.pixelSize: 10
+                        font.family: Theme.fontFamily
+                    }
+                    Text {
+                        text: (rowRoot.diskData && rowRoot.diskData.size)
+                              ? rowRoot.diskData.size : ""
+                        color: Theme.colorTextGrey
+                        font.pixelSize: 10
+                        font.family: Theme.fontFamily
+                    }
+                }
 
-                    Repeater {
-                        model: rowRoot.displayVolumes
-                        delegate: Rectangle {
-                            required property var modelData
-                            required property int index
-                            property bool isUnalloc: modelData && modelData.unallocated === true
-                            height: partsRow.height
-                            width: {
-                                var n = rowRoot.displayVolumes.length
-                                var gap = Math.max(0, n - 1) * partsRow.spacing
-                                var avail = Math.max(0, partsRow.width - gap)
-                                var r = modelData && modelData.ratio ? modelData.ratio : 0
-                                if (r <= 0)
-                                    r = 0.04
-                                var w = Math.floor(avail * r)
-                                return Math.max(isUnalloc ? 8 : 12, w)
-                            }
-                            radius: 2
-                            color: isUnalloc ? Theme.colorUnallocated
-                                             : Theme.volumeColor(index)
-                            border.width: 1
-                            border.color: Theme.colorBorder
-                            opacity: isUnalloc ? 1.0 : 0.92
-                            clip: true
+                Rectangle {
+                    id: barBg
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 44
+                    Layout.alignment: Qt.AlignVCenter
+                    radius: 3
+                    color: Theme.colorInput
+                    border.width: 1
+                    border.color: Theme.colorBorder
+                    clip: true
 
-                            Canvas {
-                                anchors.fill: parent
-                                visible: isUnalloc
-                                onPaint: {
-                                    var ctx = getContext("2d")
-                                    var w = width
-                                    var h = height
-                                    if (w < 1 || h < 1)
-                                        return
-                                    ctx.clearRect(0, 0, w, h)
-                                    ctx.strokeStyle = Theme.colorUnallocatedHatch
-                                    ctx.lineWidth = 1
-                                    var step = 6
-                                    for (var x = -h; x < w + h; x += step) {
-                                        ctx.beginPath()
-                                        ctx.moveTo(x, h)
-                                        ctx.lineTo(x + h, 0)
-                                        ctx.stroke()
-                                    }
+                    Row {
+                        id: partsRow
+                        anchors.fill: parent
+                        anchors.margins: 1
+                        spacing: 1
+
+                        Repeater {
+                            model: rowRoot.displayVolumes
+                            delegate: Rectangle {
+                                required property var modelData
+                                required property int index
+                                property bool isUnalloc: modelData && modelData.unallocated === true
+                                height: partsRow.height
+                                width: {
+                                    var n = rowRoot.displayVolumes.length
+                                    var gap = Math.max(0, n - 1) * partsRow.spacing
+                                    var avail = Math.max(0, partsRow.width - gap)
+                                    var r = modelData && modelData.ratio ? modelData.ratio : 0
+                                    if (r <= 0)
+                                        r = 0.04
+                                    var w = Math.floor(avail * r)
+                                    return Math.max(isUnalloc ? 8 : 12, w)
                                 }
-                                onWidthChanged: requestPaint()
-                                onHeightChanged: requestPaint()
-                                Component.onCompleted: requestPaint()
-                            }
+                                radius: 2
+                                color: isUnalloc ? Theme.colorUnallocated
+                                                 : Theme.volumeColor(index)
+                                border.width: 1
+                                border.color: Theme.colorBorder
+                                opacity: isUnalloc ? 1.0 : 0.92
+                                clip: true
 
-                            Text {
-                                anchors.centerIn: parent
-                                width: parent.width - 4
-                                horizontalAlignment: Text.AlignHCenter
-                                z: 1
-                                text: {
-                                    if (!modelData)
-                                        return ""
-                                    if (isUnalloc) {
-                                        if (parent.width < 48)
-                                            return "…"
-                                        return modelData.name || ""
+                                Canvas {
+                                    anchors.fill: parent
+                                    visible: isUnalloc
+                                    onPaint: {
+                                        var ctx = getContext("2d")
+                                        var w = width
+                                        var h = height
+                                        if (w < 1 || h < 1)
+                                            return
+                                        ctx.clearRect(0, 0, w, h)
+                                        ctx.strokeStyle = Theme.colorUnallocatedHatch
+                                        ctx.lineWidth = 1
+                                        var step = 6
+                                        for (var x = -h; x < w + h; x += step) {
+                                            ctx.beginPath()
+                                            ctx.moveTo(x, h)
+                                            ctx.lineTo(x + h, 0)
+                                            ctx.stroke()
+                                        }
                                     }
-                                    var title = modelData.letter || modelData.name || ""
-                                    var sz = modelData.size || ""
-                                    var fs = modelData.fileSystem || ""
-                                    if (parent.width < 50)
-                                        return title
-                                    return title + "\n" + sz + (fs ? (" " + fs) : "")
+                                    onWidthChanged: requestPaint()
+                                    onHeightChanged: requestPaint()
+                                    Component.onCompleted: requestPaint()
                                 }
-                                color: isUnalloc ? Theme.colorUnallocatedText
-                                                 : Theme.colorVolumeText
-                                font.pixelSize: parent.width < 60 ? 9 : 10
-                                font.bold: true
-                                font.family: Theme.fontFamily
-                                wrapMode: Text.WordWrap
-                                elide: Text.ElideRight
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    width: parent.width - 4
+                                    horizontalAlignment: Text.AlignHCenter
+                                    z: 1
+                                    text: {
+                                        if (!modelData)
+                                            return ""
+                                        if (isUnalloc) {
+                                            if (parent.width < 48)
+                                                return "…"
+                                            return modelData.name || ""
+                                        }
+                                        var title = modelData.letter || modelData.name || ""
+                                        var sz = modelData.size || ""
+                                        var fs = modelData.fileSystem || ""
+                                        if (parent.width < 50)
+                                            return title
+                                        return title + "\n" + sz + (fs ? (" " + fs) : "")
+                                    }
+                                    color: isUnalloc ? Theme.colorUnallocatedText
+                                                     : Theme.colorVolumeText
+                                    font.pixelSize: parent.width < 60 ? 9 : 10
+                                    font.bold: true
+                                    font.family: Theme.fontFamily
+                                    wrapMode: Text.WordWrap
+                                    elide: Text.ElideRight
+                                }
                             }
                         }
                     }
+
+                    Text {
+                        anchors.centerIn: parent
+                        visible: rowRoot.displayVolumes.length === 0
+                        //% "No partitions"
+                        text: qsTrId("aegra.restore.no_partitions")
+                        color: Theme.colorTextGrey
+                        font.pixelSize: 11
+                        font.family: Theme.fontFamily
+                    }
                 }
+            }
+
+            // Source → Target mapping row (old RestorePage "Restore to" ComboBox).
+            RowLayout {
+                Layout.fillWidth: true
+                visible: rowRoot.showMapping
+                spacing: 8
 
                 Text {
-                    anchors.centerIn: parent
-                    visible: rowRoot.displayVolumes.length === 0
-                    //% "No partitions"
-                    text: qsTrId("aegra.restore.no_partitions")
+                    //% "Restore to"
+                    text: qsTrId("aegra.restore.restore_to")
                     color: Theme.colorTextGrey
                     font.pixelSize: 11
                     font.family: Theme.fontFamily
+                }
+
+                ComboBox {
+                    id: mapCombo
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 28
+                    property int sourceNum: rowRoot.diskData && rowRoot.diskData.diskNumber !== undefined
+                                            ? Number(rowRoot.diskData.diskNumber) : -1
+                    model: {
+                        var _e = root.mappingEpoch
+                        var _t = root.targetDisks
+                        return root.targetDiskOptions(mapCombo.sourceNum)
+                    }
+                    textRole: "label"
+
+                    function syncIndex() {
+                        var want = root.mappedTarget(mapCombo.sourceNum)
+                        if (!model)
+                            return
+                        for (var i = 0; i < model.length; ++i) {
+                            if (Number(model[i].value) === Number(want)) {
+                                currentIndex = i
+                                return
+                            }
+                        }
+                        currentIndex = 0
+                    }
+
+                    Component.onCompleted: syncIndex()
+                    onModelChanged: Qt.callLater(syncIndex)
+
+                    onActivated: function(index) {
+                        if (index < 0 || !model || index >= model.length) {
+                            syncIndex()
+                            return
+                        }
+                        var item = model[index]
+                        if (!item || item.enabled === false
+                                || item.tooSmall || item.inUse || item.isSystem) {
+                            syncIndex()
+                            return
+                        }
+                        var val = Number(item.value)
+                        root.setDiskMapping(mapCombo.sourceNum, val)
+                        Qt.callLater(syncIndex)
+                    }
+
+                    background: Rectangle {
+                        color: Theme.colorInput
+                        radius: 4
+                        border.width: 1
+                        border.color: Theme.colorBorder
+                    }
+                    indicator: ComboBoxIndicator { combo: mapCombo }
+                    contentItem: Text {
+                        leftPadding: 8
+                        rightPadding: mapCombo.indicator ? mapCombo.indicator.width + 12 : 8
+                        text: mapCombo.displayText
+                        color: Theme.colorTextWhite
+                        font.pixelSize: 11
+                        font.family: Theme.fontFamily
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
+                    }
+                    popup: Popup {
+                        y: mapCombo.height
+                        width: mapCombo.width
+                        implicitHeight: Math.min(contentItem.implicitHeight + 4, 220)
+                        padding: 2
+                        contentItem: ListView {
+                            clip: true
+                            implicitHeight: contentHeight
+                            model: mapCombo.popup.visible ? mapCombo.delegateModel : null
+                            currentIndex: mapCombo.highlightedIndex
+                            ScrollIndicator.vertical: ScrollIndicator { }
+                        }
+                        background: Rectangle {
+                            color: Theme.colorCard
+                            radius: 4
+                            border.width: 1
+                            border.color: Theme.colorBorder
+                        }
+                    }
+                    delegate: ItemDelegate {
+                        width: mapCombo.width
+                        height: 28
+                        enabled: modelData && modelData.enabled !== false
+                        highlighted: mapCombo.highlightedIndex === index
+                        contentItem: Text {
+                            text: modelData ? modelData.label : ""
+                            color: parent.enabled ? Theme.colorTextWhite : Theme.colorTextGrey
+                            font.pixelSize: 11
+                            font.family: Theme.fontFamily
+                            elide: Text.ElideRight
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            color: parent.highlighted ? Theme.colorHover
+                                                      : "transparent"
+                        }
+                    }
                 }
             }
         }
@@ -448,7 +1047,7 @@ Item {
                                 font.family: Theme.fontFamily
                             }
                             Text {
-                                //% "(from backup image → pick target below)"
+                                //% "(drag onto a target disk, or use Restore to)"
                                 text: qsTrId("aegra.restore.source_hint")
                                 color: Theme.colorTextGrey
                                 font.pixelSize: 11
@@ -491,6 +1090,7 @@ Item {
                                 width: sourceList.width
                                 diskData: modelData
                                 showSystem: false
+                                showMapping: true
                             }
                             Text {
                                 anchors.centerIn: parent
@@ -596,7 +1196,7 @@ Item {
                                 font.family: Theme.fontFamily
                             }
                             Text {
-                                //% "(this PC — available restore destinations)"
+                                //% "(this PC — drop a source disk here)"
                                 text: qsTrId("aegra.restore.target_hint")
                                 color: Theme.colorTextGrey
                                 font.pixelSize: 11
@@ -619,7 +1219,9 @@ Item {
                                 required property var modelData
                                 width: targetList.width - (targetList.needsScroll ? 12 : 0)
                                 diskData: modelData
-                                showSystem: false
+                                showSystem: true
+                                highlightAsTarget: root.isDiskMappedAsTarget(
+                                                       modelData ? modelData.diskNumber : -1)
                             }
                             ScrollBar.vertical: ScrollBar {
                                 policy: targetList.needsScroll ? ScrollBar.AlwaysOn
@@ -903,12 +1505,23 @@ Item {
             spacing: 12
             Item { Layout.fillWidth: true }
             AppButton {
+                id: restoreButton
                 Layout.preferredWidth: 140
                 Layout.preferredHeight: 40
-                //% "Restore"
-                text: qsTrId("aegra.nav.restore")
+                text: {
+                    if (serviceClient.restoreCommandBusy)
+                        //% "Restoring..."
+                        return qsTrId("aegra.restore.restoring")
+                    //% "Restore"
+                    return qsTrId("aegra.nav.restore")
+                }
                 primary: true
-                enabled: false
+                enabled: root.canRestore
+                ToolTip.delay: 400
+                ToolTip.visible: restoreButton.hovered && !root.canRestore
+                                 && root.restoreBlockReason.length > 0
+                ToolTip.text: root.restoreBlockReason
+                onClicked: root.startMappedRestore()
             }
         }
     }

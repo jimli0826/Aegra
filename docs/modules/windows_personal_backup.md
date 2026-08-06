@@ -107,7 +107,10 @@ Validate JobRequest and trusted options
   并令 `parent_uuid` 指向父 `file_uuid`；
 - total size 优先使用 `IOCTL_DISK_GET_LENGTH_INFO`，不可用时使用受溢出检查的 extent 总长度；
 - mount points、filesystem、label 和 cluster size 来自 Inventory；
-- 本阶段不伪造 Disk、Partition 或 Volume Extent。Disk Inspector 完成后再补齐裸机恢复布局。
+- Disk / Partition 来自 `inspect_physical_disk_layout`，并尽量采集 `raw_layout`（MBR/GPT）供整盘还原；
+  `PhysicalDrive` 以 `GENERIC_READ` 打开以支持扇区 `ReadFile`；若原始扇区读取被拒绝则留下空
+  `raw_layout` 并继续卷备份（整盘还原会在恢复时拒绝无 `raw_layout` 的 Archive）。不伪造 Extent。
+  跨盘卷与完整裸机系统恢复仍属后续范围。
 
 ## 所有权、线程和取消
 

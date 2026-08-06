@@ -451,9 +451,11 @@ base::Result<void> WorkerSupervisor::Impl::launch_worker(
     record.created_utc_ms = utc_now_ms(clock);
     record.source_ids = request.source_ids;
     record.repository_connection_id = request.repository_connection_id;
+    record.target_source_id = request.target_source_id;
     record.backup_type =
         worker_request.backup ? std::optional(worker_request.backup->type) : std::nullopt;
     record.parent_recovery_point_id = request.parent_recovery_point_id;
+    record.preflight_token = request.preflight_token;
     if (worker_request.backup) {
         record.exclude_page_and_hibernation_files =
             worker_request.backup->exclude_page_and_hibernation_files;

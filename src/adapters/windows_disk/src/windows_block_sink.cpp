@@ -9,6 +9,7 @@
 #include <array>
 #include <cwctype>
 #include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -19,6 +20,7 @@ namespace {
 constexpr std::wstring_view kVolumePrefix = LR"(\\?\Volume{)";
 constexpr std::wstring_view kDevicePrefix = LR"(\\.\)";
 constexpr std::wstring_view kGlobalPrefix = LR"(\\?\GLOBALROOT\)";
+constexpr std::wstring_view kPhysicalDrivePrefix = LR"(\\.\PhysicalDrive)";
 
 bool equal_case_insensitive(const std::wstring_view left,
                             const std::wstring_view right) noexcept {
@@ -99,7 +101,7 @@ path_volume(const std::filesystem::path& source) {
     return base::Result<std::filesystem::path>::success(volume_name.data());
 }
 
-base::Result<void> validate_protected_sources(const WindowsBlockSinkOpenRequest& request) {
+base::Result<void> validate_protected_sources_volume(const WindowsBlockSinkOpenRequest& request) {
     if (request.protected_sources.empty()) {
         return base::Result<void>::failure(
             {base::ErrorCode::kInvalidArgument, "volume sink requires protected sources"});
@@ -116,6 +118,30 @@ base::Result<void> validate_protected_sources(const WindowsBlockSinkOpenRequest&
         if (equal_case_insensitive(request.path.native(), source_volume.value().native())) {
             return base::Result<void>::failure(
                 {base::ErrorCode::kConflict, "restore source is located on the target volume"});
+        }
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void>
+validate_protected_sources_disk(const WindowsBlockSinkOpenRequest& request,
+                                const std::uint32_t target_disk) {
+    if (request.protected_sources.empty()) {
+        return base::Result<void>::failure(
+            {base::ErrorCode::kInvalidArgument, "disk sink requires protected sources"});
+    }
+    for (const auto& source : request.protected_sources) {
+        if (source.empty()) {
+            return base::Result<void>::failure(
+                {base::ErrorCode::kInvalidArgument, "protected source path is empty"});
+        }
+        auto source_disk = physical_disk_number_for_path(source);
+        if (!source_disk) {
+            return base::Result<void>::failure(source_disk.error());
+        }
+        if (source_disk.value() == target_disk) {
+            return base::Result<void>::failure(
+                {base::ErrorCode::kConflict, "restore source is located on the target disk"});
         }
     }
     return base::Result<void>::success();
@@ -139,11 +165,29 @@ base::Result<void> validate_request(const WindowsBlockSinkOpenRequest& request) 
             return base::Result<void>::failure(
                 {base::ErrorCode::kConflict, "online system volume restore is forbidden"});
         }
-        auto protected_sources = validate_protected_sources(request);
-        if (!protected_sources) {
-            return protected_sources;
+        return validate_protected_sources_volume(request);
+    }
+    if (request.kind == WindowsBlockSinkKind::kPhysicalDisk) {
+        if (!WindowsBlockSink::is_physical_drive_path(request.path)) {
+            return base::Result<void>::failure(
+                {base::ErrorCode::kInvalidArgument, "target is not a PhysicalDrive path"});
         }
-    } else if (is_device_path(request.path.native())) {
+        auto disk_number = WindowsBlockSink::physical_drive_number(request.path);
+        if (!disk_number) {
+            return base::Result<void>::failure(
+                {base::ErrorCode::kInvalidArgument, "PhysicalDrive number is invalid"});
+        }
+        auto system = is_system_physical_disk(disk_number.value());
+        if (!system) {
+            return base::Result<void>::failure(system.error());
+        }
+        if (system.value()) {
+            return base::Result<void>::failure(
+                {base::ErrorCode::kConflict, "online system disk restore is forbidden"});
+        }
+        return validate_protected_sources_disk(request, disk_number.value());
+    }
+    if (is_device_path(request.path.native())) {
         return base::Result<void>::failure(
             {base::ErrorCode::kInvalidArgument, "stable file sink rejects device paths"});
     }
@@ -151,12 +195,12 @@ base::Result<void> validate_request(const WindowsBlockSinkOpenRequest& request) 
 }
 
 std::filesystem::path open_path(const WindowsBlockSinkOpenRequest& request) {
-    if (request.kind != WindowsBlockSinkKind::kVolume) {
-        return request.path;
+    if (request.kind == WindowsBlockSinkKind::kVolume) {
+        auto value = request.path.native();
+        value.pop_back();
+        return value;
     }
-    auto value = request.path.native();
-    value.pop_back();
-    return value;
+    return request.path;
 }
 
 base::Result<std::uint64_t> file_capacity(const HANDLE handle) {
@@ -274,11 +318,12 @@ WindowsBlockSink::open(const WindowsBlockSinkOpenRequest& request) {
     if (!valid) {
         return base::Result<std::unique_ptr<WindowsBlockSink>>::failure(valid.error());
     }
+    const auto share_mode = request.kind == WindowsBlockSinkKind::kStableFile
+                                ? FILE_SHARE_READ
+                                : (FILE_SHARE_READ | FILE_SHARE_WRITE);
     detail::UniqueHandle handle(CreateFileW(
-        open_path(request).c_str(), GENERIC_READ | GENERIC_WRITE,
-        request.kind == WindowsBlockSinkKind::kVolume ? FILE_SHARE_READ | FILE_SHARE_WRITE
-                                                       : FILE_SHARE_READ,
-        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr));
+        open_path(request).c_str(), GENERIC_READ | GENERIC_WRITE, share_mode, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr));
     if (!handle.valid()) {
         return base::Result<std::unique_ptr<WindowsBlockSink>>::failure(
             detail::win32_error(GetLastError(), "CreateFileW"));
@@ -296,14 +341,32 @@ WindowsBlockSink::open(const WindowsBlockSinkOpenRequest& request) {
             return base::Result<std::unique_ptr<WindowsBlockSink>>::failure(dismount.error());
         }
     }
-    auto capacity = request.kind == WindowsBlockSinkKind::kVolume ? volume_capacity(handle.get())
-                                                                  : file_capacity(handle.get());
+    auto capacity = (request.kind == WindowsBlockSinkKind::kVolume ||
+                     request.kind == WindowsBlockSinkKind::kPhysicalDisk)
+                        ? volume_capacity(handle.get())
+                        : file_capacity(handle.get());
     if (!capacity) {
         return base::Result<std::unique_ptr<WindowsBlockSink>>::failure(capacity.error());
     }
     if (request.expected_capacity_bytes && *request.expected_capacity_bytes != capacity.value()) {
         return base::Result<std::unique_ptr<WindowsBlockSink>>::failure(
             {base::ErrorCode::kConflict, "block sink capacity changed"});
+    }
+    if (request.minimum_capacity_bytes && capacity.value() < *request.minimum_capacity_bytes) {
+        return base::Result<std::unique_ptr<WindowsBlockSink>>::failure(
+            {base::ErrorCode::kInsufficientSpace, "block sink capacity is insufficient"});
+    }
+    if (request.kind == WindowsBlockSinkKind::kPhysicalDisk &&
+        request.expected_bytes_per_sector != 0) {
+        DISK_GEOMETRY geometry{};
+        auto geometry_result =
+            device_control(handle.get(), IOCTL_DISK_GET_DRIVE_GEOMETRY, &geometry,
+                           sizeof(geometry), "IOCTL_DISK_GET_DRIVE_GEOMETRY");
+        if (!geometry_result || geometry_result.value() < sizeof(geometry) ||
+            geometry.BytesPerSector != request.expected_bytes_per_sector) {
+            return base::Result<std::unique_ptr<WindowsBlockSink>>::failure(
+                {base::ErrorCode::kConflict, "target disk sector size does not match source"});
+        }
     }
     auto impl = std::make_unique<Impl>();
     impl->handle = std::move(handle);
@@ -320,6 +383,33 @@ bool WindowsBlockSink::is_canonical_volume_guid_path(
            starts_with_case_insensitive(value, kVolumePrefix) && value[value.size() - 2] == L'}' &&
            value.back() == L'\\' &&
            valid_guid_body(value.substr(kVolumePrefix.size(), 36));
+}
+
+bool WindowsBlockSink::is_physical_drive_path(const std::filesystem::path& path) noexcept {
+    return physical_drive_number(path).has_value();
+}
+
+std::optional<std::uint32_t>
+WindowsBlockSink::physical_drive_number(const std::filesystem::path& path) noexcept {
+    const auto value = std::wstring_view(path.native());
+    if (!starts_with_case_insensitive(value, kPhysicalDrivePrefix)) {
+        return std::nullopt;
+    }
+    const auto digits = value.substr(kPhysicalDrivePrefix.size());
+    if (digits.empty() || digits.size() > 10) {
+        return std::nullopt;
+    }
+    std::uint64_t number = 0;
+    for (const wchar_t item : digits) {
+        if (item < L'0' || item > L'9') {
+            return std::nullopt;
+        }
+        number = number * 10U + static_cast<std::uint64_t>(item - L'0');
+        if (number > (std::numeric_limits<std::uint32_t>::max)()) {
+            return std::nullopt;
+        }
+    }
+    return static_cast<std::uint32_t>(number);
 }
 
 std::uint64_t WindowsBlockSink::capacity_bytes() const noexcept { return impl_->capacity; }

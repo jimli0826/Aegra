@@ -272,31 +272,48 @@ parse_recovery_point_request(const Json& payload) {
 encode_restore_preflight_request(const contracts::RestorePreflightRequest& request) {
     return Json{{"repository_connection_id", request.repository_connection_id},
                 {"recovery_point_id", request.recovery_point_id},
-                {"target_source_id", request.target_source_id}};
+                {"target_source_id", request.target_source_id},
+                {"source_disk_number", request.source_disk_number},
+                {"archive_password", request.archive_password}};
 }
 
 [[nodiscard]] contracts::RestorePreflightRequest
 parse_restore_preflight_request(const Json& payload) {
-    constexpr std::array<std::string_view, 3> keys{"repository_connection_id", "recovery_point_id",
-                                                   "target_source_id"};
+    constexpr std::array<std::string_view, 5> keys{
+        "repository_connection_id", "recovery_point_id", "target_source_id", "source_disk_number",
+        "archive_password"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("restore preflight request fields are invalid");
     }
-    return {payload.at("repository_connection_id").get<std::string>(),
-            payload.at("recovery_point_id").get<std::string>(),
-            payload.at("target_source_id").get<std::string>()};
+    contracts::RestorePreflightRequest request;
+    request.repository_connection_id = payload.at("repository_connection_id").get<std::string>();
+    request.recovery_point_id = payload.at("recovery_point_id").get<std::string>();
+    request.target_source_id = payload.at("target_source_id").get<std::string>();
+    request.source_disk_number =
+        unsigned_value<std::uint32_t>(payload, "source_disk_number");
+    request.archive_password = payload.at("archive_password").get<std::string>();
+    return request;
 }
 
 [[nodiscard]] Json encode_start_restore(const contracts::StartRestoreCommand& command) {
-    return Json{{"preflight_token", command.preflight_token}, {"confirmed", command.confirmed}};
+    return Json{{"preflight_token", command.preflight_token},
+                {"confirmed", command.confirmed},
+                {"archive_password", command.archive_password},
+                {"preserve_disk_signature", command.preserve_disk_signature},
+                {"auto_expand_last_partition", command.auto_expand_last_partition}};
 }
 
 [[nodiscard]] contracts::StartRestoreCommand parse_start_restore(const Json& payload) {
-    constexpr std::array<std::string_view, 2> keys{"preflight_token", "confirmed"};
+    constexpr std::array<std::string_view, 5> keys{
+        "preflight_token", "confirmed", "archive_password", "preserve_disk_signature",
+        "auto_expand_last_partition"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("start restore fields are invalid");
     }
-    return {payload.at("preflight_token").get<std::string>(), payload.at("confirmed").get<bool>()};
+    return {payload.at("preflight_token").get<std::string>(), payload.at("confirmed").get<bool>(),
+            payload.at("archive_password").get<std::string>(),
+            payload.at("preserve_disk_signature").get<bool>(),
+            payload.at("auto_expand_last_partition").get<bool>()};
 }
 
 [[nodiscard]] Json

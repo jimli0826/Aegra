@@ -397,7 +397,8 @@ base::Result<void> validate_start_verify_command(const StartVerifyCommand& comma
 base::Result<void> validate_restore_preflight_request(const RestorePreflightRequest& request) {
     if (!valid_stable_value(request.repository_connection_id, kMaximumIdentifierBytes) ||
         !valid_stable_value(request.recovery_point_id, kMaximumIdentifierBytes) ||
-        !valid_stable_value(request.target_source_id, kMaximumIdentifierBytes)) {
+        !valid_stable_value(request.target_source_id, kMaximumIdentifierBytes) ||
+        request.archive_password.size() > 32) {
         return invalid("restore preflight request is invalid");
     }
     return base::Result<void>::success();
@@ -421,8 +422,10 @@ base::Result<void> validate_restore_preflight(const RestorePreflight& preflight)
 
 base::Result<void> validate_start_restore_command(const StartRestoreCommand& command) {
     const std::optional<std::string> token = command.preflight_token;
-    return valid_token(token) && command.confirmed ? base::Result<void>::success()
-                                                   : invalid("start restore command is invalid");
+    if (!valid_token(token) || !command.confirmed || command.archive_password.size() > 32) {
+        return invalid("start restore command is invalid");
+    }
+    return base::Result<void>::success();
 }
 
 base::Result<void> validate_mount_recovery_point_command(const MountRecoveryPointCommand& command) {

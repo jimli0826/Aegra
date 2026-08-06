@@ -297,6 +297,47 @@ QByteArray encode_start_backup_request(const QString& request_id, const QString&
         .toJson(QJsonDocument::Compact);
 }
 
+QByteArray encode_prepare_restore_request(const QString& request_id, const QString& connection_id,
+                                          const QString& recovery_point_id,
+                                          const QString& target_source_id,
+                                          const int source_disk_number,
+                                          const QString& archive_password) {
+    const QJsonObject payload{{QStringLiteral("repository_connection_id"), connection_id},
+                              {QStringLiteral("recovery_point_id"), recovery_point_id},
+                              {QStringLiteral("target_source_id"), target_source_id},
+                              {QStringLiteral("source_disk_number"), source_disk_number},
+                              {QStringLiteral("archive_password"), archive_password}};
+    return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
+                                      static_cast<qint64>(kServiceSchemaVersion)},
+                                     {QStringLiteral("message_type"), 1},
+                                     {QStringLiteral("request_id"), request_id},
+                                     {QStringLiteral("kind"), kPrepareRestoreRequestKind},
+                                     {QStringLiteral("idempotency_key"), QJsonValue(QJsonValue::Null)},
+                                     {QStringLiteral("payload"), payload}})
+        .toJson(QJsonDocument::Compact);
+}
+
+QByteArray encode_start_restore_request(const QString& request_id, const QString& idempotency_key,
+                                        const QString& preflight_token,
+                                        const QString& archive_password,
+                                        const bool preserve_disk_signature,
+                                        const bool auto_expand_last_partition) {
+    const QJsonObject payload{
+        {QStringLiteral("preflight_token"), preflight_token},
+        {QStringLiteral("confirmed"), true},
+        {QStringLiteral("archive_password"), archive_password},
+        {QStringLiteral("preserve_disk_signature"), preserve_disk_signature},
+        {QStringLiteral("auto_expand_last_partition"), auto_expand_last_partition}};
+    return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
+                                      static_cast<qint64>(kServiceSchemaVersion)},
+                                     {QStringLiteral("message_type"), 1},
+                                     {QStringLiteral("request_id"), request_id},
+                                     {QStringLiteral("kind"), kStartRestoreRequestKind},
+                                     {QStringLiteral("idempotency_key"), idempotency_key},
+                                     {QStringLiteral("payload"), payload}})
+        .toJson(QJsonDocument::Compact);
+}
+
 QByteArray encode_cancel_job_request(const QString& request_id, const QString& idempotency_key,
                                      const QString& job_id) {
     const QJsonObject payload{{QStringLiteral("resource_id"), job_id}};

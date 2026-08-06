@@ -127,8 +127,7 @@ QHash<int, QByteArray> SourceInventoryModel::roleNames() const {
 
 QVariantList SourceInventoryModel::disksTree() const {
     // Group volumes by disk_number for Backup wizard (old disksTree).
-    // Service emits disk.* shells for physical drives with no volumes so every PhysicalDrive
-    // appears (parity with old GetDisksWithVolumes).
+    // Service emits disk.* shells for every PhysicalDrive (empty disks + restore target ids).
     struct DiskAcc {
         std::uint32_t number{0};
         bool is_system{false};

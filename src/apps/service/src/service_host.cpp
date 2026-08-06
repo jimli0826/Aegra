@@ -202,6 +202,21 @@ query_response(const contracts::ServiceRequest& request, const ServiceRuntimeInf
         response.payload = std::move(result).value();
         return base::Result<contracts::ServiceResponse>::success(std::move(response));
     }
+    if (request.kind == contracts::ServiceRequestKind::kPrepareRestore && runtime.worker_jobs) {
+        auto result = runtime.worker_jobs->prepare_restore(
+            std::get<contracts::RestorePreflightRequest>(request.payload), cancellation);
+        if (!result) {
+            write_log(runtime, ServiceLogLevel::kWarning, "restore.preflight_failed",
+                      result.error().message.empty() ? "prepare restore failed"
+                                                     : result.error().message);
+            return base::Result<contracts::ServiceResponse>::success(
+                failure(result.error().code, request.request_id, request.kind,
+                        "restore.preflight_failed"));
+        }
+        response.message_code = "restore.preflight_ready";
+        response.payload = std::move(result).value();
+        return base::Result<contracts::ServiceResponse>::success(std::move(response));
+    }
     return capability_unavailable(request);
 }
 
@@ -265,6 +280,12 @@ command_response(const contracts::ServiceRequest& request, const ServiceRuntimeI
             std::get<contracts::ExecuteDeletePlanCommand>(request.payload),
             *request.idempotency_key, cancellation);
     } else if (runtime.worker_jobs && request.idempotency_key &&
+               request.kind == contracts::ServiceRequestKind::kStartRestore) {
+        handled = true;
+        result = runtime.worker_jobs->start_restore(
+            std::get<contracts::StartRestoreCommand>(request.payload), *request.idempotency_key,
+            cancellation);
+    } else if (runtime.worker_jobs && request.idempotency_key &&
                request.kind == contracts::ServiceRequestKind::kCancelJob) {
         handled = true;
         result = runtime.worker_jobs->cancel_job(std::get<contracts::ResourceRef>(request.payload),
@@ -303,9 +324,20 @@ command_response(const contracts::ServiceRequest& request, const ServiceRuntimeI
             message_code = "backup.worker_unavailable";
         } else if (detail.find("idempotency") != std::string::npos) {
             message_code = "backup.idempotency_conflict";
+        } else if (detail.find("preflight") != std::string::npos) {
+            message_code = "restore.preflight_invalid";
+        } else if (detail.find("system disk restore") != std::string::npos) {
+            message_code = "restore.system_target_requires_pe";
+        } else if (detail.find("restore target is smaller") != std::string::npos) {
+            message_code = "restore.target_too_small";
         } else if (request.kind == contracts::ServiceRequestKind::kStartBackup) {
             message_code = "backup.command_failed";
+        } else if (request.kind == contracts::ServiceRequestKind::kStartRestore) {
+            message_code = "restore.command_failed";
         }
+        // Log domain detail (never secrets): response_detail only has message_code.
+        write_log(runtime, ServiceLogLevel::kWarning, "service.command_failed_detail",
+                  request_detail(request) + "; detail=" + detail);
         return base::Result<contracts::ServiceResponse>::success(
             failure(result.error().code, request.request_id, request.kind, std::move(message_code)));
     }
@@ -449,6 +481,7 @@ dispatch_service_request(const contracts::ServiceRequest& request,
         break;
     case contracts::ServiceRequestKind::kListRepositoryConnections:
     case contracts::ServiceRequestKind::kListSourceInventory:
+    case contracts::ServiceRequestKind::kPrepareRestore:
         response = query_response(request, runtime, cancellation);
         break;
     case contracts::ServiceRequestKind::kResolveRecoveryPointChain:
@@ -486,6 +519,7 @@ dispatch_service_request(const contracts::ServiceRequest& request,
     case contracts::ServiceRequestKind::kRemoveRepositoryConnection:
     case contracts::ServiceRequestKind::kStartBackup:
     case contracts::ServiceRequestKind::kStartVerify:
+    case contracts::ServiceRequestKind::kStartRestore:
     case contracts::ServiceRequestKind::kExecuteDeletePlan:
     case contracts::ServiceRequestKind::kCancelJob:
         response = command_response(request, runtime, cancellation);
@@ -499,8 +533,6 @@ dispatch_service_request(const contracts::ServiceRequest& request,
         break;
     case contracts::ServiceRequestKind::kListEvents:
     case contracts::ServiceRequestKind::kListMountSessions:
-    case contracts::ServiceRequestKind::kPrepareRestore:
-    case contracts::ServiceRequestKind::kStartRestore:
     case contracts::ServiceRequestKind::kMountRecoveryPoint:
     case contracts::ServiceRequestKind::kUnmountSession:
     case contracts::ServiceRequestKind::kSubscribeTaskEvents:

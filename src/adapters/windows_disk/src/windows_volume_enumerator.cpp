@@ -653,9 +653,9 @@ WindowsSourceInventory::list_sources(const base::CancellationToken cancellation)
         return base::Result<std::vector<ports::SourceInventoryRecord>>::failure(volumes.error());
     }
     const auto system_root = system_volume_root();
-    std::map<std::uint32_t, std::size_t> volume_count_by_disk;
     std::vector<ports::SourceInventoryRecord> records;
     records.reserve(volumes.value().size() + disks.size());
+    std::map<std::uint32_t, bool> system_by_disk;
 
     for (const auto& volume : volumes.value()) {
         if (cancellation.stop_requested()) {
@@ -684,16 +684,19 @@ WindowsSourceInventory::list_sources(const base::CancellationToken cancellation)
             }
             return base::Result<std::vector<ports::SourceInventoryRecord>>::failure(record.error());
         }
-        ++volume_count_by_disk[disk_number];
+        if (record.value().is_system) {
+            system_by_disk[disk_number] = true;
+        }
         records.push_back(std::move(record).value());
     }
 
-    // Disk shells for physical drives with no attached volumes (old disksTree empty-disk rows).
+    // Always publish disk.N shells for every PhysicalDrive:
+    // - empty disks: Desktop disksTree Unallocated rows (old GetDisksWithVolumes);
+    // - disks with volumes: restore target identity (PrepareRestore target_source_id = disk.N).
+    // capacity_bytes stays 0 so volume backup selectability ignores shells.
     for (const auto& disk : disks) {
-        if (volume_count_by_disk.contains(disk.disk_number)) {
-            continue;
-        }
-        records.push_back(make_disk_shell_record(disk, false));
+        const bool is_system = system_by_disk.contains(disk.disk_number);
+        records.push_back(make_disk_shell_record(disk, is_system));
     }
 
     std::ranges::sort(records, {}, &ports::SourceInventoryRecord::source_id);

@@ -47,7 +47,8 @@ VSS 语义冲突。另一方面，块读取、Volume Inventory 和 VSS Snapshot 
   `IBlockSource`。VSS COM 对象在 Adapter 专用 MTA 线程中完成创建、使用和释放。
 - 普通稳定文件模式可用于确定性契约测试和未来离线镜像输入，但不能打开 Win32 Device Namespace。
 - Disk layout / partition table 已由 `inspect_physical_disk_layout` 写入备份 Manifest（Restore Source
-  Disks 与旧 LayoutCollector 对齐）；完整 `raw_layout`（裸机重建分区表）仍待后续补齐。
+  Disks 与旧 LayoutCollector 对齐）；`raw_layout`（MBR/GPT 原始扇区）在布局采集时尽量写入 Manifest
+  （`PhysicalDrive` 需 `GENERIC_READ`；读取失败不阻断卷备份），供 Full 整盘还原重建分区表。
 
 ## 验证
 

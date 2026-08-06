@@ -166,6 +166,10 @@ QString ServiceClient::connectionsErrorText() const {
 }
 
 bool ServiceClient::backupStartAvailable() const noexcept { return backup_start_available_; }
+bool ServiceClient::restoreStartAvailable() const noexcept {
+    return restore_start_available_ && restore_preflight_available_;
+}
+bool ServiceClient::restoreCommandBusy() const noexcept { return restore_command_busy_; }
 bool ServiceClient::jobCancelAvailable() const noexcept { return job_cancel_available_; }
 bool ServiceClient::backupCommandBusy() const noexcept { return backup_command_busy_; }
 bool ServiceClient::cancelCommandBusy() const noexcept { return cancel_command_busy_; }
@@ -475,6 +479,8 @@ RequestDisposition ServiceClient::handle_service_info_frame(const QByteArray& bo
     connections_available_ = capabilities_.contains(QStringLiteral("repository.connection"));
     schedules_available_ = capabilities_.contains(QStringLiteral("schedule"));
     backup_start_available_ = capabilities_.contains(QStringLiteral("backup.start"));
+    restore_preflight_available_ = capabilities_.contains(QStringLiteral("restore.preflight"));
+    restore_start_available_ = capabilities_.contains(QStringLiteral("restore.start"));
     job_cancel_available_ = capabilities_.contains(QStringLiteral("job.cancel"));
     handshake_complete_ = true;
     QTimer::singleShot(0, this, [this]() {
@@ -622,6 +628,9 @@ void ServiceClient::set_state(const State state, QString error_code) {
             connections_available_ = false;
             schedules_available_ = false;
             backup_start_available_ = false;
+            restore_preflight_available_ = false;
+            restore_start_available_ = false;
+            restore_command_busy_ = false;
             job_cancel_available_ = false;
             handshake_complete_ = false;
             reset_repository();

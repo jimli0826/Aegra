@@ -18,6 +18,7 @@ enum class JobOperation : std::uint8_t {
     kExport = 4,
 };
 
+/// Opaque credential handle. Empty `value` means no password (unencrypted archive).
 struct SecretRef final {
     std::string value;
 
@@ -45,6 +46,21 @@ struct BackupOptions final {
     bool encryption_enabled{false};
 };
 
+/// Optional restore-mode options. Omitted means volume restore (existing path).
+struct RestoreOptions final {
+    /// When true, restore a disk image to `\\.\PhysicalDriveN` target_ref.
+    /// source_refs must be the base-first Full→…→tip chain.
+    bool disk_restore{false};
+    /// Source `disk_number` from archive Manifest.disks[] (required when disk_restore).
+    std::uint32_t source_disk_number{0};
+    /// After successful disk restore, clear OFFLINE/READ_ONLY (data-disk path; default true).
+    bool bring_target_online{true};
+    /// Keep MBR signature / GPT DiskId from the source (default true; recommended for bootable).
+    bool preserve_disk_signature{true};
+    /// When target is larger than source, grow last data partition + NTFS/ReFS (default true).
+    bool auto_expand_last_partition{true};
+};
+
 struct JobRequest final {
     std::uint32_t schema_version{kJobSchemaVersion};
     std::string job_id;
@@ -54,6 +70,7 @@ struct JobRequest final {
     std::string target_ref;
     std::vector<SecretRef> credential_refs;
     std::optional<BackupOptions> backup;
+    std::optional<RestoreOptions> restore;
     std::string trace_id;
     std::int64_t deadline_utc_ms{0};
 };

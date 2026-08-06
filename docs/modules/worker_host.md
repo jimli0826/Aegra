@@ -46,6 +46,7 @@ task log 与 `service.log` 同树。
 | `target_ref` | string | Backup/Restore/Export 必填；Verify 为空 |
 | `credential_refs` | string array | 只允许 `SecretRef` 定位符 |
 | `backup` | object | Backup 必填；含 `type`，增量还含两个父引用 |
+| `restore` | object | 整盘 Restore 必填：`disk_restore`、`source_disk_number`、`bring_target_online`；卷恢复可省略 |
 | `trace_id` | string | 必填、非空 |
 | `deadline_utc_ms` | signed integer | 可选；`0` 表示无 deadline |
 
@@ -65,10 +66,20 @@ Secret 存活。多 Volume 增量要求父 Archive 与当前 Job 的有序 Volum
 Verify Job 的 `operation` 为 `3`，`source_refs` 恰好一个 `.bkf`，`target_ref` 为空；Worker 会完整读取并
 认证每个 Chunk，不创建目标文件。成功结果使用 `verify.completed`，错误使用脱敏的 `verify.*` code。
 
-Restore Job 的 `operation` 为 `2`，`source_refs` 按 base-first 顺序包含完整 `.bkf` 链，
-`credential_refs` 必须同长度且逐层对应，`target_ref` 必须是 canonical Windows Volume GUID Path。
-Worker 在所有层完成认证和链关系验证后才锁定、卸载并写入非系统目标卷；链深度由受信任运行配置限制，
-安全边界见 [ADR-0009](../adr/0009-windows-volume-restore-safety.md)。
+Restore Job 的 `operation` 为 `2`，`credential_refs` 必须与 `source_refs` 同长度且逐层对应
+（未加密层为空字符串）。卷恢复：`source_refs` 为 base-first 链，`target_ref` 为 canonical Volume
+GUID Path，且**不**携带 `restore` 对象。整盘恢复：`source_refs` 为 base-first 完整链
+（Full，以及可选 Incremental 层），`target_ref` 为 `\\.\PhysicalDriveN`，且必须带：
+
+```json
+{"restore":{"disk_restore":true,"source_disk_number":0,"bring_target_online":true,"preserve_disk_signature":true,"auto_expand_last_partition":true}}
+```
+
+Worker 用 `PersonalArchiveChainReader` 合成 tip 视图，再按卷写入 PhysicalDrive。Service→Worker
+编码（`encode_supervisor_job_request`）必须序列化 `restore`；省略时 Worker 按卷恢复处理，
+PhysicalDrive 目标会以 `restore.invalid_request` 失败。安全边界见
+[ADR-0009](../adr/0009-windows-volume-restore-safety.md) 与
+[windows_personal_restore.md](windows_personal_restore.md)。
 
 全量和增量 Backup 的 schema 3 片段分别为：
 

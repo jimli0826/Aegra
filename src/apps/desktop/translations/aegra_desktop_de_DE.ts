@@ -917,10 +917,6 @@ Server: %1</translation>
         <source>Backup selection is incomplete or unavailable</source>
         <translation>Sicherungsauswahl ist unvollständig oder nicht verfügbar</translation>
     </message>
-    <message id="aegra.error.backup.parent_unavailable">
-        <source>No eligible full backup is available for incremental. Run a full backup first.</source>
-        <translation>Kein geeignetes Eltern-Backup für inkrementell. Zuerst eine Vollsicherung ausführen.</translation>
-    </message>
     <message id="aegra.error.backup.repository_unavailable">
         <source>Repository is unavailable. Open Repository and test/add a destination first.</source>
         <translation>Repository ist nicht verfügbar. Bitte zuerst im Repository hinzufügen/testen.</translation>
@@ -940,6 +936,10 @@ Server: %1</translation>
     <message id="aegra.error.backup.idempotency_conflict">
         <source>Backup request conflicted with a previous attempt. Try again.</source>
         <translation>Sicherungskonflikt mit einem vorherigen Versuch. Bitte erneut versuchen.</translation>
+    </message>
+    <message id="aegra.error.backup.parent_unavailable">
+        <source>No eligible full backup is available for incremental. Run a full backup first.</source>
+        <translation>Kein geeignetes Eltern-Backup für inkrementell. Zuerst eine Vollsicherung ausführen.</translation>
     </message>
     <message id="aegra.error.service.request_failed">
         <source>Service rejected the request</source>
@@ -966,8 +966,72 @@ Server: %1</translation>
         <translation>Quelldatenträger</translation>
     </message>
     <message id="aegra.restore.source_hint">
-        <source>(from backup image → pick target below)</source>
-        <translation>(aus Backup-Image → Ziel unten wählen)</translation>
+        <source>(drag onto a target disk, or use Restore to)</source>
+        <translation>(auf Zieldatenträger ziehen oder „Wiederherstellen nach“)</translation>
+    </message>
+    <message id="aegra.restore.restore_to">
+        <source>Restore to</source>
+        <translation>Wiederherstellen nach</translation>
+    </message>
+    <message id="aegra.restore.not_mapped">
+        <source>Not mapped</source>
+        <translation>Nicht zugeordnet</translation>
+    </message>
+    <message id="aegra.restore.capability_missing">
+        <source>Service does not support restore</source>
+        <translation>Service unterstützt keine Wiederherstellung</translation>
+    </message>
+    <message id="aegra.restore.busy">
+        <source>A restore command is already in progress</source>
+        <translation>Ein Wiederherstellungsbefehl läuft bereits</translation>
+    </message>
+    <message id="aegra.restore.select_checkpoint_first">
+        <source>Select a checkpoint first</source>
+        <translation>Zuerst einen Prüfpunkt wählen</translation>
+    </message>
+    <message id="aegra.restore.map_required">
+        <source>Choose “Restore to” on a source disk</source>
+        <translation>„Wiederherstellen nach“ auf einem Quelldatenträger wählen</translation>
+    </message>
+    <message id="aegra.restore.no_repository">
+        <source>No repository connection is available</source>
+        <translation>Keine Repository-Verbindung verfügbar</translation>
+    </message>
+    <message id="aegra.restore.started">
+        <source>Restore started</source>
+        <translation>Wiederherstellung gestartet</translation>
+    </message>
+    <message id="aegra.restore.restoring">
+        <source>Restoring...</source>
+        <translation>Wird wiederhergestellt…</translation>
+    </message>
+    <message id="aegra.restore.target_too_small">
+        <source>Target disk is smaller than the source disk</source>
+        <translation>Zieldatenträger ist kleiner als die Quelle</translation>
+    </message>
+    <message id="aegra.restore.target_in_use">
+        <source>That target is already mapped by another source disk</source>
+        <translation>Dieses Ziel ist bereits einem anderen Quelldatenträger zugeordnet</translation>
+    </message>
+    <message id="aegra.restore.system_target_blocked">
+        <source>System disk restore requires PE (not available online)</source>
+        <translation>Systemdatenträger-Wiederherstellung erfordert PE (online nicht verfügbar)</translation>
+    </message>
+    <message id="aegra.restore.system_tag">
+        <source>[System]</source>
+        <translation>[System]</translation>
+    </message>
+    <message id="aegra.restore.target_too_small_tag">
+        <source>— too small</source>
+        <translation>— zu klein</translation>
+    </message>
+    <message id="aegra.restore.target_in_use_tag">
+        <source>— in use</source>
+        <translation>— belegt</translation>
+    </message>
+    <message id="aegra.restore.pe_only_tag">
+        <source>— PE only</source>
+        <translation>— nur PE</translation>
     </message>
     <message id="aegra.restore.select_checkpoint">
         <source>Select checkpoint</source>
@@ -1010,8 +1074,8 @@ Server: %1</translation>
         <translation>Zieldatenträger</translation>
     </message>
     <message id="aegra.restore.target_hint">
-        <source>(this PC — available restore destinations)</source>
-        <translation>(dieser PC — verfügbare Wiederherstellungsziele)</translation>
+        <source>(this PC — drop a source disk here)</source>
+        <translation>(dieser PC — Quelldatenträger hier ablegen)</translation>
     </message>
     <message id="aegra.restore.target_empty">
         <source>Local disks will appear when inventory is available</source>

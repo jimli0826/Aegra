@@ -34,6 +34,13 @@ class IWorkerJobService {
     [[nodiscard]] virtual base::Result<contracts::CommandAcknowledgement>
     start_verify(const contracts::StartVerifyCommand& command, std::string_view idempotency_key,
                  base::CancellationToken cancellation) = 0;
+    /// Disk→disk restore preflight (target_source_id = disk.N; tip may be Full or Incremental).
+    [[nodiscard]] virtual base::Result<contracts::RestorePreflight>
+    prepare_restore(const contracts::RestorePreflightRequest& request,
+                    base::CancellationToken cancellation) = 0;
+    [[nodiscard]] virtual base::Result<contracts::CommandAcknowledgement>
+    start_restore(const contracts::StartRestoreCommand& command, std::string_view idempotency_key,
+                  base::CancellationToken cancellation) = 0;
     [[nodiscard]] virtual base::Result<contracts::CommandAcknowledgement>
     cancel_job(const contracts::ResourceRef& job, std::string_view idempotency_key,
                base::CancellationToken cancellation) = 0;
@@ -53,6 +60,12 @@ class WorkerJobService final : public IWorkerJobService {
     [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
     start_verify(const contracts::StartVerifyCommand& command, std::string_view idempotency_key,
                  base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<contracts::RestorePreflight>
+    prepare_restore(const contracts::RestorePreflightRequest& request,
+                    base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
+    start_restore(const contracts::StartRestoreCommand& command, std::string_view idempotency_key,
+                  base::CancellationToken cancellation) override;
     [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
     cancel_job(const contracts::ResourceRef& job, std::string_view idempotency_key,
                base::CancellationToken cancellation) override;

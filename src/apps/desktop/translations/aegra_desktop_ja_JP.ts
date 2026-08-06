@@ -917,10 +917,6 @@ Server: %1</source>
         <source>Backup selection is incomplete or unavailable</source>
         <translation>バックアップ選択が不完全または利用できません</translation>
     </message>
-    <message id="aegra.error.backup.parent_unavailable">
-        <source>No eligible full backup is available for incremental. Run a full backup first.</source>
-        <translation>増分バックアップに使える親バックアップがありません。先にフルバックアップを実行してください。</translation>
-    </message>
     <message id="aegra.error.backup.repository_unavailable">
         <source>Repository is unavailable. Open Repository and test/add a destination first.</source>
         <translation>リポジトリを利用できません。先に Repository で追加またはテストしてください。</translation>
@@ -940,6 +936,10 @@ Server: %1</source>
     <message id="aegra.error.backup.idempotency_conflict">
         <source>Backup request conflicted with a previous attempt. Try again.</source>
         <translation>バックアップ要求が以前の試行と競合しました。再試行してください。</translation>
+    </message>
+    <message id="aegra.error.backup.parent_unavailable">
+        <source>No eligible full backup is available for incremental. Run a full backup first.</source>
+        <translation>増分バックアップに使える親バックアップがありません。先にフルバックアップを実行してください。</translation>
     </message>
     <message id="aegra.error.service.request_failed">
         <source>Service rejected the request</source>
@@ -966,8 +966,72 @@ Server: %1</source>
         <translation>ソースディスク</translation>
     </message>
     <message id="aegra.restore.source_hint">
-        <source>(from backup image → pick target below)</source>
-        <translation>（バックアップイメージから → 下でターゲットを選択）</translation>
+        <source>(drag onto a target disk, or use Restore to)</source>
+        <translation>（ターゲットディスクへドラッグ、または「復元先」を使用）</translation>
+    </message>
+    <message id="aegra.restore.restore_to">
+        <source>Restore to</source>
+        <translation>復元先</translation>
+    </message>
+    <message id="aegra.restore.not_mapped">
+        <source>Not mapped</source>
+        <translation>未マップ</translation>
+    </message>
+    <message id="aegra.restore.capability_missing">
+        <source>Service does not support restore</source>
+        <translation>Service は復元に対応していません</translation>
+    </message>
+    <message id="aegra.restore.busy">
+        <source>A restore command is already in progress</source>
+        <translation>復元コマンドは既に実行中です</translation>
+    </message>
+    <message id="aegra.restore.select_checkpoint_first">
+        <source>Select a checkpoint first</source>
+        <translation>先にチェックポイントを選択してください</translation>
+    </message>
+    <message id="aegra.restore.map_required">
+        <source>Choose “Restore to” on a source disk</source>
+        <translation>ソースディスクで「復元先」を選択してください</translation>
+    </message>
+    <message id="aegra.restore.no_repository">
+        <source>No repository connection is available</source>
+        <translation>利用可能なリポジトリ接続がありません</translation>
+    </message>
+    <message id="aegra.restore.started">
+        <source>Restore started</source>
+        <translation>復元を開始しました</translation>
+    </message>
+    <message id="aegra.restore.restoring">
+        <source>Restoring...</source>
+        <translation>復元中…</translation>
+    </message>
+    <message id="aegra.restore.target_too_small">
+        <source>Target disk is smaller than the source disk</source>
+        <translation>ターゲットディスクがソースより小さいです</translation>
+    </message>
+    <message id="aegra.restore.target_in_use">
+        <source>That target is already mapped by another source disk</source>
+        <translation>そのターゲットは別のソースディスクにマップ済みです</translation>
+    </message>
+    <message id="aegra.restore.system_target_blocked">
+        <source>System disk restore requires PE (not available online)</source>
+        <translation>システムディスクの復元には PE が必要です（オンライン不可）</translation>
+    </message>
+    <message id="aegra.restore.system_tag">
+        <source>[System]</source>
+        <translation>[システム]</translation>
+    </message>
+    <message id="aegra.restore.target_too_small_tag">
+        <source>— too small</source>
+        <translation>— 容量不足</translation>
+    </message>
+    <message id="aegra.restore.target_in_use_tag">
+        <source>— in use</source>
+        <translation>— 使用中</translation>
+    </message>
+    <message id="aegra.restore.pe_only_tag">
+        <source>— PE only</source>
+        <translation>— PE のみ</translation>
     </message>
     <message id="aegra.restore.select_checkpoint">
         <source>Select checkpoint</source>
@@ -1010,8 +1074,8 @@ Server: %1</source>
         <translation>ターゲットディスク</translation>
     </message>
     <message id="aegra.restore.target_hint">
-        <source>(this PC — available restore destinations)</source>
-        <translation>（この PC — 利用可能な復元先）</translation>
+        <source>(this PC — drop a source disk here)</source>
+        <translation>（この PC — ソースディスクをここにドロップ）</translation>
     </message>
     <message id="aegra.restore.target_empty">
         <source>Local disks will appear when inventory is available</source>

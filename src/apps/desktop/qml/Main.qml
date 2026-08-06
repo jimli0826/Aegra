@@ -362,7 +362,12 @@ Window {
                             onNavigateHomeRequested: pageContainer.switchPage(0)
                         }
                     }
-                    Component { id: restorePageComp; RestorePage { } }
+                    Component {
+                        id: restorePageComp
+                        RestorePage {
+                            onNavigateHomeRequested: pageContainer.switchPage(0)
+                        }
+                    }
                     Component { id: mountPageComp; MountPage { } }
                     Component { id: repositoryPageComp; RepositoryPage { } }
                     Component { id: eventLogPageComp; EventLogPage { } }

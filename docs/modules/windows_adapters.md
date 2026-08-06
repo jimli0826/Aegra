@@ -7,13 +7,23 @@ Aegra 的平台无关核心。阶段 8A 实现 Volume Inventory 与稳定 Block 
 VSS Snapshot Set Session；阶段 8F 实现 Worker 使用的系统时钟、密码学随机与凭据解析；阶段 8G
 实现 Worker 本地 Named Pipe Client。
 
-个人版卷恢复新增 `WindowsVolumeBlockSink`：生产模式只接受 canonical Volume GUID，拒绝系统卷，成功
+个人版卷恢复使用 `WindowsBlockSink` 的 `kVolume` 模式：只接受 canonical Volume GUID，拒绝系统卷，成功
 锁卷并卸载后才允许按 offset 写入，完成时 flush，析构时 best-effort 解锁。普通文件模式仅用于隔离验证。
 不可逆写入决策见 [ADR-0009](../adr/0009-windows-volume-restore-safety.md)。
 
-本模块允许备份 Worker 以只读方式直接读取不支持 VSS 的在线 Volume；不备份 `PhysicalDrive`、不修改
-分区表，也不执行 BCD/WinRE 修复。只有显式恢复用的 Block Sink 可以在完成安全检查后写入非系统目标
-Volume。
+个人版整盘恢复（Full 第一步）使用 `kPhysicalDisk` 模式：只接受 `\\.\PhysicalDriveN`，拒绝系统盘与
+Archive 所在盘；写入前由 `prepare_target_disk_for_raw_restore` 删除现有分区布局；写入后由
+`apply_disk_signature_policy`（可选随机化 MBR/GPT DiskId）、`rebuild_partition_table_from_raw_layout`
+重建 MBR/GPT、`bring_target_disk_online`，以及可选的 `expand_last_data_partition_on_disk`（对齐旧 `PartitionManager::ExtendLastDataPartitionOnDisk` /
+`ExtendVolumeByPath`：先解析末数据分区与卷 GUID，**保持 volume 句柄打开**，
+`IOCTL_DISK_GROW_PARTITION` 后再 `FSCTL_EXTEND_VOLUME(newTotalSectors)`；GPT 末尾预留 1 MiB；
+FAT/exFAT 跳过扩容）。备份侧
+`inspect_physical_disk_layout` 以 `GENERIC_READ` 打开 `PhysicalDrive` 并尽量采集 `raw_layout`；
+原始扇区读取失败时不阻断卷备份（空 `raw_layout`）。
+
+本模块允许备份 Worker 以只读方式直接读取不支持 VSS 的在线 Volume；备份数据面不直接读取
+`PhysicalDrive` 用户数据。分区表仅作为 Manifest 元数据与 `raw_layout` 采集；只有显式恢复路径可在
+安全检查后写入非系统目标 Volume 或 PhysicalDrive。
 
 ## 依赖
 
@@ -49,8 +59,9 @@ false。只有 Volume 枚举本身无法启动或异常终止时，整个调用�
 
 1. 先枚举 `PhysicalDrive0..31`（容量、`MBR`/`GPT`/`RAW` 分区样式）；
 2. 再枚举 Volume，且 **仅在 extent 能解析出 disk number 时** 发布卷记录（不再把未知 extent 默认到 Disk 0）；
-3. 若某物理盘没有任何可挂卷，发布不可选的 `disk.N` 占位记录（`capacity_bytes=0`、`is_read_only`），
-   供 Desktop `disksTree` 显示空盘行（Unallocated），与磁盘管理一致。
+3. **每个**物理盘发布不可选的 `disk.N` 壳记录（`capacity_bytes=0`、`is_read_only`，`disk_capacity_bytes`
+   为整盘容量）：空盘供 Desktop `disksTree` 显示 Unallocated；有卷的盘供 Restore 以 `disk.N` 作为
+   `PrepareRestore.target_source_id`。`is_system` 由同盘上是否存在系统卷推导。
 
 备份源可选性与恢复目标安全规则分离：Windows 系统卷（通常为 C:）、只读卷、EFI/FAT、RAW 和未知
 文件系统卷均允许作为备份源；在线恢复仍按 ADR-0009 拒绝系统目标。具备 stable Volume GUID 和可靠

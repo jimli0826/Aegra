@@ -90,6 +90,48 @@ std::optional<contracts::BackupOptions> optional_backup(const Json& root) {
     return result;
 }
 
+std::optional<contracts::RestoreOptions> optional_restore(const Json& root) {
+    const auto iterator = root.find("restore");
+    if (iterator == root.end()) {
+        return std::nullopt;
+    }
+    if (!iterator->is_object()) {
+        throw std::invalid_argument("worker request restore must be an object");
+    }
+    const auto disk_restore = iterator->find("disk_restore");
+    if (disk_restore == iterator->end() || !disk_restore->is_boolean()) {
+        throw std::invalid_argument("worker request restore.disk_restore is required");
+    }
+    contracts::RestoreOptions result;
+    result.disk_restore = disk_restore->get<bool>();
+    const auto source_disk = iterator->find("source_disk_number");
+    if (source_disk == iterator->end() || !source_disk->is_number_unsigned()) {
+        throw std::invalid_argument("worker request restore.source_disk_number is required");
+    }
+    const auto source_disk_value = source_disk->get<std::uint64_t>();
+    if (source_disk_value > (std::numeric_limits<std::uint32_t>::max)()) {
+        throw std::out_of_range("worker request restore.source_disk_number is out of range");
+    }
+    result.source_disk_number = static_cast<std::uint32_t>(source_disk_value);
+    const auto bring_online = iterator->find("bring_target_online");
+    if (bring_online == iterator->end() || !bring_online->is_boolean()) {
+        throw std::invalid_argument("worker request restore.bring_target_online is required");
+    }
+    result.bring_target_online = bring_online->get<bool>();
+    const auto preserve_sig = iterator->find("preserve_disk_signature");
+    if (preserve_sig == iterator->end() || !preserve_sig->is_boolean()) {
+        throw std::invalid_argument("worker request restore.preserve_disk_signature is required");
+    }
+    result.preserve_disk_signature = preserve_sig->get<bool>();
+    const auto auto_expand = iterator->find("auto_expand_last_partition");
+    if (auto_expand == iterator->end() || !auto_expand->is_boolean()) {
+        throw std::invalid_argument(
+            "worker request restore.auto_expand_last_partition is required");
+    }
+    result.auto_expand_last_partition = auto_expand->get<bool>();
+    return result;
+}
+
 contracts::JobRequest parse_job(const Json& root) {
     const auto schema_version = required_unsigned(root, "schema_version");
     const auto operation = required_unsigned(root, "operation");
@@ -116,6 +158,7 @@ contracts::JobRequest parse_job(const Json& root) {
         job.credential_refs.push_back(contracts::SecretRef{value});
     }
     job.backup = optional_backup(root);
+    job.restore = optional_restore(root);
     return job;
 }
 

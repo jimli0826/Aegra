@@ -694,19 +694,25 @@
 
 **用途：** Restore 预检；返回短期 `preflight_token` 与容量/链信息。**不**接受路径/key/链数组。
 
-**请求 payload（3 字段）：**
+**请求 payload（5 字段）：**
 
-| 字段 | 类型 |
-| --- | --- |
-| `repository_connection_id` | string |
-| `recovery_point_id` | string |
-| `target_source_id` | string | 目标盘 opaque ID |
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `repository_connection_id` | string | |
+| `recovery_point_id` | string | |
+| `target_source_id` | string | 目标 opaque ID：整盘还原为 `disk.N`；卷还原为 volume source_id |
+| `source_disk_number` | uint32 | 整盘还原时 Manifest 源盘号；卷还原传 `0` |
+| `archive_password` | string | 打开加密 Archive；未加密 `""`；不记日志 |
+
+**整盘还原（Full 或 Incremental tip）：** `target_source_id` 必须为 `disk.N`；Service 经
+`resolve_chain` 得到 base-first 链，校验目标非系统盘、容量 ≥ 源盘、链完整；Worker 再认证链并要求 tip
+含可用 `raw_layout`。`chain_depth` 为链长度（Full-only 为 1）。系统盘目标在线拒绝（需 PE）。
 
 **成功 payload — `RestorePreflight`（10 字段）：**
 
 `preflight_token`, `repository_connection_id`, `recovery_point_id`, `target_source_id`, `logical_size_bytes`, `target_capacity_bytes`, `chain_depth`, `expires_utc_ms`, `restore_eligible`, `message_code`
 
-**示例请求：**
+**示例请求（整盘）：**
 
 ```json
 {
@@ -718,7 +724,9 @@
   "payload": {
     "repository_connection_id": "conn-01",
     "recovery_point_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
-    "target_source_id": "vol-target-01"
+    "target_source_id": "disk.2",
+    "source_disk_number": 0,
+    "archive_password": ""
   }
 }
 ```
@@ -984,12 +992,18 @@ Service 展开：`source_ids`、`repository_connection_id`、`exclude_page_and_h
 
 **用途：** 在用户确认后，用预检 token 启动 Restore Job。
 
-**请求 payload（2 字段）：**
+**请求 payload（5 字段）：**
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `preflight_token` | string | 来自 kind 9 |
 | `confirmed` | bool | 必须为 `true` |
+| `archive_password` | string | 与预检一致；加密 Archive 必填；未加密 `""`；不记日志 |
+| `preserve_disk_signature` | bool | 保留源盘 MBR signature / GPT DiskId（默认 true） |
+| `auto_expand_last_partition` | bool | 目标更大时扩展末数据分区 + NTFS/ReFS（默认 true） |
+
+整盘路径：Service 解析 preflight 指纹中的源盘号与 Archive key，向 Worker 提交
+`disk_restore=true` + `\\.\PhysicalDriveN` 目标，并透传上述两个选项。
 
 ```json
 {
@@ -1000,7 +1014,10 @@ Service 展开：`source_ids`、`repository_connection_id`、`exclude_page_and_h
   "idempotency_key": "idem-restore-1",
   "payload": {
     "preflight_token": "pft-…",
-    "confirmed": true
+    "confirmed": true,
+    "archive_password": "",
+    "preserve_disk_signature": true,
+    "auto_expand_last_partition": true
   }
 }
 ```

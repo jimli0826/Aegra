@@ -40,8 +40,12 @@
 ## 影响
 
 - 调用方必须在 UI/Service 阶段显示目标身份并完成不可逆操作确认，再提交 canonical Volume GUID Job。
-- 当前 Worker 适用于非系统数据卷；系统盘、分区表重建和裸机恢复留给 WinPE。
+- 当前 Worker 适用于非系统数据卷；系统盘在线恢复仍禁止。
 - 目标卷成功锁定后在 Sink 生命周期内对其它访问不可用。
+- 整盘 disk→disk 恢复（Full 或 Incremental tip 的 base-first 链）使用独立的 `kPhysicalDisk` Sink
+  与 `raw_layout` 重建路径：目标必须是
+  非系统 `\\.\PhysicalDriveN`，写入前删除现有分区表，Archive 不得位于目标盘；系统盘 / 裸机 PE
+  路径仍留给后续 WinPE 工作包。
 
 ## 验证
 

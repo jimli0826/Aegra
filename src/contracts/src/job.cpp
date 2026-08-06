@@ -75,6 +75,21 @@ base::Result<void> validate_backup_options(const JobRequest& request) {
     return base::Result<void>::success();
 }
 
+base::Result<void> validate_restore_options(const JobRequest& request) {
+    if (request.operation != JobOperation::kRestore) {
+        return request.restore ? invalid("restore options require a restore operation")
+                               : base::Result<void>::success();
+    }
+    if (!request.restore) {
+        return base::Result<void>::success();
+    }
+    if (!request.restore->disk_restore) {
+        return invalid("restore options currently only support disk_restore=true");
+    }
+    // Disk restore source_refs are base-first (Full, then Incremental layers).
+    return base::Result<void>::success();
+}
+
 } // namespace
 
 base::Result<void> validate_job_request(const JobRequest& request) {
@@ -107,11 +122,13 @@ base::Result<void> validate_job_request(const JobRequest& request) {
     if (request.deadline_utc_ms < 0) {
         return invalid("deadline_utc_ms cannot be negative");
     }
-    if (std::ranges::any_of(request.credential_refs,
-                            [](const SecretRef& ref) { return ref.value.empty(); })) {
-        return invalid("credential_ref cannot be empty");
+    // Empty SecretRef values are allowed: restore/verify use a parallel credential slot with an
+    // empty value to mean "unencrypted archive" (no password). Do not reject empty values here.
+    auto backup = validate_backup_options(request);
+    if (!backup) {
+        return backup;
     }
-    return validate_backup_options(request);
+    return validate_restore_options(request);
 }
 
 } // namespace aegra::contracts

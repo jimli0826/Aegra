@@ -27,8 +27,10 @@ inline constexpr int kImportRepositoryConnectionRequestKind = 33;
 inline constexpr int kTestRepositoryConnectionRequestKind = 34;
 inline constexpr int kSetDefaultRepositoryRequestKind = 35;
 inline constexpr int kRemoveRepositoryConnectionRequestKind = 36;
+inline constexpr int kPrepareRestoreRequestKind = 9;
 inline constexpr int kStartBackupRequestKind = 37;
 inline constexpr int kCancelJobRequestKind = 38;
+inline constexpr int kStartRestoreRequestKind = 40;
 inline constexpr int kUpsertScheduleRequestKind = 43;
 inline constexpr int kDeleteScheduleRequestKind = 44;
 inline constexpr int kScheduleTriggerDaily = 1;
@@ -105,6 +107,18 @@ encode_schedule_list_request(const QString& request_id,
                                                      const QString& idempotency_key,
                                                      const QString& schedule_id,
                                                      int backup_type = kBackupTypeFull);
+[[nodiscard]] QByteArray encode_prepare_restore_request(const QString& request_id,
+                                                        const QString& connection_id,
+                                                        const QString& recovery_point_id,
+                                                        const QString& target_source_id,
+                                                        int source_disk_number,
+                                                        const QString& archive_password = {});
+[[nodiscard]] QByteArray encode_start_restore_request(const QString& request_id,
+                                                      const QString& idempotency_key,
+                                                      const QString& preflight_token,
+                                                      const QString& archive_password = {},
+                                                      bool preserve_disk_signature = true,
+                                                      bool auto_expand_last_partition = true);
 [[nodiscard]] QByteArray encode_cancel_job_request(const QString& request_id,
                                                    const QString& idempotency_key,
                                                    const QString& job_id);

@@ -24,6 +24,12 @@ struct PersonalArchiveRestoreBackendRequest final {
     std::uint64_t maximum_chunk_size{0};
     std::uint32_t maximum_chain_depth{0};
     ports::IProgressSink* progress{nullptr};
+    /// When true, restore disk image (layers are base-first Full→…→tip chain).
+    bool disk_restore{false};
+    std::uint32_t source_disk_number{0};
+    bool bring_target_online{true};
+    bool preserve_disk_signature{true};
+    bool auto_expand_last_partition{true};
 };
 
 class IPersonalArchiveRestoreTaskBackend {

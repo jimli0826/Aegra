@@ -147,4 +147,32 @@ class PersonalArchiveChainReader final : public ports::IRecoveryPointReader {
     std::unique_ptr<Impl> implementation_;
 };
 
+/// Exposes one volume from a multi-volume archive as a contiguous source_index=0 stream
+/// for RestorePipeline (which currently rejects multi-volume descriptors).
+class PersonalArchiveVolumeReader final : public ports::IRecoveryPointReader {
+  public:
+    ~PersonalArchiveVolumeReader() override;
+    PersonalArchiveVolumeReader(const PersonalArchiveVolumeReader&) = delete;
+    PersonalArchiveVolumeReader& operator=(const PersonalArchiveVolumeReader&) = delete;
+    PersonalArchiveVolumeReader(PersonalArchiveVolumeReader&&) = delete;
+    PersonalArchiveVolumeReader& operator=(PersonalArchiveVolumeReader&&) = delete;
+
+    [[nodiscard]] static base::Result<std::unique_ptr<PersonalArchiveVolumeReader>>
+    open(ports::IRecoveryPointReader& inner, const format::Manifest& manifest,
+         std::uint32_t volume_index);
+
+    [[nodiscard]] std::uint64_t logical_size_bytes() const noexcept override;
+    [[nodiscard]] std::uint64_t chunk_count() const noexcept override;
+    [[nodiscard]] base::Result<ports::ChunkDescriptor>
+    describe_chunk(std::uint64_t chunk_index) const override;
+    [[nodiscard]] base::Result<ports::ChunkData>
+    read_chunk(std::uint64_t chunk_index, base::CancellationToken cancellation) override;
+
+  private:
+    struct Impl;
+    explicit PersonalArchiveVolumeReader(std::unique_ptr<Impl> implementation) noexcept;
+
+    std::unique_ptr<Impl> implementation_;
+};
+
 } // namespace aegra::adapters::personal_archive

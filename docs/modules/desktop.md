@@ -171,3 +171,12 @@ Password 在 Service 没有对应能力时不显示。布局必须在 900x600、
   `disk_number` 渲染一行 Source Disk，分区条由 `partitions[]` 顺序 + `volumes[].extents[]` 绑定盘符/卷标，
   并过滤 MSR/EFI/Recovery（对齐旧 `RestoreBackend::volumesForSourceDisk`）。无 `disks[]` 的旧 Archive
   返回 layout 失败（需重新备份），不合成假 Disk 0。
+- Restore 整盘映射与启动（对齐旧 `RestoreBackend` + RestorePage）：
+  - Source 行提供 **Restore to** ComboBox，也可把 Source 行拖到 Target 行完成映射；目标来自
+    inventory `disksTree`；过小 / 已占用 / 系统盘拒绝（toast + 拖放红高亮）。
+  - 默认同号映射（目标存在且容量足够、非系统盘时）。
+  - **Restore** 按钮在 checkpoint + 至少一条有效映射 + `restore.preflight`/`restore.start` capability 时启用。
+  - 点击后对每个已映射的 source→target 依次 `ServiceClient::startDiskRestore`：kind 9
+    PrepareRestore（`disk.N` + `source_disk_number` + 可选 `archive_password`）→ kind 40
+    StartRestore；多盘为多条整盘 Job（串行提交；tip 可为 Full 或 Incremental；Service 解析
+    base-first 链；非系统盘目标）。全部 accepted 后切到 Home。

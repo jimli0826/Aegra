@@ -365,8 +365,10 @@ create_service_log(const std::filesystem::path& data_dir, const bool service_mod
     // S5 chain/delete/verify capabilities stay off until durable delete resume, archive credential
     // mapping, and real Verify Worker E2E all meet the package Definition of Done.
     std::vector<std::string> capabilities{
-        "backup.start",    "job.cancel",   "job.list",         "repository.connection",
-        "repository.list", "schedule",     "service.info",     "source.inventory",
+        "backup.start",    "job.cancel",         "job.list",
+        "repository.connection", "repository.list", "restore.preflight",
+        "restore.start",   "schedule",           "service.info",
+        "source.inventory",
     };
     std::ranges::sort(capabilities);
     return capabilities;

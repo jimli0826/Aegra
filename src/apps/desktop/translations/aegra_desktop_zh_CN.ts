@@ -917,10 +917,6 @@ Server: %1</source>
         <source>Backup selection is incomplete or unavailable</source>
         <translation>备份选择不完整或不可用</translation>
     </message>
-    <message id="aegra.error.backup.parent_unavailable">
-        <source>No eligible full backup is available for incremental. Run a full backup first.</source>
-        <translation>没有可用于增量备份的父备份，请先运行一次全量备份。</translation>
-    </message>
     <message id="aegra.error.backup.repository_unavailable">
         <source>Repository is unavailable. Open Repository and test/add a destination first.</source>
         <translation>仓库不可用。请先在 Repository 中添加或测试目标。</translation>
@@ -940,6 +936,10 @@ Server: %1</source>
     <message id="aegra.error.backup.idempotency_conflict">
         <source>Backup request conflicted with a previous attempt. Try again.</source>
         <translation>备份请求与先前尝试冲突，请重试。</translation>
+    </message>
+    <message id="aegra.error.backup.parent_unavailable">
+        <source>No eligible full backup is available for incremental. Run a full backup first.</source>
+        <translation>没有可用于增量备份的父备份，请先运行一次全量备份。</translation>
     </message>
     <message id="aegra.error.service.request_failed">
         <source>Service rejected the request</source>
@@ -966,8 +966,72 @@ Server: %1</source>
         <translation>源磁盘</translation>
     </message>
     <message id="aegra.restore.source_hint">
-        <source>(from backup image → pick target below)</source>
-        <translation>（来自备份镜像 → 在下方选择目标）</translation>
+        <source>(drag onto a target disk, or use Restore to)</source>
+        <translation>（拖到目标磁盘，或使用“还原到”）</translation>
+    </message>
+    <message id="aegra.restore.restore_to">
+        <source>Restore to</source>
+        <translation>还原到</translation>
+    </message>
+    <message id="aegra.restore.not_mapped">
+        <source>Not mapped</source>
+        <translation>未映射</translation>
+    </message>
+    <message id="aegra.restore.capability_missing">
+        <source>Service does not support restore</source>
+        <translation>Service 不支持恢复</translation>
+    </message>
+    <message id="aegra.restore.busy">
+        <source>A restore command is already in progress</source>
+        <translation>恢复命令已在进行中</translation>
+    </message>
+    <message id="aegra.restore.select_checkpoint_first">
+        <source>Select a checkpoint first</source>
+        <translation>请先选择检查点</translation>
+    </message>
+    <message id="aegra.restore.map_required">
+        <source>Choose “Restore to” on a source disk</source>
+        <translation>请在源磁盘上选择“还原到”</translation>
+    </message>
+    <message id="aegra.restore.no_repository">
+        <source>No repository connection is available</source>
+        <translation>没有可用的 Repository 连接</translation>
+    </message>
+    <message id="aegra.restore.started">
+        <source>Restore started</source>
+        <translation>恢复已开始</translation>
+    </message>
+    <message id="aegra.restore.restoring">
+        <source>Restoring...</source>
+        <translation>正在恢复…</translation>
+    </message>
+    <message id="aegra.restore.target_too_small">
+        <source>Target disk is smaller than the source disk</source>
+        <translation>目标磁盘小于源磁盘</translation>
+    </message>
+    <message id="aegra.restore.target_in_use">
+        <source>That target is already mapped by another source disk</source>
+        <translation>该目标已被其他源磁盘映射</translation>
+    </message>
+    <message id="aegra.restore.system_target_blocked">
+        <source>System disk restore requires PE (not available online)</source>
+        <translation>系统盘恢复需要 PE（在线不可用）</translation>
+    </message>
+    <message id="aegra.restore.system_tag">
+        <source>[System]</source>
+        <translation>[系统]</translation>
+    </message>
+    <message id="aegra.restore.target_too_small_tag">
+        <source>— too small</source>
+        <translation>— 过小</translation>
+    </message>
+    <message id="aegra.restore.target_in_use_tag">
+        <source>— in use</source>
+        <translation>— 已占用</translation>
+    </message>
+    <message id="aegra.restore.pe_only_tag">
+        <source>— PE only</source>
+        <translation>— 仅 PE</translation>
     </message>
     <message id="aegra.restore.select_checkpoint">
         <source>Select checkpoint</source>
@@ -1010,8 +1074,8 @@ Server: %1</source>
         <translation>目标磁盘</translation>
     </message>
     <message id="aegra.restore.target_hint">
-        <source>(this PC — available restore destinations)</source>
-        <translation>（此电脑 — 可用恢复目标）</translation>
+        <source>(this PC — drop a source disk here)</source>
+        <translation>（此电脑 — 将源磁盘拖放到此处）</translation>
     </message>
     <message id="aegra.restore.target_empty">
         <source>Local disks will appear when inventory is available</source>

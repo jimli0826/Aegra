@@ -42,6 +42,9 @@ struct WorkerJobRequest final {
     /// Owning schedule for backup jobs; used to advance last_recovery_point_id after Catalog publish.
     std::string schedule_id;
     std::optional<std::string> backup_archive_key;
+    /// Opaque restore preflight token when operation is restore (unique job occupancy).
+    std::optional<std::string> preflight_token;
+    std::optional<std::string> target_source_id;
     std::chrono::seconds deadline{};
 };
 

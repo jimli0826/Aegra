@@ -171,6 +171,11 @@ disk_from_layout(const adapters::windows_disk::WindowsPhysicalDiskLayout& layout
         partition.volume_guid = source.volume_guid;
         disk.partitions.push_back(std::move(partition));
     }
+    disk.raw_layout.mbr_sector = layout.raw_layout.mbr_sector;
+    disk.raw_layout.gpt_primary_header = layout.raw_layout.gpt_primary_header;
+    disk.raw_layout.gpt_partition_entries = layout.raw_layout.gpt_partition_entries;
+    disk.raw_layout.gpt_backup_header = layout.raw_layout.gpt_backup_header;
+    disk.raw_layout.gpt_backup_entries = layout.raw_layout.gpt_backup_entries;
     return base::Result<format::Disk>::success(std::move(disk));
 }
 

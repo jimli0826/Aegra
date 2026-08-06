@@ -6,8 +6,11 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <iomanip>
+#include <limits>
+#include <span>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -18,15 +21,17 @@ namespace {
 
 [[nodiscard]] detail::UniqueHandle open_physical_drive(const std::uint32_t disk_number) {
     const auto path = std::wstring(LR"(\\.\PhysicalDrive)") + std::to_wstring(disk_number);
-    detail::UniqueHandle handle(CreateFileW(path.c_str(), 0,
-                                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                            nullptr, OPEN_EXISTING, 0, nullptr));
+    // Prefer GENERIC_READ so MBR/GPT raw sector capture can use ReadFile. Access 0 allows
+    // IOCTL metadata only and makes ReadFile fail with ERROR_ACCESS_DENIED.
+    constexpr DWORD kShare = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+    detail::UniqueHandle handle(CreateFileW(path.c_str(), GENERIC_READ, kShare, nullptr,
+                                            OPEN_EXISTING, 0, nullptr));
     if (handle.valid()) {
         return handle;
     }
-    return detail::UniqueHandle(CreateFileW(path.c_str(), GENERIC_READ,
-                                            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
-                                            OPEN_EXISTING, 0, nullptr));
+    // Query-only fallback when exclusive openers deny GENERIC_READ.
+    return detail::UniqueHandle(
+        CreateFileW(path.c_str(), 0, kShare, nullptr, OPEN_EXISTING, 0, nullptr));
 }
 
 [[nodiscard]] std::string partition_style_name(const DWORD style) {
@@ -184,6 +189,86 @@ partition_from_info(const PARTITION_INFORMATION_EX& entry, const DWORD disk_styl
     return partition;
 }
 
+[[nodiscard]] base::Result<void>
+read_exact_at(const HANDLE handle, const std::uint64_t offset, std::span<std::byte> destination) {
+    if (destination.empty()) {
+        return base::Result<void>::success();
+    }
+    if (destination.size() > (std::numeric_limits<DWORD>::max)()) {
+        return base::Result<void>::failure(
+            {base::ErrorCode::kInvalidArgument, "raw layout read size is too large"});
+    }
+    LARGE_INTEGER move{};
+    move.QuadPart = static_cast<LONGLONG>(offset);
+    if (!SetFilePointerEx(handle, move, nullptr, FILE_BEGIN)) {
+        return base::Result<void>::failure(
+            {base::ErrorCode::kIoFailure, "raw layout seek failed"});
+    }
+    DWORD bytes_read = 0;
+    if (!ReadFile(handle, destination.data(), static_cast<DWORD>(destination.size()), &bytes_read,
+                  nullptr) ||
+        bytes_read != destination.size()) {
+        return base::Result<void>::failure(
+            {base::ErrorCode::kIoFailure, "raw layout read failed"});
+    }
+    return base::Result<void>::success();
+}
+
+// Best-effort MBR/GPT sector capture. Volume backup must not fail when PhysicalDrive
+// raw reads are denied; disk→disk restore later rejects archives without raw_layout.
+[[nodiscard]] base::Result<void> capture_raw_layout(const HANDLE handle,
+                                                    WindowsPhysicalDiskLayout& layout) {
+    const auto sector = layout.bytes_per_sector == 0 ? 512U : layout.bytes_per_sector;
+    layout.raw_layout = {};
+    layout.raw_layout.mbr_sector.assign(sector, std::byte{0});
+    auto mbr = read_exact_at(handle, 0, layout.raw_layout.mbr_sector);
+    if (!mbr) {
+        layout.raw_layout = {};
+        return base::Result<void>::success();
+    }
+    if (layout.partition_style != "GPT") {
+        return base::Result<void>::success();
+    }
+    layout.raw_layout.gpt_primary_header.assign(sector, std::byte{0});
+    auto primary = read_exact_at(handle, sector, layout.raw_layout.gpt_primary_header);
+    if (!primary) {
+        layout.raw_layout.gpt_primary_header.clear();
+        return base::Result<void>::success();
+    }
+    // Standard GPT: 128 entries * 128 bytes starting at LBA 2.
+    constexpr std::size_t kGptEntryBytes = 128U * 128U;
+    layout.raw_layout.gpt_partition_entries.assign(kGptEntryBytes, std::byte{0});
+    auto entries = read_exact_at(handle, static_cast<std::uint64_t>(sector) * 2U,
+                                 layout.raw_layout.gpt_partition_entries);
+    if (!entries) {
+        layout.raw_layout.gpt_partition_entries.clear();
+        return base::Result<void>::success();
+    }
+    if (layout.disk_size_bytes < sector) {
+        return base::Result<void>::success();
+    }
+    const auto backup_header_offset = layout.disk_size_bytes - sector;
+    layout.raw_layout.gpt_backup_header.assign(sector, std::byte{0});
+    auto backup_header =
+        read_exact_at(handle, backup_header_offset, layout.raw_layout.gpt_backup_header);
+    if (!backup_header) {
+        layout.raw_layout.gpt_backup_header.clear();
+        return base::Result<void>::success();
+    }
+    if (backup_header_offset < kGptEntryBytes) {
+        return base::Result<void>::success();
+    }
+    auto backup_entries_offset = backup_header_offset - kGptEntryBytes;
+    backup_entries_offset = (backup_entries_offset / sector) * sector;
+    layout.raw_layout.gpt_backup_entries.assign(kGptEntryBytes, std::byte{0});
+    auto backup_entries =
+        read_exact_at(handle, backup_entries_offset, layout.raw_layout.gpt_backup_entries);
+    if (!backup_entries) {
+        layout.raw_layout.gpt_backup_entries.clear();
+    }
+    return base::Result<void>::success();
+}
+
 [[nodiscard]] base::Result<void> fill_partitions(const HANDLE handle,
                                                  WindowsPhysicalDiskLayout& layout) {
     // DRIVE_LAYOUT_INFORMATION_EX embeds PartitionEntry[1]; sizeof includes one entry.
@@ -252,6 +337,10 @@ inspect_physical_disk_layout(const std::uint32_t disk_number) {
     auto partitions = fill_partitions(handle.get(), layout);
     if (!partitions) {
         return base::Result<WindowsPhysicalDiskLayout>::failure(partitions.error());
+    }
+    auto raw = capture_raw_layout(handle.get(), layout);
+    if (!raw) {
+        return base::Result<WindowsPhysicalDiskLayout>::failure(raw.error());
     }
     return base::Result<WindowsPhysicalDiskLayout>::success(std::move(layout));
 }

@@ -64,6 +64,8 @@ class ServiceClient final : public QObject {
     Q_PROPERTY(QString repositoryCommandErrorText READ repositoryCommandErrorText NOTIFY
                    repositoryCommandChanged)
     Q_PROPERTY(bool backupStartAvailable READ backupStartAvailable NOTIFY stateChanged)
+    Q_PROPERTY(bool restoreStartAvailable READ restoreStartAvailable NOTIFY stateChanged)
+    Q_PROPERTY(bool restoreCommandBusy READ restoreCommandBusy NOTIFY restoreCommandChanged)
     Q_PROPERTY(bool jobCancelAvailable READ jobCancelAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool backupCommandBusy READ backupCommandBusy NOTIFY backupCommandChanged)
     Q_PROPERTY(bool cancelCommandBusy READ cancelCommandBusy NOTIFY backupCommandChanged)
@@ -138,6 +140,8 @@ class ServiceClient final : public QObject {
     [[nodiscard]] QString activeBackupMessageText() const;
     [[nodiscard]] bool activeBackupTerminal() const noexcept;
     [[nodiscard]] bool activeBackupCancellable() const noexcept;
+    [[nodiscard]] bool restoreStartAvailable() const noexcept;
+    [[nodiscard]] bool restoreCommandBusy() const noexcept;
     [[nodiscard]] bool splashVisible() const noexcept;
     [[nodiscard]] bool splashBusy() const noexcept;
     [[nodiscard]] QString splashStatusText() const;
@@ -193,6 +197,13 @@ class ServiceClient final : public QObject {
     /// Starts a backup for an existing schedule. Wire payload is only schedule_id + backup_type;
     /// Service loads sources/repo/options/password from the schedule. backup_type: 1 full, 2 inc.
     Q_INVOKABLE bool startBackup(const QString& schedule_id, int backup_type = 1);
+    /// Disk→disk restore: source Manifest disk_number → local inventory disk.N target.
+    /// Tip recovery point may be Full or Incremental (Service resolves base-first chain).
+    Q_INVOKABLE bool startDiskRestore(int source_disk_number, int target_disk_number,
+                                      const QString& recovery_point_id,
+                                      const QString& archive_password = {},
+                                      bool preserve_disk_signature = true,
+                                      bool auto_expand_last_partition = true);
     Q_INVOKABLE void cancelActiveBackup();
     Q_INVOKABLE void dismissToast();
     /// Show a top toast (success/info). Safe for QML schedule Run feedback.
@@ -220,6 +231,9 @@ class ServiceClient final : public QObject {
     void backupStartSucceeded(const QString& jobId);
     /// backup.start rejected or failed (localized message for toast).
     void backupStartFailed(const QString& message);
+    void restoreCommandChanged();
+    void restoreStartSucceeded();
+    void restoreStartFailed(const QString& message);
 
   private:
     enum class State : std::uint8_t {
@@ -250,6 +264,8 @@ class ServiceClient final : public QObject {
     [[nodiscard]] RequestDisposition handle_repository_command_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_schedule_command_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_start_backup_frame(const QByteArray& body);
+    [[nodiscard]] RequestDisposition handle_prepare_restore_frame(const QByteArray& body);
+    [[nodiscard]] RequestDisposition handle_start_restore_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_cancel_job_frame(const QByteArray& body);
     void finish_repository_failure(const QString& message_code);
     void finish_recovery_point_layout_failure(const QString& message_code);
@@ -262,6 +278,7 @@ class ServiceClient final : public QObject {
     void enrich_job_row(JobRow& row) const;
     void finish_repository_command_failure(const QString& message_code);
     void finish_backup_command_failure(const QString& message_code);
+    void finish_restore_command_failure(const QString& message_code);
     void finish_cancel_command_failure(const QString& message_code);
     void reset_repository();
     void reset_recovery_point_layout();
@@ -363,9 +380,22 @@ class ServiceClient final : public QObject {
     bool repository_command_busy_{false};
     int repository_command_kind_{0};
     bool backup_start_available_{false};
+    bool restore_preflight_available_{false};
+    bool restore_start_available_{false};
+    bool restore_command_busy_{false};
     bool job_cancel_available_{false};
     bool backup_command_busy_{false};
     bool cancel_command_busy_{false};
+    int restore_source_disk_number_{-1};
+    int restore_target_disk_number_{-1};
+    bool restore_preserve_disk_signature_{true};
+    bool restore_auto_expand_last_partition_{true};
+    QString restore_recovery_point_id_;
+    QString restore_archive_password_;
+    QString restore_preflight_token_;
+    QString restore_prepare_request_id_;
+    QString restore_start_request_id_;
+    QString restore_start_idempotency_key_;
     bool active_backup_progress_visible_{false};
     bool active_backup_terminal_{false};
     bool active_backup_cancellable_{false};

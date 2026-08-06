@@ -528,12 +528,14 @@ base::Result<void> validate_command_record(const ports::CommandRecord& record) {
 }
 
 base::Result<void> validate_restore_preflight_record(const ports::RestorePreflightRecord& record) {
+    // chain_fingerprint is an opaque binding string (disk restore uses '|' + archive key paths
+    // like archives/yyyy/mm/uuid.bkf). Validate as printable text, not a stable identifier.
     if (!valid_text(record.preflight_token, kMaximumTokenBytes) ||
         !valid_stable_value(record.repository_connection_id, kMaximumIdentifierBytes) ||
         !valid_stable_value(record.repository_uuid, kMaximumIdentifierBytes) ||
         !valid_stable_value(record.recovery_point_id, kMaximumIdentifierBytes) ||
         !valid_stable_value(record.target_source_id, kMaximumIdentifierBytes) ||
-        !valid_stable_value(record.chain_fingerprint, kMaximumIdentifierBytes) ||
+        !valid_text(record.chain_fingerprint, kMaximumCommandFingerprintBytes) ||
         record.logical_size_bytes == 0 || !valid_wire_integer(record.logical_size_bytes) ||
         record.target_capacity_bytes < record.logical_size_bytes ||
         !valid_wire_integer(record.target_capacity_bytes) || record.chain_depth == 0 ||

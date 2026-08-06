@@ -23,11 +23,13 @@ constexpr qsizetype kMaximumRecoveryPoints = 10'000;
     return QStringLiteral("desktop-") + new_request_id();
 }
 
-/// Old RestoreBackend::isReservedPartitionJson — hide MSR/EFI/Recovery from data bars.
+/// Hide MSR/EFI/Recovery and other non-data partitions from Restore Source bars.
+/// GPT partitions leave mbr_type at 0 (unset); MBR-type reserved codes must not run on them.
 [[nodiscard]] bool is_reserved_partition(const QVariantMap& partition) {
     auto gpt = partition.value(QStringLiteral("gptTypeGuid")).toString().trimmed().toLower();
     gpt.remove(QLatin1Char('{'));
     gpt.remove(QLatin1Char('}'));
+    const bool has_gpt_type = !gpt.isEmpty();
     static const char* k_reserved_gpt[] = {
         "c12a7328-f81f-11d2-ba4b-00a0c93ec93b", // EFI
         "e3c9e316-0b5c-4db8-817d-f92df00215ae", // MSR
@@ -42,18 +44,21 @@ constexpr qsizetype kMaximumRecoveryPoints = 10'000;
             return true;
         }
     }
-    switch (partition.value(QStringLiteral("mbrType")).toInt()) {
-    case 0x00:
-    case 0x05:
-    case 0x0F:
-    case 0x12:
-    case 0x27:
-    case 0xEE:
-    case 0xEF:
-    case 0xDE:
-        return true;
-    default:
-        break;
+    // MBR type 0x00 means unused; on GPT the field is never populated and stays 0.
+    if (!has_gpt_type) {
+        switch (partition.value(QStringLiteral("mbrType")).toInt()) {
+        case 0x00:
+        case 0x05:
+        case 0x0F:
+        case 0x12:
+        case 0x27:
+        case 0xEE:
+        case 0xEF:
+        case 0xDE:
+            return true;
+        default:
+            break;
+        }
     }
     const auto name = (partition.value(QStringLiteral("volumeLabel")).toString() + QLatin1Char(' ') +
                        partition.value(QStringLiteral("gptName")).toString())

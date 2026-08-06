@@ -103,14 +103,8 @@ encode_schedule_list_request(const QString& request_id,
                              const std::optional<QString>& continuation_token);
 [[nodiscard]] QByteArray encode_start_backup_request(const QString& request_id,
                                                      const QString& idempotency_key,
-                                                     const QVariantList& source_ids,
-                                                     const QString& repository_connection_id,
-                                                     int backup_type = kBackupTypeFull,
-                                                     const QString& parent_recovery_point_id = {},
-                                                     bool exclude_page_and_hibernation_files = true,
-                                                     bool encryption_enabled = false,
-                                                     const QString& archive_password = {},
-                                                     const QString& schedule_id = {});
+                                                     const QString& schedule_id,
+                                                     int backup_type = kBackupTypeFull);
 [[nodiscard]] QByteArray encode_cancel_job_request(const QString& request_id,
                                                    const QString& idempotency_key,
                                                    const QString& job_id);

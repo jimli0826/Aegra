@@ -47,6 +47,8 @@ src/apps/service/
 ## 生命周期
 
 Service 默认监听逻辑名称 `control`，实际 Pipe 名称见 [ADR-0011](../adr/0011-local-service-desktop-ipc.md)。
+协议决策见 [ADR-0013](../adr/0013-service-control-protocol-v3.md)；**每一条 request/response/event 的字段与示例**
+见 [SERVICE_CONTROL_PROTOCOL_V3](../protocol/SERVICE_CONTROL_PROTOCOL_V3.md)。
 `--once` 只接受一个连接并处理一个请求，用于受控诊断；默认模式在会话断开后继续接受连接。
 
 每个 session 顺序执行：
@@ -136,5 +138,7 @@ per-file Archive Credential 映射与 Local Storage 故障恢复验证仍待补�
 `GetRecoveryPointLayout` 已实现：Catalog 定位 Archive → `PersonalArchiveReader` 读取 Manifest →
 返回 hierarchical `disks[]`（分区表）+ `volumes[]`（letter/label/fs/size + extents）。无 `disks[]`
 的 Archive（布局写入前产生）返回 `recovery_point.layout_failed`。个人备份加密：`encryption_enabled=false`
-  时写入无加密 Archive；为 true 时要求 `archive_password`，Service 写入 `wincred://aegra/job/<id>` 供
-  Worker 解析。Layout 当前优先打开无加密 Archive（空密码）。
+  时写入无加密 Archive；为 true 时创建 Schedule 要求 `archive_password`，Service 用 DPAPI
+  `CRYPTPROTECT_LOCAL_MACHINE`（`pOptionalEntropy` = `schedule_id`）写入 SQLite
+  `archive_password_protected`。`StartBackup` 仅接收 `schedule_id` + `backup_type`，从 Schedule
+  展开其余参数与密文交给 Worker。Layout 当前优先打开无加密 Archive（空密码）。

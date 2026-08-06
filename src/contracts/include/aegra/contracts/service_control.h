@@ -243,22 +243,11 @@ struct RecoveryPointRef final {
 };
 
 struct StartBackupCommand final {
-    std::vector<std::string> source_ids;
-    std::string repository_connection_id;
+    /// Required. Sources, repository, exclude options, encryption and password ciphertext
+    /// are loaded from the durable schedule record (not accepted on the wire).
+    std::string schedule_id;
+    /// Per-run type: Full or Incremental. Incremental parent is selected by Service.
     BackupType backup_type{BackupType::kFull};
-    std::optional<std::string> parent_recovery_point_id;
-    /// Desktop Options: exclude pagefile / hiberfil / swapfile (default true).
-    bool exclude_page_and_hibernation_files{true};
-    /// When true, archive is encrypted; archive_password must be non-empty (1–32 chars)
-    /// unless schedule_id is set (password loaded from wincred for that schedule).
-    /// When false, archive is stored without encryption and archive_password must be empty.
-    bool encryption_enabled{false};
-    /// One-shot password material for this command only. Never logged; never stored in SQLite.
-    /// Service immediately places it into a wincred SecretRef for the Worker.
-    std::string archive_password;
-    /// When set with encryption_enabled and empty archive_password, Service loads
-    /// wincred://aegra/schedule/<schedule_id>.
-    std::optional<std::string> schedule_id;
 };
 
 struct StartVerifyCommand final {
@@ -405,6 +394,12 @@ struct MountRecoveryPointCommand final {
 };
 
 struct UpsertScheduleCommand final {
+    /// Absent = create; present = update an existing schedule.
+    /// Update mutability (Service enforces against the durable record):
+    /// - Immutable after create: source_ids, backup_type, exclude_page_and_hibernation_files,
+    ///   encryption_enabled, archive password (DPAPI ciphertext in SQLite).
+    /// - Mutable: display_name, enabled, repository_connection_id, trigger (schedule settings).
+    /// - Backup options other than future shutdown-on-complete stay create-time only.
     std::optional<std::string> schedule_id;
     std::string display_name;
     bool enabled{false};
@@ -414,7 +409,10 @@ struct UpsertScheduleCommand final {
     ScheduleTrigger trigger;
     bool exclude_page_and_hibernation_files{true};
     bool encryption_enabled{false};
-    /// One-shot on create/update when encryption_enabled; stored as wincred, not SQLite.
+    /// Create-only when encryption_enabled: DPAPI-protected (LOCAL_MACHINE,
+    /// pOptionalEntropy = schedule_id) then base64; stored as
+    /// schedules.archive_password_protected = dpapi-lm:<schedule_id>:<base64>.
+    /// Must be empty on update (password cannot be set, cleared, or rotated after create).
     std::string archive_password;
 };
 

@@ -252,41 +252,19 @@ parse_recovery_point_request(const Json& payload) {
 }
 
 [[nodiscard]] Json encode_start_backup(const contracts::StartBackupCommand& command) {
-    return Json{
-        {"source_ids", command.source_ids},
-        {"repository_connection_id", command.repository_connection_id},
-        {"backup_type", static_cast<std::uint8_t>(command.backup_type)},
-        {"parent_recovery_point_id", optional_string_json(command.parent_recovery_point_id)},
-        {"exclude_page_and_hibernation_files", command.exclude_page_and_hibernation_files},
-        {"encryption_enabled", command.encryption_enabled},
-        {"archive_password", command.archive_password},
-        {"schedule_id", optional_string_json(command.schedule_id)}};
+    return Json{{"schedule_id", command.schedule_id},
+                {"backup_type", static_cast<std::uint8_t>(command.backup_type)}};
 }
 
 [[nodiscard]] contracts::StartBackupCommand parse_start_backup(const Json& payload) {
-    constexpr std::array<std::string_view, 8> keys{
-        "source_ids",
-        "repository_connection_id",
-        "backup_type",
-        "parent_recovery_point_id",
-        "exclude_page_and_hibernation_files",
-        "encryption_enabled",
-        "archive_password",
-        "schedule_id"};
+    constexpr std::array<std::string_view, 2> keys{"schedule_id", "backup_type"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("start backup fields are invalid");
     }
     contracts::StartBackupCommand command;
-    command.source_ids = payload.at("source_ids").get<std::vector<std::string>>();
-    command.repository_connection_id = payload.at("repository_connection_id").get<std::string>();
+    command.schedule_id = payload.at("schedule_id").get<std::string>();
     command.backup_type =
         static_cast<contracts::BackupType>(unsigned_value<std::uint8_t>(payload, "backup_type"));
-    command.parent_recovery_point_id = optional_string(payload.at("parent_recovery_point_id"));
-    command.exclude_page_and_hibernation_files =
-        payload.at("exclude_page_and_hibernation_files").get<bool>();
-    command.encryption_enabled = payload.at("encryption_enabled").get<bool>();
-    command.archive_password = payload.at("archive_password").get<std::string>();
-    command.schedule_id = optional_string(payload.at("schedule_id"));
     return command;
 }
 

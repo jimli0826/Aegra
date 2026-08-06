@@ -1,8 +1,9 @@
 #include "aegra/adapters/windows_system/windows_system.h"
 
 #include <Windows.h>
-#include <wincred.h>
+#include <wincrypt.h>
 
+#include <array>
 #include <cstddef>
 #include <cstring>
 #include <memory>
@@ -10,11 +11,61 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace aegra::adapters::windows_system {
 namespace {
 
-constexpr std::string_view kCredentialPrefix = "wincred://";
+constexpr std::string_view kDpapiLocalMachinePrefix = "dpapi-lm:";
+constexpr std::size_t kMaximumSecretBytes = 32;
+constexpr std::size_t kMaximumEntropyIdBytes = 128;
+// DPAPI envelope + base64 expansion for at most 32 password bytes stays well under this.
+constexpr std::size_t kMaximumProtectedBase64Bytes = 4'096;
+constexpr DWORD kDpapiFlags = CRYPTPROTECT_LOCAL_MACHINE | CRYPTPROTECT_UI_FORBIDDEN;
+
+struct ParsedDpapiSecretRef final {
+    std::string_view entropy_id;
+    std::string_view encoded_ciphertext;
+};
+
+[[nodiscard]] bool valid_entropy_id(const std::string_view entropy_id) noexcept {
+    if (entropy_id.empty() || entropy_id.size() > kMaximumEntropyIdBytes) {
+        return false;
+    }
+    // Must not contain ':' so SecretRef dpapi-lm:<id>:<base64> parses unambiguously.
+    for (const unsigned char character : entropy_id) {
+        const bool ok = (character >= 'a' && character <= 'z') ||
+                        (character >= '0' && character <= '9') || character == '.' ||
+                        character == '_' || character == '-';
+        if (!ok) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] base::Result<ParsedDpapiSecretRef>
+parse_dpapi_secret_ref(const std::string_view value) {
+    if (!value.starts_with(kDpapiLocalMachinePrefix)) {
+        return base::Result<ParsedDpapiSecretRef>::failure(
+            base::Error{base::ErrorCode::kInvalidArgument, "credential reference is unsupported"});
+    }
+    const auto rest = value.substr(kDpapiLocalMachinePrefix.size());
+    const auto separator = rest.find(':');
+    if (separator == std::string_view::npos || separator == 0 ||
+        separator + 1U >= rest.size()) {
+        return base::Result<ParsedDpapiSecretRef>::failure(
+            base::Error{base::ErrorCode::kInvalidArgument, "credential reference is unsupported"});
+    }
+    ParsedDpapiSecretRef parsed;
+    parsed.entropy_id = rest.substr(0, separator);
+    parsed.encoded_ciphertext = rest.substr(separator + 1U);
+    if (!valid_entropy_id(parsed.entropy_id)) {
+        return base::Result<ParsedDpapiSecretRef>::failure(
+            base::Error{base::ErrorCode::kInvalidArgument, "credential reference is unsupported"});
+    }
+    return base::Result<ParsedDpapiSecretRef>::success(parsed);
+}
 
 class LockedAllocation final {
   public:
@@ -48,24 +99,6 @@ class LockedAllocation final {
     void* data_{nullptr};
     std::size_t size_{0};
     bool locked_{false};
-};
-
-class UniqueCredential final {
-  public:
-    explicit UniqueCredential(PCREDENTIALW credential) noexcept : credential_(credential) {}
-    ~UniqueCredential() {
-        if (credential_ != nullptr) {
-            CredFree(credential_);
-        }
-    }
-
-    UniqueCredential(const UniqueCredential&) = delete;
-    UniqueCredential& operator=(const UniqueCredential&) = delete;
-    UniqueCredential(UniqueCredential&&) = delete;
-    UniqueCredential& operator=(UniqueCredential&&) = delete;
-
-  private:
-    PCREDENTIALW credential_{nullptr};
 };
 
 class LockedSecret final : public ports::IResolvedSecret {
@@ -112,31 +145,183 @@ class LockedSecret final : public ports::IResolvedSecret {
     std::size_t size_{0};
 };
 
-base::Result<std::wstring> to_wide(const std::string& value) {
-    if (value.empty() || value.size() > CRED_MAX_GENERIC_TARGET_NAME_LENGTH) {
-        return base::Result<std::wstring>::failure(
-            base::Error{base::ErrorCode::kInvalidArgument, "credential target is invalid"});
+class UniqueDataBlob final {
+  public:
+    UniqueDataBlob() = default;
+    ~UniqueDataBlob() { reset(); }
+
+    UniqueDataBlob(const UniqueDataBlob&) = delete;
+    UniqueDataBlob& operator=(const UniqueDataBlob&) = delete;
+    UniqueDataBlob(UniqueDataBlob&&) = delete;
+    UniqueDataBlob& operator=(UniqueDataBlob&&) = delete;
+
+    [[nodiscard]] DATA_BLOB* get() noexcept { return &blob_; }
+    [[nodiscard]] std::span<const std::byte> bytes() const noexcept {
+        if (blob_.pbData == nullptr || blob_.cbData == 0) {
+            return {};
+        }
+        return {reinterpret_cast<const std::byte*>(blob_.pbData), blob_.cbData};
     }
-    const auto input_size = static_cast<int>(value.size());
-    const auto required =
-        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), input_size, nullptr, 0);
-    if (required == 0) {
-        return base::Result<std::wstring>::failure(
-            base::Error{base::ErrorCode::kInvalidArgument, "credential target is not UTF-8"});
+
+    void reset() noexcept {
+        if (blob_.pbData != nullptr) {
+            SecureZeroMemory(blob_.pbData, blob_.cbData);
+            LocalFree(blob_.pbData);
+            blob_.pbData = nullptr;
+            blob_.cbData = 0;
+        }
     }
-    std::wstring result(static_cast<std::size_t>(required), L'\0');
-    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), input_size, result.data(),
-                            required) == 0) {
-        return base::Result<std::wstring>::failure(
-            base::Error{base::ErrorCode::kInvalidArgument, "credential target is not UTF-8"});
-    }
-    return base::Result<std::wstring>::success(std::move(result));
+
+  private:
+    DATA_BLOB blob_{};
+};
+
+[[nodiscard]] char base64_encode_digit(const unsigned value) noexcept {
+    static constexpr char kTable[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    return kTable[value & 63U];
 }
 
-base::Error credential_error(const DWORD error) {
-    const auto code =
-        error == ERROR_NOT_FOUND ? base::ErrorCode::kNotFound : base::ErrorCode::kUnauthorized;
-    return base::Error{code, "Windows credential lookup failed"};
+[[nodiscard]] int base64_decode_digit(const char value) noexcept {
+    if (value >= 'A' && value <= 'Z') {
+        return value - 'A';
+    }
+    if (value >= 'a' && value <= 'z') {
+        return value - 'a' + 26;
+    }
+    if (value >= '0' && value <= '9') {
+        return value - '0' + 52;
+    }
+    if (value == '+') {
+        return 62;
+    }
+    if (value == '/') {
+        return 63;
+    }
+    return -1;
+}
+
+[[nodiscard]] base::Result<std::string> base64_encode(const std::span<const std::byte> input) {
+    if (input.empty()) {
+        return base::Result<std::string>::failure(
+            base::Error{base::ErrorCode::kInvalidArgument, "protected secret is empty"});
+    }
+    std::string output;
+    output.reserve(((input.size() + 2U) / 3U) * 4U);
+    std::size_t index = 0;
+    while (index + 2U < input.size()) {
+        const auto b0 = static_cast<unsigned>(input[index]);
+        const auto b1 = static_cast<unsigned>(input[index + 1U]);
+        const auto b2 = static_cast<unsigned>(input[index + 2U]);
+        output.push_back(base64_encode_digit(b0 >> 2U));
+        output.push_back(base64_encode_digit(((b0 & 3U) << 4U) | (b1 >> 4U)));
+        output.push_back(base64_encode_digit(((b1 & 15U) << 2U) | (b2 >> 6U)));
+        output.push_back(base64_encode_digit(b2 & 63U));
+        index += 3U;
+    }
+    const auto remaining = input.size() - index;
+    if (remaining == 1U) {
+        const auto b0 = static_cast<unsigned>(input[index]);
+        output.push_back(base64_encode_digit(b0 >> 2U));
+        output.push_back(base64_encode_digit((b0 & 3U) << 4U));
+        output.push_back('=');
+        output.push_back('=');
+    } else if (remaining == 2U) {
+        const auto b0 = static_cast<unsigned>(input[index]);
+        const auto b1 = static_cast<unsigned>(input[index + 1U]);
+        output.push_back(base64_encode_digit(b0 >> 2U));
+        output.push_back(base64_encode_digit(((b0 & 3U) << 4U) | (b1 >> 4U)));
+        output.push_back(base64_encode_digit((b1 & 15U) << 2U));
+        output.push_back('=');
+    }
+    return base::Result<std::string>::success(std::move(output));
+}
+
+[[nodiscard]] base::Result<std::vector<std::byte>> base64_decode(const std::string_view input) {
+    if (input.empty() || (input.size() % 4U) != 0U || input.size() > kMaximumProtectedBase64Bytes) {
+        return base::Result<std::vector<std::byte>>::failure(
+            base::Error{base::ErrorCode::kInvalidArgument, "protected secret encoding is invalid"});
+    }
+    std::size_t padding = 0;
+    if (input.back() == '=') {
+        padding = 1;
+        if (input.size() >= 2U && input[input.size() - 2U] == '=') {
+            padding = 2;
+        }
+    }
+    std::vector<std::byte> output;
+    output.reserve((input.size() / 4U) * 3U - padding);
+    for (std::size_t index = 0; index < input.size(); index += 4U) {
+        const auto c0 = base64_decode_digit(input[index]);
+        const auto c1 = base64_decode_digit(input[index + 1U]);
+        const auto c2 = input[index + 2U] == '=' ? 0 : base64_decode_digit(input[index + 2U]);
+        const auto c3 = input[index + 3U] == '=' ? 0 : base64_decode_digit(input[index + 3U]);
+        if (c0 < 0 || c1 < 0 || (input[index + 2U] != '=' && c2 < 0) ||
+            (input[index + 3U] != '=' && c3 < 0)) {
+            return base::Result<std::vector<std::byte>>::failure(base::Error{
+                base::ErrorCode::kInvalidArgument, "protected secret encoding is invalid"});
+        }
+        output.push_back(static_cast<std::byte>((c0 << 2) | (c1 >> 4)));
+        if (input[index + 2U] != '=') {
+            output.push_back(static_cast<std::byte>(((c1 & 15) << 4) | (c2 >> 2)));
+        }
+        if (input[index + 3U] != '=') {
+            output.push_back(static_cast<std::byte>(((c2 & 3) << 6) | c3));
+        }
+    }
+    if (output.empty()) {
+        return base::Result<std::vector<std::byte>>::failure(
+            base::Error{base::ErrorCode::kInvalidArgument, "protected secret is empty"});
+    }
+    return base::Result<std::vector<std::byte>>::success(std::move(output));
+}
+
+[[nodiscard]] DATA_BLOB make_entropy_blob(const std::string_view entropy_id) noexcept {
+    DATA_BLOB entropy{};
+    // CryptProtectData requires non-const pbData; entropy bytes are not modified.
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+    entropy.pbData = reinterpret_cast<BYTE*>(const_cast<char*>(entropy_id.data()));
+    entropy.cbData = static_cast<DWORD>(entropy_id.size());
+    return entropy;
+}
+
+[[nodiscard]] base::Result<std::string>
+protect_bytes(const std::span<const std::byte> plaintext, const std::string_view entropy_id) {
+    DATA_BLOB input{};
+    // CryptProtectData requires non-const pbData; input is not modified.
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+    input.pbData = reinterpret_cast<BYTE*>(const_cast<std::byte*>(plaintext.data()));
+    input.cbData = static_cast<DWORD>(plaintext.size());
+    auto entropy = make_entropy_blob(entropy_id);
+    UniqueDataBlob output;
+    if (CryptProtectData(&input, L"aegra-archive", &entropy, nullptr, nullptr, kDpapiFlags,
+                         output.get()) == FALSE) {
+        return base::Result<std::string>::failure(
+            base::Error{base::ErrorCode::kIoFailure, "DPAPI protect failed"});
+    }
+    return base64_encode(output.bytes());
+}
+
+[[nodiscard]] base::Result<std::vector<std::byte>>
+unprotect_bytes(const std::span<const std::byte> ciphertext, const std::string_view entropy_id) {
+    DATA_BLOB input{};
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+    input.pbData = reinterpret_cast<BYTE*>(const_cast<std::byte*>(ciphertext.data()));
+    input.cbData = static_cast<DWORD>(ciphertext.size());
+    auto entropy = make_entropy_blob(entropy_id);
+    UniqueDataBlob output;
+    if (CryptUnprotectData(&input, nullptr, &entropy, nullptr, nullptr, kDpapiFlags,
+                           output.get()) == FALSE) {
+        return base::Result<std::vector<std::byte>>::failure(
+            base::Error{base::ErrorCode::kUnauthorized, "DPAPI unprotect failed"});
+    }
+    const auto plain = output.bytes();
+    if (plain.empty()) {
+        return base::Result<std::vector<std::byte>>::failure(
+            base::Error{base::ErrorCode::kUnauthorized, "DPAPI secret is empty"});
+    }
+    return base::Result<std::vector<std::byte>>::success(
+        std::vector<std::byte>(plain.begin(), plain.end()));
 }
 
 } // namespace
@@ -148,61 +333,53 @@ WindowsCredentialResolver::resolve(const contracts::SecretRef& secret_ref,
         return base::Result<std::unique_ptr<ports::IResolvedSecret>>::failure(
             base::Error{base::ErrorCode::kCancelled, "credential resolution cancelled"});
     }
-    if (!secret_ref.value.starts_with(kCredentialPrefix)) {
-        return base::Result<std::unique_ptr<ports::IResolvedSecret>>::failure(
-            base::Error{base::ErrorCode::kInvalidArgument, "credential reference is unsupported"});
+    auto parsed = parse_dpapi_secret_ref(secret_ref.value);
+    if (!parsed) {
+        return base::Result<std::unique_ptr<ports::IResolvedSecret>>::failure(parsed.error());
     }
-    auto target = to_wide(secret_ref.value.substr(kCredentialPrefix.size()));
-    if (!target) {
-        return base::Result<std::unique_ptr<ports::IResolvedSecret>>::failure(target.error());
+    auto ciphertext = base64_decode(parsed.value().encoded_ciphertext);
+    if (!ciphertext) {
+        return base::Result<std::unique_ptr<ports::IResolvedSecret>>::failure(ciphertext.error());
     }
-    PCREDENTIALW credential = nullptr;
-    if (!CredReadW(target.value().c_str(), CRED_TYPE_GENERIC, 0, &credential)) {
-        return base::Result<std::unique_ptr<ports::IResolvedSecret>>::failure(
-            credential_error(GetLastError()));
-    }
-    const UniqueCredential credential_guard(credential);
     if (cancellation.stop_requested()) {
         return base::Result<std::unique_ptr<ports::IResolvedSecret>>::failure(
             base::Error{base::ErrorCode::kCancelled, "credential resolution cancelled"});
     }
-    if (credential->CredentialBlobSize == 0 || credential->CredentialBlob == nullptr) {
-        return base::Result<std::unique_ptr<ports::IResolvedSecret>>::failure(
-            base::Error{base::ErrorCode::kUnauthorized, "Windows credential is empty"});
+    // Same UTF-8 entropy_id used at protect time (schedule_id for schedule passwords).
+    auto plaintext = unprotect_bytes(ciphertext.value(), parsed.value().entropy_id);
+    SecureZeroMemory(ciphertext.value().data(), ciphertext.value().size());
+    if (!plaintext) {
+        return base::Result<std::unique_ptr<ports::IResolvedSecret>>::failure(plaintext.error());
     }
-    const auto blob =
-        std::span<const BYTE>(credential->CredentialBlob, credential->CredentialBlobSize);
-    const auto bytes = std::as_bytes(blob);
-    return LockedSecret::create(bytes);
+    auto locked = LockedSecret::create(plaintext.value());
+    SecureZeroMemory(plaintext.value().data(), plaintext.value().size());
+    return locked;
 }
 
 base::Result<contracts::SecretRef>
-store_generic_windows_credential(const std::string_view target_name,
-                                 const std::string_view secret_material) {
-    if (target_name.empty() || target_name.size() > CRED_MAX_GENERIC_TARGET_NAME_LENGTH ||
-        secret_material.empty() || secret_material.size() > CRED_MAX_CREDENTIAL_BLOB_SIZE) {
+protect_local_machine_secret(const std::string_view secret_material,
+                             const std::string_view entropy_id) {
+    if (secret_material.empty() || secret_material.size() > kMaximumSecretBytes ||
+        !valid_entropy_id(entropy_id)) {
         return base::Result<contracts::SecretRef>::failure(
-            base::Error{base::ErrorCode::kInvalidArgument, "credential material is invalid"});
+            base::Error{base::ErrorCode::kInvalidArgument, "secret material is invalid"});
     }
-    auto target = to_wide(std::string(target_name));
-    if (!target) {
-        return base::Result<contracts::SecretRef>::failure(target.error());
+    const auto bytes = std::as_bytes(std::span(secret_material.data(), secret_material.size()));
+    auto encoded = protect_bytes(bytes, entropy_id);
+    if (!encoded) {
+        return base::Result<contracts::SecretRef>::failure(encoded.error());
     }
-    CREDENTIALW credential{};
-    credential.Type = CRED_TYPE_GENERIC;
-    credential.TargetName = target.value().data();
-    credential.CredentialBlobSize = static_cast<DWORD>(secret_material.size());
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast) CredWriteW requires LPBYTE.
-    credential.CredentialBlob =
-        reinterpret_cast<LPBYTE>(const_cast<char*>(secret_material.data()));
-    credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
-    credential.UserName = nullptr;
-    if (!CredWriteW(&credential, 0)) {
+    if (encoded.value().size() > kMaximumProtectedBase64Bytes) {
         return base::Result<contracts::SecretRef>::failure(
-            base::Error{base::ErrorCode::kIoFailure, "Windows credential store failed"});
+            base::Error{base::ErrorCode::kInternal, "protected secret is too large"});
     }
     contracts::SecretRef reference;
-    reference.value = std::string(kCredentialPrefix) + std::string(target_name);
+    reference.value.reserve(kDpapiLocalMachinePrefix.size() + entropy_id.size() + 1U +
+                            encoded.value().size());
+    reference.value.append(kDpapiLocalMachinePrefix);
+    reference.value.append(entropy_id);
+    reference.value.push_back(':');
+    reference.value.append(encoded.value());
     return base::Result<contracts::SecretRef>::success(std::move(reference));
 }
 

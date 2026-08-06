@@ -28,7 +28,7 @@ staging key。发布支持 create-only rename 与 generation 条件替换，删�
 
 个人版 Archive Adapter 组合 `format`、`IBackupSession`、`IRecoveryPointReader`、libsodium 和 Zstandard。当前全量数据面支持一个 Archive 包含多个 volume，并可在完整 chunk 边界透明分卷；每个 chunk 通过 `source_index` 归属一个 Manifest Volume，Sidecar 为每个 Volume 保存独立块表。写入期间所有分卷与 Sidecar 使用 partial 路径，全部 Volume 完整写入且 Footer 和加密 Sidecar 均写完后，先发布 Sidecar/续卷，最后发布首卷；任一 Volume 失败时 Abort 和析构清理本次创建的 partial 文件。Reader 在解析 CBOR 前必须完成 Header/Envelope 范围校验和 AEAD 认证，随后发现并验证连续分卷和每个 Volume 的完整覆盖。普通恢复不依赖 `.bhx`；增量比较通过显式 API 加载并认证 Sidecar。
 
-增量 Session 当前只接受单 Volume：创建时验证显式父 Archive 及父 Sidecar，继承备份集 UUID，并把输入完整源转换为连续变化区间组成的稀疏层；新 Sidecar 仍保存完整状态。`PersonalArchiveReader` 可以 inspect 单个稀疏层，`PersonalArchiveChainReader` 接受显式 base-first 层列表并验证链关系，对通用 Restore Pipeline 提供连续覆盖视图。多 Volume Restore 在建立明确目标映射前由 Restore Pipeline 在写入前拒绝。链恢复不读取 Sidecar；链发现和逐层凭据选择属于 Application，不由 Adapter 扫描目录猜测。
+增量 Session 接受一或多个 Volume：创建时验证显式父 Archive 及父 Sidecar，要求父层与本次 Manifest 的有序 `volume_index` / `volume_id` / `total_size` 及 Sidecar 每卷块记录数一致，继承备份集 UUID，并把各 Volume 的完整源转换为连续变化区间组成的稀疏层；新 Sidecar 仍为每个 Volume 保存完整状态。`PersonalArchiveReader` 可以 inspect 稀疏层，`PersonalArchiveChainReader` 接受显式 base-first 层列表、校验多 Volume 几何与链关系，并按 `source_index` 叠层，对通用 Restore Pipeline 提供连续覆盖视图。多 Volume **同时写多个独立目标**的显式映射尚未完成：Restore Pipeline 在未提供映射时对 `source_index != 0` 的 chunk 拒绝。链恢复不读取 Sidecar；链发现和逐层凭据选择属于 Application，不由 Adapter 扫描目录猜测。
 
 SMB、S3 和 Azure Storage Adapter 还必须实现个人版 Repository 所需的细粒度对象 Port。Adapter
 负责 Repository 相对 key 到本地路径或对象 key 的安全映射，并显式报告原子 rename、条件创建和列举
@@ -52,8 +52,10 @@ Windows Disk、Volume 和 VSS 的具体边界、公开接口与验证要求见
 [Windows Adapter 开发文档](windows_adapters.md)。在线 Volume 必须先由独立 VSS Session 变成稳定
 Snapshot Device Object，Block Source 本身不创建快照。
 
-Worker 的 Windows 时钟、CNG 随机源和 Credential Manager Resolver 也由独立 Windows System Adapter
-实现；Secret 必须复制到锁页内存并在析构前清零，不允许锁页失败时降级。
+Worker 的 Windows 时钟、CNG 随机源和 DPAPI Credential Resolver 也由独立 Windows System Adapter
+实现；Secret 必须复制到锁页内存并在析构前清零，不允许锁页失败时降级。Archive 口令使用
+`dpapi-lm:<entropy_id>:<base64>`（Schedule 用 `schedule_id` 作 `pOptionalEntropy`），
+不使用 Windows Credential Manager。
 
 `Aegra::AdapterWindowsIpc` 实现本地 Worker Named Pipe Client 与 Service/Worker Named Pipe Listener。它只接受
 受限逻辑名称，使用 4 字节 little-endian 长度前缀和帧上限，支持一个 Reader/Writer 并发及

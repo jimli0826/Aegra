@@ -294,6 +294,10 @@ command_response(const contracts::ServiceRequest& request, const ServiceRuntimeI
             message_code = "backup.source_not_selectable";
         } else if (detail.find("source id not found") != std::string::npos) {
             message_code = "backup.source_not_found";
+        } else if (detail.find("no eligible parent") != std::string::npos ||
+                   detail.find("parent recovery point") != std::string::npos ||
+                   detail.find("cannot be used for incremental") != std::string::npos) {
+            message_code = "backup.parent_unavailable";
         } else if (detail.find("worker") != std::string::npos ||
                    detail.find("executable") != std::string::npos) {
             message_code = "backup.worker_unavailable";

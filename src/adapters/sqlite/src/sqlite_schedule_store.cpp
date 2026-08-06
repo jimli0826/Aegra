@@ -25,8 +25,9 @@ base::Result<void> ScheduleStore::upsert(const ports::ScheduleRecord& record,
         "INSERT INTO schedules(schedule_id, display_name, enabled, source_ids, "
         "repository_connection_id, backup_type, trigger_kind, local_minute_of_day, weekday_mask, "
         "timezone_id, next_run_utc_ms, exclude_page_and_hibernation_files, encryption_enabled, "
-        "created_utc_ms, updated_utc_ms) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+        "archive_password_protected, backup_set_uuid, last_recovery_point_id, created_utc_ms, "
+        "updated_utc_ms) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(schedule_id) DO UPDATE SET "
         "display_name=excluded.display_name, enabled=excluded.enabled, source_ids=excluded.source_ids, "
         "repository_connection_id=excluded.repository_connection_id, "
@@ -35,6 +36,9 @@ base::Result<void> ScheduleStore::upsert(const ports::ScheduleRecord& record,
         "timezone_id=excluded.timezone_id, next_run_utc_ms=excluded.next_run_utc_ms, "
         "exclude_page_and_hibernation_files=excluded.exclude_page_and_hibernation_files, "
         "encryption_enabled=excluded.encryption_enabled, "
+        "archive_password_protected=excluded.archive_password_protected, "
+        "backup_set_uuid=excluded.backup_set_uuid, "
+        "last_recovery_point_id=excluded.last_recovery_point_id, "
         "updated_utc_ms=excluded.updated_utc_ms");
     if (!statement) {
         return base::Result<void>::failure(statement.error());
@@ -80,10 +84,19 @@ base::Result<void> ScheduleStore::upsert(const ports::ScheduleRecord& record,
     if (auto bound = stmt.bind_int64(13, record.encryption_enabled ? 1 : 0); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_int64(14, static_cast<std::int64_t>(record.created_utc_ms)); !bound) {
+    if (auto bound = stmt.bind_text(14, record.archive_password_protected); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_int64(15, static_cast<std::int64_t>(record.updated_utc_ms)); !bound) {
+    if (auto bound = stmt.bind_text(15, record.backup_set_uuid); !bound) {
+        return bound;
+    }
+    if (auto bound = stmt.bind_text_nullable(16, record.last_recovery_point_id); !bound) {
+        return bound;
+    }
+    if (auto bound = stmt.bind_int64(17, static_cast<std::int64_t>(record.created_utc_ms)); !bound) {
+        return bound;
+    }
+    if (auto bound = stmt.bind_int64(18, static_cast<std::int64_t>(record.updated_utc_ms)); !bound) {
         return bound;
     }
     auto stepped = stmt.step();
@@ -142,13 +155,13 @@ ScheduleStore::list(const contracts::ScheduleListRequest& request,
     if (!token) {
         return base::Result<contracts::SchedulePage>::failure(token.error());
     }
-    // Column order must match read_schedule() / kSelectScheduleSql (includes encryption_enabled).
+    // Column order must match read_schedule() / kSelectScheduleSql.
     std::string sql =
         "SELECT schedule_id, display_name, enabled, source_ids, repository_connection_id, "
         "backup_type, trigger_kind, local_minute_of_day, weekday_mask, timezone_id, "
         "next_run_utc_ms, exclude_page_and_hibernation_files, encryption_enabled, "
-        "created_utc_ms, updated_utc_ms "
-        "FROM schedules WHERE 1=1";
+        "archive_password_protected, backup_set_uuid, last_recovery_point_id, created_utc_ms, "
+        "updated_utc_ms FROM schedules WHERE 1=1";
     if (request.enabled) {
         sql += " AND enabled = ?";
     }

@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     exclude_page_and_hibernation_files INTEGER
         CHECK (exclude_page_and_hibernation_files IS NULL
                OR exclude_page_and_hibernation_files IN (0, 1)),
+    request_fingerprint TEXT NOT NULL DEFAULT '',
     FOREIGN KEY (repository_connection_id)
         REFERENCES repository_connections(connection_id) ON DELETE SET NULL
 );
@@ -71,6 +72,9 @@ CREATE TABLE IF NOT EXISTS schedules (
         CHECK (exclude_page_and_hibernation_files IN (0, 1)),
     encryption_enabled INTEGER NOT NULL DEFAULT 0
         CHECK (encryption_enabled IN (0, 1)),
+    archive_password_protected TEXT NOT NULL DEFAULT '',
+    backup_set_uuid TEXT NOT NULL,
+    last_recovery_point_id TEXT,
     created_utc_ms INTEGER NOT NULL CHECK (created_utc_ms >= 0),
     updated_utc_ms INTEGER NOT NULL CHECK (updated_utc_ms >= 0),
     CHECK (updated_utc_ms >= created_utc_ms),

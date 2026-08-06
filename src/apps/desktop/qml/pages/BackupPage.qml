@@ -239,15 +239,13 @@ Item {
                 return
             }
         }
+        // Create schedule (password stored by Service); first Full run after create ack.
         if (!serviceClient.createSchedule(sources, connId, frequency, timeOfDay, excludePage,
-                                          encryption, encryption ? password : "")) {
+                                          encryption, encryption ? password : "", true)) {
             //% "Could not save schedule"
             serviceClient.showToast(qsTrId("aegra.backup.schedule.save_failed"))
             return
         }
-        // First run uses wizard password; later Run uses schedule_id + wincred.
-        serviceClient.startBackup(sources, connId, excludePage, encryption,
-                                  encryption ? password : "")
         closeWizard()
     }
 
@@ -302,17 +300,10 @@ Item {
         }
         var type = (backupType === 2) ? 2 : 1
         if (serviceClient.connected && serviceClient.hasCapability("backup.start")) {
-            var sourceIds = item.sourceIds || []
-            var connectionId = item.connectionId || ""
-            if (connectionId.length === 0)
-                connectionId = serviceClient.defaultConnectionId()
-            if (sourceIds.length > 0 && connectionId.length > 0) {
-                root.pendingRunScheduleId = item.scheduleId || item.id || ""
-                var excludePage = item.excludePageAndHibernation !== false
-                var encryption = item.encryptionEnabled === true
-                var scheduleId = item.scheduleId || item.id || ""
-                if (serviceClient.startBackup(sourceIds, connectionId, excludePage, encryption,
-                                              "", encryption ? scheduleId : "", type))
+            var scheduleId = item.scheduleId || item.id || ""
+            if (scheduleId.length > 0) {
+                root.pendingRunScheduleId = scheduleId
+                if (serviceClient.startBackup(scheduleId, type))
                     return
                 root.pendingRunScheduleId = ""
                 return

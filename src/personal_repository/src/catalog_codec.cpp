@@ -17,7 +17,7 @@ constexpr std::array<std::string_view, 9> kDescriptorKeys = {
     "schema_version",  "kind",           "repository_uuid",
     "created_utc_ms",  "archive_prefix", "catalog_prefix",
     "deletion_prefix", "staging_prefix", "layout_version"};
-constexpr std::array<std::string_view, 17> kCatalogKeys = {
+constexpr std::array<std::string_view, 18> kCatalogKeys = {
     "schema_version",     "kind",
     "repository_uuid",    "file_uuid",
     "backup_set_uuid",    "parent_uuid",
@@ -25,8 +25,8 @@ constexpr std::array<std::string_view, 17> kCatalogKeys = {
     "split_part_count",   "has_sidecar",
     "format_version",     "created_utc_ms",
     "logical_size_bytes", "stored_size_bytes",
-    "source_count",       "structural_state",
-    "catalog_generation",
+    "source_count",       "source_volume_ids",
+    "structural_state",   "catalog_generation",
 };
 
 [[nodiscard]] base::Result<std::optional<std::string>> parse_parent_uuid(const Json& value) {
@@ -110,6 +110,7 @@ constexpr std::array<std::string_view, 17> kCatalogKeys = {
         result.logical_size_bytes = logical.value();
         result.stored_size_bytes = stored.value();
         result.source_count = source_count.value();
+        result.source_volume_ids = root.at("source_volume_ids").get<std::vector<std::string>>();
         result.structural_state = root.at("structural_state").get<std::string>();
         result.catalog_generation = generation.value();
         return base::Result<CatalogEntry>::success(std::move(result));
@@ -177,6 +178,7 @@ base::Result<std::string> encode_catalog_entry_json(const CatalogEntry& entry) {
         {"logical_size_bytes", entry.logical_size_bytes},
         {"stored_size_bytes", entry.stored_size_bytes},
         {"source_count", entry.source_count},
+        {"source_volume_ids", entry.source_volume_ids},
         {"structural_state", entry.structural_state},
         {"catalog_generation", entry.catalog_generation},
     };

@@ -174,11 +174,13 @@ class ServiceClient final : public QObject {
                                      bool encryption_enabled = false,
                                      const QString& archive_password = {});
     /// Creates one schedule containing all selected volumes.
+    /// When start_full_backup_after_create is true, a Full StartBackup runs after create ack.
     Q_INVOKABLE bool createSchedule(const QVariantList& sources, const QString& connection_id,
                                     const QString& frequency, const QString& time_of_day,
                                     bool exclude_page_and_hibernation_files = true,
                                     bool encryption_enabled = false,
-                                    const QString& archive_password = {});
+                                    const QString& archive_password = {},
+                                    bool start_full_backup_after_create = false);
     Q_INVOKABLE bool deleteSchedule(const QString& schedule_id);
     Q_INVOKABLE bool setScheduleEnabled(const QString& schedule_id, bool enabled);
     Q_INVOKABLE void selectRepositoryConnection(const QString& connection_id);
@@ -188,15 +190,9 @@ class ServiceClient final : public QObject {
     Q_INVOKABLE void testRepositoryConnection(const QString& connection_id);
     Q_INVOKABLE void setDefaultRepositoryConnection(const QString& connection_id);
     Q_INVOKABLE void removeRepositoryConnection(const QString& connection_id);
-    /// Returns true if the start request was accepted for send (not yet Service ack).
-    /// exclude_page_and_hibernation_files maps to Options "Exclude pagefile / hiberfil / swapfile".
-    /// encryption_enabled + archive_password map to Options "Encryption (password required)".
-    /// backup_type: 1 = full, 2 = incremental (matches service_protocol kBackupType*).
-    Q_INVOKABLE bool startBackup(const QVariantList& source_ids, const QString& connection_id,
-                                 bool exclude_page_and_hibernation_files = true,
-                                 bool encryption_enabled = false,
-                                 const QString& archive_password = {},
-                                 const QString& schedule_id = {}, int backup_type = 1);
+    /// Starts a backup for an existing schedule. Wire payload is only schedule_id + backup_type;
+    /// Service loads sources/repo/options/password from the schedule. backup_type: 1 full, 2 inc.
+    Q_INVOKABLE bool startBackup(const QString& schedule_id, int backup_type = 1);
     Q_INVOKABLE void cancelActiveBackup();
     Q_INVOKABLE void dismissToast();
     /// Show a top toast (success/info). Safe for QML schedule Run feedback.
@@ -323,11 +319,13 @@ class ServiceClient final : public QObject {
     QString schedule_command_request_id_;
     QString schedule_command_idempotency_key_;
     int schedule_command_kind_{0};
+    bool start_full_backup_after_schedule_create_{false};
     QString start_backup_request_id_;
     QString cancel_job_request_id_;
     QString start_backup_idempotency_key_;
     QString cancel_job_idempotency_key_;
     QString active_backup_job_id_;
+    QString pending_backup_schedule_id_;
     QStringList pending_backup_source_ids_;
     QString pending_backup_connection_id_;
     QVariantList pending_recovery_points_;

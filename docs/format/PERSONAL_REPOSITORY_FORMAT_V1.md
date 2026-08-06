@@ -67,6 +67,9 @@ Service 配置。创建 Descriptor 使用 `staging/<operation_uuid>/aegra.reposi
   "logical_size_bytes": 107374182400,
   "stored_size_bytes": 42949672960,
   "source_count": 1,
+  "source_volume_ids": [
+    "\\\\?\\Volume{11111111-2222-4333-8444-555555555555}\\"
+  ],
   "structural_state": "complete",
   "catalog_generation": 1
 }
@@ -93,7 +96,8 @@ Service 配置。创建 Descriptor 使用 `staging/<operation_uuid>/aegra.reposi
 | `created_utc_ms` | 来自认证 Manifest；未认证扫描时为 `0` |
 | `logical_size_bytes` | 来自认证 Manifest/Footer；未知时为 `0` |
 | `stored_size_bytes` | Archive Group 各分卷对象大小之和；未知时为 `0` |
-| `source_count` | 来自认证 Manifest；未认证扫描时为 `0` |
+| `source_count` | 来自认证 Manifest 或备份 Job 的有序源数量；未认证扫描时为 `0` |
+| `source_volume_ids` | 有序稳定 Volume 身份（canonical Volume GUID Path），长度必须等于 `source_count` 且元素唯一；用于增量自动选父时匹配源几何，不得仅用 `source_count` 选择父恢复点 |
 | `structural_state` | V1 持久化值固定为 `complete` |
 | `catalog_generation` | V1 从 `1` 开始，替换同一 Entry 时递增 |
 

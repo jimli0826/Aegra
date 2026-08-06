@@ -12,26 +12,27 @@ namespace {
 
 constexpr qsizetype kMaximumSources = 10'000;
 constexpr qsizetype kMaximumConnections = 1'000;
-constexpr qsizetype kMaximumBackupSources = 100;
 
-[[nodiscard]] std::optional<QStringList>
-validated_backup_sources(const QVariantList& source_ids, const SourceInventoryModel& inventory) {
-    if (source_ids.isEmpty() || source_ids.size() > kMaximumBackupSources) {
-        return std::nullopt;
-    }
-    QStringList result;
-    QSet<QString> seen;
-    result.reserve(source_ids.size());
-    for (const auto& value : source_ids) {
-        const auto source_id = value.toString();
-        if (source_id.isEmpty() || seen.contains(source_id) ||
-            !inventory.contains_selectable(source_id)) {
-            return std::nullopt;
+[[nodiscard]] void fill_pending_from_schedule(const QVariantList& schedules,
+                                              const QString& schedule_id, QStringList& source_ids,
+                                              QString& connection_id) {
+    source_ids.clear();
+    connection_id.clear();
+    for (const auto& item : schedules) {
+        const auto map = item.toMap();
+        const auto id = map.value(QStringLiteral("scheduleId")).toString();
+        if (id != schedule_id && map.value(QStringLiteral("id")).toString() != schedule_id) {
+            continue;
         }
-        seen.insert(source_id);
-        result.push_back(source_id);
+        connection_id = map.value(QStringLiteral("connectionId")).toString();
+        for (const auto& source : map.value(QStringLiteral("sourceIds")).toList()) {
+            const auto source_id = source.toString();
+            if (!source_id.isEmpty()) {
+                source_ids.push_back(source_id);
+            }
+        }
+        return;
     }
-    return result;
 }
 
 [[nodiscard]] QString job_state_translation(const std::int64_t state) {
@@ -82,10 +83,7 @@ validated_backup_sources(const QVariantList& source_ids, const SourceInventoryMo
 
 QString ServiceClient::defaultConnectionId() const { return connections_.default_connection_id(); }
 
-bool ServiceClient::startBackup(const QVariantList& source_ids, const QString& connection_id,
-                                const bool exclude_page_and_hibernation_files,
-                                const bool encryption_enabled, const QString& archive_password,
-                                const QString& schedule_id, const int backup_type) {
+bool ServiceClient::startBackup(const QString& schedule_id, const int backup_type) {
     if (state_ != State::kReady) {
         //% "Service is not connected"
         const auto msg = qtTrId("aegra.error.service.disconnected");
@@ -100,7 +98,8 @@ bool ServiceClient::startBackup(const QVariantList& source_ids, const QString& c
         show_toast(msg);
         return false;
     }
-    if (backup_type != kBackupTypeFull && backup_type != kBackupTypeIncremental) {
+    if (schedule_id.isEmpty() ||
+        (backup_type != kBackupTypeFull && backup_type != kBackupTypeIncremental)) {
         finish_backup_command_failure(QStringLiteral("backup.preflight_failed"));
         return false;
     }
@@ -119,26 +118,6 @@ bool ServiceClient::startBackup(const QVariantList& source_ids, const QString& c
         show_toast(msg);
         return false;
     }
-    const auto validated_sources = validated_backup_sources(source_ids, sources_);
-    if (!validated_sources) {
-        finish_backup_command_failure(QStringLiteral("backup.preflight_failed"));
-        return false;
-    }
-    if (!connections_.contains_available(connection_id)) {
-        finish_backup_command_failure(QStringLiteral("backup.repository_unavailable"));
-        return false;
-    }
-    if (encryption_enabled) {
-        const bool has_password = !archive_password.isEmpty() && archive_password.size() <= 32;
-        const bool has_schedule = !schedule_id.isEmpty();
-        if (!has_password && !has_schedule) {
-            finish_backup_command_failure(QStringLiteral("backup.preflight_failed"));
-            return false;
-        }
-    } else if (!archive_password.isEmpty()) {
-        finish_backup_command_failure(QStringLiteral("backup.preflight_failed"));
-        return false;
-    }
     // Fresh attempt after terminal or first click: mint a new idempotency key.
     // Mid-flight retry (key set, no job yet) reuses the key so Service can replay.
     if (start_backup_idempotency_key_.isEmpty() || active_backup_terminal_) {
@@ -149,16 +128,16 @@ bool ServiceClient::startBackup(const QVariantList& source_ids, const QString& c
     }
     backup_command_error_code_.clear();
     backup_command_busy_ = true;
-    pending_backup_source_ids_ = *validated_sources;
-    pending_backup_connection_id_ = connection_id;
+    pending_backup_schedule_id_ = schedule_id;
+    fill_pending_from_schedule(schedules_, schedule_id, pending_backup_source_ids_,
+                               pending_backup_connection_id_);
     emit backupCommandChanged();
     update_active_backup_observe();
 
     const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     start_backup_request_id_ = request_id;
-    const auto body = encode_start_backup_request(
-        request_id, start_backup_idempotency_key_, source_ids, connection_id, backup_type, {},
-        exclude_page_and_hibernation_files, encryption_enabled, archive_password, schedule_id);
+    const auto body = encode_start_backup_request(request_id, start_backup_idempotency_key_,
+                                                  schedule_id, backup_type);
     const auto started =
         coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
             return handle_start_backup_frame(frame_body);

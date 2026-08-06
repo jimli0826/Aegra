@@ -19,6 +19,7 @@
 | `apps` | [apps.md](apps.md) | 进程入口、依赖注入和运行时边界 |
 | `apps/worker` | [worker_host.md](worker_host.md) | 单任务 Host、进程协议、deadline 与退出码 |
 | `apps/service` | [service_host.md](service_host.md) | 本地控制面 Host、Service IPC 与生命周期 |
+| Service 协议 V3 wire | [../protocol/SERVICE_CONTROL_PROTOCOL_V3.md](../protocol/SERVICE_CONTROL_PROTOCOL_V3.md) | Desktop↔Service 逐条 kind 字段、枚举与示例 JSON |
 | `adapters/windows_ipc` | [windows_ipc.md](windows_ipc.md) | Named Pipe framing、Service ACL 与调用方身份 |
 | `apps/desktop` | [desktop.md](desktop.md) | Qt/QML 客户端、Service 连接与页面迁移边界 |
 | Repository Catalog 查询 | [personal_repository_catalog_query.md](personal_repository_catalog_query.md) | Scanner、Service 分页查询与 Desktop 列表 |

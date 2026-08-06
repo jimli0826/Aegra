@@ -15,6 +15,6 @@ target_compile_definitions(aegra_adapter_windows_system PRIVATE NOMINMAX WIN32_L
 target_link_libraries(
     aegra_adapter_windows_system
     PUBLIC Aegra::Ports
-    PRIVATE Advapi32 Bcrypt
+    PRIVATE Crypt32 Bcrypt
 )
 aegra_configure_target(aegra_adapter_windows_system)

@@ -52,11 +52,23 @@ Event 互斥表达 `TaskProgress` 或最终 `WorkerResponse`。协议要求零�
 V3 已定义 Repository connection、Source Inventory、Job、Schedule、Audit Event、Restore preflight、Mount
 Session 和 task event DTO。列表每页最多 100 项，event 未确认窗口最多 128；所有 Qt 可见整数不超过非负
 有符号 64 位范围。Catalog 状态仍不表达 Archive 已认证或 Restore Ready。完整 wire 决策见
-[ADR-0013](../adr/0013-service-control-protocol-v3.md)。
+[ADR-0013](../adr/0013-service-control-protocol-v3.md)；**逐条协议字段与示例 JSON** 见
+[SERVICE_CONTROL_PROTOCOL_V3](../protocol/SERVICE_CONTROL_PROTOCOL_V3.md)。
 
 Backup Start、Schedule 与 Backup Job 使用有序 `source_ids[]`，包含 1 至 100 个稳定且无重复的 Source ID。
 该数组是一个 Job 的原子 Source 集合；协议层不得只保留第一个 ID，也不得拆成多个命令。Worker
 `JobRequest.source_refs[]` 按相同顺序保存解析后的稳定 Volume 引用。
+
+`UpsertScheduleCommand` 区分创建与更新：
+
+- **创建**（无 `schedule_id`）：可设置完整 `source_ids`、Backup options、加密与 1–32 字符口令；
+  口令经 Service 用 DPAPI `CRYPTPROTECT_LOCAL_MACHINE` 保护（`pOptionalEntropy` = `schedule_id`）
+  并以 Base64 写入 SQLite `schedules.archive_password_protected`
+  （`dpapi-lm:<schedule_id>:<base64>`）。
+- **更新**（有 `schedule_id`）：不得携带 `archive_password`；`source_ids`、`backup_type`、
+  `exclude_page_and_hibernation_files`、`encryption_enabled` 与保护口令必须与已有记录一致（创建后冻结）。
+  允许修改 `display_name`、`enabled`、`repository_connection_id`、`trigger`（Schedule settings）。
+  Backup options 中除未来的 shutdown-on-complete 外均不可改。
 
 S6 修正了 Restore V3 DTO：Prepare 必须携带 Repository connection、Recovery Point 和 opaque target source ID；
 成功 preflight 返回相同资源归属、逻辑大小、目标容量、链深、过期 UTC、eligibility 与稳定 message code；Start

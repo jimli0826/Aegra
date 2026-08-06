@@ -1251,6 +1251,14 @@ entries = [
         "Sicherungskonflikt mit einem vorherigen Versuch. Bitte erneut versuchen.",
     ),
     (
+        "aegra.error.backup.parent_unavailable",
+        "No eligible full backup is available for incremental. Run a full backup first.",
+        "没有可用于增量备份的父备份，请先运行一次全量备份。",
+        "沒有可用於增量備份的父備份，請先執行一次完整備份。",
+        "増分バックアップに使える親バックアップがありません。先にフルバックアップを実行してください。",
+        "Kein geeignetes Eltern-Backup für inkrementell. Zuerst eine Vollsicherung ausführen.",
+    ),
+    (
         "aegra.error.service.request_failed",
         "Service rejected the request",
         "Service 拒绝了该请求",

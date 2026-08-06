@@ -157,10 +157,11 @@ load_hidden(ports::IObjectReader& reader, ports::IPrefixEnumerator& enumerator,
 }
 
 [[nodiscard]] base::Result<std::vector<CatalogEntry>>
-load_entries(ports::IObjectReader& reader, ports::IPrefixEnumerator& enumerator,
-             const RepositoryDescriptor& descriptor,
-             const std::set<std::string, std::less<>>& hidden, const CatalogScannerLimits& limits,
-             std::uint64_t& remaining, const base::CancellationToken cancellation) {
+decode_catalog_entries(ports::IObjectReader& reader, ports::IPrefixEnumerator& enumerator,
+                       const RepositoryDescriptor& descriptor,
+                       const std::set<std::string, std::less<>>& hidden,
+                       const CatalogScannerLimits& limits, std::uint64_t& remaining,
+                       const base::CancellationToken cancellation) {
     auto objects = enumerate_all(enumerator, descriptor.catalog_prefix,
                                  limits.maximum_catalog_objects, cancellation);
     if (!objects) {
@@ -229,28 +230,47 @@ RepositoryCatalogScanner::RepositoryCatalogScanner(ports::IObjectReader& reader,
                                                    CatalogScannerLimits limits)
     : reader_(reader), enumerator_(enumerator), limits_(std::move(limits)) {}
 
-base::Result<CatalogScanPage>
-RepositoryCatalogScanner::scan(const CatalogScanRequest& request,
-                               const base::CancellationToken cancellation) const {
-    if (!valid_request(request, limits_) || limits_.maximum_catalog_objects == 0 ||
-        limits_.maximum_tombstone_objects == 0 || limits_.maximum_total_read_bytes == 0) {
-        return base::Result<CatalogScanPage>::failure(
-            scanner_error(base::ErrorCode::kInvalidArgument, "catalog scan request is invalid"));
+base::Result<CatalogEntriesLoad>
+RepositoryCatalogScanner::load_entries(const base::CancellationToken cancellation) const {
+    if (limits_.maximum_catalog_objects == 0 || limits_.maximum_tombstone_objects == 0 ||
+        limits_.maximum_total_read_bytes == 0) {
+        return base::Result<CatalogEntriesLoad>::failure(
+            scanner_error(base::ErrorCode::kInvalidArgument, "catalog scan limits are invalid"));
     }
     std::uint64_t remaining = limits_.maximum_total_read_bytes;
     auto descriptor = load_descriptor(reader_, limits_, remaining, cancellation);
     if (!descriptor) {
-        return base::Result<CatalogScanPage>::failure(descriptor.error());
+        return base::Result<CatalogEntriesLoad>::failure(descriptor.error());
     }
     auto hidden =
         load_hidden(reader_, enumerator_, descriptor.value(), limits_, remaining, cancellation);
     if (!hidden) {
-        return base::Result<CatalogScanPage>::failure(hidden.error());
+        return base::Result<CatalogEntriesLoad>::failure(hidden.error());
     }
-    auto entries = load_entries(reader_, enumerator_, descriptor.value(), hidden.value(), limits_,
-                                remaining, cancellation);
-    return entries ? build_page(std::move(descriptor).value(), std::move(entries).value(), request)
-                   : base::Result<CatalogScanPage>::failure(entries.error());
+    auto entries = decode_catalog_entries(reader_, enumerator_, descriptor.value(), hidden.value(),
+                                          limits_, remaining, cancellation);
+    if (!entries) {
+        return base::Result<CatalogEntriesLoad>::failure(entries.error());
+    }
+    CatalogEntriesLoad loaded;
+    loaded.descriptor = std::move(descriptor).value();
+    loaded.entries = std::move(entries).value();
+    return base::Result<CatalogEntriesLoad>::success(std::move(loaded));
+}
+
+base::Result<CatalogScanPage>
+RepositoryCatalogScanner::scan(const CatalogScanRequest& request,
+                               const base::CancellationToken cancellation) const {
+    if (!valid_request(request, limits_)) {
+        return base::Result<CatalogScanPage>::failure(
+            scanner_error(base::ErrorCode::kInvalidArgument, "catalog scan request is invalid"));
+    }
+    auto loaded = load_entries(cancellation);
+    if (!loaded) {
+        return base::Result<CatalogScanPage>::failure(loaded.error());
+    }
+    return build_page(std::move(loaded.value().descriptor), std::move(loaded.value().entries),
+                      request);
 }
 
 } // namespace aegra::personal_repository

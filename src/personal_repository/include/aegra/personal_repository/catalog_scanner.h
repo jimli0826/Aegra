@@ -39,11 +39,25 @@ struct CatalogScanPage final {
     std::optional<std::string> continuation_token;
 };
 
+/// Raw catalog entries after decode + identity checks (tombstones applied).
+/// Does not require a globally valid recovery-point graph — used for incremental parent
+/// selection where structural graph errors demote to Full instead of failing the scan.
+struct CatalogEntriesLoad final {
+    RepositoryDescriptor descriptor;
+    std::vector<CatalogEntry> entries;
+};
+
 class RepositoryCatalogScanner final {
   public:
     RepositoryCatalogScanner(ports::IObjectReader& reader, ports::IPrefixEnumerator& enumerator,
                              CatalogScannerLimits limits = {});
 
+    /// Decode catalog objects and apply deletion tombstones. Does not build RecoveryPointGraph.
+    /// Hard failures: storage IO, descriptor/tombstone/entry JSON identity conflicts, size limits.
+    [[nodiscard]] base::Result<CatalogEntriesLoad>
+    load_entries(base::CancellationToken cancellation) const;
+
+    /// Paged catalog view with per-entry chain_state. Requires a globally valid graph.
     [[nodiscard]] base::Result<CatalogScanPage> scan(const CatalogScanRequest& request,
                                                      base::CancellationToken cancellation) const;
 

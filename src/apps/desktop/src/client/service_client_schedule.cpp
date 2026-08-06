@@ -203,6 +203,11 @@ bool ServiceClient::upsertSchedule(const QString& schedule_id, const QString& di
         display_name.isEmpty()) {
         return false;
     }
+    // Create may set encryption + password; update must not send password material and must keep
+    // encryption / sources / other options aligned with the durable schedule (Service enforces).
+    if (!schedule_id.isEmpty() && !archive_password.isEmpty()) {
+        return false;
+    }
     if (encryption_enabled) {
         if (schedule_id.isEmpty() &&
             (archive_password.isEmpty() || archive_password.size() > 32)) {
@@ -241,7 +246,8 @@ bool ServiceClient::createSchedule(const QVariantList& sources, const QString& c
                                    const QString& frequency, const QString& time_of_day,
                                    const bool exclude_page_and_hibernation_files,
                                    const bool encryption_enabled,
-                                   const QString& archive_password) {
+                                   const QString& archive_password,
+                                   const bool start_full_backup_after_create) {
     if (state_ != State::kReady || !schedules_available_ || schedule_command_busy_ ||
         sources.isEmpty() || sources.size() > 100 || connection_id.isEmpty()) {
         return false;
@@ -260,9 +266,15 @@ bool ServiceClient::createSchedule(const QVariantList& sources, const QString& c
         source_ids.push_back(source_id);
         display_names.push_back(display_name);
     }
-    return upsertSchedule({}, display_names.join(QStringLiteral(", ")), true, source_ids,
-                          connection_id, frequency, time_of_day, exclude_page_and_hibernation_files,
-                          encryption_enabled, archive_password);
+    start_full_backup_after_schedule_create_ = start_full_backup_after_create;
+    const auto started =
+        upsertSchedule({}, display_names.join(QStringLiteral(", ")), true, source_ids,
+                       connection_id, frequency, time_of_day, exclude_page_and_hibernation_files,
+                       encryption_enabled, archive_password);
+    if (!started) {
+        start_full_backup_after_schedule_create_ = false;
+    }
+    return started;
 }
 
 bool ServiceClient::deleteSchedule(const QString& schedule_id) {
@@ -301,11 +313,14 @@ bool ServiceClient::setScheduleEnabled(const QString& schedule_id, const bool en
         return false;
     }
     const auto exclude = found.value(QStringLiteral("excludePageAndHibernation"), true).toBool();
+    const auto encryption = found.value(QStringLiteral("encryptionEnabled"), false).toBool();
+    // Preserve create-time sources, options, and encryption; only enabled (and other mutable
+    // fields supplied from the existing summary) may change.
     return upsertSchedule(schedule_id, found.value(QStringLiteral("displayName")).toString(),
                           enabled, found.value(QStringLiteral("sourceIds")).toList(),
                           found.value(QStringLiteral("connectionId")).toString(),
                           found.value(QStringLiteral("frequency")).toString(),
-                          found.value(QStringLiteral("timeOfDay")).toString(), exclude);
+                          found.value(QStringLiteral("timeOfDay")).toString(), exclude, encryption);
 }
 
 RequestDisposition ServiceClient::handle_schedule_command_frame(const QByteArray& body) {
@@ -322,12 +337,20 @@ RequestDisposition ServiceClient::handle_schedule_command_frame(const QByteArray
     if (!parse_command_ack_response(root, schedule_command_kind_, ack)) {
         return RequestDisposition::kProtocolError;
     }
+    const auto created_kind = schedule_command_kind_ == kUpsertScheduleRequestKind;
+    const auto run_after_create = start_full_backup_after_schedule_create_;
+    const auto created_schedule_id = ack.has_resource_id ? ack.resource_id : QString{};
     schedule_command_request_id_.clear();
     schedule_command_idempotency_key_.clear();
     schedule_command_kind_ = 0;
+    start_full_backup_after_schedule_create_ = false;
     // Reload authoritative list from Service after mutation.
     schedule_command_busy_ = false;
     start_schedule_query();
+    // Wizard "create then run": StartBackup only needs schedule_id + backup_type (Full).
+    if (created_kind && run_after_create && !created_schedule_id.isEmpty()) {
+        (void)startBackup(created_schedule_id, kBackupTypeFull);
+    }
     return RequestDisposition::kFinished;
 }
 
@@ -336,6 +359,7 @@ void ServiceClient::finish_schedule_command_failure(const QString& message_code)
     schedule_command_request_id_.clear();
     schedule_command_idempotency_key_.clear();
     schedule_command_kind_ = 0;
+    start_full_backup_after_schedule_create_ = false;
     schedules_error_code_ = message_code;
     emit schedulesChanged();
     show_toast(message_code);

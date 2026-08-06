@@ -65,9 +65,44 @@ Port 必须使用 Repository 相对 key，支持取消、结构化错误和资�
 ```text
 identity: file_uuid, backup_set_uuid, parent_uuid, backup_type
 location: archive_main_key, split_part_count, has_sidecar
-summary: created_utc_ms, logical_size, stored_size, source_count
+summary: created_utc_ms, logical_size, stored_size, source_count, source_volume_ids
 state: discovery, structural, authentication, chain, verification projection
 ```
+
+`source_volume_ids` 是有序稳定 Volume 身份（与备份 Job 的 `source_refs` / Manifest `volume_id` 一致），
+用于校验父点几何。自动选父的主轴是 `backup_set_uuid`：同一 Schedule 固定 set；序列可为
+Full → Inc → … → Full → Inc（后继 Full 仍属同一 set；Archive/Catalog 中 Full 的 `parent_uuid` 仍为
+null，set 内为森林）。
+
+#### Service 增量选父与「树完整」判定
+
+由 Service（`worker_job_service`）在启动增量 Job 前完成。StartBackup 不传 parent；**父候选唯一来源**是
+控制面 `schedules.last_recovery_point_id`（下称 last_rp）。**不做 Catalog tip 扫描回退。**
+
+1. **读 last_rp**  
+   - 空 / 缺失 → **降级 Full**（仍用 `schedules.backup_set_uuid`）  
+   - 有值 → 按 key `catalog/recovery-points/<file_uuid>.entry` 读单条 Catalog Entry  
+
+2. **父点自身合格**  
+   - `has_sidecar`、`structural_state == "complete"`  
+   - `source_volume_ids` 与本次 Job 有序一致  
+   - 类型 Full 或 Incremental  
+   - `backup_set_uuid` 等于本 Schedule 的 set  
+   - 任一项失败 → **降级 Full**（不重算 tip）  
+
+3. **祖先链完整**（从 last_rp 沿 `parent_uuid` 逐条读 Catalog，深度上限 128）  
+   - 每一步父 entry 必须存在且同 set  
+   - 无环；终点为 `backup_type == Full` 且无 parent  
+   - 缺层 / 环 / 超深 / 跨 set → **降级 Full**  
+   - 存储 IO 或 JSON 解码失败 → 硬错误（拒绝 StartBackup）  
+
+4. **成功挂父** → 本次 Job 为 Incremental，parent = last_rp  
+
+5. **推进 tip**  
+   - 仅在 Worker 成功且 **Catalog Entry 发布成功** 后，将 `last_recovery_point_id` 更新为本次
+     `file_uuid`（Full 与 Inc 均更新）  
+   - Job 失败 / 取消 / Catalog 未发布 → tip 不变  
+   - 更换 Schedule 的 `repository_connection_id` → 清空 tip
 
 同一字段存在多个来源时采用固定优先级：认证 Archive > 结构扫描 Archive > Catalog Entry。任何身份冲突
 都返回损坏/冲突，不进行 last-writer-wins。
@@ -94,6 +129,15 @@ publish 写入对应 Catalog Entry。文件名、Archive Header 和 Catalog Entr
 
 以 `file_uuid` 为节点、`parent_uuid` 为有向边。构建时检测重复 UUID、自环、环、跨 Backup Set 父引用、
 非法备份类型和深度上限。图可以包含结构完整但缺父的节点；此类节点不可生成 Restore Chain。
+
+`resolve_chain(file_uuid)` 从指定点沿 `parent_uuid` 上溯到 Full，得到 base-first 祖先列表。完整条件：
+
+- 上溯路径上每个父 UUID 均在图中有对应 Entry（中间节点缺失即 incomplete）；
+- 路径终点的 Entry 类型为 Full（增量/差异终点不是 Full 即 incomplete）；
+- 深度不超过图的 `maximum_chain_depth`（默认 128）。
+
+增量选父与恢复预检共用该定义：Service 用它判定 tip/显式父的祖先链是否可挂增量；Application 用它
+生成 Restore/Mount 的 base-first 层列表。二者都只依赖 Catalog 图，不在图构建阶段打开 Archive。
 
 ### DeletePlan
 

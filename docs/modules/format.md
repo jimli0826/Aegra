@@ -46,7 +46,7 @@
 - `BackupHeader`、`CborMetadataEnvelopeHeader`、`ChunkHeader`、`BlockEntry`、`BackupFooter` 的显式小端编解码；
 - 整数 CBOR Map key、非法 magic/版本/尺寸、未加密 metadata envelope 和非法 BlockEntry 的拒绝路径。
 
-当前实现不使用 packed C++ struct 直接映射外部字节。`.bhx` Sidecar 采用固定 96 字节头和显式小端 payload codec；DATA 使用 SHA-256，ZERO/SKIP hash 全零。V6 Header codec 区分非分卷、首卷和续卷规则，并校验全量/增量 `parent_uuid`。ChunkHeader 固定为 96 字节，保存独立 XChaCha20-Poly1305 nonce/tag；tag 清零的 Header 和全部 BlockEntry 作为 AAD。Adapter 已实现 Chunk Payload 认证加密、完整 chunk 边界分卷、末卷 Footer、多 Volume 全量 Archive、稀疏单 Volume 增量层和链式覆盖读取。DEDUP 写入、差异备份和多 Volume 增量仍是后续工作。
+当前实现不使用 packed C++ struct 直接映射外部字节。`.bhx` Sidecar 采用固定 96 字节头和显式小端 payload codec；DATA 使用 SHA-256，ZERO/SKIP hash 全零。V6 Header codec 区分非分卷、首卷和续卷规则，并校验全量/增量 `parent_uuid`。ChunkHeader 固定为 96 字节，保存独立 XChaCha20-Poly1305 nonce/tag；tag 清零的 Header 和全部 BlockEntry 作为 AAD。Adapter 已实现 Chunk Payload 认证加密、完整 chunk 边界分卷、末卷 Footer、多 Volume 全量/增量 Archive（父层有序 volume 几何与 Sidecar 块表匹配）、稀疏增量层和多 Volume 链式覆盖读取。DEDUP 写入、差异备份和多目标（多 volume 显式映射）Restore 仍是后续工作。
 
 ## 完成标准
 

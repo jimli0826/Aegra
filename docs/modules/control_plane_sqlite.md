@@ -52,14 +52,39 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
 
 ## Schema 与不变量
 
-- `schema_meta.version` 当前为 `5`（`ports::kControlPlaneSchemaVersion`）。产品未发布：
-  - 新库 `CREATE IF NOT EXISTS` 即为当前完整表结构，再写入 version=5；
-  - **不提供** V3/V4 等历史 schema 的 `ALTER` 迁移或兼容读取；旧开发库必须删除后重建；
+- `schema_meta.version` 当前为 `10`（`ports::kControlPlaneSchemaVersion`）。产品未发布：
+  - 新库 `CREATE IF NOT EXISTS` 即为当前完整表结构，再写入 version=10；
+  - **不提供** 历史 schema 的 `ALTER` 迁移或兼容读取；旧开发库必须删除后重建；
   - 非 0 且非当前版本 → `kUnsupportedVersion`。
-- `jobs.exclude_page_and_hibernation_files` 可空（非 backup job）；backup job 必须写入，
-  `same_backup` 幂等重放比较该字段。
+- `jobs.exclude_page_and_hibernation_files` 可空（非 backup job）；backup job 必须写入。
+- `jobs.request_fingerprint`：幂等键对应的规范化请求指纹。StartBackup 指纹覆盖
+  `schedule_id`、**请求的** `backup_type`（非降级后的 effective 类型）、`source_ids`、
+  `repository_connection_id`、exclude、encryption；重放时只比指纹，不从 effective Job 状态猜 demote。
+  有 `idempotency_key` 时指纹不得为空。
 - `schedules.exclude_page_and_hibernation_files` 必填；upsert command 的 idempotency fingerprint
-  必须包含该选项。
+  必须包含该选项与 `archive_password` 的不可逆摘要（不存明文）。
+- `schedules.archive_password_protected`：加密 Schedule 为 `dpapi-lm:<schedule_id>:<base64>`
+  （DPAPI `CRYPTPROTECT_LOCAL_MACHINE`，`pOptionalEntropy` = UTF-8 `schedule_id`）；未加密必须为空串。
+  **不**返回给 Desktop `ScheduleSummary`。
+- **Schedule 更新不变量**（`UpsertSchedule` 在已有 `schedule_id` 上强制）：
+  - **创建后不可变**：有序 `source_ids[]`、`backup_type`、`exclude_page_and_hibernation_files`、
+    `encryption_enabled`；加密时 `archive_password_protected` 创建后不可改、不可清空、不可关闭加密。
+  - **可修改**：`display_name`、`enabled`、`repository_connection_id`（可换其它 Repository connection）、
+    `trigger`（频率/时间/星期等 Schedule settings）。
+  - **Backup options**：除未来的 “完成后关机”（shutdown）外，其它选项均为创建时固定；当前持久化选项仅
+    `exclude_page_and_hibernation_files` 与 `encryption_enabled`，更新时不得变更。
+  - 更新请求不得携带 `archive_password`；加密口令只在创建时 DPAPI 保护后写入 SQLite。
+- `schedules.backup_set_uuid` 必填、canonical UUID；创建 Schedule 时分配并终身固定。同一 Schedule 的
+  全量与增量共享该 set（含 Full→Inc→…→Full→Inc 序列：后继 Full 仍用同一 set，V6 下 Full 的
+  `parent_uuid` 仍为 null，set 内形成森林）。
+- `schedules.last_recovery_point_id`：可空；**下一次增量的唯一父候选**（`file_uuid`）。
+  - 仅在该 Schedule 的备份 **Catalog 发布成功** 后更新为本次 `file_uuid`。
+  - 不返回 `ScheduleSummary`；Client 不可写。
+  - 更换 `repository_connection_id` 时清空。
+  - 增量选父：**不以 Catalog tip 扫描回退**；空 tip / entry 缺失 / 父不合格 / 祖先链不完整 → **降级 Full**
+    （仍用本 Schedule 的 `backup_set_uuid`）。校验链时只按 `parent_uuid` 逐条读 Catalog entry。
+  - 详见 [personal_repository.md](personal_repository.md#service-增量选父与树完整判定)。
+- Command 重放：`key` 不存在 → 执行；指纹相同 → Replayed；指纹不同 → `kConflict`。
 - 打开时在 `BEGIN IMMEDIATE` 事务中 `CREATE IF NOT EXISTS` 并写入版本。
 - 外键：`jobs.repository_connection_id` → `ON DELETE SET NULL`；
   `schedules.repository_connection_id` → `ON DELETE CASCADE`。
@@ -72,7 +97,8 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
   持久化并确认唯一 queued intent。
 - 时间全部为非负 UTC 毫秒整数；超出有符号 64 位线范围拒绝。
 - Job 与 Schedule 的 `source_ids` 使用有序字符串列表编码，必须包含 1 至 100 个稳定且无重复的 Source ID。
-- 只存 `SecretRef` 字符串；不存明文凭据、Chunk Index、Manifest 或 Archive metadata。
+- 只存 `SecretRef` 形态字符串（含 Schedule 的 `dpapi-lm:<base64>` 密文）；不存明文凭据、
+  Chunk Index、Manifest 或 Archive metadata。
 
 ## 并发模型
 

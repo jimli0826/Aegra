@@ -149,14 +149,21 @@ Password 在 Service 没有对应能力时不显示。布局必须在 900x600、
   Home/Splash/Toast/Loading/Shell 已接入真实生产状态和导航。
 - D3（已完成，按生产功能范围）：Backup 页面与 Inventory/Connection model/codec、`StartBackup`/`CancelJob` 门面；
   Source 仅绑定 Service Inventory 稳定 ID；Target 仅绑定 Repository connection；全量备份真实启动；
-  增量/差异禁用；Backup Options 支持无密码（不加密 Archive）与加密（向导密码 1–32 字符，经
-  StartBackup 一次性交给 Service，再写入 wincred SecretRef 供 Worker）；页面进度复用 D2 Job 观察；
+  增量/差异禁用；Backup Options 支持无密码（不加密 Archive）与加密（向导创建 Schedule 时密码
+  1–32 字符交给 UpsertSchedule；`StartBackup` 仅传 `schedule_id` + `backup_type`）；页面进度复用 D2 Job 观察；
   五语言翻译与 Home↔Backup↔Repository 导航已接线。
   Schedule 向导允许选择多个 Volume；Desktop 把有序、去重的稳定 `source_ids[]` 保存为一条 Schedule。
   Run 一次提交完整 Source 列表，只生成一个 Job 和一个包含全部 Volume 的 Archive；不得回退到首个可选
   Source，也不得为每个 Volume 拆分 Schedule、Job 或 Archive。单卷可以独立选择；选中 Disk 时必须
   选中并提交该 Disk 下所有具备稳定 identity 和可靠非零容量的 Volume。系统卷、只读卷、EFI/FAT、RAW
   和未知文件系统卷都可勾选；读取方式由 Worker 决定，Desktop 不按 VSS 能力过滤。
+  **Schedule 创建后变更规则**（与 Service 不变量一致）：
+  - 创建时若开启加密并设置密码：之后不可关闭加密、不可改/清空密码；更新命令不得再带 `archive_password`。
+  - 备份源 `source_ids[]` 创建后不可变。
+  - Repository connection 可改为其它已连接目标。
+  - Schedule settings（频率、时间、星期等）可修改；`enabled` 可切换。
+  - Backup options 中除 “完成后关机”（shutdown）可改外，其余（含 exclude pagefile、加密、去重/分卷/压缩
+    等向导选项）创建后不可改；Desktop 更新路径必须回传已有冻结字段，不得静默改写加密标志。
   Backup list、Add、slide-in wizard、真实 Service/SQLite Job、Schedule、多 Volume 单 Archive、取消和聚合进度
   均已具备生产功能。
 - Restore Source Disks：选中 checkpoint 后调用 Service V3 `GetRecoveryPointLayout`（kind 12）。payload 为

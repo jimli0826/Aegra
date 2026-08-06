@@ -52,7 +52,7 @@ base::Result<void> validate_task(const contracts::JobRequest& job,
     if (!valid_job) {
         return valid_job;
     }
-    // Credential refs are optional for personal local backup (no wincred required).
+    // Credential refs carry dpapi-lm ciphertext for encrypted archives; empty when unencrypted.
     if (job.operation != contracts::JobOperation::kBackup || job.source_refs.empty() ||
         job.source_refs.size() > contracts::kMaximumBackupSources) {
         return invalid("personal backup task source count is invalid");

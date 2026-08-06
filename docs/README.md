@@ -22,6 +22,7 @@
 
 - [个人版 `.bkf` V6 格式](format/PERSONAL_BACKUP_FORMAT_V6.md)
 - [个人版 Repository Descriptor 与 Catalog V1](format/PERSONAL_REPOSITORY_FORMAT_V1.md)
+- [本地 Service 控制面协议 V3（逐条 wire 说明）](protocol/SERVICE_CONTROL_PROTOCOL_V3.md)
 - [产品范围](requirements/PRODUCT_SCOPE.md)
 - [品牌与命名](branding/BRAND.md)
 

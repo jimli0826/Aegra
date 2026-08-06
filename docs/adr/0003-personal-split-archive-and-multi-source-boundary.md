@@ -50,7 +50,8 @@ V6 允许一个逻辑备份跨多个 `.bkf` 分卷，也允许 Manifest 描述�
 - 分卷 Archive 的完整性依赖连续文件集合，但恢复仍不依赖 Sidecar。
 - `BackupFooter.file_size` 只描述末卷自身，Footer 其它统计描述整个逻辑 Archive。
 - 同一路径若存在孤立续卷或 Sidecar，创建操作返回冲突，不自动删除无法证明归属的文件。
-- 多 volume 实现前，Personal Archive Session 继续明确要求 Manifest 中只有一个 selected volume。
+- 多 volume 全量与增量均已实现：Session 按 Manifest `volumes[]` 顺序写入；增量父匹配与 Chain Reader
+  均要求有序 volume 几何一致。多目标 Restore 的显式映射仍属后续工作。
 
 ## 验证
 

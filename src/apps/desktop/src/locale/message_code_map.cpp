@@ -54,6 +54,8 @@ namespace {
          QStringLiteral("aegra.error.backup.worker_unavailable")},
         {QStringLiteral("backup.idempotency_conflict"),
          QStringLiteral("aegra.error.backup.idempotency_conflict")},
+        {QStringLiteral("backup.parent_unavailable"),
+         QStringLiteral("aegra.error.backup.parent_unavailable")},
         {QStringLiteral("service.request_failed"),
          QStringLiteral("aegra.error.service.request_failed")},
         {QStringLiteral("job.cancel_failed"), QStringLiteral("aegra.error.job.cancel_failed")},

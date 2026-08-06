@@ -917,6 +917,10 @@ Server: %1</source>
         <source>Backup selection is incomplete or unavailable</source>
         <translation>備份選擇不完整或不可用</translation>
     </message>
+    <message id="aegra.error.backup.parent_unavailable">
+        <source>No eligible full backup is available for incremental. Run a full backup first.</source>
+        <translation>沒有可用於增量備份的父備份，請先執行一次完整備份。</translation>
+    </message>
     <message id="aegra.error.backup.repository_unavailable">
         <source>Repository is unavailable. Open Repository and test/add a destination first.</source>
         <translation>存放庫不可用。請先在 Repository 中新增或測試目標。</translation>

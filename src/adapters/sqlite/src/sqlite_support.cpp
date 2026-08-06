@@ -1,11 +1,13 @@
 #include "sqlite_internal.h"
 
+#include "aegra/base/uuid.h"
 #include "aegra/contracts/service_control.h"
 
 #include <algorithm>
 #include <cctype>
 #include <limits>
 #include <set>
+#include <string_view>
 #include <utility>
 
 namespace aegra::adapters::sqlite::detail {
@@ -444,8 +446,12 @@ base::Result<void> validate_job_record(const ports::JobRecord& record) {
         (record.idempotency_key &&
          !valid_stable_value(*record.idempotency_key, kMaximumIdentifierBytes)) ||
         (record.result_message_code &&
-         !valid_stable_value(*record.result_message_code, kMaximumMessageCodeBytes))) {
+         !valid_stable_value(*record.result_message_code, kMaximumMessageCodeBytes)) ||
+        record.request_fingerprint.size() > kMaximumCommandFingerprintBytes) {
         return invalid("job record is invalid");
+    }
+    if (record.idempotency_key && record.request_fingerprint.empty()) {
+        return invalid("job with idempotency key requires a request fingerprint");
     }
     if (record.state == contracts::ServiceJobState::kQueued && record.started_utc_ms) {
         return invalid("queued job cannot have started timestamp");
@@ -466,12 +472,29 @@ base::Result<void> validate_schedule_record(const ports::ScheduleRecord& record)
         !valid_stable_value(record.repository_connection_id, kMaximumIdentifierBytes) ||
         !known_backup_type(record.backup_type) || !valid_trigger ||
         !valid_optional_wire_integer(record.next_run_utc_ms) ||
+        !base::is_canonical_uuid(record.backup_set_uuid) ||
+        (record.last_recovery_point_id &&
+         !base::is_canonical_uuid(*record.last_recovery_point_id)) ||
         !valid_wire_integer(record.created_utc_ms) || !valid_wire_integer(record.updated_utc_ms) ||
         record.updated_utc_ms < record.created_utc_ms) {
         return invalid("schedule record is invalid");
     }
     if (record.trigger.timezone_id.size() > kMaximumTimezoneBytes) {
         return invalid("schedule timezone is invalid");
+    }
+    // archive_password_protected is dpapi-lm:<schedule_id>:<base64>; entropy binds to schedule_id.
+    constexpr std::size_t kMaximumProtectedSecretBytes = 4'096 + 160;
+    constexpr std::string_view kDpapiPrefix = "dpapi-lm:";
+    if (record.encryption_enabled) {
+        const auto expected_prefix =
+            std::string(kDpapiPrefix) + record.schedule_id + std::string(":");
+        if (record.archive_password_protected.size() <= expected_prefix.size() ||
+            record.archive_password_protected.size() > kMaximumProtectedSecretBytes ||
+            !record.archive_password_protected.starts_with(expected_prefix)) {
+            return invalid("encrypted schedule requires a protected password");
+        }
+    } else if (!record.archive_password_protected.empty()) {
+        return invalid("unencrypted schedule cannot store a protected password");
     }
     return base::Result<void>::success();
 }
@@ -647,6 +670,7 @@ base::Result<ports::JobRecord> read_job(sqlite3_stmt* const stmt) {
     if (sqlite3_column_type(stmt, 18) != SQLITE_NULL) {
         record.exclude_page_and_hibernation_files = sqlite3_column_int(stmt, 18) != 0;
     }
+    record.request_fingerprint = column_text_required(stmt, 19);
     auto valid = validate_job_record(record);
     if (!valid) {
         return base::Result<ports::JobRecord>::failure(valid.error());
@@ -673,8 +697,11 @@ base::Result<ports::ScheduleRecord> read_schedule(sqlite3_stmt* const stmt) {
     record.next_run_utc_ms = column_uint64_optional(stmt, 10);
     record.exclude_page_and_hibernation_files = sqlite3_column_int(stmt, 11) != 0;
     record.encryption_enabled = sqlite3_column_int(stmt, 12) != 0;
-    record.created_utc_ms = column_uint64(stmt, 13);
-    record.updated_utc_ms = column_uint64(stmt, 14);
+    record.archive_password_protected = column_text_required(stmt, 13);
+    record.backup_set_uuid = column_text_required(stmt, 14);
+    record.last_recovery_point_id = column_text_optional(stmt, 15);
+    record.created_utc_ms = column_uint64(stmt, 16);
+    record.updated_utc_ms = column_uint64(stmt, 17);
     auto valid = validate_schedule_record(record);
     if (!valid) {
         return base::Result<ports::ScheduleRecord>::failure(valid.error());

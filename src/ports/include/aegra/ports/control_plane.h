@@ -16,7 +16,7 @@ namespace aegra::ports {
 
 // Personal-edition control-plane schema version for durable local SQLite.
 // Not Recovery Point / Archive / Chunk Index authority.
-inline constexpr std::uint32_t kControlPlaneSchemaVersion = 6;
+inline constexpr std::uint32_t kControlPlaneSchemaVersion = 10;
 
 // ---- Durable records (control-plane only; no plaintext secrets, no RP authority) ----
 
@@ -54,6 +54,9 @@ struct JobRecord final {
     /// Durable start-backup option; required for idempotent replay matching.
     /// nullopt for non-backup jobs (verify/restore/cancel).
     std::optional<bool> exclude_page_and_hibernation_files;
+    /// Normalized request identity for idempotent replay. Compared on key reuse;
+    /// must capture requested (not effective) backup type and plan fields.
+    std::string request_fingerprint;
 };
 
 struct ScheduleRecord final {
@@ -67,6 +70,17 @@ struct ScheduleRecord final {
     std::optional<std::uint64_t> next_run_utc_ms;
     bool exclude_page_and_hibernation_files{true};
     bool encryption_enabled{false};
+    /// When encryption_enabled: dpapi-lm:<schedule_id>:<base64> (CRYPTPROTECT_LOCAL_MACHINE,
+    /// pOptionalEntropy = UTF-8 schedule_id). Empty when encryption is off. Never log.
+    /// Not returned in ScheduleSummary.
+    std::string archive_password_protected;
+    /// Stable backup set identity for this schedule. Full and all incrementals share it.
+    std::string backup_set_uuid;
+    /// Control-plane tip for the next Incremental parent (file_uuid of last successful backup).
+    /// Empty until the first successful Catalog publish. Not returned in ScheduleSummary.
+    /// Incremental StartBackup uses this as the only parent candidate (no Catalog tip scan);
+    /// missing/invalid tip or incomplete chain demotes to Full. Advanced only after Catalog publish.
+    std::optional<std::string> last_recovery_point_id;
     std::uint64_t created_utc_ms{0};
     std::uint64_t updated_utc_ms{0};
 };

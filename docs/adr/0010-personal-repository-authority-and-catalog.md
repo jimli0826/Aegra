@@ -34,8 +34,17 @@ JSON、SQLite Schema 或目录布局。
 8. 扫描只枚举受管理前缀中的首卷候选，先读取固定 Header 并验证分卷/Footer，再按 `file_uuid` 建立候选
    集合和父子图。扫描阶段不对无关文件批量执行 KDF；只有具备明确 CredentialRef 的受信任调用才认证
    Metadata。
-9. 链解析以 `file_uuid`、`backup_set_uuid` 和 `parent_uuid` 为准。时间戳只用于显示和排序，不能选择父层。
-   完整恢复链必须从全量点开始，逐层直接相连，且通过现有 Chain Reader 的身份与几何校验。
+9. 链解析以 `file_uuid`、`backup_set_uuid` 和 `parent_uuid` 为准。同一 Schedule 的 Full 与 Inc 共享
+   `backup_set_uuid`；Inc 之后再 Full 仍属同一 set（V6 Full 的 `parent_uuid` 仍为 0，set 内可有多棵
+   以 Full 为根的子树）。**自动增量父** = 控制面 `schedules.last_recovery_point_id`（上次成功发布
+   Catalog 的 `file_uuid`）；再校验父点资格与沿 `parent_uuid` 的祖先链。空 tip / 校验失败 → 降级
+   Full。**不**再对 Catalog 做 tip 扫描回退。Catalog 仍是链与 Archive 的权威；last_rp 是控制面指针。
+   Service 增量「树完整」判定（Catalog-only，不打开 Archive）：
+   (a) 父点自身可作增量基线（`has_sidecar`、structural complete、`source_volume_ids` 匹配、Full/Inc）；
+   (b) `RecoveryPointGraph::resolve_chain` 从父点上溯到 Full，Catalog 中无断链、终点为 Full。
+   任一步失败则增量**降级为 Full**（Schedule set 或已识别 set，新开 Full 根），不写悬空父引用。
+   身份冲突（多 set 歧义、显式父跨 Schedule set）仍拒绝。恢复时再从叶子沿 `parent_uuid` 到 Full，
+   由 Application 组 base-first 层列表，Chain Reader 校验层关系。
 10. 删除先生成不可变 Delete Plan。若所选点存在未包含在 Plan 中的后代则拒绝；第一版只支持删除叶子、
     完整后代子树或整个 Backup Set，不实现链重写或合并。
 11. 删除顺序固定为：先发布独立 Deletion Tombstone、删除 Archive Group 的非首卷成员、最后删除首卷、

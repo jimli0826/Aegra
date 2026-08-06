@@ -43,7 +43,8 @@ struct PartArtifact final {
 
 struct IncrementalBaseline final {
     ArchiveIdentity identity;
-    std::vector<archive::SidecarRecord> records;
+    // Parallel to request.manifest.volumes: baseline records for each source volume.
+    std::vector<std::vector<archive::SidecarRecord>> volume_records;
 };
 
 struct SourceWriteState final {
@@ -104,11 +105,6 @@ struct SourceWriteState final {
         return base::Result<void>::failure(
             error(base::ErrorCode::kInvalidArgument, "archive backup type is invalid"));
     }
-    if (backup_type == format::BackupType::kIncremental && request.manifest.volumes.size() != 1) {
-        return base::Result<void>::failure(error(
-            base::ErrorCode::kInvalidArgument,
-            "multi-volume incremental archives are not implemented"));
-    }
     if (backup_type == format::BackupType::kFull) {
         if (request.parent_source.empty() && request.parent_password.empty()) {
             return base::Result<void>::success();
@@ -164,7 +160,7 @@ struct SourceWriteState final {
 }
 
 [[nodiscard]] base::Result<std::optional<IncrementalBaseline>>
-load_incremental_baseline(const ArchiveCreateRequest& request, const format::Volume& volume) {
+load_incremental_baseline(const ArchiveCreateRequest& request) {
     if (request.manifest.backup_job.backup_type == format::BackupType::kFull) {
         return base::Result<std::optional<IncrementalBaseline>>::success(std::nullopt);
     }
@@ -178,24 +174,38 @@ load_incremental_baseline(const ArchiveCreateRequest& request, const format::Vol
     }
     const auto& parent_manifest = parent.value()->manifest();
     const auto& identity = parent.value()->identity();
-    const bool volume_matches = parent_manifest.volumes.size() == 1 &&
-                                parent_manifest.volumes.front().volume_id == volume.volume_id &&
-                                parent_manifest.volumes.front().total_size == volume.total_size;
-    const bool sidecar_matches =
-        sidecar.value().block_size == request.block_size &&
-        sidecar.value().payload.volumes.size() == 1 &&
-        sidecar.value().payload.volumes.front().volume_index == volume.volume_index &&
-        sidecar.value().payload.volumes.front().records.size() ==
-            block_count(volume.total_size, request.block_size);
+    const auto& request_volumes = request.manifest.volumes;
+    const auto& parent_volumes = parent_manifest.volumes;
+    const auto& sidecar_volumes = sidecar.value().payload.volumes;
     const bool requested_set_matches = is_zero_uuid(request.backup_set_uuid) ||
                                        request.backup_set_uuid == identity.backup_set_uuid;
-    if (!volume_matches || !sidecar_matches || !requested_set_matches ||
-        identity.block_size != request.block_size || identity.file_uuid == request.file_uuid) {
+    if (!requested_set_matches || identity.block_size != request.block_size ||
+        identity.file_uuid == request.file_uuid ||
+        sidecar.value().block_size != request.block_size ||
+        parent_volumes.size() != request_volumes.size() ||
+        sidecar_volumes.size() != request_volumes.size()) {
         return base::Result<std::optional<IncrementalBaseline>>::failure(
             error(base::ErrorCode::kConflict, "incremental parent does not match the source"));
     }
-    IncrementalBaseline baseline{identity,
-                                 std::move(sidecar).value().payload.volumes.front().records};
+    IncrementalBaseline baseline;
+    baseline.identity = identity;
+    baseline.volume_records.resize(request_volumes.size());
+    for (std::size_t index = 0; index < request_volumes.size(); ++index) {
+        const auto& expected = request_volumes[index];
+        const auto& parent_volume = parent_volumes[index];
+        const auto sidecar_it = std::find_if(
+            sidecar_volumes.begin(), sidecar_volumes.end(),
+            [&](const auto& item) { return item.volume_index == expected.volume_index; });
+        if (sidecar_it == sidecar_volumes.end() ||
+            parent_volume.volume_id != expected.volume_id ||
+            parent_volume.total_size != expected.total_size ||
+            parent_volume.volume_index != expected.volume_index ||
+            sidecar_it->records.size() != block_count(expected.total_size, request.block_size)) {
+            return base::Result<std::optional<IncrementalBaseline>>::failure(
+                error(base::ErrorCode::kConflict, "incremental parent does not match the source"));
+        }
+        baseline.volume_records[index] = sidecar_it->records;
+    }
     return base::Result<std::optional<IncrementalBaseline>>::success(std::move(baseline));
 }
 
@@ -601,8 +611,7 @@ PersonalArchiveSession::create(const ArchiveCreateRequest& request) {
     if (!available) {
         return base::Result<std::unique_ptr<PersonalArchiveSession>>::failure(available.error());
     }
-    const auto& baseline_volume = request.manifest.volumes.front();
-    auto baseline = load_incremental_baseline(request, baseline_volume);
+    auto baseline = load_incremental_baseline(request);
     if (!baseline) {
         return base::Result<std::unique_ptr<PersonalArchiveSession>>::failure(baseline.error());
     }
@@ -629,15 +638,15 @@ PersonalArchiveSession::create(const ArchiveCreateRequest& request) {
     implementation->split_size_bytes = request.split_size_bytes;
     implementation->incremental = baseline_value.has_value();
     implementation->sources.reserve(request.manifest.volumes.size());
-    for (const auto& volume : request.manifest.volumes) {
+    for (std::size_t index = 0; index < request.manifest.volumes.size(); ++index) {
+        const auto& volume = request.manifest.volumes[index];
         SourceWriteState source;
         source.source_index = volume.volume_index;
         source.logical_size = volume.total_size;
+        if (baseline_value.has_value()) {
+            source.baseline_records = std::move(baseline_value->volume_records[index]);
+        }
         implementation->sources.push_back(std::move(source));
-    }
-    if (baseline_value.has_value()) {
-        implementation->sources.front().baseline_records =
-            std::move(baseline_value).value().records;
     }
     implementation->parts.push_back({request.destination, partial});
     implementation->output.open(partial, std::ios::binary | std::ios::trunc);

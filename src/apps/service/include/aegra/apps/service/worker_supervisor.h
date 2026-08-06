@@ -37,6 +37,10 @@ struct WorkerJobRequest final {
     std::string repository_connection_id;
     std::optional<std::string> parent_recovery_point_id;
     std::string idempotency_key;
+    /// Normalized request identity for idempotent replay (requested fields, not effective type).
+    std::string request_fingerprint;
+    /// Owning schedule for backup jobs; used to advance last_recovery_point_id after Catalog publish.
+    std::string schedule_id;
     std::optional<std::string> backup_archive_key;
     std::chrono::seconds deadline{};
 };

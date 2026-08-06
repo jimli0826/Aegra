@@ -354,17 +354,40 @@ BackupCatalogRegistrar::publish(const WorkerJobRequest& request,
         return base::Result<void>::failure(storage.error());
     }
     auto descriptor = read_descriptor(storage.value()->reader(), cancellation);
+    if (!descriptor) {
+        return base::Result<void>::failure(descriptor.error());
+    }
     const auto& backup = *request.worker_request.backup;
+    std::string set_uuid = backup.backup_set_uuid;
+    std::optional<std::string> parent_uuid;
+    if (backup.type == contracts::BackupType::kIncremental) {
+        if (!request.parent_recovery_point_id) {
+            return base::Result<void>::failure(registration_error(
+                base::ErrorCode::kInternal, "incremental backup is missing parent identity"));
+        }
+        parent_uuid = request.parent_recovery_point_id;
+        // Job leaves backup_set_uuid empty; inherit the set from the parent catalog entry.
+        auto parent = read_catalog_entry(
+            storage.value()->reader(),
+            descriptor.value().catalog_prefix + "/" + *parent_uuid + ".entry", cancellation);
+        if (!parent || !parent.value()) {
+            return base::Result<void>::failure(
+                !parent ? parent.error()
+                        : registration_error(base::ErrorCode::kNotFound,
+                                             "parent catalog entry was not found"));
+        }
+        set_uuid = parent.value()->backup_set_uuid;
+    }
     auto archive = inspect_archive(storage.value()->reader(), *request.backup_archive_key,
-                                   backup.file_uuid, backup.backup_set_uuid, backup.type,
-                                   cancellation);
-    if (!descriptor || !archive) {
-        return base::Result<void>::failure(!descriptor ? descriptor.error() : archive.error());
+                                   backup.file_uuid, set_uuid, backup.type, cancellation);
+    if (!archive) {
+        return base::Result<void>::failure(archive.error());
     }
     personal_repository::CatalogEntry entry;
     entry.repository_uuid = descriptor.value().repository_uuid;
     entry.file_uuid = backup.file_uuid;
-    entry.backup_set_uuid = backup.backup_set_uuid;
+    entry.backup_set_uuid = std::move(set_uuid);
+    entry.parent_uuid = std::move(parent_uuid);
     entry.backup_type = catalog_backup_type(backup.type);
     entry.archive_main_key = *request.backup_archive_key;
     entry.split_part_count = archive.value().split_part_count;
@@ -373,8 +396,41 @@ BackupCatalogRegistrar::publish(const WorkerJobRequest& request,
     entry.logical_size_bytes = response.task_result->logical_bytes;
     entry.stored_size_bytes = archive.value().stored_size_bytes;
     entry.source_count = static_cast<std::uint32_t>(request.worker_request.source_refs.size());
-    return publish_entry(*storage.value(), descriptor.value(), entry,
-                         request.worker_request.job_id, cancellation);
+    // Ordered stable Volume GUID paths used by the Worker; parent selection matches these.
+    entry.source_volume_ids = request.worker_request.source_refs;
+    auto published = publish_entry(*storage.value(), descriptor.value(), entry,
+                                   request.worker_request.job_id, cancellation);
+    if (!published) {
+        return published;
+    }
+    // Advance schedule tip only after Catalog is durable; next Incremental uses this file_uuid.
+    if (request.schedule_id.empty()) {
+        return base::Result<void>::success();
+    }
+    auto unit = control_plane_.begin_unit_of_work(cancellation);
+    if (!unit) {
+        return base::Result<void>::failure(unit.error());
+    }
+    auto schedule = unit.value()->schedules().get(request.schedule_id, cancellation);
+    if (!schedule) {
+        unit.value()->rollback();
+        return base::Result<void>::failure(schedule.error());
+    }
+    if (!schedule.value()) {
+        unit.value()->rollback();
+        // Schedule may have been deleted after job start; Catalog publish still succeeded.
+        return base::Result<void>::success();
+    }
+    auto record = std::move(*schedule.value());
+    record.last_recovery_point_id = entry.file_uuid;
+    auto upserted = unit.value()->schedules().upsert(record, cancellation);
+    if (!upserted) {
+        unit.value()->rollback();
+        return base::Result<void>::failure(upserted.error());
+    }
+    auto committed = unit.value()->commit(cancellation);
+    return committed ? base::Result<void>::success()
+                     : base::Result<void>::failure(committed.error());
 }
 
 } // namespace aegra::apps::service

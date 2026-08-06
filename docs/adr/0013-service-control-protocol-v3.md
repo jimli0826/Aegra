@@ -177,6 +177,12 @@ capability，返回 Conflict 与 `service.capability_unavailable` 且不产生�
 - 严格 schema 会拒绝未知字段；后续新增字段需要新 schema 或预先定义的可选字段。
 - task event 需要 S3 把当前串行 session 扩展为单写者异步发送模型，并保持 response/event framing 顺序。
 
+## 详细 wire 说明
+
+逐条 request/response/event 字段、枚举与示例 JSON 见权威说明文档：
+[本地 Service 控制面协议 V3](../protocol/SERVICE_CONTROL_PROTOCOL_V3.md)。
+本 ADR 记录决策与边界；字段级编解码以该文档与 codec 实现同步维护。
+
 ## 验证
 
 - Contracts 测试覆盖 request/response/event envelope、kind/payload 配对、幂等键、版本范围和消息参数。

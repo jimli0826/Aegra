@@ -21,9 +21,13 @@ V6 使用固定二进制启动结构、加密 CBOR 元数据和 chunk 内索引�
 
 该设计支持一个备份文件包含多个磁盘和多个卷。`disks[]/partitions[]` 表达物理布局和裸机恢复所需的分区表信息，`volumes[]` 表达 VSS 一致性数据源及其到物理分区/extent 的映射。一个 chunk 只能包含一个 volume 的逻辑地址空间数据；整盘备份不直接读 `PhysicalDrive`，而是展开为该磁盘上所有可备份 volume，并通过 VSS 读取这些 volume。
 
-当前产品实现已经支持多 Volume 全量 Archive：所有选中 Volume 位于同一个 VSS Snapshot Set，按
-`volumes[]` 顺序写入同一个逻辑 chunk 流，并在最后一个 Volume 完成后一次性提交 `.bkf` 与多 Volume
-Sidecar。多 Volume 增量和多目标 Restore 尚未实现，必须明确拒绝，不得退化为只处理第一个 Volume。
+当前产品实现已经支持多 Volume 全量与多 Volume 增量 Archive：所有选中 Volume 位于同一个 VSS
+Snapshot Set，按 `volumes[]` 顺序写入同一个逻辑 chunk 流，并在最后一个 Volume 完成后一次性提交
+`.bkf` 与多 Volume Sidecar。增量创建时父 Archive / 父 Sidecar 的有序 `volume_index`、`volume_id`、
+`total_size` 与块记录数必须与本次 Job 完全一致；Chain Reader 对 base-first 层列表做相同几何校验，
+按 `source_index` 与 per-volume `logical_offset` 叠层。不得退化为只处理第一个 Volume。
+多目标（多 volume 同时写多个独立目标）Restore 的显式映射仍属后续工作；通用 Restore Pipeline 在
+未提供目标映射时对 `source_index != 0` 的 chunk 明确拒绝。
 
 ## 文件布局
 
@@ -769,13 +773,21 @@ Windows 本地 volume/disk 备份必须使用 VSS。`backup volume` 直接对用
 
 ## 增量与差异备份
 
-V6 通过备份链（backup chain）支持增量和差异备份。一条链由一个基准全量备份和其后的若干增量/差异备份组成，所有成员共享同一个 `backup_set_uuid`。
+V6 通过备份链（backup chain）支持增量和差异备份。同一 Schedule / 备份策略下的成员共享同一个
+`backup_set_uuid`。序列允许 Full → Inc → … → Full → Inc：后继全量仍使用同一 `backup_set_uuid`，
+但每个全量的 `parent_uuid` 仍为全 0（自包含、可独立恢复），因此 set 内在 `parent_uuid` 图上是森林
+（每棵子树以一次 Full 为根）。
 
 ### 备份链模型
 
-- 全量备份：`flags & BACKUP_FLAG_FULL`，`parent_uuid` 为全 0。
+- 全量备份：`flags & BACKUP_FLAG_FULL`，`parent_uuid` 为全 0；可与先前同 set 成员并存。
 - 差异备份：`flags & BACKUP_FLAG_DIFFERENTIAL`，`parent_uuid` 指向基准全量的 `file_uuid`。差异只与基准比较，链深度恒为 2。
-- 增量备份：`flags & BACKUP_FLAG_INCREMENTAL`，`parent_uuid` 指向上一次备份的 `file_uuid`，链可任意深度。
+- 增量备份：`flags & BACKUP_FLAG_INCREMENTAL`，`parent_uuid` 指向上一次备份的 `file_uuid`。自动挂接时
+  「上一次」= **当前树 tip**：当前树为同 `backup_set_uuid` 中最新 Full 为根的子树；tip 为该子树上
+  不被引用为 parent 的叶子（可能是该 Full 本身，或其后的 Inc）。不得默认挂到旧 Full 分支。
+  Service 在写 Archive 前用 Catalog 判定树是否完整（不打开 `.bkf`）：父点须有 sidecar、结构完整、
+  卷几何匹配；且 `parent_uuid` 图上从 tip 上溯到 Full 无断链（`resolve_chain`）。不完整则本次
+  **改写为 Full**（同 set 或新 set，`parent_uuid` 全 0），不写悬空父引用。链可任意深度。
 
 链上每个文件本身都是结构完整的 V6 文件：拥有完整的 CBOR 元数据（磁盘/分区/卷布局）与独立的加密 envelope（独立 salt），但其 chunk 流只包含相对父备份发生变化的逻辑块。
 
@@ -859,13 +871,15 @@ V1 固定使用 SHA-256（`hash_size = 32`）。DATA record 保存内容散列�
 恢复差异/增量备份时需要应用整条链。Application 根据用户选择、备份目录或本地目录索引解析
 `parent_uuid`，并为每一层取得对应凭据，最终向 Archive Adapter 提交显式 **base-first** 层列表。
 Adapter 不扫描目录猜测父文件，也不对无关文件批量执行 KDF。Chain Reader 必须验证：第一层为全量、
-后续层的 `parent_uuid` 精确指向前一层、`backup_set_uuid` 一致、UUID 不重复，并且 block size、volume
-identity 与逻辑大小保持一致。
+后续层的 `parent_uuid` 精确指向前一层、`backup_set_uuid` 一致、UUID 不重复，并且 block size 与
+有序 volume 几何一致——每一层的 `volumes[]` 在相同顺序下共享相同的 `volume_index`、`volume_id` 与
+`total_size`（与写入端增量父匹配规则一致，不限制为单 Volume）。
 
 恢复不把稀疏层逐个直接写入目标。`PersonalArchiveChainReader` 以基准全量层的连续 chunk 边界为
-输出范围，在读取每个范围时按 base-first 顺序应用所有相交覆盖，形成完整连续
-`IRecoveryPointReader` 视图。通用 Restore Pipeline 对该合并视图只执行一次，因此不会在中间层重复
-准备目标、重建布局或提前上线。单个全量 Archive 是长度为 1 的合法链；单个增量层不得作为标准恢复源。
+输出范围，在读取每个范围时按 base-first 顺序、按 `source_index` 与 per-volume `logical_offset`
+应用所有相交覆盖，形成完整连续 `IRecoveryPointReader` 视图。通用 Restore Pipeline 对该合并视图
+只执行一次，因此不会在中间层重复准备目标、重建布局或提前上线。单个全量 Archive 是长度为 1 的合法链；
+单个增量层不得作为标准恢复源。
 
 Adapter 不扫描目录，也不自动对候选文件执行 KDF。链发现、凭据选择和用户交互由 Application 或本地
 Recovery Point 目录负责，最终必须提交显式、受深度限制的 base-first 层列表。

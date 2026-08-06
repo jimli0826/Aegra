@@ -460,6 +460,7 @@ base::Result<void> WorkerSupervisor::Impl::launch_worker(
     }
     record.message_code = "job.queued";
     record.idempotency_key = request.idempotency_key;
+    record.request_fingerprint = request.request_fingerprint;
     auto inserted = unit.value()->jobs().insert(record, cancellation);
     if (!inserted) {
         unit.value()->rollback();

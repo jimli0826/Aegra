@@ -49,6 +49,9 @@ struct CatalogEntry final {
     std::uint64_t logical_size_bytes{0};
     std::uint64_t stored_size_bytes{0};
     std::uint32_t source_count{0};
+    /// Ordered stable volume identities (canonical Volume GUID paths) matching the archive
+    /// source order. Used for incremental parent selection without opening the parent archive.
+    std::vector<std::string> source_volume_ids;
     std::string structural_state{"complete"};
     std::uint64_t catalog_generation{1};
 

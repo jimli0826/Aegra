@@ -5,9 +5,9 @@
 `apps/worker` 把 Windows Volume Inventory、VSS Snapshot/raw Volume Block Source、个人版 Archive
 Session 和通用 Backup Pipeline 组装成一个真实卷全量/增量备份入口。
 
-本阶段支持一个全量 Job 将一个或多个 Volume 原子写入同一 Archive，也支持单 Volume 的显式父 Archive
-增量备份。不实现多 Volume 增量、磁盘分区表采集、自动父链发现、差异备份、任务持久化、提权 Host 或
-命令行协议。
+本阶段支持一个全量或增量 Job 将一个或多个 Volume 原子写入同一 Archive。增量要求显式父 Archive 路径与
+完整 `.bhx`，并按 volume 顺序匹配父层身份与逻辑大小。不实现磁盘分区表独立采集、Service 外的自动父链
+发现、差异备份、任务持久化、提权 Host 或命令行协议。
 
 ## 依赖边界
 
@@ -84,7 +84,8 @@ Validate JobRequest and trusted options
 
 - Job schema 3 的 Backup 必须包含 1 至 100 个有序且无重复的 volume source、显式 `backup.type`、`file_uuid`、
   `created_utc_ms`，全量还必须包含不同于 `file_uuid` 的 `backup_set_uuid`；
-  Archive `credential_refs` 可选（缺省时 Worker 使用固定的 personal-local 口令材料，不访问 wincred）；
+  加密 Archive 的 `credential_refs` 为 `dpapi-lm:<entropy_id>:<base64>`（Worker 用同一 entropy
+  DPAPI 解密）；未加密时为空；
   增量还必须提供 `parent_source_ref`（`parent_credential_ref` 可选，缺省同 local 口令）；
 - 差异备份当前在获取随机数、凭据或 Snapshot 前拒绝；
 - schema 或 operation-specific 校验失败表示请求未被接受，返回 `Result` failure 且不获取凭据；

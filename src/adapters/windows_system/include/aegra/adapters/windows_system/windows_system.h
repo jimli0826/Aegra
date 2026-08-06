@@ -22,16 +22,19 @@ class WindowsCryptographicRandom final : public ports::IRandomSource {
 
 class WindowsCredentialResolver final : public ports::ICredentialResolver {
   public:
-    // Resolves only wincred://<target> references. The generic credential blob is copied into
-    // locked memory and zeroed before release.
+    // Resolves only dpapi-lm:<entropy_id>:<base64>. Ciphertext is DPAPI-protected with
+    // CRYPTPROTECT_LOCAL_MACHINE and pOptionalEntropy = UTF-8(entropy_id) (schedule_id for
+    // schedules). Plaintext is copied into locked memory and zeroed on release.
     [[nodiscard]] base::Result<std::unique_ptr<ports::IResolvedSecret>>
     resolve(const contracts::SecretRef& secret_ref,
             const base::CancellationToken& cancellation) override;
 };
 
-/// Stores a generic Windows credential as wincred://<target_name> and returns that SecretRef.
-/// Overwrites an existing target. Used for one-shot personal archive passwords.
+/// Protects secret material with DPAPI (CRYPTPROTECT_LOCAL_MACHINE).
+/// pOptionalEntropy is the UTF-8 bytes of entropy_id (use schedule_id for schedule passwords;
+/// job_id for one-shot backups). Returns SecretRef dpapi-lm:<entropy_id>:<base64>.
+/// Never log the result value.
 [[nodiscard]] base::Result<contracts::SecretRef>
-store_generic_windows_credential(std::string_view target_name, std::string_view secret_material);
+protect_local_machine_secret(std::string_view secret_material, std::string_view entropy_id);
 
 } // namespace aegra::adapters::windows_system

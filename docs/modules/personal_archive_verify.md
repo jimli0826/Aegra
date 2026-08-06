@@ -9,7 +9,7 @@ Archive Verify 对个人版 `.bkf` 执行完整、只读的数据完整性校验
 
 通用 `VerifyPipeline` 只依赖 `IRecoveryPointReader`、取消和 Progress Port。个人版 Worker Composition
 Root 可以创建 `PersonalArchiveReader`，但 Reader、Pipeline 和任务契约不得依赖 Windows、VSS、数据库或
-JSON。JSON、Credential Manager 和进程退出码仍只存在于 `apps/worker` 与具体 Adapter。
+JSON。JSON、DPAPI 凭据解析和进程退出码仍只存在于 `apps/worker` 与具体 Adapter。
 
 ## 执行流程
 

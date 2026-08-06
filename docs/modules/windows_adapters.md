@@ -20,7 +20,7 @@ Volume。
 - `aegra_adapter_windows_disk` 只依赖 `Aegra::Ports` 和 Windows SDK。
 - `aegra_adapter_windows_vss` 只依赖 `Aegra::Base`、VSS API、COM 和 Windows SDK；不得依赖
   `windows_disk` 的实现。
-- `aegra_adapter_windows_system` 只依赖 `Aegra::Ports`、BCrypt、Credential Manager 和虚拟内存 API；
+- `aegra_adapter_windows_system` 只依赖 `Aegra::Ports`、BCrypt、Crypt32（DPAPI）和虚拟内存 API；
   不依赖 Disk、VSS 或 Archive Adapter。
 - `aegra_adapter_windows_ipc` 只依赖 `Aegra::Ports` 与 Windows Named Pipe API；不解析 JSON，也不依赖
   Worker Host 实现。
@@ -135,8 +135,10 @@ Set，成功后幂等；未显式关闭或关闭失败时，析构路径执行 `
 
 - `WindowsSystemClock` 返回 Unix UTC 毫秒；转换前的 Windows epoch 不得伪装成有效时间。
 - `WindowsCryptographicRandom` 使用系统首选 CNG RNG，预取消时不调用系统 RNG。
-- `WindowsCredentialResolver` 只解析 `wincred://<target>` Generic Credential；Blob 复制到锁页内存，
-  析构前清零。具体安全与部署决策见
+- `WindowsCredentialResolver` 只解析 `dpapi-lm:<entropy_id>:<base64>`（DPAPI
+  `CRYPTPROTECT_LOCAL_MACHINE`，`pOptionalEntropy` = UTF-8 `entropy_id`，Schedule 为 `schedule_id`）；
+  解密后的明文复制到锁页内存，析构前清零。`protect_local_machine_secret(secret, entropy_id)` 供
+  Service 加密口令。不使用 Windows Credential Manager。具体决策见
   [ADR-0007](../adr/0007-windows-worker-system-capabilities.md)。
 
 ### `WindowsNamedPipeChannel` / `WindowsNamedPipeListener`

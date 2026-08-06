@@ -54,11 +54,13 @@ task log 与 `service.log` 同树。
 主机名，来自 Worker 的受信任配置，不从 Job 消息接收。
 
 个人版 Windows Worker 的 Backup 接受 1 至 100 个有序且无重复的 Volume `source_refs`，并在一个 VSS
-Snapshot Set 中为同一 Job 创建一致性快照。Credential Blob 是非空、长度明确的密码字节，位于 Worker
-运行账户的 Generic Credential Store；Job 和响应都不携带 target 对应的明文值。Backup 的
+Snapshot Set 中为同一 Job 创建一致性快照。`credential_refs` 为 `dpapi-lm:<entropy_id>:<base64>`
+密文引用；Worker 经 `ICredentialResolver` 用 DPAPI LOCAL_MACHINE 与同一 `entropy_id` 解密得到非空密码字节。
+Job 和响应都不携带明文。Backup 的
 `backup.type` 数值为 `1=full`、`2=incremental`、`3=differential`；当前
-Worker 明确拒绝 differential。Incremental 必须提供 `parent_source_ref` 与 `parent_credential_ref`，并在
-Backend 调用期间同时保持新 Archive 和父 Archive 的 Secret 存活。
+Worker 明确拒绝 differential。Incremental 必须提供 `parent_source_ref`；`parent_credential_ref` 可选
+（缺省时复用当前 Archive 口令或空口令），并在 Backend 调用期间同时保持新 Archive 和父 Archive 的
+Secret 存活。多 Volume 增量要求父 Archive 与当前 Job 的有序 Volume 集合一致。
 
 Verify Job 的 `operation` 为 `3`，`source_refs` 恰好一个 `.bkf`，`target_ref` 为空；Worker 会完整读取并
 认证每个 Chunk，不创建目标文件。成功结果使用 `verify.completed`，错误使用脱敏的 `verify.*` code。
@@ -72,7 +74,7 @@ Worker 在所有层完成认证和链关系验证后才锁定、卸载并写入�
 
 ```json
 {"backup":{"type":1}}
-{"backup":{"type":2,"parent_source_ref":"D:\\Backups\\base.bkf","parent_credential_ref":"wincred://aegra/base"}}
+{"backup":{"type":2,"parent_source_ref":"D:\\Backups\\base.bkf","parent_credential_ref":"dpapi-lm:…"}}
 ```
 
 父 Archive 路径是显式输入，不由 Worker 扫描目录猜测；当前 Archive 口令仍由顶层

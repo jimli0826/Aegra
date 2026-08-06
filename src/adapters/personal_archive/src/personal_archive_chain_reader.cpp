@@ -28,16 +28,23 @@ struct ChainRecord final {
     return {code, std::move(message)};
 }
 
-[[nodiscard]] bool same_volume(const format::Manifest& left,
-                               const format::Manifest& right) noexcept {
-    if (left.volumes.size() != 1 || right.volumes.size() != 1) {
+/// Layer geometry must match the write-side incremental parent check: same ordered
+/// volume_index / volume_id / total_size for every source volume (not single-volume only).
+[[nodiscard]] bool same_volume_geometry(const format::Manifest& left,
+                                        const format::Manifest& right) noexcept {
+    if (left.volumes.size() != right.volumes.size() || left.volumes.empty()) {
         return false;
     }
-    const auto& left_volume = left.volumes.front();
-    const auto& right_volume = right.volumes.front();
-    return left_volume.volume_index == right_volume.volume_index &&
-           left_volume.volume_id == right_volume.volume_id &&
-           left_volume.total_size == right_volume.total_size;
+    for (std::size_t index = 0; index < left.volumes.size(); ++index) {
+        const auto& left_volume = left.volumes[index];
+        const auto& right_volume = right.volumes[index];
+        if (left_volume.volume_index != right_volume.volume_index ||
+            left_volume.volume_id != right_volume.volume_id ||
+            left_volume.total_size != right_volume.total_size) {
+            return false;
+        }
+    }
+    return true;
 }
 
 [[nodiscard]] base::Result<void> validate_layer(const PersonalArchiveReader& previous,
@@ -51,7 +58,7 @@ struct ChainRecord final {
             error(base::ErrorCode::kConflict, "archive chain identity is invalid"));
     }
     if (current_identity.block_size != previous_identity.block_size ||
-        !same_volume(previous.manifest(), current.manifest())) {
+        !same_volume_geometry(previous.manifest(), current.manifest())) {
         return base::Result<void>::failure(
             error(base::ErrorCode::kConflict, "archive chain source geometry changed"));
     }
@@ -120,8 +127,12 @@ make_base_records(const PersonalArchiveReader& base) {
 
 void append_overlay(std::vector<ChainRecord>& records, const std::size_t layer_index,
                     const ports::ChunkDescriptor& overlay) {
+    // logical_offset is per source volume (restarts at 0); match source_index first.
     const auto overlay_end = overlay.logical_offset + overlay.logical_size;
     for (auto& record : records) {
+        if (record.descriptor.source_index != overlay.source_index) {
+            continue;
+        }
         const auto base_start = record.descriptor.logical_offset;
         const auto base_end = base_start + record.descriptor.logical_size;
         if (base_end <= overlay.logical_offset) {

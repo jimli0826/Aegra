@@ -277,7 +277,8 @@ inline constexpr const char* kSelectJobSql =
     "SELECT job_id, trace_id, operation, state, created_utc_ms, started_utc_ms, completed_utc_ms, "
     "source_ids, repository_connection_id, target_source_id, backup_type, parent_recovery_point_id, "
     "preflight_token, message_code, idempotency_key, result_error_code, result_outcome, "
-    "result_message_code, exclude_page_and_hibernation_files FROM jobs WHERE job_id = ?";
+    "result_message_code, exclude_page_and_hibernation_files, request_fingerprint "
+    "FROM jobs WHERE job_id = ?";
 
 inline constexpr const char* kSelectCommandSql =
     "SELECT idempotency_key, request_fingerprint, command_id, resource_id, created_utc_ms "
@@ -286,7 +287,8 @@ inline constexpr const char* kSelectCommandSql =
 inline constexpr const char* kSelectScheduleSql =
     "SELECT schedule_id, display_name, enabled, source_ids, repository_connection_id, backup_type, "
     "trigger_kind, local_minute_of_day, weekday_mask, timezone_id, next_run_utc_ms, "
-    "exclude_page_and_hibernation_files, encryption_enabled, created_utc_ms, updated_utc_ms FROM schedules "
-    "WHERE schedule_id = ?";
+    "exclude_page_and_hibernation_files, encryption_enabled, archive_password_protected, "
+    "backup_set_uuid, last_recovery_point_id, created_utc_ms, updated_utc_ms "
+    "FROM schedules WHERE schedule_id = ?";
 
 } // namespace aegra::adapters::sqlite::detail

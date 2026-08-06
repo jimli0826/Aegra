@@ -32,8 +32,9 @@
 6. 单文件 `PersonalArchiveReader` 可以打开稀疏增量层，验证其有序、无重叠和边界正确，但不得把它
    当成完整恢复视图。全量层仍必须连续覆盖整个 volume。
 7. `PersonalArchiveChainReader` 接受调用者显式提供的 base-first `ArchiveOpenRequest` 列表，逐层验证
-   UUID 链、类型、volume 和 block size，再把后层稀疏区间覆盖到基准全量 Reader 上，对 Pipeline 暴露
-   连续 `IRecoveryPointReader`。
+   UUID 链、类型、有序 multi-volume 几何（每层 volumes 的 index/id/size 一致）和 block size，再按
+   `source_index` 与 per-volume `logical_offset` 把后层稀疏区间覆盖到基准全量 Reader 上，对 Pipeline
+   暴露连续 `IRecoveryPointReader`。
 8. Adapter 不扫描目录猜测父文件，也不对任意文件批量执行 KDF。链发现、凭据选择和用户交互属于后续
    Application 用例；显式层列表允许每层使用不同口令，并避免路径与资源消耗策略进入格式 Reader。
 

@@ -377,32 +377,11 @@ base::Result<void> validate_recovery_point_ref(const RecoveryPointRef& reference
 }
 
 base::Result<void> validate_start_backup_command(const StartBackupCommand& command) {
-    const auto parent_required = command.backup_type == BackupType::kIncremental;
-    if (!valid_source_ids(command.source_ids, false) ||
-        !valid_stable_value(command.repository_connection_id, kMaximumIdentifierBytes) ||
+    // Wire payload is only schedule_id + backup_type; Service expands the rest from SQLite.
+    if (!valid_stable_value(command.schedule_id, kMaximumIdentifierBytes) ||
         !known_backup_type(command.backup_type) ||
-        parent_required != command.parent_recovery_point_id.has_value() ||
-        (command.parent_recovery_point_id &&
-         !valid_stable_value(*command.parent_recovery_point_id, kMaximumIdentifierBytes))) {
+        command.backup_type == BackupType::kDifferential) {
         return invalid("start backup command is invalid");
-    }
-    if (command.schedule_id &&
-        !valid_stable_value(*command.schedule_id, kMaximumIdentifierBytes)) {
-        return invalid("start backup schedule id is invalid");
-    }
-    constexpr std::size_t kMaximumArchivePasswordBytes = 32;
-    if (command.encryption_enabled) {
-        const bool has_password = !command.archive_password.empty() &&
-                                  command.archive_password.size() <= kMaximumArchivePasswordBytes;
-        const bool has_schedule = command.schedule_id.has_value();
-        if (!has_password && !has_schedule) {
-            return invalid("encrypted backup requires a password or schedule credential");
-        }
-        if (has_password && command.archive_password.size() > kMaximumArchivePasswordBytes) {
-            return invalid("encrypted backup requires a password of 1 to 32 characters");
-        }
-    } else if (!command.archive_password.empty()) {
-        return invalid("unencrypted backup must not include a password");
     }
     return base::Result<void>::success();
 }
@@ -468,16 +447,15 @@ base::Result<void> validate_upsert_schedule_command(const UpsertScheduleCommand&
         return invalid("upsert schedule command is invalid");
     }
     constexpr std::size_t kMaximumArchivePasswordBytes = 32;
+    // Update must not carry password material: create freezes encryption and DPAPI ciphertext.
+    if (command.schedule_id && !command.archive_password.empty()) {
+        return invalid("schedule password cannot be changed after create");
+    }
     if (command.encryption_enabled) {
-        // Create requires password; update may keep existing wincred when password empty.
         if (!command.schedule_id &&
             (command.archive_password.empty() ||
              command.archive_password.size() > kMaximumArchivePasswordBytes)) {
             return invalid("encrypted schedule requires a password of 1 to 32 characters");
-        }
-        if (!command.archive_password.empty() &&
-            command.archive_password.size() > kMaximumArchivePasswordBytes) {
-            return invalid("encrypted schedule password is too long");
         }
     } else if (!command.archive_password.empty()) {
         return invalid("unencrypted schedule must not include a password");

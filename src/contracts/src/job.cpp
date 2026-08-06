@@ -46,18 +46,19 @@ base::Result<void> validate_backup_options(const JobRequest& request) {
     if (!request.backup || !is_known_backup_type(request.backup->type)) {
         return invalid("backup options are required and must have a known type");
     }
-    const bool has_parent = !request.backup->parent_source_ref.empty() &&
-                            !request.backup->parent_credential_ref.value.empty();
-    const bool has_partial_parent = request.backup->parent_source_ref.empty() !=
-                                    request.backup->parent_credential_ref.value.empty();
-    if (has_partial_parent) {
-        return invalid("backup parent source and credential must be provided together");
+    const bool has_parent_source = !request.backup->parent_source_ref.empty();
+    const bool has_parent_credential = !request.backup->parent_credential_ref.value.empty();
+    // Credential without a parent path is invalid; credential may be omitted when the Worker
+    // reuses the archive password or the parent archive is unencrypted.
+    if (has_parent_credential && !has_parent_source) {
+        return invalid("backup parent credential requires a parent source");
     }
-    if (request.backup->type == BackupType::kFull && has_parent) {
+    if (request.backup->type == BackupType::kFull &&
+        (has_parent_source || has_parent_credential)) {
         return invalid("full backup cannot have a parent");
     }
-    if (request.backup->type != BackupType::kFull && !has_parent) {
-        return invalid("non-full backup requires a parent source and credential");
+    if (request.backup->type != BackupType::kFull && !has_parent_source) {
+        return invalid("non-full backup requires a parent source");
     }
     if (!base::is_canonical_uuid(request.backup->file_uuid) ||
         request.backup->created_utc_ms <= 0) {

@@ -284,26 +284,9 @@ encode_repository_connection_list_request(const QString& request_id,
 }
 
 QByteArray encode_start_backup_request(const QString& request_id, const QString& idempotency_key,
-                                       const QVariantList& source_ids,
-                                       const QString& repository_connection_id,
-                                       const int backup_type,
-                                       const QString& parent_recovery_point_id,
-                                       const bool exclude_page_and_hibernation_files,
-                                       const bool encryption_enabled,
-                                       const QString& archive_password,
-                                       const QString& schedule_id) {
-    const QJsonObject payload{
-        {QStringLiteral("source_ids"), QJsonArray::fromVariantList(source_ids)},
-        {QStringLiteral("repository_connection_id"), repository_connection_id},
-        {QStringLiteral("backup_type"), backup_type},
-        {QStringLiteral("parent_recovery_point_id"), parent_recovery_point_id.isEmpty()
-                                                         ? QJsonValue(QJsonValue::Null)
-                                                         : QJsonValue(parent_recovery_point_id)},
-        {QStringLiteral("exclude_page_and_hibernation_files"), exclude_page_and_hibernation_files},
-        {QStringLiteral("encryption_enabled"), encryption_enabled},
-        {QStringLiteral("archive_password"), archive_password},
-        {QStringLiteral("schedule_id"), schedule_id.isEmpty() ? QJsonValue(QJsonValue::Null)
-                                                              : QJsonValue(schedule_id)}};
+                                       const QString& schedule_id, const int backup_type) {
+    const QJsonObject payload{{QStringLiteral("schedule_id"), schedule_id},
+                              {QStringLiteral("backup_type"), backup_type}};
     return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
                                       static_cast<qint64>(kServiceSchemaVersion)},
                                      {QStringLiteral("message_type"), 1},

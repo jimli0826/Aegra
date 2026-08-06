@@ -41,10 +41,14 @@ Worker 发送 Progress 事件并最终发送一个 Result。Windows Composition 
 [ADR-0008](../adr/0008-worker-session-named-pipe-protocol.md)。
 
 个人版 Service 在提交备份前生成 `file_uuid`、全量 `backup_set_uuid` 和 `created_utc_ms`，并把目标固定为
-`archives/YYYY/MM/<file_uuid>.bkf`。Worker 成功提交 Archive 后，Service 的 Catalog Registrar 读取固定
-Header、连续分卷、末卷 Footer 和 Sidecar Header，确认任务身份与 Archive 一致，再以 create-only 语义
-发布 `catalog/recovery-points/<file_uuid>.entry`。Catalog 发布失败只记录错误并保留已提交 Archive，后续
-Repository 扫描负责补建。
+`archives/YYYY/MM/<file_uuid>.bkf`。增量请求由 Service 按 Catalog 选父（当前树 tip 或显式父），并用
+`RecoveryPointGraph::resolve_chain` 校验 tip→Full 祖先链完整；父点须具备 sidecar 与匹配的
+`source_volume_ids`。树不完整则**降级为 Full**（保留 Schedule/已识别 set），再下发 Worker。Worker
+成功提交 Archive 后，Service 的 Catalog Registrar 读取固定 Header、连续分卷、末卷 Footer 和 Sidecar
+Header，确认任务身份与 Archive 一致，再以 create-only 语义发布
+`catalog/recovery-points/<file_uuid>.entry`。Catalog 发布失败只记录错误并保留已提交 Archive，后续
+Repository 扫描负责补建。选父与降级细节见
+[personal_repository.md](personal_repository.md#service-增量选父与树完整判定)。
 
 ## WinPE 离线恢复
 

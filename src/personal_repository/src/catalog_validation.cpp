@@ -117,6 +117,16 @@ base::Result<void> validate_catalog_entry(const CatalogEntry& entry) {
         entry.split_part_count > kMaximumSplitPartCount || entry.catalog_generation == 0) {
         return invalid("catalog entry chain or location is invalid");
     }
+    if (entry.source_volume_ids.size() != entry.source_count) {
+        return invalid("catalog entry source volume identity count is invalid");
+    }
+    std::set<std::string, std::less<>> unique_sources;
+    for (const auto& volume_id : entry.source_volume_ids) {
+        if (volume_id.empty() || volume_id.size() > kMaximumRepositoryKeyBytes ||
+            !unique_sources.insert(volume_id).second) {
+            return invalid("catalog entry source volume identity is invalid");
+        }
+    }
     return valid();
 }
 

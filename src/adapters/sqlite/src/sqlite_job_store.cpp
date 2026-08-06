@@ -26,8 +26,8 @@ base::Result<void> JobStore::insert(const ports::JobRecord& record,
         "completed_utc_ms, source_ids, repository_connection_id, target_source_id, backup_type, "
         "parent_recovery_point_id, preflight_token, message_code, idempotency_key, "
         "result_error_code, result_outcome, result_message_code, "
-        "exclude_page_and_hibernation_files) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+        "exclude_page_and_hibernation_files, request_fingerprint) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     if (!statement) {
         return base::Result<void>::failure(statement.error());
     }
@@ -110,6 +110,9 @@ base::Result<void> JobStore::insert(const ports::JobRecord& record,
     } else if (auto bound = stmt.bind_null(19); !bound) {
         return bound;
     }
+    if (auto bound = stmt.bind_text(20, record.request_fingerprint); !bound) {
+        return bound;
+    }
     auto stepped = stmt.step();
     if (!stepped) {
         return base::Result<void>::failure(stepped.error());
@@ -171,7 +174,8 @@ base::Result<contracts::JobPage> JobStore::list(const contracts::JobListRequest&
         "source_ids, repository_connection_id, target_source_id, backup_type, "
         "parent_recovery_point_id, "
         "preflight_token, message_code, idempotency_key, result_error_code, result_outcome, "
-        "result_message_code, exclude_page_and_hibernation_files FROM jobs WHERE 1=1";
+        "result_message_code, exclude_page_and_hibernation_files, request_fingerprint "
+        "FROM jobs WHERE 1=1";
     if (request.operation) {
         sql += " AND operation = ?";
     }

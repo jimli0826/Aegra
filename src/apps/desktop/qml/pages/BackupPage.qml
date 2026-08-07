@@ -1,4 +1,5 @@
 import QtQuick 2.15
+import QtQuick.Window 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import ".."
@@ -12,13 +13,40 @@ Item {
     /// Request Main to switch to Home after a real backup job is accepted.
     signal navigateHomeRequested()
 
+    // Add Schedule wizard (drawer)
     property bool wizardOpen: false
-    property int wizardStep: 1
+    property int wizardStep: 0
+    /// "disk" | "files" — chosen on wizard step 0
+    property string backupMode: "disk"
     property int selectedLocationIndex: 0
     property var expandedDisks: ({})
-    /// Volume selection keys "d{diskIndex}v{volIndex}" → true (old wizard multi-select).
     property var selectedVolumeKeys: ({})
     property int selectionEpoch: 0
+
+    // Staggered Entrance Animation States
+    property bool animStage1: false
+    property bool animStage2: false
+
+    function restartEntranceAnimation() {
+        animStage1 = false
+        animStage2 = false
+        t1.restart()
+    }
+
+    Timer { id: t1; interval: 60;  repeat: false; onTriggered: root.animStage1 = true }
+    Timer { id: t2; interval: 180; repeat: false; onTriggered: root.animStage2 = true }
+
+    onAnimStage1Changed: if (animStage1) t2.restart()
+
+    Component.onCompleted: restartEntranceAnimation()
+
+    onVisibleChanged: {
+        if (visible) {
+            restartEntranceAnimation()
+        } else if (root.wizardOpen) {
+            root.closeWizard()
+        }
+    }
 
     // Service-backed schedules (empty until list_schedules returns).
     readonly property var schedules: serviceClient.schedules || []
@@ -45,21 +73,21 @@ Item {
     function toggleDiskExpanded(index) {
         var next = Object.assign({}, expandedDisks)
         next[index] = !next[index]
-        expandedDisks = next
+        root.expandedDisks = next
     }
 
     function openWizard() {
-        selectedLocationIndex = 0
-        expandedDisks = ({})
-        selectedVolumeKeys = ({})
-        selectionEpoch = 0
-        wizardStep = 1
-        // Disks start collapsed (old wizard default: click chevron to expand).
-        expandedDisks = ({})
-        if (wizardStep2)
+        // Open drawer first so UI always reacts even if later setup throws.
+        root.wizardOpen = true
+        root.wizardStep = 0
+        root.backupMode = "disk"
+        root.selectedLocationIndex = 0
+        root.expandedDisks = ({})
+        root.selectedVolumeKeys = ({})
+        root.selectionEpoch = 0
+        if (typeof wizardStep2 !== "undefined" && wizardStep2)
             wizardStep2.resetDefaults()
-        wizardOpen = true
-        if (serviceClient.connected) {
+        if (typeof serviceClient !== "undefined" && serviceClient && serviceClient.connected) {
             serviceClient.refreshInventory()
             serviceClient.refreshConnections()
             serviceClient.refreshSchedules()
@@ -67,9 +95,16 @@ Item {
     }
 
     function closeWizard() {
-        wizardOpen = false
-        wizardStep = 1
+        root.wizardOpen = false
+        root.wizardStep = 0
     }
+
+    // Step labels for progress header (wizard step 0 / 1 / 2)
+    readonly property var wizardStepLabels: [
+        qsTrId("aegra.backup.wizard.step.type"),
+        qsTrId("aegra.backup.wizard.step.source_dest"),
+        qsTrId("aegra.backup.wizard.step.options")
+    ]
 
     function volumeKey(diskIndex, volumeIndex) {
         return "d" + diskIndex + "v" + volumeIndex
@@ -207,6 +242,15 @@ Item {
         return s.length > 0 ? s : qsTrId("aegra.common.not_available")
     }
 
+    /// Soft badge color for schedule row icons (design mini-badge palette).
+    function scheduleBadgeColor(index) {
+        var palette = ["#2A7982", "#3B82F6", "#10B981", "#8B5CF6", "#F59E0B", "#EF4444", "#0EA5E9"]
+        var i = index % palette.length
+        if (i < 0)
+            i += palette.length
+        return palette[i]
+    }
+
     function createScheduleFromWizard() {
         var sources = selectedSources()
         var connId = selectedConnectionId()
@@ -222,7 +266,7 @@ Item {
             serviceClient.showToast(qsTrId("aegra.backup.schedule.missing_target"))
             return
         }
-        var s2 = wizardStep2
+        var s2 = (typeof wizardStep2 !== "undefined") ? wizardStep2 : null
         var frequency = s2 ? s2.frequency : "daily"
         var timeOfDay = s2 ? s2.timeOfDay : "02:00"
         var excludePage = s2 ? s2.excludePageHibernation : true
@@ -346,126 +390,378 @@ Item {
     // ==================== LIST ====================
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 12
-        spacing: 12
+        anchors.leftMargin: 24
+        anchors.rightMargin: 24
+        anchors.bottomMargin: 24
+        anchors.topMargin: 40
+        spacing: 16
 
+        // ===============================================
+        // TOP STAT METRIC CARDS (3 Cards Row)
+        // ===============================================
         RowLayout {
             Layout.fillWidth: true
-            spacing: 12
-            Row {
-                spacing: 8
-                Rectangle {
-                    width: 3
-                    height: 20
-                    color: Theme.colorAccentBlue
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-                Text {
-                    //% "Backup"
-                    text: qsTrId("aegra.nav.backup")
-                    color: Theme.colorTextWhite
-                    font.pixelSize: 18
-                    font.bold: true
-                    font.family: Theme.fontFamily
-                    anchors.verticalCenter: parent.verticalCenter
+            spacing: 16
+
+            // Stat 1: Total Backup Runs
+            Card {
+                Layout.fillWidth: true
+                implicitHeight: 92
+
+                opacity: root.animStage1 ? 1 : 0
+                transform: Translate { y: root.animStage1 ? 0 : 36 }
+                scale: root.animStage1 ? 1.0 : 0.95
+                Behavior on opacity { NumberAnimation { duration: 380; easing.type: Easing.OutCubic } }
+                Behavior on transform { NumberAnimation { duration: 520; easing.type: Easing.OutBack; easing.overshoot: 1.25 } }
+                Behavior on scale { NumberAnimation { duration: 520; easing.type: Easing.OutBack; easing.overshoot: 1.25 } }
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: 14
+                    spacing: 14
+
+                    Rectangle {
+                        id: iconBox1
+                        width: 44
+                        height: 44
+                        radius: 14
+                        transformOrigin: Item.Center
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: "#3B82F6" }
+                            GradientStop { position: 1.0; color: "#2563EB" }
+                        }
+                        Text { anchors.centerIn: parent; text: "🔄"; font.pixelSize: 20 }
+
+                        ParallelAnimation {
+                            running: root.animStage1
+                            NumberAnimation {
+                                target: iconBox1
+                                property: "scale"
+                                from: 0.2
+                                to: 1.0
+                                duration: 650
+                                easing.type: Easing.OutBack
+                                easing.overshoot: 1.8
+                            }
+                            NumberAnimation {
+                                target: iconBox1
+                                property: "rotation"
+                                from: -25
+                                to: 0
+                                duration: 650
+                                easing.type: Easing.OutBack
+                                easing.overshoot: 1.8
+                            }
+                        }
+                    }
+
+                    ColumnLayout {
+                        spacing: 2
+                        Text {
+                            //% "Total backup runs"
+                            text: qsTrId("aegra.backup.stat.total_runs")
+                            color: Theme.colorTextGrey
+                            font.pixelSize: 10
+                            font.bold: true
+                        }
+                        Text {
+                            //% "%1 runs"
+                            text: qsTrId("aegra.backup.stat.total_runs_value").arg(48)
+                            color: Theme.colorTextWhite
+                            font.pixelSize: 20
+                            font.bold: true
+                            font.family: Theme.fontFamily
+                        }
+                    }
                 }
             }
-            Item { Layout.fillWidth: true }
+
+            // Stat 2: Days Protected
+            Card {
+                Layout.fillWidth: true
+                implicitHeight: 92
+
+                opacity: root.animStage1 ? 1 : 0
+                transform: Translate { y: root.animStage1 ? 0 : 36 }
+                scale: root.animStage1 ? 1.0 : 0.95
+                Behavior on opacity { NumberAnimation { duration: 420; easing.type: Easing.OutCubic } }
+                Behavior on transform { NumberAnimation { duration: 540; easing.type: Easing.OutBack; easing.overshoot: 1.25 } }
+                Behavior on scale { NumberAnimation { duration: 540; easing.type: Easing.OutBack; easing.overshoot: 1.25 } }
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: 14
+                    spacing: 14
+
+                    Rectangle {
+                        id: iconBox2
+                        width: 44
+                        height: 44
+                        radius: 14
+                        transformOrigin: Item.Center
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: "#10B981" }
+                            GradientStop { position: 1.0; color: "#059669" }
+                        }
+                        Text { anchors.centerIn: parent; text: "⏱️"; font.pixelSize: 20 }
+
+                        ParallelAnimation {
+                            running: root.animStage1
+                            NumberAnimation {
+                                target: iconBox2
+                                property: "scale"
+                                from: 0.2
+                                to: 1.0
+                                duration: 680
+                                easing.type: Easing.OutBack
+                                easing.overshoot: 1.8
+                            }
+                            NumberAnimation {
+                                target: iconBox2
+                                property: "rotation"
+                                from: -25
+                                to: 0
+                                duration: 680
+                                easing.type: Easing.OutBack
+                                easing.overshoot: 1.8
+                            }
+                        }
+                    }
+
+                    ColumnLayout {
+                        spacing: 2
+                        Text {
+                            //% "Since first backup"
+                            text: qsTrId("aegra.backup.stat.since_first")
+                            color: Theme.colorTextGrey
+                            font.pixelSize: 10
+                            font.bold: true
+                        }
+                        Text {
+                            //% "%1 days"
+                            text: qsTrId("aegra.backup.stat.since_first_value").arg(126)
+                            color: Theme.colorTextWhite
+                            font.pixelSize: 20
+                            font.bold: true
+                            font.family: Theme.fontFamily
+                        }
+                    }
+                }
+            }
+
+            // Stat 3: Schedules Count
+            Card {
+                Layout.fillWidth: true
+                implicitHeight: 92
+
+                opacity: root.animStage1 ? 1 : 0
+                transform: Translate { y: root.animStage1 ? 0 : 36 }
+                scale: root.animStage1 ? 1.0 : 0.95
+                Behavior on opacity { NumberAnimation { duration: 460; easing.type: Easing.OutCubic } }
+                Behavior on transform { NumberAnimation { duration: 560; easing.type: Easing.OutBack; easing.overshoot: 1.25 } }
+                Behavior on scale { NumberAnimation { duration: 560; easing.type: Easing.OutBack; easing.overshoot: 1.25 } }
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: 14
+                    spacing: 14
+
+                    Rectangle {
+                        id: iconBox3
+                        width: 44
+                        height: 44
+                        radius: 14
+                        transformOrigin: Item.Center
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: "#8B5CF6" }
+                            GradientStop { position: 1.0; color: "#7C3AED" }
+                        }
+                        Text { anchors.centerIn: parent; text: "⚡"; font.pixelSize: 20 }
+
+                        ParallelAnimation {
+                            running: root.animStage1
+                            NumberAnimation {
+                                target: iconBox3
+                                property: "scale"
+                                from: 0.2
+                                to: 1.0
+                                duration: 710
+                                easing.type: Easing.OutBack
+                                easing.overshoot: 1.8
+                            }
+                            NumberAnimation {
+                                target: iconBox3
+                                property: "rotation"
+                                from: -25
+                                to: 0
+                                duration: 710
+                                easing.type: Easing.OutBack
+                                easing.overshoot: 1.8
+                            }
+                        }
+                    }
+
+                    ColumnLayout {
+                        spacing: 2
+                        Text {
+                            //% "Scheduled tasks"
+                            text: qsTrId("aegra.backup.stat.schedule_count")
+                            color: Theme.colorTextGrey
+                            font.pixelSize: 10
+                            font.bold: true
+                        }
+                        Text {
+                            //% "%1 schedules"
+                            text: qsTrId("aegra.backup.stat.schedule_count_value").arg(root.schedules.length)
+                            color: Theme.colorTextWhite
+                            font.pixelSize: 20
+                            font.bold: true
+                            font.family: Theme.fontFamily
+                        }
+                    }
+                }
+            }
         }
 
+        // ===============================================
+        // SCHEDULES TABLE (CoachPro standings-style)
+        // ===============================================
         Card {
+            id: scheduleCard
             Layout.fillWidth: true
             Layout.fillHeight: true
             //% "Schedules"
             title: qsTrId("aegra.backup.section.schedule")
 
-            AppButton {
-                anchors.right: parent.right
-                anchors.rightMargin: 14
+            opacity: root.animStage2 ? 1 : 0
+            enabled: true
+            transform: Translate { y: root.animStage2 ? 0 : 36 }
+            scale: root.animStage2 ? 1.0 : 0.95
+            Behavior on opacity { NumberAnimation { duration: 380; easing.type: Easing.OutCubic } }
+            Behavior on scale { NumberAnimation { duration: 520; easing.type: Easing.OutBack; easing.overshoot: 1.25 } }
+
+            // Design card-action link (top-right), same role as "+ Add"
+            Text {
+                id: addScheduleButton
+                z: 30
                 anchors.top: parent.top
-                anchors.topMargin: 8
-                z: 2
+                anchors.right: parent.right
+                anchors.topMargin: 20
+                anchors.rightMargin: 22
                 //% "Add"
-                text: qsTrId("aegra.common.add")
-                onClicked: root.openWizard()
+                text: "+ " + qsTrId("aegra.common.add")
+                color: addHover.containsMouse ? Theme.colorLinkHover : Theme.colorAccentBlue
+                font.pixelSize: 13
+                font.bold: true
+                font.family: Theme.fontFamily
+                MouseArea {
+                    id: addHover
+                    anchors.fill: parent
+                    anchors.margins: -6
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.openWizard()
+                }
             }
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.topMargin: 44
-                anchors.leftMargin: 12
-                anchors.rightMargin: 12
-                anchors.bottomMargin: 12
+                anchors.topMargin: 52
+                anchors.leftMargin: 8
+                anchors.rightMargin: 8
+                anchors.bottomMargin: 10
                 spacing: 0
+                z: 0
 
-                Rectangle {
+                // Column headers — uppercase, muted, letter-spaced (standings th)
+                Item {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 36
-                    color: Theme.colorTableHeader
-                    radius: 2
+                    Layout.preferredHeight: 34
+
                     RowLayout {
                         anchors.fill: parent
-                        anchors.leftMargin: 12
-                        anchors.rightMargin: 12
-                        spacing: 8
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 10
+                        spacing: 4
+
                         Text {
-                            Layout.preferredWidth: 140
-                            Layout.fillWidth: true
-                            //% "Source"
-                            text: qsTrId("aegra.backup.section.source")
-                            color: Theme.colorTextGrey
-                            font.pixelSize: 12
+                            Layout.preferredWidth: 28
+                            text: "#"
+                            color: Theme.colorTextDim
+                            font.pixelSize: 11
                             font.bold: true
-                            font.family: Theme.fontFamily
-                        }
-                        Text {
-                            Layout.preferredWidth: 100
-                            Layout.fillWidth: true
-                            //% "Destination"
-                            text: qsTrId("aegra.backup.column.destination")
-                            color: Theme.colorTextGrey
-                            font.pixelSize: 12
-                            font.bold: true
-                            font.family: Theme.fontFamily
-                        }
-                        Text {
-                            Layout.preferredWidth: 110
-                            //% "Frequency"
-                            text: qsTrId("aegra.backup.column.frequency")
-                            color: Theme.colorTextGrey
-                            font.pixelSize: 12
-                            font.bold: true
-                            font.family: Theme.fontFamily
-                        }
-                        Text {
-                            Layout.preferredWidth: 130
-                            //% "Last run"
-                            text: qsTrId("aegra.backup.column.last_run")
-                            color: Theme.colorTextGrey
-                            font.pixelSize: 12
-                            font.bold: true
-                            font.family: Theme.fontFamily
-                        }
-                        Text {
-                            Layout.preferredWidth: 130
-                            //% "Next run"
-                            text: qsTrId("aegra.backup.column.next_run")
-                            color: Theme.colorTextGrey
-                            font.pixelSize: 12
-                            font.bold: true
-                            font.family: Theme.fontFamily
-                        }
-                        Text {
-                            Layout.preferredWidth: 72
-                            //% "Enabled"
-                            text: qsTrId("aegra.backup.column.enabled")
-                            color: Theme.colorTextGrey
-                            font.pixelSize: 12
-                            font.bold: true
+                            font.letterSpacing: 0.8
                             font.family: Theme.fontFamily
                             horizontalAlignment: Text.AlignHCenter
                         }
-                        Item { Layout.preferredWidth: 40 }
+                        Text {
+                            Layout.preferredWidth: 160
+                            Layout.fillWidth: true
+                            //% "SOURCE"
+                            text: qsTrId("aegra.backup.section.source_upper")
+                            color: Theme.colorTextDim
+                            font.pixelSize: 11
+                            font.bold: true
+                            font.letterSpacing: 0.8
+                            font.family: Theme.fontFamily
+                        }
+                        Text {
+                            Layout.preferredWidth: 120
+                            Layout.fillWidth: true
+                            //% "DESTINATION"
+                            text: qsTrId("aegra.backup.section.destination_upper")
+                            color: Theme.colorTextDim
+                            font.pixelSize: 11
+                            font.bold: true
+                            font.letterSpacing: 0.8
+                            font.family: Theme.fontFamily
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+                        Text {
+                            Layout.preferredWidth: 100
+                            //% "Frequency"
+                            text: qsTrId("aegra.backup.column.frequency").toUpperCase()
+                            color: Theme.colorTextDim
+                            font.pixelSize: 11
+                            font.bold: true
+                            font.letterSpacing: 0.8
+                            font.family: Theme.fontFamily
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+                        Text {
+                            Layout.preferredWidth: 110
+                            //% "Last run"
+                            text: qsTrId("aegra.backup.column.last_run").toUpperCase()
+                            color: Theme.colorTextDim
+                            font.pixelSize: 11
+                            font.bold: true
+                            font.letterSpacing: 0.8
+                            font.family: Theme.fontFamily
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+                        Text {
+                            Layout.preferredWidth: 110
+                            //% "Next run"
+                            text: qsTrId("aegra.backup.column.next_run").toUpperCase()
+                            color: Theme.colorTextDim
+                            font.pixelSize: 11
+                            font.bold: true
+                            font.letterSpacing: 0.8
+                            font.family: Theme.fontFamily
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+                        Text {
+                            Layout.preferredWidth: 56
+                            //% "Enabled"
+                            text: qsTrId("aegra.backup.column.enabled").toUpperCase()
+                            color: Theme.colorTextDim
+                            font.pixelSize: 11
+                            font.bold: true
+                            font.letterSpacing: 0.8
+                            font.family: Theme.fontFamily
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+                        Item { Layout.preferredWidth: 36 }
                     }
                 }
 
@@ -490,107 +786,188 @@ Item {
                         spacing: 0
                         visible: root.schedules.length > 0
                         model: root.schedules
+                        boundsBehavior: Flickable.StopAtBounds
 
-                        delegate: Rectangle {
+                        delegate: Item {
+                            id: scheduleRow
                             required property var modelData
                             required property int index
                             width: scheduleList.width
-                            height: (modelData.destinationPath || "") !== "" ? 52 : 44
-                            color: index % 2 === 0 ? Theme.colorTableRow : Theme.colorTableAlt
+                            height: 52
+
+                            // Subtle top divider (standings border-top)
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.leftMargin: 10
+                                anchors.rightMargin: 10
+                                height: 1
+                                color: Theme.colorBorder
+                                opacity: 0.55
+                            }
+
+                            // HoverHandler does not steal events from child controls (toggle / menu),
+                            // so moving over buttons no longer toggles containsMouse and flicker.
+                            HoverHandler {
+                                id: rowHover
+                                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                            }
+
+                            Rectangle {
+                                id: rowBg
+                                anchors.fill: parent
+                                anchors.leftMargin: 4
+                                anchors.rightMargin: 4
+                                radius: 10
+                                color: rowHover.hovered
+                                       ? Qt.rgba(1, 1, 1, 0.65)
+                                       : "transparent"
+                            }
 
                             RowLayout {
                                 anchors.fill: parent
-                                anchors.leftMargin: 12
-                                anchors.rightMargin: 12
-                                spacing: 8
+                                anchors.leftMargin: 10
+                                anchors.rightMargin: 10
+                                spacing: 4
 
+                                // Rank #
                                 Text {
-                                    Layout.preferredWidth: 140
-                                    Layout.fillWidth: true
-                                    text: modelData.sourceName || ""
-                                    color: Theme.colorTextWhite
-                                    font.pixelSize: 12
+                                    Layout.preferredWidth: 28
+                                    text: "" + (scheduleRow.index + 1)
+                                    color: Theme.colorTextDim
+                                    font.pixelSize: 13
+                                    font.bold: true
                                     font.family: Theme.fontFamily
-                                    elide: Text.ElideMiddle
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
                                 }
+
+                                // Source with mini-badge (TEAM cell)
                                 Item {
-                                    Layout.preferredWidth: 120
+                                    Layout.preferredWidth: 160
                                     Layout.fillWidth: true
                                     Layout.fillHeight: true
-                                    Column {
+
+                                    Row {
                                         anchors.verticalCenter: parent.verticalCenter
                                         anchors.left: parent.left
-                                        anchors.right: parent.right
-                                        spacing: 0
-                                        Text {
-                                            width: parent.width
-                                            height: (modelData.destinationPath || "") !== ""
-                                                    ? 16 : implicitHeight
-                                            text: modelData.destinationName || ""
-                                            color: Theme.colorTextWhite
-                                            font.pixelSize: (modelData.destinationPath || "") !== ""
-                                                            ? 11 : 12
-                                            font.family: Theme.fontFamily
-                                            elide: Text.ElideMiddle
+                                        spacing: 12
+
+                                        Rectangle {
+                                            id: miniBadge
+                                            width: 28
+                                            height: 28
+                                            radius: 8
+                                            color: "#ffffff"
+                                            border.width: 0
+                                            // Avoid transform-on-hover (can jitter layout under cursor)
+                                            scale: 1.0
+
+                                            Rectangle {
+                                                anchors.centerIn: parent
+                                                width: 18
+                                                height: 18
+                                                radius: 5
+                                                color: root.scheduleBadgeColor(scheduleRow.index)
+                                                opacity: 0.92
+                                            }
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: {
+                                                    var n = (modelData.sourceName || "?").trim()
+                                                    return n.length > 0 ? n.charAt(0).toUpperCase() : "?"
+                                                }
+                                                color: "#ffffff"
+                                                font.pixelSize: 10
+                                                font.bold: true
+                                                font.family: Theme.fontFamily
+                                            }
                                         }
+
                                         Text {
-                                            width: parent.width
-                                            height: 14
-                                            visible: (modelData.destinationPath || "") !== ""
-                                            text: modelData.destinationPath || ""
-                                            color: Theme.colorTextGrey
-                                            font.pixelSize: 9
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: Math.max(40, scheduleRow.width * 0.18)
+                                            text: modelData.sourceName || ""
+                                            color: Theme.colorTextWhite
+                                            font.pixelSize: 14
+                                            font.bold: true
                                             font.family: Theme.fontFamily
                                             elide: Text.ElideMiddle
                                         }
                                     }
                                 }
+
+                                // Destination (muted centered stats)
                                 Text {
-                                    Layout.preferredWidth: 110
+                                    Layout.preferredWidth: 120
+                                    Layout.fillWidth: true
+                                    text: modelData.destinationName || ""
+                                    color: Theme.colorTextGrey
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                    font.family: Theme.fontFamily
+                                    horizontalAlignment: Text.AlignHCenter
+                                    elide: Text.ElideMiddle
+                                }
+
+                                // Frequency
+                                Text {
+                                    Layout.preferredWidth: 100
                                     text: root.freqLabel(modelData.frequency)
                                           + " · " + (modelData.timeOfDay || "02:00")
-                                    color: Theme.colorAccentBlue
-                                    font.pixelSize: 12
+                                    color: Theme.colorTextGrey
+                                    font.pixelSize: 13
+                                    font.bold: true
                                     font.family: Theme.fontFamily
+                                    horizontalAlignment: Text.AlignHCenter
                                     elide: Text.ElideRight
                                 }
+
+                                // Last run
                                 Text {
-                                    Layout.preferredWidth: 130
+                                    Layout.preferredWidth: 110
                                     text: root.timeOrNa(modelData.lastRun)
-                                    color: (modelData.lastRun && ("" + modelData.lastRun).trim().length > 0)
-                                           ? Theme.colorTextWhite : Theme.colorTextGrey
-                                    font.pixelSize: 11
+                                    color: Theme.colorTextGrey
+                                    font.pixelSize: 13
+                                    font.bold: true
                                     font.family: Theme.fontFamily
+                                    horizontalAlignment: Text.AlignHCenter
                                     elide: Text.ElideRight
                                 }
+
+                                // Next run — emphasized like PTS
                                 Text {
-                                    Layout.preferredWidth: 130
+                                    Layout.preferredWidth: 110
                                     text: root.timeOrNa(modelData.nextRun)
-                                    color: (modelData.nextRun && ("" + modelData.nextRun).trim().length > 0)
-                                           ? Theme.colorTextWhite : Theme.colorTextGrey
-                                    font.pixelSize: 11
+                                    color: Theme.colorTextWhite
+                                    font.pixelSize: 14
+                                    font.bold: true
                                     font.family: Theme.fontFamily
+                                    horizontalAlignment: Text.AlignHCenter
                                     elide: Text.ElideRight
                                 }
+
+                                // Enabled toggle (compact pill)
                                 Item {
-                                    Layout.preferredWidth: 72
+                                    Layout.preferredWidth: 56
                                     Layout.fillHeight: true
                                     Rectangle {
-                                        width: 40
-                                        height: 22
-                                        radius: 11
+                                        width: 36
+                                        height: 20
+                                        radius: 10
                                         anchors.centerIn: parent
-                                        color: modelData.enabled ? Theme.colorAccentBlue : "#555"
-                                        border.width: 1
-                                        border.color: modelData.enabled
-                                                      ? Theme.colorAccentBlue : Theme.colorBorder
+                                        color: modelData.enabled
+                                               ? Theme.colorAccentBlue : Theme.colorProgressTrack
                                         Rectangle {
-                                            width: 16
-                                            height: 16
-                                            radius: 8
+                                            width: 14
+                                            height: 14
+                                            radius: 7
                                             anchors.verticalCenter: parent.verticalCenter
                                             x: modelData.enabled ? parent.width - width - 3 : 3
-                                            color: "white"
+                                            color: "#ffffff"
+                                            Behavior on x {
+                                                NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+                                            }
                                         }
                                         MouseArea {
                                             anchors.fill: parent
@@ -599,27 +976,26 @@ Item {
                                         }
                                     }
                                 }
+
+                                // More actions
                                 Item {
-                                    Layout.preferredWidth: 40
+                                    Layout.preferredWidth: 36
                                     Layout.fillHeight: true
                                     Rectangle {
                                         id: moreBtn
-                                        width: 32
+                                        width: 28
                                         height: 28
-                                        radius: 4
+                                        radius: 8
                                         anchors.centerIn: parent
                                         color: (moreHover.containsMouse || scheduleMenu.visible)
-                                               ? Theme.colorButtonHover : Theme.colorButton
-                                        border.width: 1
-                                        border.color: Theme.colorBorder
+                                               ? Theme.colorHover : "transparent"
                                         //% "More actions"
                                         Accessible.name: qsTrId("aegra.backup.action.more")
                                         Text {
                                             anchors.centerIn: parent
-                                            // Vertical ellipsis ⋮
                                             text: "\u22EE"
-                                            color: Theme.colorTextWhite
-                                            font.pixelSize: 16
+                                            color: Theme.colorTextGrey
+                                            font.pixelSize: 15
                                             font.bold: true
                                             font.family: Theme.fontFamily
                                         }
@@ -640,7 +1016,7 @@ Item {
                                                 color: Theme.colorPopup
                                                 border.width: 1
                                                 border.color: Theme.colorBorder
-                                                radius: 4
+                                                radius: 10
                                             }
                                             MenuItem {
                                                 //% "Run full"
@@ -652,7 +1028,7 @@ Item {
                                                 background: Rectangle {
                                                     color: parent.highlighted
                                                            ? Theme.colorHover : "transparent"
-                                                    radius: 3
+                                                    radius: 6
                                                     opacity: parent.enabled ? 1.0 : 0.45
                                                 }
                                                 contentItem: Text {
@@ -675,7 +1051,7 @@ Item {
                                                 background: Rectangle {
                                                     color: parent.highlighted
                                                            ? Theme.colorHover : "transparent"
-                                                    radius: 3
+                                                    radius: 6
                                                     opacity: parent.enabled ? 1.0 : 0.45
                                                 }
                                                 contentItem: Text {
@@ -704,8 +1080,8 @@ Item {
                                                 rightPadding: 12
                                                 background: Rectangle {
                                                     color: parent.highlighted
-                                                           ? "#cc3333" : "transparent"
-                                                    radius: 3
+                                                           ? Theme.colorHoverClose : "transparent"
+                                                    radius: 6
                                                 }
                                                 contentItem: Text {
                                                     text: parent.text
@@ -728,14 +1104,20 @@ Item {
         }
     }
 
-    // ==================== WIZARD (old Add Schedule Wizard step 1) ====================
+    // ==================== WIZARD (Add Schedule) ====================
     Item {
         id: wizardDrawer
         anchors.fill: parent
-        z: 2000
+        z: 5000
+        // Match main window corner radius so the dim scrim does not paint square
+        // into the transparent shell corners.
+        readonly property real cornerRadius: Theme.radiusWindow
 
+        // Rounded scrim — only close when clicking outside the panel.
         Rectangle {
+            id: wizardScrim
             anchors.fill: parent
+            radius: wizardDrawer.cornerRadius
             color: Theme.colorScrim
             opacity: root.wizardOpen ? 1 : 0
             visible: opacity > 0.01
@@ -743,75 +1125,448 @@ Item {
             MouseArea {
                 anchors.fill: parent
                 enabled: root.wizardOpen
+                onClicked: root.closeWizard()
             }
         }
 
         Rectangle {
             id: wizardPanel
-            width: Math.max(420, parent.width * 9 / 10)
-            height: parent.height
-            property real slideProgress: root.wizardOpen ? 0 : 1
-            x: parent.width - width + slideProgress * width
+            // Vertical inset only: clear main caption above, gap at bottom.
+            // Flush to the right edge (no right margin).
+            readonly property int bottomInset: 16
+            readonly property int topInset: 48
+            width: Math.max(520, Math.min(parent.width * 0.92, parent.width))
+            height: parent.height - topInset - bottomInset
+            y: topInset
+            // Off-canvas when closed; slide in flush to the right when open.
+            x: root.wizardOpen ? (parent.width - width) : parent.width
             color: Theme.colorBg
+            radius: 16
             border.width: 1
             border.color: Theme.colorBorder
-            Behavior on slideProgress {
+            clip: true
+            // Avoid intercepting clicks while fully off-screen.
+            enabled: root.wizardOpen
+            Behavior on x {
                 NumberAnimation { duration: 280; easing.type: Easing.OutCubic }
+            }
+
+            // Swallow clicks on empty panel areas so they do not fall through
+            // to the scrim (which would close the wizard).
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.AllButtons
+                onPressed: function(mouse) { mouse.accepted = true }
+                onClicked: function(mouse) { mouse.accepted = true }
+            }
+
+            // Close pinned to panel top-right (aligned with step dots, not header center)
+            Rectangle {
+                id: wizardCloseBtn
+                z: 20
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.topMargin: 14
+                anchors.rightMargin: 14
+                width: 32
+                height: 32
+                radius: 8
+                color: closeWizardMouse.containsMouse ? Theme.colorHoverClose
+                                                     : "transparent"
+                Text {
+                    anchors.centerIn: parent
+                    text: "\u2715"
+                    font.pixelSize: 14
+                    color: closeWizardMouse.containsMouse ? "#ffffff"
+                                                          : Theme.colorTextGrey
+                }
+                MouseArea {
+                    id: closeWizardMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.closeWizard()
+                }
             }
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 16
-                spacing: 12
+                anchors.margins: 20
+                // Leave room for the absolute close control on the right.
+                anchors.rightMargin: 52
+                spacing: 16
 
-                // Header — "Add Schedule Wizard"
+                // Header: back + step progress bar
                 RowLayout {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 28
+                    Layout.preferredHeight: 64
                     spacing: 8
-                    Rectangle {
-                        width: 3
-                        height: 18
-                        color: Theme.colorAccentBlue
-                        Layout.alignment: Qt.AlignVCenter
+
+                    // Back — keep slot width stable so the step bar does not jump
+                    Item {
+                        Layout.preferredWidth: 36
+                        Layout.preferredHeight: 36
+                        Layout.alignment: Qt.AlignTop
+                        Layout.topMargin: 0
+
+                        Rectangle {
+                            anchors.top: parent.top
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            width: 32
+                            height: 32
+                            radius: 16
+                            opacity: root.wizardStep > 0 ? 1 : 0
+                            enabled: root.wizardStep > 0
+                            color: backMouse.containsMouse ? Theme.colorHover : "transparent"
+                            Text {
+                                anchors.centerIn: parent
+                                text: "\u25C0"
+                                font.pixelSize: 11
+                                color: Theme.colorTextGrey
+                            }
+                            MouseArea {
+                                id: backMouse
+                                anchors.fill: parent
+                                enabled: root.wizardStep > 0
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (root.wizardStep > 0)
+                                        root.wizardStep--
+                                }
+                            }
+                        }
                     }
-                    Text {
-                        //% "Add Schedule Wizard"
-                        text: qsTrId("aegra.backup.wizard.title")
-                        color: Theme.colorTextWhite
-                        font.pixelSize: 16
-                        font.bold: true
-                        font.family: Theme.fontFamily
+
+                    // Step progress (replaces plain wizard title)
+                    Item {
+                        id: stepBar
                         Layout.fillWidth: true
-                        elide: Text.ElideRight
-                    }
-                    Button {
-                        Layout.preferredWidth: 32
-                        Layout.preferredHeight: 28
-                        text: "\u2715"
-                        background: Rectangle {
-                            color: parent.hovered ? Theme.colorButtonHover : "transparent"
-                            radius: 4
+                        Layout.preferredHeight: 56
+                        Layout.alignment: Qt.AlignVCenter
+
+                        readonly property int stepCount: 3
+                        readonly property real slotW: width / stepCount
+                        readonly property real lineY: 14
+                        readonly property real lineLeft: slotW * 0.5
+                        readonly property real lineSpan: slotW * (stepCount - 1)
+
+                        // Track
+                        Rectangle {
+                            x: stepBar.lineLeft
+                            y: stepBar.lineY
+                            width: stepBar.lineSpan
+                            height: 3
+                            radius: 1.5
+                            color: Theme.colorBorder
                         }
-                        contentItem: Text {
-                            text: parent.text
-                            color: Theme.colorTextWhite
-                            font.pixelSize: 14
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
+                        // Progress fill between step centers
+                        Rectangle {
+                            x: stepBar.lineLeft
+                            y: stepBar.lineY
+                            width: stepBar.lineSpan
+                                 * (root.wizardStep / Math.max(1, stepBar.stepCount - 1))
+                            height: 3
+                            radius: 1.5
+                            color: Theme.colorAccentBlue
+                            Behavior on width {
+                                NumberAnimation { duration: 280; easing.type: Easing.OutCubic }
+                            }
                         }
-                        onClicked: root.closeWizard()
+
+                        Repeater {
+                            model: stepBar.stepCount
+                            delegate: Item {
+                                width: stepBar.slotW
+                                height: stepBar.height
+                                x: index * stepBar.slotW
+                                y: 0
+
+                                readonly property bool done: index < root.wizardStep
+                                readonly property bool current: index === root.wizardStep
+
+                                Rectangle {
+                                    id: stepDot
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    y: 2
+                                    width: 26
+                                    height: 26
+                                    radius: 13
+                                    border.width: (parent.done || parent.current) ? 0 : 2
+                                    border.color: Theme.colorBorder
+                                    color: (parent.done || parent.current)
+                                           ? Theme.colorAccentBlue
+                                           : Theme.colorCard
+                                    Behavior on color {
+                                        ColorAnimation { duration: 200 }
+                                    }
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: parent.parent.done
+                                              ? "\u2713"
+                                              : ("" + (index + 1))
+                                        color: (parent.parent.done || parent.parent.current)
+                                               ? "#ffffff"
+                                               : Theme.colorTextDim
+                                        font.pixelSize: parent.parent.done ? 12 : 11
+                                        font.bold: true
+                                        font.family: Theme.fontFamily
+                                    }
+                                }
+
+                                Text {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    anchors.top: stepDot.bottom
+                                    anchors.topMargin: 6
+                                    width: parent.width - 4
+                                    horizontalAlignment: Text.AlignHCenter
+                                    elide: Text.ElideRight
+                                    text: root.wizardStepLabels[index] || ""
+                                    color: parent.current ? Theme.colorTextWhite
+                                           : (parent.done ? Theme.colorAccentBlue
+                                                          : Theme.colorTextDim)
+                                    font.pixelSize: 11
+                                    font.bold: parent.current
+                                    font.family: Theme.fontFamily
+                                }
+                            }
+                        }
                     }
                 }
 
-                StackLayout {
+                Item {
+                    id: wizardStepContainer
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    currentIndex: root.wizardStep === 1 ? 0 : 1
+                    clip: true
+
+                    // -------- Step 0: TYPE SELECTION CARDS (Disk/Volume vs Files) --------
+                    Item {
+                        id: wizardStep0
+                        anchors.fill: parent
+                        visible: opacity > 0.001
+                        opacity: root.wizardStep === 0 ? 1 : 0
+                        transform: Translate {
+                            x: root.wizardStep === 0 ? 0 : (root.wizardStep > 0 ? -wizardStepContainer.width : wizardStepContainer.width)
+                        }
+                        Behavior on opacity { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
+                        Behavior on transform { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                        spacing: 24
+                        Layout.alignment: Qt.AlignTop
+
+                        Item { height: 12 }
+
+                        ColumnLayout {
+                            spacing: 6
+                            Layout.alignment: Qt.AlignHCenter
+
+                            Text {
+                                //% "Choose backup protection type"
+                                text: qsTrId("aegra.backup.wizard.type_title")
+                                color: Theme.colorTextWhite
+                                font.pixelSize: 22
+                                font.bold: true
+                                font.family: Theme.fontFamily
+                                Layout.alignment: Qt.AlignHCenter
+                            }
+                            Text {
+                                //% "Select block-level protection for full disks/volumes, or versioned protection for specific files and folders"
+                                text: qsTrId("aegra.backup.wizard.type_subtitle")
+                                color: Theme.colorTextGrey
+                                font.pixelSize: 13
+                                font.family: Theme.fontFamily
+                                Layout.alignment: Qt.AlignHCenter
+                                wrapMode: Text.WordWrap
+                                horizontalAlignment: Text.AlignHCenter
+                                Layout.fillWidth: true
+                            }
+                        }
+
+                        Item { height: 8 }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 24
+                            Layout.alignment: Qt.AlignHCenter
+
+                            // Card 1: Disk / Volume 备份
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredWidth: 320
+                                implicitHeight: 300
+                                radius: 20
+                                color: diskCardMouse.containsMouse ? Theme.colorHover : Theme.colorCard
+                                border.width: 2
+                                border.color: diskCardMouse.containsMouse ? Theme.colorAccentBlue : "#ffffff"
+                                Behavior on color { ColorAnimation { duration: 150 } }
+
+                                MouseArea {
+                                    id: diskCardMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        root.backupMode = "disk"
+                                        root.wizardStep = 1
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 24
+                                    spacing: 16
+
+                                    Rectangle {
+                                        width: 56
+                                        height: 56
+                                        radius: 18
+                                        Layout.alignment: Qt.AlignHCenter
+                                        gradient: Gradient {
+                                            GradientStop { position: 0.0; color: "#3B82F6" }
+                                            GradientStop { position: 1.0; color: "#2563EB" }
+                                        }
+                                        DiskIcon { anchors.centerIn: parent; size: 34; variant: "system" }
+                                    }
+
+                                    Text {
+                                        //% "Disk / Volume backup"
+                                        text: qsTrId("aegra.backup.wizard.mode.disk_title")
+                                        color: Theme.colorTextWhite
+                                        font.pixelSize: 18
+                                        font.bold: true
+                                        font.family: Theme.fontFamily
+                                        Layout.alignment: Qt.AlignHCenter
+                                    }
+
+                                    Text {
+                                        //% "Full and incremental block-level backup of Windows system volumes, physical disks, and logical volumes (supports disaster recovery and full-disk restore)."
+                                        text: qsTrId("aegra.backup.wizard.mode.disk_desc")
+                                        color: Theme.colorTextGrey
+                                        font.pixelSize: 12
+                                        wrapMode: Text.WordWrap
+                                        horizontalAlignment: Text.AlignHCenter
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                    }
+
+                                    Rectangle {
+                                        height: 38
+                                        Layout.fillWidth: true
+                                        radius: 19
+                                        color: Theme.colorAccentBlue
+                                        Text {
+                                            anchors.centerIn: parent
+                                            //% "Choose Disk / Volume backup →"
+                                            text: qsTrId("aegra.backup.wizard.mode.disk_action")
+                                            color: "#ffffff"
+                                            font.pixelSize: 13
+                                            font.bold: true
+                                            font.family: Theme.fontFamily
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Card 2: Files 备份
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredWidth: 320
+                                implicitHeight: 300
+                                radius: 20
+                                color: filesCardMouse.containsMouse ? Theme.colorHover : Theme.colorCard
+                                border.width: 2
+                                border.color: filesCardMouse.containsMouse ? Theme.colorGreen : "#ffffff"
+                                Behavior on color { ColorAnimation { duration: 150 } }
+
+                                MouseArea {
+                                    id: filesCardMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        root.backupMode = "files"
+                                        root.wizardStep = 1
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 24
+                                    spacing: 16
+
+                                    Rectangle {
+                                        width: 56
+                                        height: 56
+                                        radius: 18
+                                        Layout.alignment: Qt.AlignHCenter
+                                        gradient: Gradient {
+                                            GradientStop { position: 0.0; color: "#10B981" }
+                                            GradientStop { position: 1.0; color: "#059669" }
+                                        }
+                                        Text { anchors.centerIn: parent; text: "📁"; font.pixelSize: 26 }
+                                    }
+
+                                    Text {
+                                        //% "Files backup"
+                                        text: qsTrId("aegra.backup.wizard.mode.files_title")
+                                        color: Theme.colorTextWhite
+                                        font.pixelSize: 18
+                                        font.bold: true
+                                        font.family: Theme.fontFamily
+                                        Layout.alignment: Qt.AlignHCenter
+                                    }
+
+                                    Text {
+                                        //% "Select documents, project folders, or data directories for continuous versioned protection and lightweight folder sync."
+                                        text: qsTrId("aegra.backup.wizard.mode.files_desc")
+                                        color: Theme.colorTextGrey
+                                        font.pixelSize: 12
+                                        wrapMode: Text.WordWrap
+                                        horizontalAlignment: Text.AlignHCenter
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                    }
+
+                                    Rectangle {
+                                        height: 38
+                                        Layout.fillWidth: true
+                                        radius: 19
+                                        color: Theme.colorGreen
+                                        Text {
+                                            anchors.centerIn: parent
+                                            //% "Choose Files backup →"
+                                            text: qsTrId("aegra.backup.wizard.mode.files_action")
+                                            color: "#ffffff"
+                                            font.pixelSize: 13
+                                            font.bold: true
+                                            font.family: Theme.fontFamily
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        } // step0 ColumnLayout
+                    } // wizardStep0
 
                     // -------- Step 1: SOURCE | DESTINATION --------
-                    ColumnLayout {
-                        spacing: 12
+                    Item {
+                        id: wizardStep1
+                        anchors.fill: parent
+                        visible: opacity > 0.001
+                        opacity: root.wizardStep === 1 ? 1 : 0
+                        transform: Translate {
+                            x: root.wizardStep === 1 ? 0 : (root.wizardStep < 1 ? wizardStepContainer.width : -wizardStepContainer.width)
+                        }
+                        Behavior on opacity { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
+                        Behavior on transform { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            spacing: 12
 
                         RowLayout {
                             Layout.fillWidth: true
@@ -1333,17 +2088,31 @@ Item {
                                 onClicked: root.wizardStep = 2
                             }
                         }
-                    }
+                        } // step1 ColumnLayout
+                    } // wizardStep1
 
                     // -------- Step 2: Schedule settings + Options --------
-                    BackupWizardStep2 {
-                        id: wizardStep2
-                        onBackRequested: root.wizardStep = 1
-                        onCreateRequested: root.createScheduleFromWizard()
-                    }
-                }
-            }
-        }
-    }
+                    Item {
+                        id: wizardStep2Item
+                        anchors.fill: parent
+                        visible: opacity > 0.001
+                        opacity: root.wizardStep === 2 ? 1 : 0
+                        transform: Translate {
+                            x: root.wizardStep === 2 ? 0 : (root.wizardStep < 2 ? wizardStepContainer.width : -wizardStepContainer.width)
+                        }
+                        Behavior on opacity { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
+                        Behavior on transform { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
 
-}
+                        BackupWizardStep2 {
+                            id: wizardStep2
+                            anchors.fill: parent
+                            onBackRequested: root.wizardStep = 1
+                            onCreateRequested: root.createScheduleFromWizard()
+                        }
+                    } // wizardStep2Item
+                } // wizardStepContainer
+            } // ColumnLayout (wizard body)
+        } // wizardPanel
+    } // wizardDrawer
+} // root
+

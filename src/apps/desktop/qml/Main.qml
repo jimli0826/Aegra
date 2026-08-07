@@ -37,20 +37,11 @@ Window {
     property bool settingsPanelOpen: false
     /// Latched once splash dismisses so main opacity/animation never re-toggles.
     property bool appReady: false
-    /// Global busy after splash: page catalog reload / commands (old Main.qml appLoading).
-    /// Bound to each loading flag so NOTIFY from domain signals is enough (not only loadingChanged).
-    // Old Main.qml appLoading: catalog reload + mount/unmount + source layout.
+    // App loading overlay is for heavy blocking commands (not background catalog refreshes).
     readonly property bool appLoading: {
         if (!window.appReady || !serviceClient.connected)
             return false
-        return serviceClient.jobsLoading
-                || serviceClient.inventoryLoading
-                || serviceClient.connectionsLoading
-                || serviceClient.schedulesLoading
-                || serviceClient.repositoryLoading
-                || serviceClient.recoveryPointLayoutLoading
-                || serviceClient.mountSessionsLoading
-                || serviceClient.repositoryCommandBusy
+        return serviceClient.repositoryCommandBusy
                 || serviceClient.backupCommandBusy
                 || serviceClient.cancelCommandBusy
                 || serviceClient.mountCommandBusy

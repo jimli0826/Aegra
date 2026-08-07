@@ -9,7 +9,7 @@
     </message>
     <message id="aegra.nav.home">
         <source>Home</source>
-        <translation>概览</translation>
+        <translation>主页</translation>
     </message>
     <message id="aegra.nav.backup">
         <source>Backup</source>
@@ -25,7 +25,7 @@
     </message>
     <message id="aegra.nav.repository">
         <source>Repository</source>
-        <translation>仓库</translation>
+        <translation>Repository</translation>
     </message>
     <message id="aegra.nav.event_log">
         <source>Event Log</source>
@@ -46,18 +46,6 @@
     <message id="aegra.nav.expand_sidebar">
         <source>Expand menu</source>
         <translation>展开菜单</translation>
-    </message>
-    <message id="aegra.shell.last_sync_just_now">
-        <source>Last sync · just now</source>
-        <translation>最近同步·刚刚</translation>
-    </message>
-    <message id="aegra.shell.service_offline">
-        <source>Service offline</source>
-        <translation>服务未连接</translation>
-    </message>
-    <message id="aegra.shell.service_running">
-        <source>Service is running</source>
-        <translation>服务运行正常</translation>
     </message>
     <message id="aegra.shell.service_label">
         <source>Service %1</source>
@@ -589,6 +577,50 @@ Server: %1</source>
         <source>Add Schedule Wizard</source>
         <translation>添加计划向导</translation>
     </message>
+    <message id="aegra.backup.wizard.step.type">
+        <source>Protection type</source>
+        <translation>保护类型</translation>
+    </message>
+    <message id="aegra.backup.wizard.step.source_dest">
+        <source>Source &amp; destination</source>
+        <translation>源与目标</translation>
+    </message>
+    <message id="aegra.backup.wizard.step.options">
+        <source>Options &amp; schedule</source>
+        <translation>选项调度</translation>
+    </message>
+    <message id="aegra.backup.wizard.type_title">
+        <source>Choose backup protection type</source>
+        <translation>请选择备份保护类型</translation>
+    </message>
+    <message id="aegra.backup.wizard.type_subtitle">
+        <source>Select block-level protection for full disks/volumes, or versioned protection for specific files and folders</source>
+        <translation>根据业务需求选择对完整磁盘/卷进行块级保护，或对特定文件目录进行版本保护</translation>
+    </message>
+    <message id="aegra.backup.wizard.mode.disk_title">
+        <source>Disk / Volume backup</source>
+        <translation>Disk / Volume 备份</translation>
+    </message>
+    <message id="aegra.backup.wizard.mode.disk_desc">
+        <source>Full and incremental block-level backup of Windows system volumes, physical disks, and logical volumes (supports disaster recovery and full-disk restore).</source>
+        <translation>完整保护 Windows 系统卷、本地物理硬盘与逻辑卷的全量与增量块级备份 (支持系统灾备还原与整盘复原)。</translation>
+    </message>
+    <message id="aegra.backup.wizard.mode.disk_action">
+        <source>Choose Disk / Volume backup →</source>
+        <translation>选择 Disk / Volume 备份 →</translation>
+    </message>
+    <message id="aegra.backup.wizard.mode.files_title">
+        <source>Files backup</source>
+        <translation>Files 备份</translation>
+    </message>
+    <message id="aegra.backup.wizard.mode.files_desc">
+        <source>Select documents, project folders, or data directories for continuous versioned protection and lightweight folder sync.</source>
+        <translation>灵活勾选特定的文档、工程文件夹或数据目录进行持续版本保护与轻量化目录同步。</translation>
+    </message>
+    <message id="aegra.backup.wizard.mode.files_action">
+        <source>Choose Files backup →</source>
+        <translation>选择 Files 备份 →</translation>
+    </message>
     <message id="aegra.backup.column.destination">
         <source>Destination</source>
         <translation>目标</translation>
@@ -788,6 +820,30 @@ Server: %1</source>
     <message id="aegra.backup.section.schedule">
         <source>Schedule</source>
         <translation>计划</translation>
+    </message>
+    <message id="aegra.backup.stat.total_runs">
+        <source>Total backup runs</source>
+        <translation>累计备份次数</translation>
+    </message>
+    <message id="aegra.backup.stat.total_runs_value">
+        <source>%1 runs</source>
+        <translation>%1 次</translation>
+    </message>
+    <message id="aegra.backup.stat.since_first">
+        <source>Since first backup</source>
+        <translation>首次备份至今</translation>
+    </message>
+    <message id="aegra.backup.stat.since_first_value">
+        <source>%1 days</source>
+        <translation>%1 天</translation>
+    </message>
+    <message id="aegra.backup.stat.schedule_count">
+        <source>Scheduled tasks</source>
+        <translation>计划任务数量</translation>
+    </message>
+    <message id="aegra.backup.stat.schedule_count_value">
+        <source>%1 schedules</source>
+        <translation>%1 个计划</translation>
     </message>
     <message id="aegra.backup.section.credentials">
         <source>Credentials</source>
@@ -1249,90 +1305,6 @@ Server: %1</source>
         <source>Unmount</source>
         <translation>卸载</translation>
     </message>
-    <message id="aegra.mount.busy_loading">
-        <source>Mounting / unmounting...</source>
-        <translation>正在挂载/卸载...</translation>
-    </message>
-    <message id="aegra.mount.disk_name">
-        <source>Disk %1</source>
-        <translation>磁盘 %1</translation>
-    </message>
-    <message id="aegra.mount.state.mounting">
-        <source>Mounting</source>
-        <translation>挂载中</translation>
-    </message>
-    <message id="aegra.mount.state.mounted">
-        <source>Mounted</source>
-        <translation>已挂载</translation>
-    </message>
-    <message id="aegra.mount.state.unmounting">
-        <source>Unmounting</source>
-        <translation>卸载中</translation>
-    </message>
-    <message id="aegra.mount.state.failed">
-        <source>Failed</source>
-        <translation>失败</translation>
-    </message>
-    <message id="aegra.mount.capability_missing">
-        <source>Service does not support mount</source>
-        <translation>服务不支持挂载</translation>
-    </message>
-    <message id="aegra.mount.busy">
-        <source>A mount command is already in progress</source>
-        <translation>挂载命令正在进行中</translation>
-    </message>
-    <message id="aegra.mount.select_required">
-        <source>Select a checkpoint and at least one source disk</source>
-        <translation>请选择检查点和至少一个源磁盘</translation>
-    </message>
-    <message id="aegra.mount.invalid_drive_letter">
-        <source>Preferred drive letter must be a single letter A–Z</source>
-        <translation>首选盘符必须是单个字母 A–Z</translation>
-    </message>
-    <message id="aegra.mount.select_session">
-        <source>Select a mounted session to unmount</source>
-        <translation>请选择要卸载的已挂载会话</translation>
-    </message>
-    <message id="aegra.mount.started">
-        <source>Mount started</source>
-        <translation>已开始挂载</translation>
-    </message>
-    <message id="aegra.mount.already_mounted_selection">
-        <source>Selected disk(s) are already mounted</source>
-        <translation>所选磁盘已挂载</translation>
-    </message>
-    <message id="aegra.mount.unmounted">
-        <source>Unmounted</source>
-        <translation>已卸载</translation>
-    </message>
-    <message id="aegra.error.mount.command_failed">
-        <source>Mount command failed</source>
-        <translation>挂载命令失败</translation>
-    </message>
-    <message id="aegra.error.mount.list_failed">
-        <source>Failed to list mount sessions</source>
-        <translation>获取挂载会话列表失败</translation>
-    </message>
-    <message id="aegra.error.mount.host_unavailable">
-        <source>Mount host is unavailable</source>
-        <translation>挂载主机不可用</translation>
-    </message>
-    <message id="aegra.error.mount.already_mounted">
-        <source>This disk is already mounted</source>
-        <translation>该磁盘已挂载</translation>
-    </message>
-    <message id="aegra.error.mount.dokan_unavailable">
-        <source>Dokan driver is not available</source>
-        <translation>Dokan 驱动不可用</translation>
-    </message>
-    <message id="aegra.error.mount.disk_not_found">
-        <source>Source disk was not found in the recovery point</source>
-        <translation>恢复点中未找到源磁盘</translation>
-    </message>
-    <message id="aegra.error.mount.host_failed">
-        <source>Mount host failed</source>
-        <translation>挂载主机失败</translation>
-    </message>
     <message id="aegra.mount.checkpoint_panel_empty">
         <source>Recovery point list will appear when mount Service APIs are connected</source>
         <translation>连接 Mount Service API 后将显示恢复点列表</translation>
@@ -1410,8 +1382,8 @@ Server: %1</source>
         <translation>选择桌面客户端的配色主题</translation>
     </message>
     <message id="aegra.settings.theme.blue_extra">
-        <source>Glass</source>
-        <translation>青璃</translation>
+        <source>Blue Extra</source>
+        <translation>深蓝</translation>
     </message>
     <message id="aegra.settings.theme.dark">
         <source>Dark</source>

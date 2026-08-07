@@ -1,33 +1,42 @@
 import QtQuick 2.15
+import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import ".."
 
 Rectangle {
-    id: root
+    id: card
     property string title: ""
     property string actionText: ""
+    property Component headerRightComponent: null
     signal actionClicked()
 
-    // Pure white background matching CoachPro design mockup
-    color: "#ffffff"
+    // Soft ice mint color tint matching CoachPro reference image
+    color: Theme.colorCard
     radius: 20
     border.width: 1
-    border.color: "#ebf3f2"
+    border.color: "#ffffff"
+
+    // Do not use id "root" here — nested Component { onClicked: root.xxx }
+    // would resolve to this Card instead of the page.
 
     RowLayout {
         id: headerRow
-        visible: root.title.length > 0
+        // Keep header (and + Add) above page content for hit-testing.
+        z: 10
+        visible: card.title.length > 0 || card.headerRightComponent !== null
+                 || card.actionText.length > 0
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.leftMargin: 22
-        anchors.rightMargin: 22
-        anchors.topMargin: 20
-        height: 24
+        anchors.rightMargin: 16
+        anchors.topMargin: 16
+        height: 32
 
         Text {
-            text: root.title
-            color: "#111111"
+            visible: card.title.length > 0
+            text: card.title
+            color: Theme.colorTextWhite
             font.pixelSize: 16
             font.bold: true
             font.family: Theme.fontFamily
@@ -36,10 +45,17 @@ Rectangle {
 
         Item { Layout.fillWidth: true }
 
+        Loader {
+            id: rightLoader
+            active: card.headerRightComponent !== null
+            sourceComponent: card.headerRightComponent
+            Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+        }
+
         Text {
-            visible: root.actionText.length > 0
-            text: root.actionText
-            color: "#2A7982"
+            visible: card.headerRightComponent === null && card.actionText.length > 0
+            text: card.actionText
+            color: Theme.colorAccentBlue
             font.pixelSize: 12
             font.bold: true
             font.family: Theme.fontFamily
@@ -47,7 +63,7 @@ Rectangle {
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
-                onClicked: root.actionClicked()
+                onClicked: card.actionClicked()
             }
         }
     }

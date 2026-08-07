@@ -17,15 +17,14 @@ QtObject {
 
     // ---- Live palette (bound by UI); defaults match glass (blueExtra) ----
     // Page bg matches sidebar so shell looks one continuous surface.
-    property color colorBg: "#eef7f5"
-    property color colorBgEnd: "#eef7f5"
-    property color colorCard: "#f7fbfa"
-    property color colorBorder: "#c5d9d5"
-    property color colorHeader: "#eef7f5"
-    property color colorSidebar: "#eef7f5"
-    /// Outer window chrome radius (0 when maximized). Concept mock uses ~28; keep a bit
-    /// tighter so Windows DWM still looks clean with the MultiEffect mask.
-    property int radiusWindow: 22
+    property color colorBg: "#dceeea"
+    property color colorBgEnd: "#dceeea"
+    property color colorCard: "#e7f3f1"
+    property color colorBorder: "#ffffff"
+    property color colorHeader: "#dceeea"
+    property color colorSidebar: "#dceeea"
+    /// Outer window chrome radius (0 when maximized). Tightened to 14 for clean DWM window corners.
+    property int radiusWindow: 14
     property color colorTableHeader: "#e2f0ed"
     property color colorTableRow: "#f7fbfa"
     property color colorTableAlt: "#eef6f4"
@@ -107,6 +106,14 @@ QtObject {
             previewText: "#1a2f2c"
         },
         {
+            id: "oceanBlue",
+            labelKey: "aegra.settings.theme.ocean_blue",
+            previewBg: "#EBF3FC",
+            previewCard: "#ECF3FD",
+            previewAccent: "#3B82F6",
+            previewText: "#1E293B"
+        },
+        {
             id: "dark",
             labelKey: "aegra.settings.theme.dark",
             previewBg: "#1e1e1e",
@@ -175,6 +182,62 @@ QtObject {
             radiusControl: 6,
             radiusMenu: 6,
             radiusButton: 6
+        },
+        "oceanBlue": {
+            // Coachwyse / Ocean Blue glass theme matching user image
+            colorBg: "#EBF3FC",
+            colorBgEnd: "#EBF3FC",
+            colorCard: "#ECF3FD",
+            colorBorder: "#ffffff",
+            colorHeader: "#EBF3FC",
+            colorSidebar: "#EBF3FC",
+            colorTableHeader: "#E0ECFD",
+            colorTableRow: "#ECF3FD",
+            colorTableAlt: "#F4F8FE",
+            colorPopup: "#ffffff",
+            colorInput: "#ffffff",
+            colorListItem: "#E3EDFB",
+            colorListItemAlt: "#ECF3FD",
+            colorAccentRed: "#E11D48",
+            colorAccentBlue: "#3B82F6",
+            colorGreen: "#10B981",
+            colorMenuActive: "#3A7BD5",
+            colorMenuActiveEnd: "#2E64D8",
+            colorMenuActiveText: "#ffffff",
+            colorMenuIdle: "#3B82F6",
+            colorMenuHoverText: "#2563EB",
+            colorMenuHoverBg: "#EBF2FE",
+            colorOnAccent: "#ffffff",
+            colorLinkHover: "#1D4ED8",
+            colorTextWhite: "#1E293B",
+            colorTextGrey: "#475569",
+            colorTextDim: "#64748B",
+            colorHover: "#EBF2FE",
+            colorHoverClose: "#E11D48",
+            colorButton: "#E0ECFD",
+            colorButtonHover: "#D0E2FC",
+            colorButtonDisabled: "#F1F5F9",
+            colorButtonDisabledText: "#94A3B8",
+            colorProgressTrack: "#E2E8F0",
+            colorCalendarMuted: "#94A3B8",
+            colorCalendarHasBackup: "#DBEAFE",
+            colorToastSuccessBg: "#ECFDF5",
+            colorToastSuccessBorder: "#10B981",
+            colorToastErrorBg: "#FEF2F2",
+            colorToastErrorBorder: "#EF4444",
+            colorScrim: "#66000000",
+            volumeColors: [
+                "#3B82F6", "#6366F1", "#0EA5E9", "#10B981",
+                "#EC4899", "#8B5CF6", "#14B8A6", "#F59E0B"
+            ],
+            colorVolumeText: "#1E293B",
+            colorUnallocated: "#E2E8F0",
+            colorUnallocatedHatch: "#CBD5E1",
+            colorUnallocatedText: "#64748B",
+            radiusCard: 18,
+            radiusControl: 10,
+            radiusMenu: 14,
+            radiusButton: 10
         },
         "blueExtra": {
             // Glass / CoachPro-inspired mint-teal (default product look)

@@ -9,7 +9,7 @@
     </message>
     <message id="aegra.nav.home">
         <source>Home</source>
-        <translation>概要</translation>
+        <translation>ホーム</translation>
     </message>
     <message id="aegra.nav.backup">
         <source>Backup</source>
@@ -46,18 +46,6 @@
     <message id="aegra.nav.expand_sidebar">
         <source>Expand menu</source>
         <translation>メニューを展開</translation>
-    </message>
-    <message id="aegra.shell.last_sync_just_now">
-        <source>Last sync · just now</source>
-        <translation>最終同期 · たった今</translation>
-    </message>
-    <message id="aegra.shell.service_offline">
-        <source>Service offline</source>
-        <translation>サービスオフライン</translation>
-    </message>
-    <message id="aegra.shell.service_running">
-        <source>Service is running</source>
-        <translation>サービス稼働中</translation>
     </message>
     <message id="aegra.shell.service_label">
         <source>Service %1</source>
@@ -589,6 +577,50 @@ Server: %1</source>
         <source>Add Schedule Wizard</source>
         <translation>スケジュール追加ウィザード</translation>
     </message>
+    <message id="aegra.backup.wizard.step.type">
+        <source>Protection type</source>
+        <translation>保護の種類</translation>
+    </message>
+    <message id="aegra.backup.wizard.step.source_dest">
+        <source>Source &amp; destination</source>
+        <translation>ソースと保存先</translation>
+    </message>
+    <message id="aegra.backup.wizard.step.options">
+        <source>Options &amp; schedule</source>
+        <translation>オプションとスケジュール</translation>
+    </message>
+    <message id="aegra.backup.wizard.type_title">
+        <source>Choose backup protection type</source>
+        <translation>バックアップ保護の種類を選択</translation>
+    </message>
+    <message id="aegra.backup.wizard.type_subtitle">
+        <source>Select block-level protection for full disks/volumes, or versioned protection for specific files and folders</source>
+        <translation>ディスク/ボリューム全体のブロックレベル保護、または特定ファイル/フォルダーのバージョン保護を選択します</translation>
+    </message>
+    <message id="aegra.backup.wizard.mode.disk_title">
+        <source>Disk / Volume backup</source>
+        <translation>Disk / Volume バックアップ</translation>
+    </message>
+    <message id="aegra.backup.wizard.mode.disk_desc">
+        <source>Full and incremental block-level backup of Windows system volumes, physical disks, and logical volumes (supports disaster recovery and full-disk restore).</source>
+        <translation>Windows システムボリューム、物理ディスク、論理ボリュームのフル/増分ブロックレベルバックアップ（災害復旧とディスク全体の復元に対応）。</translation>
+    </message>
+    <message id="aegra.backup.wizard.mode.disk_action">
+        <source>Choose Disk / Volume backup →</source>
+        <translation>Disk / Volume バックアップを選択 →</translation>
+    </message>
+    <message id="aegra.backup.wizard.mode.files_title">
+        <source>Files backup</source>
+        <translation>ファイルバックアップ</translation>
+    </message>
+    <message id="aegra.backup.wizard.mode.files_desc">
+        <source>Select documents, project folders, or data directories for continuous versioned protection and lightweight folder sync.</source>
+        <translation>特定のドキュメント、プロジェクトフォルダー、データディレクトリを選んで継続的なバージョン保護と軽量なフォルダー同期を行います。</translation>
+    </message>
+    <message id="aegra.backup.wizard.mode.files_action">
+        <source>Choose Files backup →</source>
+        <translation>ファイルバックアップを選択 →</translation>
+    </message>
     <message id="aegra.backup.column.destination">
         <source>Destination</source>
         <translation>保存先</translation>
@@ -788,6 +820,30 @@ Server: %1</source>
     <message id="aegra.backup.section.schedule">
         <source>Schedule</source>
         <translation>スケジュール</translation>
+    </message>
+    <message id="aegra.backup.stat.total_runs">
+        <source>Total backup runs</source>
+        <translation>累計バックアップ回数</translation>
+    </message>
+    <message id="aegra.backup.stat.total_runs_value">
+        <source>%1 runs</source>
+        <translation>%1 回</translation>
+    </message>
+    <message id="aegra.backup.stat.since_first">
+        <source>Since first backup</source>
+        <translation>初回バックアップから</translation>
+    </message>
+    <message id="aegra.backup.stat.since_first_value">
+        <source>%1 days</source>
+        <translation>%1 日</translation>
+    </message>
+    <message id="aegra.backup.stat.schedule_count">
+        <source>Scheduled tasks</source>
+        <translation>スケジュール数</translation>
+    </message>
+    <message id="aegra.backup.stat.schedule_count_value">
+        <source>%1 schedules</source>
+        <translation>%1 件</translation>
     </message>
     <message id="aegra.backup.section.credentials">
         <source>Credentials</source>
@@ -1249,90 +1305,6 @@ Server: %1</source>
         <source>Unmount</source>
         <translation>アンマウント</translation>
     </message>
-    <message id="aegra.mount.busy_loading">
-        <source>Mounting / unmounting...</source>
-        <translation>マウント/アンマウント中...</translation>
-    </message>
-    <message id="aegra.mount.disk_name">
-        <source>Disk %1</source>
-        <translation>ディスク %1</translation>
-    </message>
-    <message id="aegra.mount.state.mounting">
-        <source>Mounting</source>
-        <translation>マウント中</translation>
-    </message>
-    <message id="aegra.mount.state.mounted">
-        <source>Mounted</source>
-        <translation>マウント済み</translation>
-    </message>
-    <message id="aegra.mount.state.unmounting">
-        <source>Unmounting</source>
-        <translation>アンマウント中</translation>
-    </message>
-    <message id="aegra.mount.state.failed">
-        <source>Failed</source>
-        <translation>失敗</translation>
-    </message>
-    <message id="aegra.mount.capability_missing">
-        <source>Service does not support mount</source>
-        <translation>サービスはマウントに対応していません</translation>
-    </message>
-    <message id="aegra.mount.busy">
-        <source>A mount command is already in progress</source>
-        <translation>マウントコマンド実行中です</translation>
-    </message>
-    <message id="aegra.mount.select_required">
-        <source>Select a checkpoint and at least one source disk</source>
-        <translation>チェックポイントとソースディスクを選択してください</translation>
-    </message>
-    <message id="aegra.mount.invalid_drive_letter">
-        <source>Preferred drive letter must be a single letter A–Z</source>
-        <translation>希望のドライブレターは A–Z の1文字である必要があります</translation>
-    </message>
-    <message id="aegra.mount.select_session">
-        <source>Select a mounted session to unmount</source>
-        <translation>アンマウントするセッションを選択してください</translation>
-    </message>
-    <message id="aegra.mount.started">
-        <source>Mount started</source>
-        <translation>マウントを開始しました</translation>
-    </message>
-    <message id="aegra.mount.already_mounted_selection">
-        <source>Selected disk(s) are already mounted</source>
-        <translation>選択したディスクは既にマウントされています</translation>
-    </message>
-    <message id="aegra.mount.unmounted">
-        <source>Unmounted</source>
-        <translation>アンマウントしました</translation>
-    </message>
-    <message id="aegra.error.mount.command_failed">
-        <source>Mount command failed</source>
-        <translation>マウントコマンドに失敗しました</translation>
-    </message>
-    <message id="aegra.error.mount.list_failed">
-        <source>Failed to list mount sessions</source>
-        <translation>マウントセッション一覧の取得に失敗しました</translation>
-    </message>
-    <message id="aegra.error.mount.host_unavailable">
-        <source>Mount host is unavailable</source>
-        <translation>マウントホストを利用できません</translation>
-    </message>
-    <message id="aegra.error.mount.already_mounted">
-        <source>This disk is already mounted</source>
-        <translation>このディスクは既にマウントされています</translation>
-    </message>
-    <message id="aegra.error.mount.dokan_unavailable">
-        <source>Dokan driver is not available</source>
-        <translation>Dokan ドライバーを利用できません</translation>
-    </message>
-    <message id="aegra.error.mount.disk_not_found">
-        <source>Source disk was not found in the recovery point</source>
-        <translation>回復ポイントにソースディスクが見つかりません</translation>
-    </message>
-    <message id="aegra.error.mount.host_failed">
-        <source>Mount host failed</source>
-        <translation>マウントホストが失敗しました</translation>
-    </message>
     <message id="aegra.mount.checkpoint_panel_empty">
         <source>Recovery point list will appear when mount Service APIs are connected</source>
         <translation>マウント Service API 接続後に回復ポイント一覧が表示されます</translation>
@@ -1410,8 +1382,8 @@ Server: %1</source>
         <translation>デスクトップクライアントの配色テーマを選択します</translation>
     </message>
     <message id="aegra.settings.theme.blue_extra">
-        <source>Glass</source>
-        <translation>グラス</translation>
+        <source>Blue Extra</source>
+        <translation>ブルー Extra</translation>
     </message>
     <message id="aegra.settings.theme.dark">
         <source>Dark</source>

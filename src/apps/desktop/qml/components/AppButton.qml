@@ -7,6 +7,7 @@ Button {
     id: root
     property bool primary: false
     property bool danger: false
+    property bool borderVisible: true
 
     implicitHeight: 32
     implicitWidth: Math.max(90, contentItem.implicitWidth + 24)
@@ -32,7 +33,7 @@ Button {
 
     background: Rectangle {
         radius: Theme.radiusButton
-        border.width: root.primary || root.danger ? 0 : 1
+        border.width: (root.primary || root.danger || !root.borderVisible) ? 0 : 1
         border.color: {
             if (!root.enabled)
                 return Theme.colorBorder
@@ -50,5 +51,11 @@ Button {
             return root.hovered ? Theme.colorButtonHover : Theme.colorButton
         }
         opacity: root.enabled ? 1.0 : 0.55
+
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.clicked()
+        }
     }
 }

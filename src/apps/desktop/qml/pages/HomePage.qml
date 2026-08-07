@@ -81,14 +81,14 @@ Item {
                     Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
                     Text {
                         text: "系统服务运行中 · 本地管理员 🖐️"
-                        color: "#2A7982"
+                        color: Theme.colorAccentBlue
                         font.pixelSize: 12
                         font.bold: true
                         font.family: Theme.fontFamily
                     }
                     Text {
                         text: "Dashboard"
-                        color: "#111111"
+                        color: Theme.colorTextWhite
                         font.pixelSize: 30
                         font.bold: true
                         font.family: Theme.fontFamily
@@ -782,8 +782,8 @@ Item {
                         radius: 20
                         gradient: Gradient {
                             orientation: Gradient.Horizontal
-                            GradientStop { position: 0.0; color: "#1C525A" }
-                            GradientStop { position: 1.0; color: "#154249" }
+                            GradientStop { position: 0.0; color: Theme.colorMenuActive }
+                            GradientStop { position: 1.0; color: Theme.colorMenuActiveEnd }
                         }
 
                         opacity: root.animStage5 ? 1 : 0
@@ -803,7 +803,7 @@ Item {
 
                             Text {
                                 text: "数据安全提醒"
-                                color: "#89D8CF"
+                                color: "#A5C7F9"
                                 font.pixelSize: 10
                                 font.bold: true
                                 font.letterSpacing: 0.8
@@ -825,7 +825,7 @@ Item {
                                 Text {
                                     anchors.centerIn: parent
                                     text: "前往新建备份计划"
-                                    color: "#154249"
+                                    color: Theme.colorMenuActiveEnd
                                     font.pixelSize: 11
                                     font.bold: true
                                     font.family: Theme.fontFamily

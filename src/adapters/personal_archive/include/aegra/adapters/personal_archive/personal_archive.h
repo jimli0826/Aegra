@@ -4,6 +4,7 @@
 #include "aegra/format/manifest.h"
 #include "aegra/format/personal_archive_sidecar.h"
 #include "aegra/ports/backup_session.h"
+#include "aegra/ports/random_access.h"
 
 #include <array>
 #include <cstddef>
@@ -171,6 +172,36 @@ class PersonalArchiveVolumeReader final : public ports::IRecoveryPointReader {
   private:
     struct Impl;
     explicit PersonalArchiveVolumeReader(std::unique_ptr<Impl> implementation) noexcept;
+
+    std::unique_ptr<Impl> implementation_;
+};
+
+// Presents one source disk as a linear image for mount:
+// zero-filled holes + volume extents + raw partition-table overlay.
+// Does not modify the underlying recovery-point reader.
+class WholeDiskByteReader final : public ports::IRandomAccessReader {
+  public:
+    ~WholeDiskByteReader() override;
+    WholeDiskByteReader(const WholeDiskByteReader&) = delete;
+    WholeDiskByteReader& operator=(const WholeDiskByteReader&) = delete;
+    WholeDiskByteReader(WholeDiskByteReader&&) = delete;
+    WholeDiskByteReader& operator=(WholeDiskByteReader&&) = delete;
+
+    [[nodiscard]] static base::Result<std::unique_ptr<WholeDiskByteReader>>
+    open(ports::IRecoveryPointReader& inner, const format::Manifest& manifest,
+         std::uint32_t source_disk_number);
+
+    [[nodiscard]] std::uint64_t size_bytes() const noexcept override;
+    [[nodiscard]] base::Result<std::size_t>
+    read_at(std::uint64_t offset, std::span<std::byte> destination,
+            base::CancellationToken cancellation) override;
+
+    [[nodiscard]] std::uint32_t source_disk_number() const noexcept;
+    [[nodiscard]] const format::Disk& disk() const noexcept;
+
+  private:
+    struct Impl;
+    explicit WholeDiskByteReader(std::unique_ptr<Impl> implementation) noexcept;
 
     std::unique_ptr<Impl> implementation_;
 };

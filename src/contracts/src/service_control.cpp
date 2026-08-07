@@ -338,10 +338,15 @@ base::Result<void> validate_mount_session_list_request(const MountSessionListReq
 }
 
 base::Result<void> validate_mount_session_summary(const MountSessionSummary& summary) {
+    // mount_point may be empty while mounting or when no drive letter was assigned yet.
     if (!valid_stable_value(summary.session_id, kMaximumIdentifierBytes) ||
         !valid_stable_value(summary.recovery_point_id, kMaximumIdentifierBytes) ||
         !known_mount_state(summary.state) ||
-        !valid_text(summary.mount_point, kMaximumMountPointBytes) ||
+        summary.mount_point.size() > kMaximumMountPointBytes ||
+        (!summary.mount_point.empty() &&
+         !valid_text(summary.mount_point, kMaximumMountPointBytes)) ||
+        !valid_wire_integer(summary.source_disk_number) ||
+        !valid_wire_integer(summary.disk_size_bytes) ||
         !valid_wire_integer(summary.started_utc_ms) ||
         !valid_stable_value(summary.message_code, kMaximumMessageCodeBytes)) {
         return invalid("mount session summary is invalid");
@@ -429,7 +434,10 @@ base::Result<void> validate_start_restore_command(const StartRestoreCommand& com
 }
 
 base::Result<void> validate_mount_recovery_point_command(const MountRecoveryPointCommand& command) {
-    if (!valid_stable_value(command.recovery_point_id, kMaximumIdentifierBytes)) {
+    constexpr std::size_t kMaximumArchivePasswordBytes = 32;
+    if (!valid_stable_value(command.repository_connection_id, kMaximumIdentifierBytes) ||
+        !valid_stable_value(command.recovery_point_id, kMaximumIdentifierBytes) ||
+        command.archive_password.size() > kMaximumArchivePasswordBytes) {
         return invalid("mount recovery point command is invalid");
     }
     if (command.preferred_drive_letter && (command.preferred_drive_letter->size() != 1 ||

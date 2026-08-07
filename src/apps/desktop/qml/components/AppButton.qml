@@ -14,7 +14,13 @@ Button {
 
     contentItem: Text {
         text: root.text
-        color: Theme.colorTextWhite
+        color: {
+            if (!root.enabled)
+                return Theme.colorButtonDisabledText
+            if (root.primary || root.danger)
+                return Theme.colorOnAccent
+            return Theme.colorTextWhite
+        }
         font.family: Theme.fontFamily
         font.pixelSize: 12
         font.bold: root.primary || root.danger
@@ -25,8 +31,8 @@ Button {
     }
 
     background: Rectangle {
-        radius: 4
-        border.width: 1
+        radius: Theme.radiusButton
+        border.width: root.primary || root.danger ? 0 : 1
         border.color: {
             if (!root.enabled)
                 return Theme.colorBorder
@@ -36,13 +42,13 @@ Button {
         }
         color: {
             if (!root.enabled)
-                return Theme.colorInput
+                return Theme.colorButtonDisabled
             if (root.danger)
                 return root.hovered ? "#e03333" : "#cc3333"
             if (root.primary)
-                return root.hovered ? Theme.colorButtonHover : Theme.colorAccentBlue
+                return root.hovered ? Theme.colorLinkHover : Theme.colorAccentBlue
             return root.hovered ? Theme.colorButtonHover : Theme.colorButton
         }
-        opacity: root.enabled ? 1.0 : 0.45
+        opacity: root.enabled ? 1.0 : 0.55
     }
 }

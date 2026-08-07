@@ -165,8 +165,8 @@ Makefile、`release/` 生成物和 `.bak` 文件全部禁止迁移。
 | S6  | 等待前置 | P2   | Restore 编排                 | preflight、目标检查、任务监督、结果查询                                | S3, S5         |
 | D4  | 等待前置 | P2   | Restore 页面                 | recovery point、链、目标、确认、进度                               | D0, D1, S6     |
 | D5  | 等待前置 | P2   | Repository 管理              | add/import/test/default/delete/verify actions           | D0, D1, S4, S5 |
-| S7  | 等待前置 | P3   | Mount Host 编排              | mounted session、unmount、崩溃清理                            | S3, S5         |
-| D6  | 等待前置 | P3   | Mount 页面                   | mount/unmount/session table                             | D0, D1, S7     |
+| S7  | 进行中   | P3   | Mount Host 编排              | mounted session、unmount、崩溃清理                            | S3, S5         |
+| D6  | 进行中   | P3   | Mount 页面                   | mount/unmount/session table                             | D0, D1, S7     |
 | S8  | 可开始  | P3   | Schedule 与 Event/Audit     | trigger engine、history、paged queries                    | S2, S3         |
 | D7  | 等待前置 | P3   | Event Log 页面               | filter、分页、详情、导出入口                                       | D0, D1, S8     |
 | D8  | 可开始  | P3   | Settings 页面                | language、theme、service/repository settings              | D0, D1, S1, S4 |
@@ -583,11 +583,12 @@ composition/capability；未完成 Release 构建或隔离非系统卷人工 Res
 
 ### S7 / D6：Mount
 
-**状态：S7 等待前置 S3、S5；D6 等待前置 S7。**
+**状态：S7/D6 实现中（MVP 接线完成，待人工挂载验收）。**
 
-- 新增隔离 Mount Host 与 Service supervisor，Service 维护 mounted session 的权威状态。
-- crash、用户注销、Service 停止和强制 unmount 都必须清理挂载点；Desktop 不直接调用 Dokan。
-- Mount 页面展示 recovery point、挂载点、只读状态、开始时间和 unmount 结果。
+- 隔离 `aegra_mount_host` + Service `MountSupervisor`；会话权威状态在 Service 内存表。
+- Desktop 不直接调用 Dokan；经 kinds 8/41/42 与 `mount.list|start|unmount` 能力。
+- Mount 页面：checkpoint → layout 源盘勾选 → mount/unmount；会话表展示挂载点、状态、开始时间。
+- 待验收：Dokan 可用环境整盘只读、强制 unmount、Service 停止清理 overlay、加密 Archive 口令路径。
 
 ### S8 / D7：Schedule 与 Event Log
 

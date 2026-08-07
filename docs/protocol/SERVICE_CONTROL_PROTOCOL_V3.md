@@ -684,9 +684,21 @@
 
 **成功 payload：** 通用列表页。
 
-**`MountSessionSummary`（6 字段）：**
+**`MountSessionSummary`（8 字段）：**
 
-`session_id`, `recovery_point_id`, `state`, `mount_point`, `started_utc_ms`, `message_code`
+`session_id`, `recovery_point_id`, `state`, `mount_point`, `source_disk_number`,
+`disk_size_bytes`, `started_utc_ms`, `message_code`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `session_id` | string | 稳定 id（如 `mount-` + hex） |
+| `recovery_point_id` | string | 恢复点 id |
+| `state` | number | MountSessionState |
+| `mount_point` | string | 盘符列表展示，如 `H:` 或 `H: I:`；尚未分配时可为空 |
+| `source_disk_number` | uint32 | Manifest 源盘号 |
+| `disk_size_bytes` | uint64 | 源盘/数据大小（字节） |
+| `started_utc_ms` | uint64 | 会话开始时间 |
+| `message_code` | string | 状态消息码 |
 
 ---
 
@@ -1056,12 +1068,15 @@ Service 展开：`source_ids`、`repository_connection_id`、`exclude_page_and_h
 
 **用途：** 挂载恢复点只读会话（Dokan 等由 Service/Mount Host 处理）。
 
-**请求 payload（2 字段）：**
+**请求 payload（5 字段）：**
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
+| `repository_connection_id` | string | |
 | `recovery_point_id` | string | |
-| `preferred_drive_letter` | string \| null | 单字母 `"D"`–`"Z"` 或 null |
+| `source_disk_number` | uint32 | Manifest `disk_number` |
+| `preferred_drive_letter` | string \| null | 单字母 `"D"`–`"Z"` 或 null（自动选空闲盘符） |
+| `archive_password` | string | 加密 Archive 密码；未加密 `""`；不记日志 |
 
 ---
 

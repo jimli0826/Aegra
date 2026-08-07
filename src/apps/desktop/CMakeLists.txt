@@ -18,6 +18,7 @@ set(AEGRA_DESKTOP_SOURCES
     src/client/service_request_coordinator.cpp
     src/client/service_request_coordinator.h
     src/client/service_client_backup.cpp
+    src/client/service_client_mount.cpp
     src/client/service_client_repository.cpp
     src/client/service_client_restore.cpp
     src/client/service_client_schedule.cpp
@@ -90,5 +91,9 @@ target_link_libraries(
         Qt6::Quick
         Qt6::QuickControls2
 )
+
+if(WIN32)
+    target_link_libraries(aegra_desktop PRIVATE dwmapi)
+endif()
 
 aegra_configure_target(aegra_desktop)

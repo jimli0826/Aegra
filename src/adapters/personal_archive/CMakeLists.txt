@@ -8,6 +8,7 @@ add_library(aegra_adapter_personal_archive STATIC
     src/personal_archive_session.cpp
     src/personal_archive_shape_validation.cpp
     src/personal_archive_sidecar_io.cpp
+    src/whole_disk_byte_reader.cpp
 )
 
 add_library(Aegra::AdapterPersonalArchive ALIAS aegra_adapter_personal_archive)

@@ -1,0 +1,1479 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CoachPro / Aegra Modern Dashboard UI Concept</title>
+  
+  <!-- Google Fonts: Plus Jakarta Sans & Outfit -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+
+  <style>
+    :root {
+      --bg-gradient: linear-gradient(135deg, #CDE2DE 0%, #DBE7E4 35%, #CCD2EB 100%);
+      --app-bg: rgba(235, 245, 243, 0.88);
+      --card-bg: rgba(255, 255, 255, 0.78);
+      --card-border: rgba(255, 255, 255, 0.95);
+      --text-dark: #1A2E2B;
+      --text-muted: #64827E;
+      --text-light-muted: #8CA7A3;
+      --primary-teal: #2A7982;
+      --primary-teal-dark: #1E5C64;
+      --primary-teal-light: #48A3AC;
+      --accent-pink: #EE6877;
+      --accent-violet: #8E54FF;
+      --accent-orange: #FF8008;
+      --accent-mint: #82CBB9;
+      --shadow-app: 0 30px 80px rgba(25, 60, 55, 0.14), inset 0 1.5px 0.5px rgba(255, 255, 255, 0.95);
+      --shadow-card: 0 14px 32px rgba(30, 75, 70, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+      --shadow-button: 0 8px 20px rgba(42, 121, 130, 0.25);
+      --radius-app: 28px;
+      --radius-card: 20px;
+      --radius-pill: 9999px;
+      --transition-smooth: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: var(--text-dark);
+      overflow-x: hidden;
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg-gradient);
+      padding: 24px;
+      position: relative;
+    }
+
+    /* Ambient Background Glow Effects */
+    body::before {
+      content: "";
+      position: absolute;
+      top: 5%;
+      right: 8%;
+      width: 500px;
+      height: 500px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(185, 175, 235, 0.5) 0%, rgba(185, 175, 235, 0) 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    body::after {
+      content: "";
+      position: absolute;
+      bottom: 5%;
+      left: 10%;
+      width: 550px;
+      height: 550px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(170, 225, 210, 0.55) 0%, rgba(170, 225, 210, 0) 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* Main App Layout Shell */
+    .app-shell {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 1340px;
+      height: calc(100vh - 48px);
+      max-height: 860px;
+      min-height: 720px;
+      background: var(--app-bg);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border-radius: var(--radius-app);
+      border: 1px solid rgba(255, 255, 255, 0.85);
+      box-shadow: var(--shadow-app);
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      overflow: hidden;
+      animation: appEntrance 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    /* Sidebar Navigation */
+    .sidebar {
+      padding: 32px 22px 24px 28px;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid rgba(200, 220, 215, 0.5);
+      background: rgba(240, 248, 246, 0.4);
+    }
+
+    .brand-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 36px;
+    }
+
+    .brand-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--text-dark);
+      letter-spacing: -0.5px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .mode-switch-badge {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: var(--radius-pill);
+      background: rgba(42, 121, 130, 0.12);
+      color: var(--primary-teal);
+      cursor: pointer;
+      transition: var(--transition-smooth);
+    }
+
+    .mode-switch-badge:hover {
+      background: var(--primary-teal);
+      color: #fff;
+      transform: scale(1.05);
+    }
+
+    .nav-menu {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .nav-item {
+      height: 48px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 0 16px;
+      border-radius: 14px;
+      color: #557773;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: var(--transition-smooth);
+      text-decoration: none;
+    }
+
+    .nav-item i {
+      width: 20px;
+      height: 20px;
+      stroke-width: 2.2;
+      transition: var(--transition-smooth);
+    }
+
+    .nav-item:hover {
+      color: var(--primary-teal);
+      background: rgba(42, 121, 130, 0.08);
+      transform: translateX(4px);
+    }
+
+    .nav-item.active {
+      color: #FFFFFF;
+      background: linear-gradient(135deg, var(--primary-teal) 0%, var(--primary-teal-dark) 100%);
+      box-shadow: var(--shadow-button);
+    }
+
+    .nav-item.active i {
+      color: #FFFFFF;
+    }
+
+    /* Main Content Area */
+    .main-area {
+      padding: 32px 38px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Top Bar */
+    .topbar {
+      display: flex;
+      align-items: flex-center;
+      justify-content: space-between;
+      margin-bottom: 28px;
+    }
+
+    .topbar-left .greeting {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--primary-teal);
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .topbar-left .page-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 38px;
+      font-weight: 700;
+      color: var(--text-dark);
+      letter-spacing: -0.8px;
+      line-height: 1.1;
+    }
+
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .icon-btn {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0.9);
+      background: rgba(255, 255, 255, 0.65);
+      color: #4A6E69;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      transition: var(--transition-smooth);
+      position: relative;
+    }
+
+    .icon-btn:hover {
+      background: #FFFFFF;
+      color: var(--primary-teal);
+      transform: translateY(-3px) scale(1.05);
+      box-shadow: 0 8px 18px rgba(0, 0, 0, 0.08);
+    }
+
+    .icon-btn i {
+      width: 19px;
+      height: 19px;
+      stroke-width: 2.2;
+    }
+
+    .notification-dot {
+      position: absolute;
+      top: 10px;
+      right: 11px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent-pink);
+      border: 2px solid #FFF;
+      animation: pulseDot 2s infinite;
+    }
+
+    @keyframes pulseDot {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.3); opacity: 0.8; }
+    }
+
+    .user-profile {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-left: 6px;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: var(--radius-pill);
+      transition: var(--transition-smooth);
+    }
+
+    .user-profile:hover {
+      background: rgba(255, 255, 255, 0.6);
+      transform: translateY(-1px);
+    }
+
+    .user-avatar {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 2px solid #FFFFFF;
+      box-shadow: 0 6px 14px rgba(42, 121, 130, 0.18);
+    }
+
+    .user-info {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .user-name {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-dark);
+      line-height: 1.2;
+    }
+
+    /* Dashboard Main Grid Layout */
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(430px, 0.95fr);
+      gap: 22px;
+      flex: 1;
+    }
+
+    .grid-col {
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+
+    /* =========================================
+       CARD & WIDGET ENTRANCE ANIMATIONS
+       ========================================= */
+
+    @keyframes cardSlideUp {
+      0% {
+        opacity: 0;
+        transform: translateY(32px) scale(0.95);
+        filter: blur(4px);
+      }
+      60% {
+        opacity: 0.95;
+        transform: translateY(-3px) scale(1.01);
+        filter: blur(0px);
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        filter: blur(0px);
+      }
+    }
+
+    @keyframes iconPopIn {
+      0% {
+        opacity: 0;
+        transform: scale(0.3) rotate(-18deg);
+      }
+      70% {
+        transform: scale(1.15) rotate(6deg);
+      }
+      100% {
+        opacity: 1;
+        transform: scale(1) rotate(0deg);
+      }
+    }
+
+    @keyframes progressGrow {
+      from { width: 0%; }
+    }
+
+    @keyframes rowFadeIn {
+      from {
+        opacity: 0;
+        transform: translateX(-12px);
+      }
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    @keyframes appEntrance {
+      from {
+        opacity: 0;
+        transform: scale(0.97) translateY(16px);
+      }
+      to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+      }
+    }
+
+    /* Card Base */
+    .card {
+      background: var(--card-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-card);
+      padding: 22px 24px;
+      box-shadow: var(--shadow-card);
+      transition: var(--transition-smooth);
+      position: relative;
+      opacity: 0; /* Animated in via JS or class */
+      transform: translateY(32px);
+    }
+
+    .card.animate-enter {
+      animation: cardSlideUp 0.65s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    }
+
+    .card:hover {
+      transform: translateY(-5px) scale(1.01);
+      box-shadow: 0 20px 42px rgba(30, 75, 70, 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+
+    .card-title {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-dark);
+    }
+
+    .card-action {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--primary-teal);
+      text-decoration: none;
+      transition: var(--transition-smooth);
+      cursor: pointer;
+    }
+
+    .card-action:hover {
+      color: var(--primary-teal-dark);
+      text-decoration: underline;
+    }
+
+    /* Card 1: Next Game */
+    .next-game-card {
+      padding-bottom: 24px;
+    }
+
+    .match-meta {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      margin-bottom: 22px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    .league-badge {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--primary-teal);
+      font-weight: 700;
+    }
+
+    .league-badge i {
+      width: 15px;
+      height: 15px;
+    }
+
+    .match-display {
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      padding: 10px 16px;
+    }
+
+    .team-box {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .team-badge {
+      width: 58px;
+      height: 58px;
+      background: #FFFFFF;
+      border-radius: 16px;
+      display: grid;
+      place-items: center;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.05);
+      border: 1px solid rgba(230, 240, 238, 0.8);
+      transition: var(--transition-smooth);
+    }
+
+    .team-badge:hover {
+      transform: scale(1.08) rotate(3deg);
+    }
+
+    .team-badge svg {
+      width: 36px;
+      height: 36px;
+    }
+
+    .team-name {
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--text-dark);
+    }
+
+    .vs-circle {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #FF7B8B 0%, #EE6476 100%);
+      color: #FFFFFF;
+      font-family: 'Outfit', sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+      display: grid;
+      place-items: center;
+      box-shadow: 0 6px 16px rgba(238, 100, 118, 0.35);
+      transition: var(--transition-smooth);
+    }
+
+    .vs-circle:hover {
+      transform: scale(1.15) rotate(10deg);
+    }
+
+    /* Card 2: Standings Table */
+    .standings-card {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .standings-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .standings-table th {
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--text-light-muted);
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      text-align: center;
+      padding: 0 6px 14px 6px;
+    }
+
+    .standings-table th.col-team {
+      text-align: left;
+      padding-left: 12px;
+    }
+
+    .standings-table td {
+      padding: 11px 6px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-align: center;
+      border-top: 1px solid rgba(220, 235, 232, 0.6);
+      transition: background 0.2s ease;
+    }
+
+    .standings-table tr {
+      opacity: 0;
+      animation: rowFadeIn 0.4s ease forwards;
+    }
+
+    .standings-table tr:nth-child(1) { animation-delay: 0.25s; }
+    .standings-table tr:nth-child(2) { animation-delay: 0.30s; }
+    .standings-table tr:nth-child(3) { animation-delay: 0.35s; }
+    .standings-table tr:nth-child(4) { animation-delay: 0.40s; }
+    .standings-table tr:nth-child(5) { animation-delay: 0.45s; }
+    .standings-table tr:nth-child(6) { animation-delay: 0.50s; }
+
+    .standings-table tr:hover td {
+      background: rgba(255, 255, 255, 0.65);
+    }
+
+    .standings-table td.rank-cell {
+      font-weight: 700;
+      color: var(--text-light-muted);
+      width: 24px;
+    }
+
+    .standings-table td.team-cell {
+      text-align: left;
+      padding-left: 12px;
+    }
+
+    .team-cell-content {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .mini-badge {
+      width: 26px;
+      height: 26px;
+      border-radius: 8px;
+      background: #FFFFFF;
+      display: grid;
+      place-items: center;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+      transition: transform 0.2s ease;
+    }
+
+    .standings-table tr:hover .mini-badge {
+      transform: scale(1.15);
+    }
+
+    .mini-badge svg {
+      width: 17px;
+      height: 17px;
+    }
+
+    .team-cell-name {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-dark);
+    }
+
+    .pts-cell {
+      font-weight: 800 !important;
+      color: var(--text-dark) !important;
+      font-size: 14px !important;
+    }
+
+    /* Card 3: Games Statistic */
+    .games-stat-card {
+      padding-bottom: 24px;
+    }
+
+    .stat-progress-bar {
+      height: 10px;
+      border-radius: 6px;
+      background: #E0EFEF;
+      display: flex;
+      overflow: hidden;
+      margin: 16px 0 24px;
+    }
+
+    .stat-seg {
+      height: 100%;
+      width: 0%;
+      transition: width 1s cubic-bezier(0.34, 1.25, 0.64, 1);
+    }
+
+    .stat-seg.victories {
+      background: var(--primary-teal);
+    }
+
+    .stat-seg.draws {
+      background: #84CBB8;
+    }
+
+    .stat-seg.lost {
+      background: var(--accent-pink);
+    }
+
+    .stat-metrics-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      text-align: center;
+    }
+
+    .stat-metric-item small {
+      display: block;
+      font-size: 10px;
+      font-weight: 800;
+      color: var(--text-light-muted);
+      letter-spacing: 0.8px;
+      margin-bottom: 6px;
+    }
+
+    .stat-metric-item strong {
+      font-family: 'Outfit', sans-serif;
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text-dark);
+      display: inline-block;
+      transition: transform 0.3s ease;
+    }
+
+    .stat-metric-item:hover strong {
+      transform: scale(1.15);
+      color: var(--primary-teal);
+    }
+
+    /* 2x2 Metric Cards Grid */
+    .metric-cards-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .mini-metric-card {
+      padding: 18px 20px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .metric-icon-box {
+      width: 48px;
+      height: 48px;
+      border-radius: 15px;
+      display: grid;
+      place-items: center;
+      color: #FFFFFF;
+      box-shadow: 0 8px 18px rgba(0, 0, 0, 0.08);
+      flex-shrink: 0;
+      transition: var(--transition-smooth);
+    }
+
+    .mini-metric-card.animate-enter .metric-icon-box {
+      animation: iconPopIn 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    }
+
+    .mini-metric-card:hover .metric-icon-box {
+      transform: scale(1.12) rotate(6deg);
+    }
+
+    .metric-icon-box i {
+      width: 22px;
+      height: 22px;
+      stroke-width: 2.2;
+    }
+
+    .metric-icon-box.violet {
+      background: linear-gradient(135deg, #A882FF 0%, var(--accent-violet) 100%);
+    }
+
+    .metric-icon-box.pink {
+      background: linear-gradient(135deg, #FF7BBF 0%, #F53C95 100%);
+    }
+
+    .metric-icon-box.orange {
+      background: linear-gradient(135deg, #FFB247 0%, var(--accent-orange) 100%);
+    }
+
+    .metric-icon-box.teal {
+      background: linear-gradient(135deg, #42E6B5 0%, #17937A 100%);
+    }
+
+    .metric-info small {
+      display: block;
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--text-light-muted);
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    .metric-info strong {
+      font-family: 'Outfit', sans-serif;
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--text-dark);
+      letter-spacing: -0.3px;
+      display: inline-block;
+      transition: transform 0.25s ease;
+    }
+
+    .mini-metric-card:hover .metric-info strong {
+      transform: translateX(2px) scale(1.04);
+    }
+
+    /* Card 4: Action Banner Card */
+    .banner-card {
+      background: linear-gradient(135deg, #226D75 0%, #1A545B 100%);
+      border: none;
+      color: #FFFFFF;
+      padding: 24px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .banner-content {
+      max-width: 240px;
+      z-index: 2;
+    }
+
+    .banner-tag {
+      font-size: 11px;
+      font-weight: 800;
+      color: #A3ECE4;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .banner-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 22px;
+      font-weight: 700;
+      line-height: 1.25;
+      margin-bottom: 18px;
+    }
+
+    .banner-btn {
+      padding: 10px 20px;
+      border-radius: var(--radius-pill);
+      border: none;
+      background: #FFFFFF;
+      color: var(--primary-teal-dark);
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: var(--transition-smooth);
+      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+    }
+
+    .banner-btn:hover {
+      background: #F0FAF8;
+      transform: translateY(-3px) scale(1.04);
+      box-shadow: 0 12px 24px rgba(0, 0, 0, 0.2);
+    }
+
+    .banner-art {
+      position: absolute;
+      right: 0;
+      top: 0;
+      bottom: 0;
+      width: 220px;
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    .banner-art img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0.85;
+      mix-blend-mode: luminosity;
+      mask-image: linear-gradient(to left, rgba(0,0,0,1) 50%, rgba(0,0,0,0) 100%);
+      -webkit-mask-image: linear-gradient(to left, rgba(0,0,0,1) 50%, rgba(0,0,0,0) 100%);
+      transition: transform 0.5s ease;
+    }
+
+    .banner-card:hover .banner-art img {
+      transform: scale(1.08) rotate(-1deg);
+    }
+
+    /* Modal / Tooltip Quick Interactivity */
+    .toast-notice {
+      position: fixed;
+      bottom: 30px;
+      right: 30px;
+      background: #182C29;
+      color: #FFF;
+      padding: 12px 20px;
+      border-radius: 14px;
+      font-size: 13px;
+      font-weight: 600;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      opacity: 0;
+      transform: translateY(20px);
+      transition: var(--transition-smooth);
+      pointer-events: none;
+      z-index: 100;
+    }
+
+    .toast-notice.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* Responsive Adaptation */
+    @media (max-width: 1100px) {
+      .app-shell {
+        grid-template-columns: 80px 1fr;
+      }
+      .sidebar {
+        padding: 24px 12px;
+        align-items: center;
+      }
+      .brand-title span, .nav-item span, .mode-switch-badge {
+        display: none;
+      }
+      .nav-item {
+        justify-content: center;
+        padding: 0;
+      }
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Main Application Shell -->
+  <div class="app-shell">
+    
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="brand-header">
+        <div class="brand-title" id="appBrand">
+          <span>CoachPro</span>
+        </div>
+        <div class="mode-switch-badge" id="modeSwitcher" title="切换模式：CoachPro 足球教练 / Aegra 备份系统">
+          <i data-lucide="repeat" style="width: 12px; height: 12px; display: inline-block; vertical-align: middle;"></i> Switch
+        </div>
+      </div>
+
+      <nav class="nav-menu" id="navMenu">
+        <a class="nav-item active" data-tab="dashboard">
+          <i data-lucide="layout-grid"></i>
+          <span>Dashboard</span>
+        </a>
+        <a class="nav-item" data-tab="squad">
+          <i data-lucide="users"></i>
+          <span id="tabSquadLabel">Squad</span>
+        </a>
+        <a class="nav-item" data-tab="messenger">
+          <i data-lucide="message-square"></i>
+          <span id="tabMessengerLabel">Messenger</span>
+        </a>
+        <a class="nav-item" data-tab="statistic">
+          <i data-lucide="bar-chart-3"></i>
+          <span>Statistic</span>
+        </a>
+        <a class="nav-item" data-tab="calendar">
+          <i data-lucide="calendar"></i>
+          <span>Calendar</span>
+        </a>
+        <a class="nav-item" data-tab="finance">
+          <i data-lucide="wallet"></i>
+          <span id="tabFinanceLabel">Finance</span>
+        </a>
+        <a class="nav-item" data-tab="transfers">
+          <i data-lucide="arrow-left-right"></i>
+          <span id="tabTransfersLabel">Transfers</span>
+        </a>
+        <a class="nav-item" data-tab="youth">
+          <i data-lucide="line-chart"></i>
+          <span id="tabYouthLabel">Youth academy</span>
+        </a>
+      </nav>
+    </aside>
+
+    <!-- Main Content View -->
+    <main class="main-area">
+      
+      <!-- Top Bar Header -->
+      <header class="topbar">
+        <div class="topbar-left">
+          <div class="greeting">Welcome back, Andrea 👋</div>
+          <h1 class="page-title" id="pageTitle">Dashboard</h1>
+        </div>
+
+        <div class="topbar-right">
+          <button class="icon-btn" id="searchBtn" title="Search">
+            <i data-lucide="search"></i>
+          </button>
+          <button class="icon-btn" id="notifyBtn" title="Notifications">
+            <i data-lucide="bell"></i>
+            <span class="notification-dot"></span>
+          </button>
+          <div class="user-profile" id="userProfile">
+            <img src="assets/avatar.jpg" alt="Andrea Pirlo" class="user-avatar">
+            <div class="user-info">
+              <span class="user-name">Andrea Pirlo</span>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- Dashboard Main Cards Grid -->
+      <div class="dashboard-grid" id="dashboardContent">
+        
+        <!-- Left Column -->
+        <div class="grid-col">
+          
+          <!-- Card 1: Next Game / Next Backup -->
+          <article class="card next-game-card" data-delay="100">
+            <div class="card-header">
+              <h2 class="card-title" id="card1Title">Next game</h2>
+              <a href="#" class="card-action" id="card1Action">View calendar</a>
+            </div>
+            
+            <div class="match-meta">
+              <span class="league-badge" id="card1Badge"><i data-lucide="trophy"></i> Serie A</span>
+              <span id="card1Time">21:00, 11 November, 2020</span>
+            </div>
+
+            <div class="match-display" id="card1Display">
+              <!-- Team 1 -->
+              <div class="team-box">
+                <div class="team-badge">
+                  <!-- Juventus Logo SVG -->
+                  <svg viewBox="0 0 32 32" fill="none">
+                    <rect width="32" height="32" rx="8" fill="#F8F8F8"/>
+                    <path d="M12 7H16V21C16 23.2 14.2 25 12 25H11V21H12V7Z" fill="#111111"/>
+                    <path d="M19 7H23V21C23 23.2 21.2 25 19 25H18V21H19V7Z" fill="#111111"/>
+                  </svg>
+                </div>
+                <span class="team-name" id="team1Name">Juventus</span>
+              </div>
+
+              <!-- VS Badge -->
+              <div class="vs-circle" id="vsBadge">VS</div>
+
+              <!-- Team 2 -->
+              <div class="team-box">
+                <div class="team-badge">
+                  <!-- Sassuolo Logo SVG -->
+                  <svg viewBox="0 0 32 32" fill="none">
+                    <rect width="32" height="32" rx="8" fill="#EBF7F3"/>
+                    <path d="M7 8H25V18C25 22.4 21.4 26 17 26H15C10.6 26 7 22.4 7 18V8Z" fill="#00864B"/>
+                    <circle cx="16" cy="17" r="4" fill="#FFFFFF"/>
+                  </svg>
+                </div>
+                <span class="team-name" id="team2Name">Sassuolo</span>
+              </div>
+            </div>
+          </article>
+
+          <!-- Card 2: Standings / Backup Vaults Table -->
+          <article class="card standings-card" data-delay="200">
+            <div class="card-header">
+              <h2 class="card-title" id="card2Title">Standings</h2>
+              <a href="#" class="card-action">View all</a>
+            </div>
+
+            <table class="standings-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th class="col-team" id="colTeamHead">TEAM</th>
+                  <th>MP</th>
+                  <th>W</th>
+                  <th>D</th>
+                  <th>L</th>
+                  <th>G</th>
+                  <th>PTS</th>
+                </tr>
+              </thead>
+              <tbody id="standingsBody">
+                <tr>
+                  <td class="rank-cell">1</td>
+                  <td class="team-cell">
+                    <div class="team-cell-content">
+                      <div class="mini-badge">
+                        <svg viewBox="0 0 24 24" fill="none"><path d="M9 4h3v14c0 1.1-.9 2-2 2s-2-.9-2-2V4zM15 4h3v14c0 1.1-.9 2-2 2s-2-.9-2-2V4z" fill="#111"/></svg>
+                      </div>
+                      <span class="team-cell-name">Juventus</span>
+                    </div>
+                  </td>
+                  <td>8</td>
+                  <td>6</td>
+                  <td>1</td>
+                  <td>1</td>
+                  <td>13:5</td>
+                  <td class="pts-cell">19</td>
+                </tr>
+
+                <tr>
+                  <td class="rank-cell">2</td>
+                  <td class="team-cell">
+                    <div class="team-cell-content">
+                      <div class="mini-badge">
+                        <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="#1E5C64" stroke-width="3"/></svg>
+                      </div>
+                      <span class="team-cell-name">Atalanta</span>
+                    </div>
+                  </td>
+                  <td>8</td>
+                  <td>5</td>
+                  <td>1</td>
+                  <td>3</td>
+                  <td>10:2</td>
+                  <td class="pts-cell">16</td>
+                </tr>
+
+                <tr>
+                  <td class="rank-cell">3</td>
+                  <td class="team-cell">
+                    <div class="team-cell-content">
+                      <div class="mini-badge">
+                        <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" fill="#111"/><circle cx="12" cy="12" r="4" fill="#FFF"/></svg>
+                      </div>
+                      <span class="team-cell-name">Inter</span>
+                    </div>
+                  </td>
+                  <td>8</td>
+                  <td>5</td>
+                  <td>0</td>
+                  <td>3</td>
+                  <td>10:3</td>
+                  <td class="pts-cell">15</td>
+                </tr>
+
+                <tr>
+                  <td class="rank-cell">4</td>
+                  <td class="team-cell">
+                    <div class="team-cell-content">
+                      <div class="mini-badge">
+                        <svg viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="6" fill="#0080FF"/><path d="M8 8h3v8H8zM13 8h3v8h-3z" fill="#FFF"/></svg>
+                      </div>
+                      <span class="team-cell-name">Napoli</span>
+                    </div>
+                  </td>
+                  <td>8</td>
+                  <td>4</td>
+                  <td>1</td>
+                  <td>3</td>
+                  <td>14:6</td>
+                  <td class="pts-cell">13</td>
+                </tr>
+
+                <tr>
+                  <td class="rank-cell">5</td>
+                  <td class="team-cell">
+                    <div class="team-cell-content">
+                      <div class="mini-badge">
+                        <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" fill="#D32F2F"/><path d="M12 6v12" stroke="#FFF" stroke-width="2"/></svg>
+                      </div>
+                      <span class="team-cell-name">Milan</span>
+                    </div>
+                  </td>
+                  <td>8</td>
+                  <td>4</td>
+                  <td>1</td>
+                  <td>3</td>
+                  <td>8:4</td>
+                  <td class="pts-cell">13</td>
+                </tr>
+
+                <tr>
+                  <td class="rank-cell">6</td>
+                  <td class="team-cell">
+                    <div class="team-cell-content">
+                      <div class="mini-badge">
+                        <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" fill="#FF8F00"/></svg>
+                      </div>
+                      <span class="team-cell-name">Roma</span>
+                    </div>
+                  </td>
+                  <td>8</td>
+                  <td>4</td>
+                  <td>0</td>
+                  <td>4</td>
+                  <td>7:3</td>
+                  <td class="pts-cell">12</td>
+                </tr>
+              </tbody>
+            </table>
+          </article>
+        </div>
+
+        <!-- Right Column -->
+        <div class="grid-col">
+          
+          <!-- Card 3: Games statistic / Task Health -->
+          <article class="card games-stat-card" data-delay="300">
+            <div class="card-header">
+              <h2 class="card-title" id="card3Title">Games statistic</h2>
+              <a href="#" class="card-action">View all statistic</a>
+            </div>
+
+            <div class="stat-progress-bar">
+              <div class="stat-seg victories" id="seg1"></div>
+              <div class="stat-seg draws" id="seg2"></div>
+              <div class="stat-seg lost" id="seg3"></div>
+            </div>
+
+            <div class="stat-metrics-row" id="statMetricsRow">
+              <div class="stat-metric-item">
+                <small id="lbl1">PL</small>
+                <strong id="val1">8</strong>
+              </div>
+              <div class="stat-metric-item">
+                <small id="lbl2">VICTORIES</small>
+                <strong id="val2">6</strong>
+              </div>
+              <div class="stat-metric-item">
+                <small id="lbl3">DRAWS</small>
+                <strong id="val3">1</strong>
+              </div>
+              <div class="stat-metric-item">
+                <small id="lbl4">LOST</small>
+                <strong id="val4">1</strong>
+              </div>
+            </div>
+          </article>
+
+          <!-- 2x2 Metric Cards Grid -->
+          <div class="metric-cards-grid">
+            <article class="card mini-metric-card" data-delay="380">
+              <div class="metric-icon-box violet">
+                <i data-lucide="pie-chart"></i>
+              </div>
+              <div class="metric-info">
+                <small id="m1Label">POSSESSION</small>
+                <strong id="m1Value">65%</strong>
+              </div>
+            </article>
+
+            <article class="card mini-metric-card" data-delay="440">
+              <div class="metric-icon-box pink">
+                <i data-lucide="dollar-sign"></i>
+              </div>
+              <div class="metric-info">
+                <small id="m2Label">OVERALL PRICE</small>
+                <strong id="m2Value">$690.2m</strong>
+              </div>
+            </article>
+
+            <article class="card mini-metric-card" data-delay="500">
+              <div class="metric-icon-box orange">
+                <i data-lucide="bar-chart-2"></i>
+              </div>
+              <div class="metric-info">
+                <small id="m3Label">TRANSFER BUDGET</small>
+                <strong id="m3Value">$240.6m</strong>
+              </div>
+            </article>
+
+            <article class="card mini-metric-card" data-delay="560">
+              <div class="metric-icon-box teal">
+                <i data-lucide="star"></i>
+              </div>
+              <div class="metric-info">
+                <small id="m4Label">AVERAGE SCORE</small>
+                <strong id="m4Value">7.2</strong>
+              </div>
+            </article>
+          </div>
+
+          <!-- Card 4: Bottom Action Banner Card -->
+          <article class="card banner-card" data-delay="640">
+            <div class="banner-content">
+              <div class="banner-tag" id="bannerTag">DON'T FORGET</div>
+              <h3 class="banner-title" id="bannerTitle">Setup training for next week</h3>
+              <button class="banner-btn" id="bannerBtn">Go to training center</button>
+            </div>
+            <div class="banner-art">
+              <img src="assets/banner_3d.jpg" alt="3D Banner Graphic">
+            </div>
+          </article>
+
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- Interactive Toast Notification -->
+  <div class="toast-notice" id="toastNotice">
+    <i data-lucide="check-circle-2" style="width: 18px; height: 18px; color: #42E6B5;"></i>
+    <span id="toastMessage">Dashboard reloaded successfully</span>
+  </div>
+
+  <!-- Application Logic & Entrance Animation Trigger Script -->
+  <script>
+    lucide.createIcons();
+
+    // Mode Data (CoachPro vs Aegra Backup)
+    const MODES = {
+      coachPro: {
+        brand: 'CoachPro',
+        greeting: 'Welcome back, Andrea 👋',
+        title: 'Dashboard',
+        squadLabel: 'Squad',
+        messengerLabel: 'Messenger',
+        financeLabel: 'Finance',
+        transfersLabel: 'Transfers',
+        youthLabel: 'Youth academy',
+        card1Title: 'Next game',
+        card1Action: 'View calendar',
+        card1Badge: '<i data-lucide="trophy"></i> Serie A',
+        card1Time: '21:00, 11 November, 2020',
+        team1: 'Juventus',
+        team2: 'Sassuolo',
+        vs: 'VS',
+        card2Title: 'Standings',
+        colTeam: 'TEAM',
+        card3Title: 'Games statistic',
+        lbl1: 'PL', val1: '8',
+        lbl2: 'VICTORIES', val2: '6',
+        lbl3: 'DRAWS', val3: '1',
+        lbl4: 'LOST', val4: '1',
+        seg1Width: '65%', seg2Width: '15%', seg3Width: '12%',
+        m1Label: 'POSSESSION', m1Value: '65%',
+        m2Label: 'OVERALL PRICE', m2Value: '$690.2m',
+        m3Label: 'TRANSFER BUDGET', m3Value: '$240.6m',
+        m4Label: 'AVERAGE SCORE', m4Value: '7.2',
+        bannerTag: "DON'T FORGET",
+        bannerTitle: 'Setup training for next week',
+        bannerBtn: 'Go to training center'
+      },
+      aegra: {
+        brand: 'Aegra Protection',
+        greeting: '系统服务运行中 · 本地管理员 👋',
+        title: '备份数据概览',
+        squadLabel: '保护源',
+        messengerLabel: '事件日志',
+        financeLabel: '存储仓库',
+        transfersLabel: '数据恢复',
+        youthLabel: '挂载中心',
+        card1Title: '下一次计划备份',
+        card1Action: '管理备份计划',
+        card1Badge: '<i data-lucide="shield-check"></i> 系统与数据卷增量',
+        card1Time: '今晚 21:00 · 目标: Local Vault',
+        team1: 'C: & D: 盘',
+        team2: 'Local Vault (E:)',
+        vs: 'SYNC',
+        card2Title: '受保护存储仓库 (Standings)',
+        colTeam: 'VAULT REPOSITORY',
+        card3Title: '任务健康状态',
+        lbl1: 'TOTAL', val1: '28',
+        lbl2: 'SUCCESS', val2: '25',
+        lbl3: 'RUNNING', val3: '2',
+        lbl4: 'WARNING', val4: '1',
+        seg1Width: '72%', seg2Width: '18%', seg3Width: '10%',
+        m1Label: '已保护数据量', m1Value: '1.84 TB',
+        m2Label: '存储总占用', m2Value: '690 GB',
+        m3Label: '重删与压缩率', m3Value: '2.67 : 1',
+        m4Label: '平均传输速度', m4Value: '248 MB/s',
+        bannerTag: '数据安全提醒',
+        bannerTitle: '立即为重要卷配置异地冷备计划',
+        bannerBtn: '前往新建备份计划'
+      }
+    };
+
+    let currentMode = 'coachPro';
+
+    const modeSwitcher = document.getElementById('modeSwitcher');
+    const toastNotice = document.getElementById('toastNotice');
+    const toastMessage = document.getElementById('toastMessage');
+
+    function showToast(msg) {
+      toastMessage.textContent = msg;
+      toastNotice.classList.add('show');
+      setTimeout(() => {
+        toastNotice.classList.remove('show');
+      }, 2600);
+    }
+
+    // Trigger Cards Entrance Animation Sequence
+    function triggerEntranceAnimations() {
+      const cards = document.querySelectorAll('.card');
+      
+      // Reset progress bar width
+      document.getElementById('seg1').style.width = '0%';
+      document.getElementById('seg2').style.width = '0%';
+      document.getElementById('seg3').style.width = '0%';
+
+      cards.forEach((card) => {
+        card.classList.remove('animate-enter');
+        // Force reflow for re-animation
+        void card.offsetWidth;
+        const delay = card.getAttribute('data-delay') || 100;
+        setTimeout(() => {
+          card.classList.add('animate-enter');
+        }, parseInt(delay));
+      });
+
+      // Animate progress bar widths after cards enter
+      setTimeout(() => {
+        const data = MODES[currentMode];
+        document.getElementById('seg1').style.width = data.seg1Width;
+        document.getElementById('seg2').style.width = data.seg2Width;
+        document.getElementById('seg3').style.width = data.seg3Width;
+      }, 500);
+    }
+
+    modeSwitcher.addEventListener('click', () => {
+      currentMode = (currentMode === 'coachPro') ? 'aegra' : 'coachPro';
+      applyMode(currentMode);
+      triggerEntranceAnimations();
+      showToast(`已切换至: ${currentMode === 'coachPro' ? 'CoachPro 教练视觉模式' : 'Aegra 备份系统模式'}`);
+    });
+
+    function applyMode(modeKey) {
+      const data = MODES[modeKey];
+      document.getElementById('appBrand').querySelector('span').textContent = data.brand;
+      document.querySelector('.greeting').textContent = data.greeting;
+      document.getElementById('pageTitle').textContent = data.title;
+      
+      document.getElementById('tabSquadLabel').textContent = data.squadLabel;
+      document.getElementById('tabMessengerLabel').textContent = data.messengerLabel;
+      document.getElementById('tabFinanceLabel').textContent = data.financeLabel;
+      document.getElementById('tabTransfersLabel').textContent = data.transfersLabel;
+      document.getElementById('tabYouthLabel').textContent = data.youthLabel;
+
+      document.getElementById('card1Title').textContent = data.card1Title;
+      document.getElementById('card1Action').textContent = data.card1Action;
+      document.getElementById('card1Badge').innerHTML = data.card1Badge;
+      document.getElementById('card1Time').textContent = data.card1Time;
+
+      document.getElementById('team1Name').textContent = data.team1;
+      document.getElementById('team2Name').textContent = data.team2;
+      document.getElementById('vsBadge').textContent = data.vs;
+
+      document.getElementById('card2Title').textContent = data.card2Title;
+      document.getElementById('colTeamHead').textContent = data.colTeam;
+
+      document.getElementById('card3Title').textContent = data.card3Title;
+      document.getElementById('lbl1').textContent = data.lbl1;
+      document.getElementById('val1').textContent = data.val1;
+      document.getElementById('lbl2').textContent = data.lbl2;
+      document.getElementById('val2').textContent = data.val2;
+      document.getElementById('lbl3').textContent = data.lbl3;
+      document.getElementById('val3').textContent = data.val3;
+      document.getElementById('lbl4').textContent = data.lbl4;
+      document.getElementById('val4').textContent = data.val4;
+
+      document.getElementById('m1Label').textContent = data.m1Label;
+      document.getElementById('m1Value').textContent = data.m1Value;
+      document.getElementById('m2Label').textContent = data.m2Label;
+      document.getElementById('m2Value').textContent = data.m2Value;
+      document.getElementById('m3Label').textContent = data.m3Label;
+      document.getElementById('m3Value').textContent = data.m3Value;
+      document.getElementById('m4Label').textContent = data.m4Label;
+      document.getElementById('m4Value').textContent = data.m4Value;
+
+      document.getElementById('bannerTag').textContent = data.bannerTag;
+      document.getElementById('bannerTitle').textContent = data.bannerTitle;
+      document.getElementById('bannerBtn').textContent = data.bannerBtn;
+
+      lucide.createIcons();
+    }
+
+    // Sidebar Nav Item Switcher
+    const navItems = document.querySelectorAll('.nav-item');
+    navItems.forEach(item => {
+      item.addEventListener('click', () => {
+        navItems.forEach(n => n.classList.remove('active'));
+        item.classList.add('active');
+        const label = item.querySelector('span').textContent;
+        document.getElementById('pageTitle').textContent = label;
+        triggerEntranceAnimations();
+        showToast(`加载模块: ${label}`);
+      });
+    });
+
+    // Top buttons interactive triggers
+    document.getElementById('searchBtn').addEventListener('click', () => {
+      showToast('搜索框功能已就绪');
+    });
+
+    document.getElementById('notifyBtn').addEventListener('click', () => {
+      showToast('您有 2 条未读系统通知');
+    });
+
+    document.getElementById('bannerBtn').addEventListener('click', () => {
+      showToast('跳转至训练与备份中心...');
+    });
+
+    // Initial Trigger on Page Load
+    window.addEventListener('DOMContentLoaded', () => {
+      triggerEntranceAnimations();
+    });
+  </script>
+</body>
+</html>

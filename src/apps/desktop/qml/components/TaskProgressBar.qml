@@ -14,10 +14,9 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        radius: 4
-        color: Theme.colorButton
-        border.width: 1
-        border.color: Theme.colorBorder
+        radius: 6
+        color: Theme.colorProgressTrack
+        border.width: 0
     }
 
     Rectangle {
@@ -25,7 +24,7 @@ Item {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         width: parent.width * Math.max(0, Math.min(value / 100.0, 1.0))
-        radius: 4
+        radius: 6
         color: root.fillColor
         visible: root.active || value > 0
     }

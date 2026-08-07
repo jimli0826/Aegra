@@ -9,7 +9,7 @@
     </message>
     <message id="aegra.nav.home">
         <source>Home</source>
-        <translation>首頁</translation>
+        <translation>概覽</translation>
     </message>
     <message id="aegra.nav.backup">
         <source>Backup</source>
@@ -25,7 +25,7 @@
     </message>
     <message id="aegra.nav.repository">
         <source>Repository</source>
-        <translation>Repository</translation>
+        <translation>倉庫</translation>
     </message>
     <message id="aegra.nav.event_log">
         <source>Event Log</source>
@@ -46,6 +46,18 @@
     <message id="aegra.nav.expand_sidebar">
         <source>Expand menu</source>
         <translation>展開選單</translation>
+    </message>
+    <message id="aegra.shell.last_sync_just_now">
+        <source>Last sync · just now</source>
+        <translation>最近同步·剛剛</translation>
+    </message>
+    <message id="aegra.shell.service_offline">
+        <source>Service offline</source>
+        <translation>服務未連線</translation>
+    </message>
+    <message id="aegra.shell.service_running">
+        <source>Service is running</source>
+        <translation>服務運行正常</translation>
     </message>
     <message id="aegra.shell.service_label">
         <source>Service %1</source>
@@ -1237,6 +1249,90 @@ Server: %1</source>
         <source>Unmount</source>
         <translation>卸載</translation>
     </message>
+    <message id="aegra.mount.busy_loading">
+        <source>Mounting / unmounting...</source>
+        <translation>正在掛載/卸載...</translation>
+    </message>
+    <message id="aegra.mount.disk_name">
+        <source>Disk %1</source>
+        <translation>磁碟 %1</translation>
+    </message>
+    <message id="aegra.mount.state.mounting">
+        <source>Mounting</source>
+        <translation>掛載中</translation>
+    </message>
+    <message id="aegra.mount.state.mounted">
+        <source>Mounted</source>
+        <translation>已掛載</translation>
+    </message>
+    <message id="aegra.mount.state.unmounting">
+        <source>Unmounting</source>
+        <translation>卸載中</translation>
+    </message>
+    <message id="aegra.mount.state.failed">
+        <source>Failed</source>
+        <translation>失敗</translation>
+    </message>
+    <message id="aegra.mount.capability_missing">
+        <source>Service does not support mount</source>
+        <translation>服務不支援掛載</translation>
+    </message>
+    <message id="aegra.mount.busy">
+        <source>A mount command is already in progress</source>
+        <translation>掛載命令進行中</translation>
+    </message>
+    <message id="aegra.mount.select_required">
+        <source>Select a checkpoint and at least one source disk</source>
+        <translation>請選擇檢查點與至少一個來源磁碟</translation>
+    </message>
+    <message id="aegra.mount.invalid_drive_letter">
+        <source>Preferred drive letter must be a single letter A–Z</source>
+        <translation>偏好磁碟機代號必須是單一字母 A–Z</translation>
+    </message>
+    <message id="aegra.mount.select_session">
+        <source>Select a mounted session to unmount</source>
+        <translation>請選擇要卸載的已掛載工作階段</translation>
+    </message>
+    <message id="aegra.mount.started">
+        <source>Mount started</source>
+        <translation>已開始掛載</translation>
+    </message>
+    <message id="aegra.mount.already_mounted_selection">
+        <source>Selected disk(s) are already mounted</source>
+        <translation>所選磁碟已掛載</translation>
+    </message>
+    <message id="aegra.mount.unmounted">
+        <source>Unmounted</source>
+        <translation>已卸載</translation>
+    </message>
+    <message id="aegra.error.mount.command_failed">
+        <source>Mount command failed</source>
+        <translation>掛載命令失敗</translation>
+    </message>
+    <message id="aegra.error.mount.list_failed">
+        <source>Failed to list mount sessions</source>
+        <translation>取得掛載工作階段清單失敗</translation>
+    </message>
+    <message id="aegra.error.mount.host_unavailable">
+        <source>Mount host is unavailable</source>
+        <translation>掛載主機無法使用</translation>
+    </message>
+    <message id="aegra.error.mount.already_mounted">
+        <source>This disk is already mounted</source>
+        <translation>此磁碟已掛載</translation>
+    </message>
+    <message id="aegra.error.mount.dokan_unavailable">
+        <source>Dokan driver is not available</source>
+        <translation>Dokan 驅動程式無法使用</translation>
+    </message>
+    <message id="aegra.error.mount.disk_not_found">
+        <source>Source disk was not found in the recovery point</source>
+        <translation>還原點中找不到來源磁碟</translation>
+    </message>
+    <message id="aegra.error.mount.host_failed">
+        <source>Mount host failed</source>
+        <translation>掛載主機失敗</translation>
+    </message>
     <message id="aegra.mount.checkpoint_panel_empty">
         <source>Recovery point list will appear when mount Service APIs are connected</source>
         <translation>連線 Mount Service API 後會顯示還原點清單</translation>
@@ -1314,8 +1410,8 @@ Server: %1</source>
         <translation>選擇桌面用戶端的配色主題</translation>
     </message>
     <message id="aegra.settings.theme.blue_extra">
-        <source>Blue Extra</source>
-        <translation>深藍</translation>
+        <source>Glass</source>
+        <translation>青璃</translation>
     </message>
     <message id="aegra.settings.theme.dark">
         <source>Dark</source>

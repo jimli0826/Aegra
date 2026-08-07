@@ -3,7 +3,9 @@
 #include "application_ids.h"
 
 #include <algorithm>
+#include <cctype>
 #include <optional>
+#include <string>
 #include <utility>
 
 namespace aegra::application {
@@ -34,6 +36,31 @@ decode_inventory_token(const std::optional<std::string>& token, const bool inclu
     return std::string(include_unavailable ? "inv|1|" : "inv|0|") + std::string(source_id);
 }
 
+/// Wire field is a short drive letter (max 16). Folder mounts / long paths are dropped.
+[[nodiscard]] std::string normalize_mount_letter(const std::string& raw) {
+    if (raw.empty()) {
+        return {};
+    }
+    const auto letter = static_cast<unsigned char>(raw.front());
+    if (!((letter >= 'A' && letter <= 'Z') || (letter >= 'a' && letter <= 'z'))) {
+        return {};
+    }
+    if (raw.size() == 1) {
+        return std::string(1, static_cast<char>(std::toupper(letter))) + ":";
+    }
+    if (raw[1] != ':') {
+        return {};
+    }
+    // Accept "C:", "C:\", or "C:/" only — not folder mounts like "C:\data".
+    if (raw.size() > 3) {
+        return {};
+    }
+    if (raw.size() == 3 && raw[2] != '\\' && raw[2] != '/') {
+        return {};
+    }
+    return std::string(1, static_cast<char>(std::toupper(letter))) + ":";
+}
+
 [[nodiscard]] contracts::SourceInventoryItem map_item(const ports::SourceInventoryRecord& record) {
     contracts::SourceInventoryItem item;
     item.source_id = record.source_id;
@@ -48,11 +75,24 @@ decode_inventory_token(const std::optional<std::string>& token, const bool inclu
     item.is_read_only = record.is_read_only;
     item.is_selectable = detail::is_source_selectable(record);
     item.disk_number = record.disk_number;
-    item.mount_letter = record.mount_letter;
+    item.mount_letter = normalize_mount_letter(record.mount_letter);
     item.volume_label = record.volume_label;
     item.health_status = record.health_status.empty() ? "Healthy" : record.health_status;
     item.partition_style = record.partition_style.empty() ? "GPT" : record.partition_style;
     item.media_type = record.media_type.empty() ? "Unknown" : record.media_type;
+    // Contracts reject empty display names / oversized text — clamp for wire safety.
+    if (item.display_name.empty()) {
+        item.display_name = item.source_id;
+    }
+    if (item.display_name.size() > 256) {
+        item.display_name.resize(256);
+    }
+    if (item.volume_label.size() > 256) {
+        item.volume_label.resize(256);
+    }
+    if (item.health_status.size() > 256) {
+        item.health_status.resize(256);
+    }
     return item;
 }
 
@@ -84,11 +124,16 @@ SourceInventoryQuery::list_sources(const contracts::SourceInventoryListRequest& 
             source.availability != contracts::SourceAvailability::kAvailable) {
             continue;
         }
-        if (source.source_id.empty() || source.stable_key.empty() || source.display_name.empty()) {
-            return base::Result<contracts::SourceInventoryPage>::failure(
-                {base::ErrorCode::kInvalidArgument, "inventory source record is invalid"});
+        if (source.source_id.empty() || source.stable_key.empty()) {
+            // Skip unusable identities; do not fail the whole inventory page.
+            continue;
         }
-        mapped.push_back(map_item(source));
+        auto item = map_item(source);
+        if (!contracts::validate_source_inventory_item(item)) {
+            // One odd volume (long mount path, bad label, etc.) must not block Backup UI.
+            continue;
+        }
+        mapped.push_back(std::move(item));
     }
     std::ranges::sort(mapped, [](const contracts::SourceInventoryItem& left,
                                  const contracts::SourceInventoryItem& right) {

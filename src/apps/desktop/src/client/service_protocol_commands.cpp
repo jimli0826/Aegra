@@ -15,6 +15,7 @@
 namespace aegra::desktop {
 namespace {
 
+using protocol_detail::canonical_uuid;
 using protocol_detail::has_exact_keys;
 using protocol_detail::integer_in_range;
 using protocol_detail::kMaximumCapabilities;
@@ -353,6 +354,61 @@ QByteArray encode_cancel_job_request(const QString& request_id, const QString& i
         .toJson(QJsonDocument::Compact);
 }
 
+QByteArray encode_mount_session_list_request(const QString& request_id) {
+    const QJsonObject page{
+        {QStringLiteral("maximum_results"), static_cast<qint64>(kMountSessionPageSize)},
+        {QStringLiteral("continuation_token"), QJsonValue(QJsonValue::Null)}};
+    const QJsonObject payload{{QStringLiteral("page"), page},
+                              {QStringLiteral("state"), QJsonValue(QJsonValue::Null)}};
+    return QJsonDocument(
+               QJsonObject{
+                   {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
+                   {QStringLiteral("message_type"), 1},
+                   {QStringLiteral("request_id"), request_id},
+                   {QStringLiteral("kind"), kListMountSessionsRequestKind},
+                   {QStringLiteral("idempotency_key"), QJsonValue(QJsonValue::Null)},
+                   {QStringLiteral("payload"), payload}})
+        .toJson(QJsonDocument::Compact);
+}
+
+QByteArray encode_mount_recovery_point_request(const QString& request_id,
+                                               const QString& idempotency_key,
+                                               const QString& connection_id,
+                                               const QString& recovery_point_id,
+                                               const int source_disk_number,
+                                               const QString& preferred_drive_letter,
+                                               const QString& archive_password) {
+    const QJsonObject payload{
+        {QStringLiteral("repository_connection_id"), connection_id},
+        {QStringLiteral("recovery_point_id"), recovery_point_id},
+        {QStringLiteral("source_disk_number"), source_disk_number},
+        {QStringLiteral("preferred_drive_letter"),
+         preferred_drive_letter.isEmpty() ? QJsonValue(QJsonValue::Null)
+                                          : QJsonValue(preferred_drive_letter)},
+        {QStringLiteral("archive_password"), archive_password}};
+    return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
+                                      static_cast<qint64>(kServiceSchemaVersion)},
+                                     {QStringLiteral("message_type"), 1},
+                                     {QStringLiteral("request_id"), request_id},
+                                     {QStringLiteral("kind"), kMountRecoveryPointRequestKind},
+                                     {QStringLiteral("idempotency_key"), idempotency_key},
+                                     {QStringLiteral("payload"), payload}})
+        .toJson(QJsonDocument::Compact);
+}
+
+QByteArray encode_unmount_session_request(const QString& request_id, const QString& idempotency_key,
+                                          const QString& session_id) {
+    const QJsonObject payload{{QStringLiteral("resource_id"), session_id}};
+    return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
+                                      static_cast<qint64>(kServiceSchemaVersion)},
+                                     {QStringLiteral("message_type"), 1},
+                                     {QStringLiteral("request_id"), request_id},
+                                     {QStringLiteral("kind"), kUnmountSessionRequestKind},
+                                     {QStringLiteral("idempotency_key"), idempotency_key},
+                                     {QStringLiteral("payload"), payload}})
+        .toJson(QJsonDocument::Compact);
+}
+
 QByteArray encode_repository_connection_input_request(const QString& request_id,
                                                       const QString& idempotency_key,
                                                       const int request_kind,
@@ -530,6 +586,86 @@ bool is_schedule_list_failure_response(const QJsonObject& root) {
                             kRequestFailedResponseKind, kind) &&
            integer_in_range(root.value(QStringLiteral("request_kind")), kListSchedulesRequestKind,
                             kListSchedulesRequestKind, request_kind) &&
+           integer_in_range(root.value(QStringLiteral("boundary_error_code")), 1, 11, error) &&
+           root.value(QStringLiteral("payload")).isNull();
+}
+
+[[nodiscard]] bool parse_mount_session_item(const QJsonValue& value, QVariantMap& result) {
+    if (!value.isObject()) {
+        return false;
+    }
+    const auto object = value.toObject();
+    if (!has_exact_keys(object,
+                        {"session_id", "recovery_point_id", "state", "mount_point",
+                         "source_disk_number", "disk_size_bytes", "started_utc_ms",
+                         "message_code"})) {
+        return false;
+    }
+    qint64 state = 0;
+    qint64 started = 0;
+    qint64 source_disk = 0;
+    qint64 disk_size = 0;
+    const auto session_id = object.value(QStringLiteral("session_id")).toString();
+    const auto recovery_point_id = object.value(QStringLiteral("recovery_point_id")).toString();
+    const auto message_code = object.value(QStringLiteral("message_code")).toString();
+    if (!object.value(QStringLiteral("session_id")).isString() || !stable_code(session_id, 128) ||
+        !object.value(QStringLiteral("recovery_point_id")).isString() ||
+        !canonical_uuid(recovery_point_id) ||
+        !integer_in_range(object.value(QStringLiteral("state")), kMountSessionStateMounting,
+                          kMountSessionStateFailed, state) ||
+        !object.value(QStringLiteral("mount_point")).isString() ||
+        !integer_in_range(object.value(QStringLiteral("source_disk_number")), 0,
+                          (std::numeric_limits<qint64>::max)(), source_disk) ||
+        !integer_in_range(object.value(QStringLiteral("disk_size_bytes")), 0,
+                          (std::numeric_limits<qint64>::max)(), disk_size) ||
+        !integer_in_range(object.value(QStringLiteral("started_utc_ms")), 0,
+                          (std::numeric_limits<qint64>::max)(), started) ||
+        !object.value(QStringLiteral("message_code")).isString() ||
+        !stable_code(message_code, 128)) {
+        return false;
+    }
+    result = {{QStringLiteral("sessionId"), session_id},
+              {QStringLiteral("recoveryPointId"), recovery_point_id},
+              {QStringLiteral("state"), state},
+              {QStringLiteral("mountPoint"), object.value(QStringLiteral("mount_point")).toString()},
+              {QStringLiteral("sourceDiskNumber"), source_disk},
+              {QStringLiteral("diskSizeBytes"), disk_size},
+              {QStringLiteral("startedUtcMs"), started},
+              {QStringLiteral("messageCode"), message_code}};
+    return true;
+}
+
+bool parse_mount_session_list_response(const QJsonObject& root, MountSessionPage& result) {
+    qint64 kind = 0;
+    qint64 request_kind = 0;
+    qint64 error = 0;
+    if (!integer_in_range(root.value(QStringLiteral("kind")), 1, 1, kind) ||
+        !integer_in_range(root.value(QStringLiteral("request_kind")), kListMountSessionsRequestKind,
+                          kListMountSessionsRequestKind, request_kind) ||
+        !integer_in_range(root.value(QStringLiteral("boundary_error_code")), 0, 0, error) ||
+        !root.value(QStringLiteral("payload")).isObject()) {
+        return false;
+    }
+    const auto payload = root.value(QStringLiteral("payload")).toObject();
+    if (!has_exact_keys(payload, {"items", "continuation_token"})) {
+        return false;
+    }
+    // Service sorts by started_utc_ms (newest first); session_id is not wire-ordered.
+    return parse_paged_items(payload.value(QStringLiteral("items")), kMountSessionPageSize,
+                             parse_mount_session_item, "sessionId", false, result.items) &&
+           parse_token(payload.value(QStringLiteral("continuation_token")),
+                       result.continuation_token);
+}
+
+bool is_mount_list_failure_response(const QJsonObject& root) {
+    qint64 kind = 0;
+    qint64 request_kind = 0;
+    qint64 error = 0;
+    return integer_in_range(root.value(QStringLiteral("kind")), kRequestFailedResponseKind,
+                            kRequestFailedResponseKind, kind) &&
+           integer_in_range(root.value(QStringLiteral("request_kind")),
+                            kListMountSessionsRequestKind, kListMountSessionsRequestKind,
+                            request_kind) &&
            integer_in_range(root.value(QStringLiteral("boundary_error_code")), 1, 11, error) &&
            root.value(QStringLiteral("payload")).isNull();
 }

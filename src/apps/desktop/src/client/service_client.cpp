@@ -170,6 +170,21 @@ bool ServiceClient::restoreStartAvailable() const noexcept {
     return restore_start_available_ && restore_preflight_available_;
 }
 bool ServiceClient::restoreCommandBusy() const noexcept { return restore_command_busy_; }
+bool ServiceClient::mountStartAvailable() const noexcept {
+    return mount_start_available_ && mount_list_available_;
+}
+bool ServiceClient::mountListAvailable() const noexcept { return mount_list_available_; }
+bool ServiceClient::mountCommandBusy() const noexcept { return mount_command_busy_; }
+bool ServiceClient::mountSessionsLoading() const noexcept { return mount_sessions_loading_; }
+QVariantList ServiceClient::mountSessions() const { return mount_sessions_; }
+QString ServiceClient::mountSessionsErrorText() const {
+    return mount_sessions_error_code_.isEmpty() ? QString{}
+                                                : localize_message_code(mount_sessions_error_code_);
+}
+QString ServiceClient::mountCommandErrorText() const {
+    return mount_command_error_code_.isEmpty() ? QString{}
+                                               : localize_message_code(mount_command_error_code_);
+}
 bool ServiceClient::jobCancelAvailable() const noexcept { return job_cancel_available_; }
 bool ServiceClient::backupCommandBusy() const noexcept { return backup_command_busy_; }
 bool ServiceClient::cancelCommandBusy() const noexcept { return cancel_command_busy_; }
@@ -221,7 +236,7 @@ bool ServiceClient::globalLoading() const noexcept {
     return repository_loading_ || recovery_point_layout_loading_ || jobs_loading_ ||
            inventory_loading_ || connections_loading_ || schedules_loading_ ||
            repository_command_busy_ || backup_command_busy_ || cancel_command_busy_ ||
-           schedule_command_busy_;
+           schedule_command_busy_ || mount_command_busy_;
 }
 
 bool ServiceClient::hasCapability(const QString& capability) const {
@@ -321,8 +336,8 @@ void ServiceClient::on_request_failed(const QString& message_code) {
         if (handshake_complete_ && first_ready_seen_ &&
             (repository_loading_ || recovery_point_layout_loading_ || jobs_loading_ ||
              inventory_loading_ || connections_loading_ || schedules_loading_ ||
-             repository_command_busy_ || schedule_command_busy_ || backup_command_busy_ ||
-             cancel_command_busy_) &&
+             mount_sessions_loading_ || repository_command_busy_ || schedule_command_busy_ ||
+             backup_command_busy_ || cancel_command_busy_ || mount_command_busy_) &&
             message_code == QLatin1String("service.protocol_invalid")) {
             if (repository_loading_) {
                 finish_repository_failure(QStringLiteral("repository.query_failed"));
@@ -342,6 +357,9 @@ void ServiceClient::on_request_failed(const QString& message_code) {
             if (schedules_loading_) {
                 finish_schedule_failure(QStringLiteral("schedule.query_failed"));
             }
+            if (mount_sessions_loading_) {
+                finish_mount_list_failure(QStringLiteral("mount.list_failed"));
+            }
             if (repository_command_busy_) {
                 finish_repository_command_failure(QStringLiteral("service.request_failed"));
             }
@@ -353,6 +371,9 @@ void ServiceClient::on_request_failed(const QString& message_code) {
             }
             if (schedule_command_busy_) {
                 finish_schedule_command_failure(QStringLiteral("schedule.command_failed"));
+            }
+            if (mount_command_busy_) {
+                finish_mount_command_failure(QStringLiteral("mount.command_failed"));
             }
             return;
         }
@@ -382,6 +403,9 @@ void ServiceClient::on_request_failed(const QString& message_code) {
     if (schedules_loading_) {
         finish_schedule_failure(QStringLiteral("schedule.query_failed"));
     }
+    if (mount_sessions_loading_) {
+        finish_mount_list_failure(QStringLiteral("mount.list_failed"));
+    }
     if (repository_command_busy_) {
         finish_repository_command_failure(QStringLiteral("service.request_failed"));
     }
@@ -393,6 +417,9 @@ void ServiceClient::on_request_failed(const QString& message_code) {
     }
     if (schedule_command_busy_) {
         finish_schedule_command_failure(QStringLiteral("schedule.command_failed"));
+    }
+    if (mount_command_busy_) {
+        finish_mount_command_failure(QStringLiteral("mount.command_failed"));
     }
 }
 
@@ -481,6 +508,9 @@ RequestDisposition ServiceClient::handle_service_info_frame(const QByteArray& bo
     backup_start_available_ = capabilities_.contains(QStringLiteral("backup.start"));
     restore_preflight_available_ = capabilities_.contains(QStringLiteral("restore.preflight"));
     restore_start_available_ = capabilities_.contains(QStringLiteral("restore.start"));
+    mount_list_available_ = capabilities_.contains(QStringLiteral("mount.list"));
+    mount_start_available_ = capabilities_.contains(QStringLiteral("mount.start"));
+    mount_unmount_available_ = capabilities_.contains(QStringLiteral("mount.unmount"));
     job_cancel_available_ = capabilities_.contains(QStringLiteral("job.cancel"));
     handshake_complete_ = true;
     QTimer::singleShot(0, this, [this]() {
@@ -505,6 +535,9 @@ RequestDisposition ServiceClient::handle_service_info_frame(const QByteArray& bo
         }
         if (schedules_available_) {
             start_schedule_query();
+        }
+        if (mount_list_available_) {
+            start_mount_session_query();
         }
     });
     return RequestDisposition::kFinished;
@@ -631,6 +664,10 @@ void ServiceClient::set_state(const State state, QString error_code) {
             restore_preflight_available_ = false;
             restore_start_available_ = false;
             restore_command_busy_ = false;
+            mount_list_available_ = false;
+            mount_start_available_ = false;
+            mount_unmount_available_ = false;
+            mount_command_busy_ = false;
             job_cancel_available_ = false;
             handshake_complete_ = false;
             reset_repository();
@@ -641,6 +678,8 @@ void ServiceClient::set_state(const State state, QString error_code) {
             reset_schedules();
             reset_repository_command();
             reset_backup_command();
+            reset_mount_sessions();
+            reset_mount_command();
         } else {
             // Pre-ready connect churn: clear handshake only (avoid model/signal storms).
             handshake_complete_ = false;

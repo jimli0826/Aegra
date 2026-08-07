@@ -6,7 +6,7 @@ Text {
     id: root
     signal clicked()
 
-    color: linkMouse.containsMouse ? "#33b8ff" : Theme.colorAccentBlue
+    color: linkMouse.containsMouse ? Theme.colorLinkHover : Theme.colorAccentBlue
     font.pixelSize: 12
     font.family: Theme.fontFamily
     font.bold: true

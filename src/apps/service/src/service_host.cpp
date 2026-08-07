@@ -5,6 +5,7 @@
 #include "aegra/application/recovery_point_operations.h"
 #include "aegra/application/repository_connection_service.h"
 #include "aegra/application/source_inventory_query.h"
+#include "aegra/apps/service/mount_supervisor.h"
 #include "aegra/apps/service/schedule_service.h"
 #include "aegra/apps/service/service_protocol.h"
 #include "aegra/apps/service/worker_job_service.h"
@@ -302,6 +303,18 @@ command_response(const contracts::ServiceRequest& request, const ServiceRuntimeI
         result = runtime.schedules->delete_schedule(
             std::get<contracts::ResourceRef>(request.payload), *request.idempotency_key,
             cancellation);
+    } else if (runtime.mount_supervisor && request.idempotency_key &&
+               request.kind == contracts::ServiceRequestKind::kMountRecoveryPoint) {
+        handled = true;
+        result = runtime.mount_supervisor->mount(
+            std::get<contracts::MountRecoveryPointCommand>(request.payload),
+            *request.idempotency_key, cancellation);
+    } else if (runtime.mount_supervisor && request.idempotency_key &&
+               request.kind == contracts::ServiceRequestKind::kUnmountSession) {
+        handled = true;
+        result = runtime.mount_supervisor->unmount(
+            std::get<contracts::ResourceRef>(request.payload), *request.idempotency_key,
+            cancellation);
     }
     if (!handled)
         return capability_unavailable(request);
@@ -309,7 +322,9 @@ command_response(const contracts::ServiceRequest& request, const ServiceRuntimeI
         // Prefer domain-specific message codes so Desktop can show actionable text.
         std::string message_code = "service.request_failed";
         const auto& detail = result.error().message;
-        if (detail.find("repository is unavailable") != std::string::npos) {
+        if (detail.rfind("mount.", 0) == 0) {
+            message_code = detail;
+        } else if (detail.find("repository is unavailable") != std::string::npos) {
             message_code = "backup.repository_unavailable";
         } else if (detail.find("source is not selectable") != std::string::npos) {
             message_code = "backup.source_not_selectable";
@@ -334,6 +349,9 @@ command_response(const contracts::ServiceRequest& request, const ServiceRuntimeI
             message_code = "backup.command_failed";
         } else if (request.kind == contracts::ServiceRequestKind::kStartRestore) {
             message_code = "restore.command_failed";
+        } else if (request.kind == contracts::ServiceRequestKind::kMountRecoveryPoint ||
+                   request.kind == contracts::ServiceRequestKind::kUnmountSession) {
+            message_code = "mount.command_failed";
         }
         // Log domain detail (never secrets): response_detail only has message_code.
         write_log(runtime, ServiceLogLevel::kWarning, "service.command_failed_detail",
@@ -444,6 +462,28 @@ recovery_point_ops_response(const contracts::ServiceRequest& request,
     return base::Result<contracts::ServiceResponse>::success(std::move(response));
 }
 
+[[nodiscard]] base::Result<contracts::ServiceResponse>
+mount_list_response(const contracts::ServiceRequest& request, const ServiceRuntimeInfo& runtime,
+                    const base::CancellationToken cancellation) {
+    if (!runtime.mount_supervisor) {
+        return capability_unavailable(request);
+    }
+    auto result = runtime.mount_supervisor->list(
+        std::get<contracts::MountSessionListRequest>(request.payload), cancellation);
+    if (!result) {
+        return base::Result<contracts::ServiceResponse>::success(
+            failure(result.error().code, request.request_id, request.kind, "mount.list_failed"));
+    }
+    contracts::ServiceResponse response;
+    response.request_id = request.request_id;
+    response.kind = contracts::ServiceResponseKind::kQueryResult;
+    response.request_kind = request.kind;
+    response.boundary_error_code = base::ErrorCode::kNone;
+    response.message_code = "mount.list_ready";
+    response.payload = std::move(result).value();
+    return base::Result<contracts::ServiceResponse>::success(std::move(response));
+}
+
 } // namespace
 
 base::Result<contracts::ServiceResponse>
@@ -531,10 +571,14 @@ dispatch_service_request(const contracts::ServiceRequest& request,
     case contracts::ServiceRequestKind::kDeleteSchedule:
         response = command_response(request, runtime, cancellation);
         break;
-    case contracts::ServiceRequestKind::kListEvents:
     case contracts::ServiceRequestKind::kListMountSessions:
+        response = mount_list_response(request, runtime, cancellation);
+        break;
     case contracts::ServiceRequestKind::kMountRecoveryPoint:
     case contracts::ServiceRequestKind::kUnmountSession:
+        response = command_response(request, runtime, cancellation);
+        break;
+    case contracts::ServiceRequestKind::kListEvents:
     case contracts::ServiceRequestKind::kSubscribeTaskEvents:
     case contracts::ServiceRequestKind::kAcknowledgeEvents:
         response = capability_unavailable(request);

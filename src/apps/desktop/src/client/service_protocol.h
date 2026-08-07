@@ -21,6 +21,7 @@ inline constexpr int kListRepositoryConnectionsRequestKind = 3;
 inline constexpr int kListSourceInventoryRequestKind = 4;
 inline constexpr int kListJobsRequestKind = 5;
 inline constexpr int kListSchedulesRequestKind = 6;
+inline constexpr int kListMountSessionsRequestKind = 8;
 inline constexpr int kGetRecoveryPointLayoutRequestKind = 12;
 inline constexpr int kAddRepositoryConnectionRequestKind = 32;
 inline constexpr int kImportRepositoryConnectionRequestKind = 33;
@@ -31,6 +32,8 @@ inline constexpr int kPrepareRestoreRequestKind = 9;
 inline constexpr int kStartBackupRequestKind = 37;
 inline constexpr int kCancelJobRequestKind = 38;
 inline constexpr int kStartRestoreRequestKind = 40;
+inline constexpr int kMountRecoveryPointRequestKind = 41;
+inline constexpr int kUnmountSessionRequestKind = 42;
 inline constexpr int kUpsertScheduleRequestKind = 43;
 inline constexpr int kDeleteScheduleRequestKind = 44;
 inline constexpr int kScheduleTriggerDaily = 1;
@@ -41,6 +44,11 @@ inline constexpr int kBackupTypeFull = 1;
 inline constexpr int kBackupTypeIncremental = 2;
 inline constexpr int kCommandDispositionAccepted = 1;
 inline constexpr int kCommandDispositionReplayed = 2;
+inline constexpr int kMountSessionStateMounting = 1;
+inline constexpr int kMountSessionStateMounted = 2;
+inline constexpr int kMountSessionStateUnmounting = 3;
+inline constexpr int kMountSessionStateFailed = 4;
+inline constexpr quint32 kMountSessionPageSize = 100;
 
 struct ServiceInfo final {
     QString version;
@@ -71,6 +79,11 @@ struct RepositoryConnectionPage final {
 };
 
 struct SchedulePage final {
+    QVariantList items;
+    std::optional<QString> continuation_token;
+};
+
+struct MountSessionPage final {
     QVariantList items;
     std::optional<QString> continuation_token;
 };
@@ -142,6 +155,14 @@ encode_repository_connection_resource_request(const QString& request_id,
 [[nodiscard]] QByteArray encode_delete_schedule_request(const QString& request_id,
                                                         const QString& idempotency_key,
                                                         const QString& schedule_id);
+[[nodiscard]] QByteArray encode_mount_session_list_request(const QString& request_id);
+[[nodiscard]] QByteArray encode_mount_recovery_point_request(
+    const QString& request_id, const QString& idempotency_key, const QString& connection_id,
+    const QString& recovery_point_id, int source_disk_number,
+    const QString& preferred_drive_letter = {}, const QString& archive_password = {});
+[[nodiscard]] QByteArray encode_unmount_session_request(const QString& request_id,
+                                                        const QString& idempotency_key,
+                                                        const QString& session_id);
 
 [[nodiscard]] bool parse_response_root(const QByteArray& body, const QString& request_id,
                                        QJsonObject& root);
@@ -157,6 +178,8 @@ encode_repository_connection_resource_request(const QString& request_id,
 [[nodiscard]] bool parse_repository_connection_list_response(const QJsonObject& root,
                                                              RepositoryConnectionPage& result);
 [[nodiscard]] bool parse_schedule_list_response(const QJsonObject& root, SchedulePage& result);
+[[nodiscard]] bool parse_mount_session_list_response(const QJsonObject& root,
+                                                     MountSessionPage& result);
 [[nodiscard]] bool parse_command_ack_response(const QJsonObject& root, int expected_request_kind,
                                               CommandAck& result);
 // Parses one JobSummary JSON object into the desktop map form used by JobModel.
@@ -167,6 +190,7 @@ encode_repository_connection_resource_request(const QString& request_id,
 [[nodiscard]] bool is_inventory_failure_response(const QJsonObject& root);
 [[nodiscard]] bool is_connection_list_failure_response(const QJsonObject& root);
 [[nodiscard]] bool is_schedule_list_failure_response(const QJsonObject& root);
+[[nodiscard]] bool is_mount_list_failure_response(const QJsonObject& root);
 [[nodiscard]] bool is_command_failure_response(const QJsonObject& root, int expected_request_kind);
 
 } // namespace aegra::desktop

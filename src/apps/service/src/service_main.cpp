@@ -11,6 +11,7 @@
 #include "aegra/application/source_inventory_query.h"
 #include "aegra/base/error.h"
 #include "aegra/apps/service/backup_catalog_registrar.h"
+#include "aegra/apps/service/mount_supervisor.h"
 #include "aegra/apps/service/schedule_service.h"
 #include "aegra/apps/service/service_host.h"
 #include "aegra/apps/service/service_protocol.h"
@@ -169,6 +170,7 @@ struct ServiceArguments final {
     std::optional<std::filesystem::path> repository_root;
     std::optional<std::filesystem::path> data_dir;
     std::optional<std::filesystem::path> worker_path;
+    std::optional<std::filesystem::path> mount_host_path;
 };
 
 struct RuntimeComponents final {
@@ -189,6 +191,7 @@ struct RuntimeComponents final {
     std::unique_ptr<service::WorkerSupervisor> supervisor;
     std::unique_ptr<service::WorkerJobService> worker_jobs;
     std::unique_ptr<service::ScheduleService> schedules;
+    std::unique_ptr<service::MountSupervisor> mount_supervisor;
     service::ServiceRuntimeInfo runtime;
 };
 
@@ -262,13 +265,16 @@ class WindowsServiceStatusReporter final : public service::IWindowsServiceStatus
         } else if (argument == L"--worker-path" && index + 1 < arguments.size() &&
                    !result.worker_path) {
             result.worker_path = std::filesystem::path(arguments[++index]);
+        } else if (argument == L"--mount-host-path" && index + 1 < arguments.size() &&
+                   !result.mount_host_path) {
+            result.mount_host_path = std::filesystem::path(arguments[++index]);
         } else {
             return false;
         }
     }
     const auto absolute = [](const auto& value) { return !value || value->is_absolute(); };
     return absolute(result.repository_root) && absolute(result.data_dir) &&
-           absolute(result.worker_path);
+           absolute(result.worker_path) && absolute(result.mount_host_path);
 }
 
 [[nodiscard]] aegra::base::Result<std::filesystem::path>
@@ -296,10 +302,10 @@ resolve_data_dir(const ServiceArguments& arguments) {
     return environment_directory(arguments.service_mode ? L"ProgramData" : L"LOCALAPPDATA");
 }
 
-[[nodiscard]] aegra::base::Result<std::filesystem::path>
-resolve_worker_path(const ServiceArguments& arguments) {
-    if (arguments.worker_path) {
-        return aegra::base::Result<std::filesystem::path>::success(*arguments.worker_path);
+[[nodiscard]] aegra::base::Result<std::filesystem::path> resolve_sibling_executable(
+    const std::optional<std::filesystem::path>& explicit_path, const wchar_t* sibling_name) {
+    if (explicit_path) {
+        return aegra::base::Result<std::filesystem::path>::success(*explicit_path);
     }
     std::vector<wchar_t> module_path(32'768);
     const DWORD length =
@@ -310,7 +316,17 @@ resolve_worker_path(const ServiceArguments& arguments) {
     }
     const std::filesystem::path executable(std::wstring_view(module_path.data(), length));
     return aegra::base::Result<std::filesystem::path>::success(executable.parent_path() /
-                                                               L"aegra_personal_worker.exe");
+                                                               sibling_name);
+}
+
+[[nodiscard]] aegra::base::Result<std::filesystem::path>
+resolve_worker_path(const ServiceArguments& arguments) {
+    return resolve_sibling_executable(arguments.worker_path, L"aegra_personal_worker.exe");
+}
+
+[[nodiscard]] aegra::base::Result<std::filesystem::path>
+resolve_mount_host_path(const ServiceArguments& arguments) {
+    return resolve_sibling_executable(arguments.mount_host_path, L"aegra_mount_host.exe");
 }
 
 [[nodiscard]] aegra::base::Result<std::string> path_to_utf8(const std::filesystem::path& path) {
@@ -437,9 +453,10 @@ create_service_log(const std::filesystem::path& data_dir, const bool service_mod
     // S5 chain/delete/verify capabilities stay off until durable delete resume, archive credential
     // mapping, and real Verify Worker E2E all meet the package Definition of Done.
     std::vector<std::string> capabilities{
-        "backup.start",    "job.cancel",         "job.list",
-        "repository.connection", "repository.list", "restore.preflight",
-        "restore.start",   "schedule",           "service.info",
+        "backup.start",          "job.cancel",           "job.list",
+        "mount.list",            "mount.start",          "mount.unmount",
+        "repository.connection", "repository.list",      "restore.preflight",
+        "restore.start",         "schedule",             "service.info",
         "source.inventory",
     };
     std::ranges::sort(capabilities);
@@ -457,9 +474,11 @@ create_runtime(const ServiceArguments& arguments) {
 
     auto data_dir = resolve_data_dir(arguments);
     auto worker_path = resolve_worker_path(arguments);
-    if (!data_dir || !worker_path) {
-        return aegra::base::Result<RuntimeComponents>::failure(!data_dir ? data_dir.error()
-                                                                         : worker_path.error());
+    auto mount_host_path = resolve_mount_host_path(arguments);
+    if (!data_dir || !worker_path || !mount_host_path) {
+        return aegra::base::Result<RuntimeComponents>::failure(
+            !data_dir ? data_dir.error()
+                      : (!worker_path ? worker_path.error() : mount_host_path.error()));
     }
     // Worker inherits this environment and writes per-task logs under <data_dir>/logs/<op>/.
     if (!::SetEnvironmentVariableW(L"AEGRA_DATA_DIR", data_dir.value().c_str())) {
@@ -476,6 +495,10 @@ create_runtime(const ServiceArguments& arguments) {
     auto worker_path_utf8 = path_to_utf8(worker_path.value());
     if (!worker_path_utf8) {
         return aegra::base::Result<RuntimeComponents>::failure(worker_path_utf8.error());
+    }
+    auto mount_host_path_utf8 = path_to_utf8(mount_host_path.value());
+    if (!mount_host_path_utf8) {
+        return aegra::base::Result<RuntimeComponents>::failure(mount_host_path_utf8.error());
     }
     auto control_plane = open_control_plane(data_dir.value(), components);
     auto repository = open_legacy_repository(arguments, components);
@@ -562,6 +585,12 @@ create_runtime(const ServiceArguments& arguments) {
         *components.supervisor, *components.clock, *components.random);
     components.schedules = std::make_unique<service::ScheduleService>(
         *components.control_plane, *components.clock, *components.random);
+    service::MountSupervisorConfig mount_config;
+    mount_config.mount_host_executable_path = std::move(mount_host_path_utf8).value();
+    mount_config.overlay_root = data_dir.value() / L"mount_overlays";
+    components.mount_supervisor = std::make_unique<service::MountSupervisor>(
+        std::move(mount_config), *components.process_launcher, *components.control_plane,
+        *components.storage_factory, *components.clock, *components.random);
     components.runtime = {
         .service_version = AEGRA_APPLICATION_VERSION,
         .capabilities = runtime_capabilities(),
@@ -574,6 +603,7 @@ create_runtime(const ServiceArguments& arguments) {
         .worker_jobs = components.worker_jobs.get(),
         .schedules = components.schedules.get(),
         .worker_supervisor = components.supervisor.get(),
+        .mount_supervisor = components.mount_supervisor.get(),
         .control_plane = components.control_plane.get(),
         .storage_factory = components.storage_factory.get(),
     };

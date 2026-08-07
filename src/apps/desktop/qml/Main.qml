@@ -16,8 +16,11 @@ Window {
     visible: true
     //% "Aegra"
     title: qsTrId("aegra.app.title")
-    color: Theme.colorCard
+    // Transparent + alpha buffer (main.cpp) so the rounded shell shows real corners.
+    // Frameless: no Windows caption bar; chrome buttons are self-drawn in QML.
+    color: "transparent"
     flags: Qt.Window | Qt.FramelessWindowHint
+           | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint
     minimumWidth: appReady ? 900 : 400
     minimumHeight: appReady ? 600 : 300
 
@@ -27,12 +30,16 @@ Window {
     readonly property bool canResize: appReady
                                       && visibility !== Window.Maximized
                                       && visibility !== Window.FullScreen
+    readonly property real chromeRadius: (visibility === Window.Maximized
+                                          || visibility === Window.FullScreen)
+                                         ? 0 : Theme.radiusWindow
     /// Settings opens as right drawer (old Main.qml pattern)
     property bool settingsPanelOpen: false
     /// Latched once splash dismisses so main opacity/animation never re-toggles.
     property bool appReady: false
     /// Global busy after splash: page catalog reload / commands (old Main.qml appLoading).
     /// Bound to each loading flag so NOTIFY from domain signals is enough (not only loadingChanged).
+    // Old Main.qml appLoading: catalog reload + mount/unmount + source layout.
     readonly property bool appLoading: {
         if (!window.appReady || !serviceClient.connected)
             return false
@@ -41,10 +48,16 @@ Window {
                 || serviceClient.connectionsLoading
                 || serviceClient.schedulesLoading
                 || serviceClient.repositoryLoading
+                || serviceClient.recoveryPointLayoutLoading
+                || serviceClient.mountSessionsLoading
                 || serviceClient.repositoryCommandBusy
                 || serviceClient.backupCommandBusy
                 || serviceClient.cancelCommandBusy
+                || serviceClient.mountCommandBusy
     }
+
+    // Old Main.qml LoadingOverlay: always the same "Loading" string (never per-page text).
+    readonly property string appLoadingMessage: qsTrId("aegra.common.loading")
 
     function centerOnScreen() {
         var scr = window.screen
@@ -61,14 +74,14 @@ Window {
         var h = splash.preferredHeight || 440
         window.width = w
         window.height = h
-        window.color = Theme.colorCard
+        window.color = "transparent"
         centerOnScreen()
     }
 
     function applyMainSize() {
         window.width = window.mainWidth
         window.height = window.mainHeight
-        window.color = Theme.colorBg
+        window.color = "transparent"
         centerOnScreen()
     }
 
@@ -80,19 +93,11 @@ Window {
         applyMainSize()
     }
 
-    // Keep window chrome in sync when theme changes (old Main.qml pattern)
+    // Frameless shell stays transparent; Theme paints the rounded chrome.
     Connections {
         target: Theme
         function onThemeIdChanged() {
-            window.color = window.appReady ? Theme.colorBg : Theme.colorCard
-        }
-        function onColorBgChanged() {
-            if (window.appReady)
-                window.color = Theme.colorBg
-        }
-        function onColorCardChanged() {
-            if (!window.appReady)
-                window.color = Theme.colorCard
+            window.color = "transparent"
         }
     }
 
@@ -116,141 +121,30 @@ Window {
         }
     }
 
-    ColumnLayout {
+    // Rounded shell without QtQuick.Effects (not always present in run environments).
+    // Transparent HWND + alpha buffer (main.cpp) + Rectangle.radius = visible corners.
+    Rectangle {
+        id: shell
         anchors.fill: parent
-        spacing: 0
-        // Hidden under splash; fade in once when ready (never re-hide → no flicker).
-        opacity: window.appReady ? 1 : 0
-        enabled: window.appReady
-        Behavior on opacity {
-            enabled: window.appReady
-            NumberAnimation { duration: 280; easing.type: Easing.OutCubic }
-        }
+        radius: window.chromeRadius
+        color: Theme.colorBg
+        border.width: window.chromeRadius > 0 ? 1 : 0
+        border.color: Theme.colorBorder
+        clip: true
 
-        // ========== Title Bar ==========
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 32
-            color: Theme.colorHeader
-
-            MouseArea {
-                anchors.fill: parent
-                anchors.topMargin: window.canResize ? window.resizeBorder : 0
-                onPressed: window.startSystemMove()
-                onDoubleClicked: {
-                    if (window.visibility === Window.Maximized)
-                        window.showNormal()
-                    else
-                        window.showMaximized()
-                }
-            }
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 12
-                anchors.rightMargin: 8
-                spacing: 10
-
-                Image {
-                    source: "qrc:/Aegra/icons/product_32.png"
-                    sourceSize.width: 32
-                    sourceSize.height: 32
-                    Layout.preferredWidth: 18
-                    Layout.preferredHeight: 18
-                    Layout.alignment: Qt.AlignVCenter
-                    fillMode: Image.PreserveAspectFit
-                    smooth: true
-                    mipmap: true
-                }
-
-                Text {
-                    //% "Aegra"
-                    text: qsTrId("aegra.app.title")
-                    color: Theme.colorTextWhite
-                    font.pixelSize: 12
-                    font.family: Theme.fontFamily
-                    font.bold: true
-                    Layout.alignment: Qt.AlignVCenter
-                }
-                Text {
-                    text: serviceClient.serviceVersion.length > 0
-                          ? "V" + serviceClient.serviceVersion : ""
-                    color: Theme.colorTextDim
-                    font.pixelSize: 11
-                    font.family: Theme.fontFamily
-                    Layout.alignment: Qt.AlignVCenter
-                    Layout.leftMargin: 2
-                }
-
-                Item { Layout.fillWidth: true }
-
-                Rectangle {
-                    Layout.preferredWidth: 7
-                    Layout.preferredHeight: 7
-                    radius: 4
-                    Layout.alignment: Qt.AlignVCenter
-                    color: serviceClient.connected ? Theme.colorGreen
-                           : (serviceClient.statusText.indexOf("Connect") >= 0
-                              ? Theme.colorAccentBlue : Theme.colorAccentRed)
-                }
-                Text {
-                    //% "Service %1"
-                    text: qsTrId("aegra.shell.service_label").arg(serviceClient.statusText)
-                    color: serviceClient.connected ? Theme.colorTextGrey
-                           : (statusHover.containsMouse ? Theme.colorAccentBlue
-                                                        : Theme.colorTextGrey)
-                    font.family: Theme.fontFamily
-                    font.pixelSize: 11
-                    Layout.alignment: Qt.AlignVCenter
-                    MouseArea {
-                        id: statusHover
-                        anchors.fill: parent
-                        anchors.margins: -4
-                        hoverEnabled: true
-                        cursorShape: serviceClient.connected ? Qt.ArrowCursor
-                                                             : Qt.PointingHandCursor
-                        enabled: !serviceClient.connected
-                        onClicked: serviceClient.reconnect()
-                    }
-                }
-                Text {
-                    visible: serviceClient.jobListAvailable && serviceClient.jobs.activeCount > 0
-                    //% "Tasks %1"
-                    text: qsTrId("aegra.shell.tasks_badge").arg(serviceClient.jobs.activeCount)
-                    color: Theme.colorTextGrey
-                    font.family: Theme.fontFamily
-                    font.pixelSize: 11
-                    Layout.alignment: Qt.AlignVCenter
-                    Layout.rightMargin: 4
-                }
-
-                // Language switch lives in Settings only (not title bar).
-                Row {
-                    spacing: 0
-                    Layout.alignment: Qt.AlignVCenter
-                    WindowButton {
-                        icon: "\u2500"
-                        onClicked: window.showMinimized()
-                    }
-                    WindowButton {
-                        icon: window.visibility === Window.Maximized ? "\u2750" : "\u25A1"
-                        onClicked: window.visibility === Window.Maximized
-                                   ? window.showNormal() : window.showMaximized()
-                    }
-                    WindowButton {
-                        icon: "\u2715"
-                        isClose: true
-                        onClicked: window.close()
-                    }
-                }
-            }
-        }
-
-        // ========== Main Content ==========
+        // Full-height body (no system/title brand strip — brand lives in sidebar only).
         RowLayout {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
+            anchors.fill: parent
+            // Inset so solid children do not paint over the rounded corner pixels.
+            anchors.margins: window.chromeRadius > 0 ? 1 : 0
             spacing: 0
+            // Hidden under splash; fade in once when ready (never re-hide → no flicker).
+            opacity: window.appReady ? 1 : 0
+            enabled: window.appReady
+            Behavior on opacity {
+                enabled: window.appReady
+                NumberAnimation { duration: 280; easing.type: Easing.OutCubic }
+            }
 
             SidebarMenu {
                 id: sideMenu
@@ -279,7 +173,8 @@ Window {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                color: Theme.colorBg
+                // Transparent background so outer shell rounded corners show cleanly on the right side.
+                color: "transparent"
 
                 Item {
                     id: pageContainer
@@ -323,15 +218,11 @@ Window {
                             anchors.fill: parent
                             opacity: index === pageContainer.currentIndex ? 1 : 0
                             visible: opacity > 0
-                            scale: index === pageContainer.currentIndex ? 1 : 0.98
                             active: index === pageContainer.currentIndex
                                     || index === pageContainer.previousIndex
 
                             Behavior on opacity {
-                                NumberAnimation { duration: 320; easing.type: Easing.OutCubic }
-                            }
-                            Behavior on scale {
-                                NumberAnimation { duration: 320; easing.type: Easing.OutCubic }
+                                NumberAnimation { duration: 250; easing.type: Easing.OutCubic }
                             }
 
                             sourceComponent: {
@@ -417,32 +308,76 @@ Window {
                 }
             }
         }
-    }
 
-    SplashOverlay {
-        id: splash
-        anchors.fill: parent
-        windowAppReady: window.appReady
-        onSizeHintChanged: window.applySplashSize()
-        onQuitRequested: window.close()
-    }
+        // Floating caption: drag region + self-drawn window buttons only (no logo / version).
+        Item {
+            id: captionBar
+            z: 200
+            height: 40
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            visible: window.appReady
 
-    // Global loading overlay (old Main.qml): menu switch / catalog reload / busy commands.
-    LoadingOverlay {
-        anchors.fill: parent
-        z: 500
-        visible: window.appLoading
-        //% "Loading"
-        message: qsTrId("aegra.common.loading")
-    }
+            MouseArea {
+                anchors.fill: parent
+                anchors.topMargin: window.canResize ? window.resizeBorder : 0
+                anchors.rightMargin: 128
+                onPressed: window.startSystemMove()
+                onDoubleClicked: {
+                    if (window.visibility === Window.Maximized)
+                        window.showNormal()
+                    else
+                        window.showMaximized()
+                }
+            }
 
-    ToastBanner {
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.topMargin: window.appReady ? 32 : 0
-        visible: window.appReady
-    }
+            Row {
+                anchors.right: parent.right
+                anchors.rightMargin: 10
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 4
+                WindowButton {
+                    role: "minimize"
+                    onClicked: window.showMinimized()
+                }
+                WindowButton {
+                    role: window.visibility === Window.Maximized ? "restore" : "maximize"
+                    onClicked: window.visibility === Window.Maximized
+                               ? window.showNormal() : window.showMaximized()
+                }
+                WindowButton {
+                    role: "close"
+                    onClicked: window.close()
+                }
+            }
+        }
+
+        SplashOverlay {
+            id: splash
+            anchors.fill: parent
+            windowAppReady: window.appReady
+            onSizeHintChanged: window.applySplashSize()
+            onQuitRequested: window.close()
+        }
+
+        // Global loading overlay (old Main.qml): menu switch / catalog reload / busy commands.
+        LoadingOverlay {
+            anchors.fill: parent
+            z: 500
+            visible: window.appLoading
+            //% "Loading"
+            message: window.appLoadingMessage
+        }
+
+        ToastBanner {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.topMargin: window.appReady ? 44 : 0
+            visible: window.appReady
+        }
+    } // shell
 
     ResizeHandle {
         targetWindow: window

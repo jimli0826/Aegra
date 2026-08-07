@@ -2,64 +2,87 @@ pragma Singleton
 import QtQuick 2.15
 
 /**
- * App color theme — Visual Studio–style palettes (same approach as backup/src/gui Theme.qml).
+ * App color theme — glass / dark / light palettes.
  * Colors are writable so setTheme() updates the whole UI via bindings to Theme.*.
  * Persistence is via localeController (C++ QSettings ui/theme), not Qt.labs.settings.
+ *
+ * Theme ids (stable for QSettings): blueExtra (default glass), dark, light.
+ * colorTextWhite is the primary text color (may be dark on light/glass themes).
  */
 QtObject {
     id: root
 
-    // blueExtra | dark | light  — blueExtra is the default
+    // blueExtra (glass default) | dark | light
     property string themeId: "blueExtra"
 
-    // ---- Live palette (bound by UI); defaults match blueExtra ----
-    property color colorBg: "#1e3048"
-    property color colorCard: "#2a4260"
-    property color colorBorder: "#4a6a90"
-    property color colorHeader: "#243a56"
-    property color colorSidebar: "#243a56"
-    property color colorTableHeader: "#34506e"
-    property color colorTableRow: "#2a4260"
-    property color colorTableAlt: "#314a6a"
-    property color colorPopup: "#2a4260"
-    property color colorInput: "#243a56"
-    property color colorListItem: "#34506e"
-    property color colorListItemAlt: "#2a4260"
+    // ---- Live palette (bound by UI); defaults match glass (blueExtra) ----
+    // Page bg matches sidebar so shell looks one continuous surface.
+    property color colorBg: "#eef7f5"
+    property color colorBgEnd: "#eef7f5"
+    property color colorCard: "#f7fbfa"
+    property color colorBorder: "#c5d9d5"
+    property color colorHeader: "#eef7f5"
+    property color colorSidebar: "#eef7f5"
+    /// Outer window chrome radius (0 when maximized). Concept mock uses ~28; keep a bit
+    /// tighter so Windows DWM still looks clean with the MultiEffect mask.
+    property int radiusWindow: 22
+    property color colorTableHeader: "#e2f0ed"
+    property color colorTableRow: "#f7fbfa"
+    property color colorTableAlt: "#eef6f4"
+    property color colorPopup: "#ffffff"
+    property color colorInput: "#ffffff"
+    property color colorListItem: "#e8f4f2"
+    property color colorListItemAlt: "#f7fbfa"
 
-    property color colorAccentRed: "#ff5c5c"
-    property color colorAccentBlue: "#4fc1ff"
-    property color colorGreen: "#57d38c"
-    property color colorMenuActive: "#4fc1ff"
+    property color colorAccentRed: "#ef7d78"
+    property color colorAccentBlue: "#2a9aa3"
+    property color colorGreen: "#3db87a"
+    // Nav active: CoachPro / index.html primary teal gradient ends
+    property color colorMenuActive: "#2A7982"
+    property color colorMenuActiveEnd: "#1E5C64"
+    property color colorMenuActiveText: "#ffffff"
+    // Nav idle / hover (index.html .nav-item)
+    property color colorMenuIdle: "#557773"
+    property color colorMenuHoverText: "#2A7982"
+    property color colorMenuHoverBg: "#E4F1F2"
+    property color colorOnAccent: "#ffffff"
+    property color colorLinkHover: "#1f7a82"
 
-    property color colorTextWhite: "#f0f4f8"
-    property color colorTextGrey: "#b4c8dc"
-    property color colorTextDim: "#8aa4c0"
+    property color colorTextWhite: "#1a2f2c"
+    property color colorTextGrey: "#5a7572"
+    property color colorTextDim: "#8a9f9c"
 
-    property color colorHover: "#3a5878"
-    property color colorHoverClose: "#ff5c5c"
+    property color colorHover: "#E4F1F2"
+    property color colorHoverClose: "#ef7d78"
 
-    property color colorButton: "#3a5574"
-    property color colorButtonHover: "#466888"
-    property color colorButtonDisabled: "#2d4560"
-    property color colorButtonDisabledText: "#8aa4c0"
-    property color colorProgressTrack: "#3a5574"
-    property color colorCalendarMuted: "#8aa4c0"
-    property color colorCalendarHasBackup: "#355878"
+    property color colorButton: "#e0eeeb"
+    property color colorButtonHover: "#cfe4e0"
+    property color colorButtonDisabled: "#eef4f3"
+    property color colorButtonDisabledText: "#a0b5b2"
+    property color colorProgressTrack: "#d5e8e4"
+    property color colorCalendarMuted: "#a0b5b2"
+    property color colorCalendarHasBackup: "#d0ece9"
 
-    property color colorToastSuccessBg: "#1e3d32"
-    property color colorToastSuccessBorder: "#57d38c"
-    property color colorToastErrorBg: "#3d2428"
-    property color colorToastErrorBorder: "#ff5c5c"
-    property color colorScrim: "#99000000"
+    property color colorToastSuccessBg: "#e5f6ed"
+    property color colorToastSuccessBorder: "#3db87a"
+    property color colorToastErrorBg: "#fdecea"
+    property color colorToastErrorBorder: "#ef7d78"
+    property color colorScrim: "#66000000"
 
     property var volumeColors: [
-        "#4d6d8c", "#5a7a98", "#436384", "#6586a4",
-        "#4a6a88", "#6e90ac", "#3f5e7e", "#7898b4"
+        "#7fc4b4", "#6a9fd4", "#c4a06a", "#8b7fd9",
+        "#e87ba8", "#5ba8c9", "#3ab0a8", "#e9a85c"
     ]
-    property color colorVolumeText: "#f0f4f8"
-    property color colorUnallocated: "#252f3d"
-    property color colorUnallocatedHatch: "#3d4a5c"
-    property color colorUnallocatedText: "#9aabbc"
+    property color colorVolumeText: "#1a2f2c"
+    property color colorUnallocated: "#e8eeec"
+    property color colorUnallocatedHatch: "#c5d4d0"
+    property color colorUnallocatedText: "#7a9190"
+
+    // Shared chrome metrics (concept: soft glass cards / pill nav)
+    property int radiusCard: 18
+    property int radiusControl: 10
+    property int radiusMenu: 14
+    property int radiusButton: 10
 
     function volumeColor(index) {
         var list = volumeColors
@@ -73,15 +96,15 @@ QtObject {
 
     property string fontFamily: "Segoe UI"
 
-    /// Catalog for Settings UI (preview chips) — blueExtra first (default)
+    /// Catalog for Settings UI (preview chips) — glass (blueExtra) first (default)
     readonly property var themes: [
         {
             id: "blueExtra",
             labelKey: "aegra.settings.theme.blue_extra",
-            previewBg: "#1b2a40",
-            previewCard: "#2a3f5c",
-            previewAccent: "#4fc1ff",
-            previewText: "#ffffff"
+            previewBg: "#eef7f5",
+            previewCard: "#f7fbfa",
+            previewAccent: "#2a9aa3",
+            previewText: "#1a2f2c"
         },
         {
             id: "dark",
@@ -104,6 +127,7 @@ QtObject {
     readonly property var _palettes: ({
         "dark": {
             colorBg: "#252526",
+            colorBgEnd: "#1e1e1e",
             colorCard: "#2d2d30",
             colorBorder: "#3f3f46",
             colorHeader: "#2d2d30",
@@ -118,7 +142,10 @@ QtObject {
             colorAccentRed: "#e81123",
             colorAccentBlue: "#00a8ff",
             colorGreen: "#00cc66",
-            colorMenuActive: "#e81123",
+            colorMenuActive: "#0e639c",
+            colorMenuActiveText: "#ffffff",
+            colorOnAccent: "#ffffff",
+            colorLinkHover: "#33b8ff",
             colorTextWhite: "#f3f3f3",
             colorTextGrey: "#a0a0a0",
             colorTextDim: "#6e6e6e",
@@ -143,53 +170,71 @@ QtObject {
             colorVolumeText: "#ffffff",
             colorUnallocated: "#2a2a2e",
             colorUnallocatedHatch: "#4a4a50",
-            colorUnallocatedText: "#9a9a9a"
+            colorUnallocatedText: "#9a9a9a",
+            radiusCard: 8,
+            radiusControl: 6,
+            radiusMenu: 6,
+            radiusButton: 6
         },
         "blueExtra": {
-            colorBg: "#1e3048",
-            colorCard: "#2a4260",
-            colorBorder: "#4a6a90",
-            colorHeader: "#243a56",
-            colorSidebar: "#243a56",
-            colorTableHeader: "#34506e",
-            colorTableRow: "#2a4260",
-            colorTableAlt: "#314a6a",
-            colorPopup: "#2a4260",
-            colorInput: "#243a56",
-            colorListItem: "#34506e",
-            colorListItemAlt: "#2a4260",
-            colorAccentRed: "#ff5c5c",
-            colorAccentBlue: "#4fc1ff",
-            colorGreen: "#57d38c",
-            colorMenuActive: "#4fc1ff",
-            colorTextWhite: "#f0f4f8",
-            colorTextGrey: "#b4c8dc",
-            colorTextDim: "#8aa4c0",
-            colorHover: "#3a5878",
-            colorHoverClose: "#ff5c5c",
-            colorButton: "#3a5574",
-            colorButtonHover: "#466888",
-            colorButtonDisabled: "#2d4560",
-            colorButtonDisabledText: "#8aa4c0",
-            colorProgressTrack: "#3a5574",
-            colorCalendarMuted: "#8aa4c0",
-            colorCalendarHasBackup: "#355878",
-            colorToastSuccessBg: "#1e3d32",
-            colorToastSuccessBorder: "#57d38c",
-            colorToastErrorBg: "#3d2428",
-            colorToastErrorBorder: "#ff5c5c",
-            colorScrim: "#99000000",
+            // Glass / CoachPro-inspired mint-teal (default product look)
+            colorBg: "#eef7f5",
+            colorBgEnd: "#eef7f5",
+            colorCard: "#f7fbfa",
+            colorBorder: "#c5d9d5",
+            colorHeader: "#eef7f5",
+            colorSidebar: "#eef7f5",
+            colorTableHeader: "#e2f0ed",
+            colorTableRow: "#f7fbfa",
+            colorTableAlt: "#eef6f4",
+            colorPopup: "#ffffff",
+            colorInput: "#ffffff",
+            colorListItem: "#e8f4f2",
+            colorListItemAlt: "#f7fbfa",
+            colorAccentRed: "#ef7d78",
+            colorAccentBlue: "#2a9aa3",
+            colorGreen: "#3db87a",
+            colorMenuActive: "#2A7982",
+            colorMenuActiveEnd: "#1E5C64",
+            colorMenuActiveText: "#ffffff",
+            colorMenuIdle: "#557773",
+            colorMenuHoverText: "#2A7982",
+            colorMenuHoverBg: "#E4F1F2",
+            colorOnAccent: "#ffffff",
+            colorLinkHover: "#1f7a82",
+            colorTextWhite: "#1a2f2c",
+            colorTextGrey: "#5a7572",
+            colorTextDim: "#8a9f9c",
+            colorHover: "#E4F1F2",
+            colorHoverClose: "#ef7d78",
+            colorButton: "#e0eeeb",
+            colorButtonHover: "#cfe4e0",
+            colorButtonDisabled: "#eef4f3",
+            colorButtonDisabledText: "#a0b5b2",
+            colorProgressTrack: "#d5e8e4",
+            colorCalendarMuted: "#a0b5b2",
+            colorCalendarHasBackup: "#d0ece9",
+            colorToastSuccessBg: "#e5f6ed",
+            colorToastSuccessBorder: "#3db87a",
+            colorToastErrorBg: "#fdecea",
+            colorToastErrorBorder: "#ef7d78",
+            colorScrim: "#66000000",
             volumeColors: [
-                "#4d6d8c", "#5a7a98", "#436384", "#6586a4",
-                "#4a6a88", "#6e90ac", "#3f5e7e", "#7898b4"
+                "#7fc4b4", "#6a9fd4", "#c4a06a", "#8b7fd9",
+                "#e87ba8", "#5ba8c9", "#3ab0a8", "#e9a85c"
             ],
-            colorVolumeText: "#f0f4f8",
-            colorUnallocated: "#252f3d",
-            colorUnallocatedHatch: "#3d4a5c",
-            colorUnallocatedText: "#9aabbc"
+            colorVolumeText: "#1a2f2c",
+            colorUnallocated: "#e8eeec",
+            colorUnallocatedHatch: "#c5d4d0",
+            colorUnallocatedText: "#7a9190",
+            radiusCard: 14,
+            radiusControl: 10,
+            radiusMenu: 14,
+            radiusButton: 10
         },
         "light": {
             colorBg: "#f0f0f0",
+            colorBgEnd: "#e8e8ec",
             colorCard: "#ffffff",
             colorBorder: "#cccedb",
             colorHeader: "#f5f5f5",
@@ -205,6 +250,9 @@ QtObject {
             colorAccentBlue: "#0078d4",
             colorGreen: "#107c10",
             colorMenuActive: "#cce4f7",
+            colorMenuActiveText: "#1e1e1e",
+            colorOnAccent: "#ffffff",
+            colorLinkHover: "#005a9e",
             colorTextWhite: "#1e1e1e",
             colorTextGrey: "#616161",
             colorTextDim: "#8a8a8a",
@@ -229,7 +277,11 @@ QtObject {
             colorVolumeText: "#1e2a38",
             colorUnallocated: "#e8eaed",
             colorUnallocatedHatch: "#c5cad3",
-            colorUnallocatedText: "#616161"
+            colorUnallocatedText: "#616161",
+            radiusCard: 8,
+            radiusControl: 6,
+            radiusMenu: 6,
+            radiusButton: 6
         }
     })
 
@@ -246,6 +298,8 @@ QtObject {
 
     function applyPalette(p) {
         colorBg = p.colorBg
+        if (p.colorBgEnd !== undefined)
+            colorBgEnd = p.colorBgEnd
         colorCard = p.colorCard
         colorBorder = p.colorBorder
         colorHeader = p.colorHeader
@@ -261,6 +315,20 @@ QtObject {
         colorAccentBlue = p.colorAccentBlue
         colorGreen = p.colorGreen
         colorMenuActive = p.colorMenuActive
+        if (p.colorMenuActiveEnd !== undefined)
+            colorMenuActiveEnd = p.colorMenuActiveEnd
+        if (p.colorMenuActiveText !== undefined)
+            colorMenuActiveText = p.colorMenuActiveText
+        if (p.colorMenuIdle !== undefined)
+            colorMenuIdle = p.colorMenuIdle
+        if (p.colorMenuHoverText !== undefined)
+            colorMenuHoverText = p.colorMenuHoverText
+        if (p.colorMenuHoverBg !== undefined)
+            colorMenuHoverBg = p.colorMenuHoverBg
+        if (p.colorOnAccent !== undefined)
+            colorOnAccent = p.colorOnAccent
+        if (p.colorLinkHover !== undefined)
+            colorLinkHover = p.colorLinkHover
         colorTextWhite = p.colorTextWhite
         colorTextGrey = p.colorTextGrey
         colorTextDim = p.colorTextDim
@@ -287,6 +355,14 @@ QtObject {
             colorUnallocatedHatch = p.colorUnallocatedHatch
         if (p.colorUnallocatedText !== undefined)
             colorUnallocatedText = p.colorUnallocatedText
+        if (p.radiusCard !== undefined)
+            radiusCard = p.radiusCard
+        if (p.radiusControl !== undefined)
+            radiusControl = p.radiusControl
+        if (p.radiusMenu !== undefined)
+            radiusMenu = p.radiusMenu
+        if (p.radiusButton !== undefined)
+            radiusButton = p.radiusButton
     }
 
     function initFromBackend() {

@@ -20,7 +20,7 @@ Item {
         anchors.horizontalCenter: parent.horizontalCenter
         width: Math.min(parent.width - 48, Math.max(280, msgText.implicitWidth + 56))
         height: Math.max(40, msgText.implicitHeight + 20)
-        radius: 6
+        radius: Theme.radiusControl
         y: serviceClient.toastVisible ? 12 : -height - 20
         opacity: serviceClient.toastVisible ? 1 : 0
         border.width: 1

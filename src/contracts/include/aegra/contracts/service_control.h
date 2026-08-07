@@ -201,6 +201,8 @@ struct MountSessionSummary final {
     std::string recovery_point_id;
     MountSessionState state{MountSessionState::kMounting};
     std::string mount_point;
+    std::uint32_t source_disk_number{0};
+    std::uint64_t disk_size_bytes{0};
     std::uint64_t started_utc_ms{0};
     std::string message_code;
 };
@@ -402,8 +404,14 @@ struct StartRestoreCommand final {
 };
 
 struct MountRecoveryPointCommand final {
+    std::string repository_connection_id;
     std::string recovery_point_id;
+    /// Manifest disk_number of the source disk to present.
+    std::uint32_t source_disk_number{0};
+    /// Single letter "D".."Z", or absent for automatic free letter selection.
     std::optional<std::string> preferred_drive_letter;
+    /// Opens encrypted archives; empty when encryption is off. Never log.
+    std::string archive_password;
 };
 
 struct UpsertScheduleCommand final {

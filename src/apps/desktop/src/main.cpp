@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QGuiApplication>
 #include <QIcon>
+#include <QLibraryInfo>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QLockFile>
@@ -12,11 +13,23 @@
 #include <QQmlContext>
 #include <QQmlError>
 #include <QQuickStyle>
+#include <QQuickWindow>
 #include <QSize>
 #include <QStandardPaths>
+#include <QSurfaceFormat>
 #include <QTextStream>
 #include <QUrl>
 #include <QWindow>
+
+#if defined(Q_OS_WIN)
+#  include <dwmapi.h>
+#  ifndef DWMWA_WINDOW_CORNER_PREFERENCE
+#    define DWMWA_WINDOW_CORNER_PREFERENCE 33
+#  endif
+#  ifndef DWMWCP_ROUND
+#    define DWMWCP_ROUND 2
+#  endif
+#endif
 
 namespace {
 
@@ -30,6 +43,33 @@ constexpr char kSingleInstanceServerName[] = "Aegra.Desktop.IPC";
     icon.addFile(QStringLiteral(":/Aegra/icons/product_64.png"), QSize(64, 64));
     icon.addFile(QStringLiteral(":/Aegra/icons/product.png"), QSize(256, 256));
     return icon;
+}
+
+/// Enable per-pixel alpha so a frameless QML shell can show true rounded corners.
+void configure_transparent_quick_surface() {
+    QSurfaceFormat format = QSurfaceFormat::defaultFormat();
+    format.setAlphaBufferSize(8);
+    QSurfaceFormat::setDefaultFormat(format);
+    QQuickWindow::setDefaultAlphaBuffer(true);
+}
+
+/// Windows DWM corner preference: set DWMWCP_ROUND (2) for rounded window borders.
+void apply_frameless_platform_chrome(QWindow* window) {
+    if (window == nullptr) {
+        return;
+    }
+    if (auto* quick = qobject_cast<QQuickWindow*>(window); quick != nullptr) {
+        quick->setColor(Qt::transparent);
+    }
+#if defined(Q_OS_WIN)
+    const HWND hwnd = reinterpret_cast<HWND>(window->winId());
+    if (hwnd == nullptr) {
+        return;
+    }
+    const int preference = DWMWCP_ROUND;
+    DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &preference,
+                          sizeof(preference));
+#endif
 }
 
 void configure_application(QGuiApplication& application) {
@@ -76,11 +116,14 @@ void raise_main_windows(QQmlApplicationEngine& engine) {
 
 /// True if this process is the primary UI. Secondary instance asks primary to raise and exits.
 [[nodiscard]] bool acquire_single_instance(QLockFile& lock_file) {
-    // Reclaim lock after crash (stale holder).
-    lock_file.setStaleLockTime(10000);
+    // Reclaim lock after crash (stale holder). Short stale window so a failed
+    // previous run does not block the next double-click for long.
+    lock_file.setStaleLockTime(3000);
     if (lock_file.tryLock(200)) {
         return true;
     }
+
+    // Live primary: ask it to raise, then this process exits.
     QLocalSocket socket;
     socket.connectToServer(QLatin1String(kSingleInstanceServerName));
     if (socket.waitForConnected(800)) {
@@ -88,13 +131,27 @@ void raise_main_windows(QQmlApplicationEngine& engine) {
         socket.flush();
         socket.waitForBytesWritten(500);
         socket.disconnectFromServer();
+        return false;
     }
+
+    // Lock held but no IPC server — previous process died without cleanup.
+    lock_file.removeStaleLockFile();
+    QLocalServer::removeServer(QLatin1String(kSingleInstanceServerName));
+    if (lock_file.tryLock(500)) {
+        return true;
+    }
+
+    qWarning("Aegra desktop: could not acquire single-instance lock (%s)",
+             qPrintable(lock_file.fileName()));
     return false;
 }
 
 } // namespace
 
 int main(int argument_count, char* arguments[]) {
+    // Must run before any QQuickWindow is created (alpha corners on Windows).
+    configure_transparent_quick_surface();
+
     QGuiApplication application(argument_count, arguments);
     configure_application(application);
 
@@ -116,6 +173,10 @@ int main(int argument_count, char* arguments[]) {
     }
 
     QQmlApplicationEngine engine;
+    // Ensure Qt QML modules resolve when not launched from Qt Creator.
+    engine.addImportPath(QLibraryInfo::path(QLibraryInfo::QmlImportsPath));
+    QCoreApplication::addLibraryPath(QLibraryInfo::path(QLibraryInfo::PluginsPath));
+
     aegra::desktop::LocaleController locale_controller(&engine);
     aegra::desktop::ServiceClient service_client;
     service_client.set_locale_controller(&locale_controller);
@@ -131,12 +192,19 @@ int main(int argument_count, char* arguments[]) {
         [root](QObject* object, const QUrl& object_url) {
             if (object == nullptr && object_url == root) {
                 QCoreApplication::exit(EXIT_FAILURE);
+                return;
+            }
+            if (object != nullptr && object_url == root) {
+                apply_frameless_platform_chrome(qobject_cast<QWindow*>(object));
             }
         },
         Qt::QueuedConnection);
     engine.load(root);
     if (engine.rootObjects().isEmpty()) {
         return EXIT_FAILURE;
+    }
+    for (QObject* object : engine.rootObjects()) {
+        apply_frameless_platform_chrome(qobject_cast<QWindow*>(object));
     }
 
     QObject::connect(&ipc_server, &QLocalServer::newConnection, &application, [&]() {

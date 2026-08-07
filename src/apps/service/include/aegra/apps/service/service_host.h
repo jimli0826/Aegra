@@ -26,6 +26,7 @@ class IRepositoryStorageFactory;
 namespace aegra::apps::service {
 
 class IWorkerJobService;
+class MountSupervisor;
 class ScheduleService;
 class WorkerSupervisor;
 
@@ -62,6 +63,7 @@ struct ServiceRuntimeInfo final {
     IWorkerJobService* worker_jobs{nullptr};
     ScheduleService* schedules{nullptr};
     WorkerSupervisor* worker_supervisor{nullptr};
+    MountSupervisor* mount_supervisor{nullptr};
     ports::IControlPlaneDatabase* control_plane{nullptr};
     ports::IRepositoryStorageFactory* storage_factory{nullptr};
 };

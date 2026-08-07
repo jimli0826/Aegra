@@ -75,7 +75,20 @@ Online Prepare -> Validate -> Build/Cache WinRE -> Write Pending Job
 
 ## Mount Host
 
-Mount Host 只读打开 Recovery Point，组合 Reader、虚拟磁盘呈现 Adapter 和 Dokan。每个挂载会话具有独立生命周期、取消和临时 overlay；Shell Extension 不加载这些实现。
+Mount Host 只读打开 Recovery Point，组合 `PersonalArchiveChainReader`、`WholeDiskByteReader`、Dokan/VHDX Adapter。
+每个挂载会话具有独立生命周期、取消和临时 overlay；Shell Extension 不加载这些实现。
+
+### Service 编排（S7）
+
+- `MountSupervisor` 在 `apps/service` 内维护内存态会话表（session_id → host PID、pipe、summary）。
+- Service 通过 `--pipe` 启动 `aegra_mount_host`，发送 mount 请求 JSON，等待 `mounted`/`failed` 事件后向 Desktop 返回 CommandAcknowledgement。
+- 能力位：`mount.list`、`mount.start`、`mount.unmount`。协议 kinds：8 / 41 / 42。
+- 可选 CLI：`--mount-host-path <abs>`；默认与 Service 同目录的 `aegra_mount_host.exe`。
+- Overlay 根：`<data_dir>/mount_overlays/<session_id>`（Service 已按会话隔离，host 不再二次嵌套）。
+  - Dokan 挂载点：`<session>/mnt/`（必须为空目录，与旧 backup host 一致）。
+  - COW sidecar：`<session>/diskN.vhdx.overlay(.map)`，**不得**放在 `mnt/` 内，否则 Dokan 报 `DOKAN_MOUNT_POINT_ERROR`。
+- Tear-down：unmount 命令 → 终止 host → join waiter；Service 析构时 `shutdown()` 清理全部会话。
+- MVP：整盘只读、会话不落盘；崩溃后 list 可见 `mount.host_exited` 失败态。
 
 ## 验证
 

@@ -9,7 +9,7 @@
     </message>
     <message id="aegra.nav.home">
         <source>Home</source>
-        <translation>Startseite</translation>
+        <translation>Übersicht</translation>
     </message>
     <message id="aegra.nav.backup">
         <source>Backup</source>
@@ -46,6 +46,18 @@
     <message id="aegra.nav.expand_sidebar">
         <source>Expand menu</source>
         <translation>Menü ausklappen</translation>
+    </message>
+    <message id="aegra.shell.last_sync_just_now">
+        <source>Last sync · just now</source>
+        <translation>Letzte Sync · gerade eben</translation>
+    </message>
+    <message id="aegra.shell.service_offline">
+        <source>Service offline</source>
+        <translation>Dienst offline</translation>
+    </message>
+    <message id="aegra.shell.service_running">
+        <source>Service is running</source>
+        <translation>Dienst läuft</translation>
     </message>
     <message id="aegra.shell.service_label">
         <source>Service %1</source>
@@ -1237,6 +1249,90 @@ Server: %1</translation>
         <source>Unmount</source>
         <translation>Aushängen</translation>
     </message>
+    <message id="aegra.mount.busy_loading">
+        <source>Mounting / unmounting...</source>
+        <translation>Einbinden / Aushängen...</translation>
+    </message>
+    <message id="aegra.mount.disk_name">
+        <source>Disk %1</source>
+        <translation>Datenträger %1</translation>
+    </message>
+    <message id="aegra.mount.state.mounting">
+        <source>Mounting</source>
+        <translation>Wird eingebunden</translation>
+    </message>
+    <message id="aegra.mount.state.mounted">
+        <source>Mounted</source>
+        <translation>Eingebunden</translation>
+    </message>
+    <message id="aegra.mount.state.unmounting">
+        <source>Unmounting</source>
+        <translation>Wird ausgehängt</translation>
+    </message>
+    <message id="aegra.mount.state.failed">
+        <source>Failed</source>
+        <translation>Fehlgeschlagen</translation>
+    </message>
+    <message id="aegra.mount.capability_missing">
+        <source>Service does not support mount</source>
+        <translation>Dienst unterstützt kein Einbinden</translation>
+    </message>
+    <message id="aegra.mount.busy">
+        <source>A mount command is already in progress</source>
+        <translation>Ein Mount-Befehl läuft bereits</translation>
+    </message>
+    <message id="aegra.mount.select_required">
+        <source>Select a checkpoint and at least one source disk</source>
+        <translation>Prüfpunkt und mindestens einen Quelldatenträger wählen</translation>
+    </message>
+    <message id="aegra.mount.invalid_drive_letter">
+        <source>Preferred drive letter must be a single letter A–Z</source>
+        <translation>Bevorzugter Laufwerksbuchstabe muss ein einzelner Buchstabe A–Z sein</translation>
+    </message>
+    <message id="aegra.mount.select_session">
+        <source>Select a mounted session to unmount</source>
+        <translation>Eingebundene Sitzung zum Aushängen wählen</translation>
+    </message>
+    <message id="aegra.mount.started">
+        <source>Mount started</source>
+        <translation>Einbinden gestartet</translation>
+    </message>
+    <message id="aegra.mount.already_mounted_selection">
+        <source>Selected disk(s) are already mounted</source>
+        <translation>Ausgewählte Datenträger sind bereits eingebunden</translation>
+    </message>
+    <message id="aegra.mount.unmounted">
+        <source>Unmounted</source>
+        <translation>Ausgehängt</translation>
+    </message>
+    <message id="aegra.error.mount.command_failed">
+        <source>Mount command failed</source>
+        <translation>Mount-Befehl fehlgeschlagen</translation>
+    </message>
+    <message id="aegra.error.mount.list_failed">
+        <source>Failed to list mount sessions</source>
+        <translation>Mount-Sitzungen konnten nicht geladen werden</translation>
+    </message>
+    <message id="aegra.error.mount.host_unavailable">
+        <source>Mount host is unavailable</source>
+        <translation>Mount-Host nicht verfügbar</translation>
+    </message>
+    <message id="aegra.error.mount.already_mounted">
+        <source>This disk is already mounted</source>
+        <translation>Dieser Datenträger ist bereits eingebunden</translation>
+    </message>
+    <message id="aegra.error.mount.dokan_unavailable">
+        <source>Dokan driver is not available</source>
+        <translation>Dokan-Treiber nicht verfügbar</translation>
+    </message>
+    <message id="aegra.error.mount.disk_not_found">
+        <source>Source disk was not found in the recovery point</source>
+        <translation>Quelldatenträger im Wiederherstellungspunkt nicht gefunden</translation>
+    </message>
+    <message id="aegra.error.mount.host_failed">
+        <source>Mount host failed</source>
+        <translation>Mount-Host fehlgeschlagen</translation>
+    </message>
     <message id="aegra.mount.checkpoint_panel_empty">
         <source>Recovery point list will appear when mount Service APIs are connected</source>
         <translation>Liste der Wiederherstellungspunkte erscheint nach Anbindung der Mount-Service-APIs</translation>
@@ -1314,8 +1410,8 @@ Server: %1</translation>
         <translation>Farbdesign für den Desktop-Client wählen</translation>
     </message>
     <message id="aegra.settings.theme.blue_extra">
-        <source>Blue Extra</source>
-        <translation>Blau Extra</translation>
+        <source>Glass</source>
+        <translation>Glas</translation>
     </message>
     <message id="aegra.settings.theme.dark">
         <source>Dark</source>

@@ -66,6 +66,13 @@ class ServiceClient final : public QObject {
     Q_PROPERTY(bool backupStartAvailable READ backupStartAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool restoreStartAvailable READ restoreStartAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool restoreCommandBusy READ restoreCommandBusy NOTIFY restoreCommandChanged)
+    Q_PROPERTY(bool mountStartAvailable READ mountStartAvailable NOTIFY stateChanged)
+    Q_PROPERTY(bool mountListAvailable READ mountListAvailable NOTIFY stateChanged)
+    Q_PROPERTY(bool mountCommandBusy READ mountCommandBusy NOTIFY mountCommandChanged)
+    Q_PROPERTY(bool mountSessionsLoading READ mountSessionsLoading NOTIFY mountSessionsChanged)
+    Q_PROPERTY(QVariantList mountSessions READ mountSessions NOTIFY mountSessionsChanged)
+    Q_PROPERTY(QString mountSessionsErrorText READ mountSessionsErrorText NOTIFY mountSessionsChanged)
+    Q_PROPERTY(QString mountCommandErrorText READ mountCommandErrorText NOTIFY mountCommandChanged)
     Q_PROPERTY(bool jobCancelAvailable READ jobCancelAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool backupCommandBusy READ backupCommandBusy NOTIFY backupCommandChanged)
     Q_PROPERTY(bool cancelCommandBusy READ cancelCommandBusy NOTIFY backupCommandChanged)
@@ -142,6 +149,13 @@ class ServiceClient final : public QObject {
     [[nodiscard]] bool activeBackupCancellable() const noexcept;
     [[nodiscard]] bool restoreStartAvailable() const noexcept;
     [[nodiscard]] bool restoreCommandBusy() const noexcept;
+    [[nodiscard]] bool mountStartAvailable() const noexcept;
+    [[nodiscard]] bool mountListAvailable() const noexcept;
+    [[nodiscard]] bool mountCommandBusy() const noexcept;
+    [[nodiscard]] bool mountSessionsLoading() const noexcept;
+    [[nodiscard]] QVariantList mountSessions() const;
+    [[nodiscard]] QString mountSessionsErrorText() const;
+    [[nodiscard]] QString mountCommandErrorText() const;
     [[nodiscard]] bool splashVisible() const noexcept;
     [[nodiscard]] bool splashBusy() const noexcept;
     [[nodiscard]] QString splashStatusText() const;
@@ -211,6 +225,20 @@ class ServiceClient final : public QObject {
     Q_INVOKABLE bool startVolumeRestore(int source_volume_index, const QString& target_source_id,
                                         const QString& recovery_point_id,
                                         const QString& archive_password = {});
+    /// Mount a recovery-point disk read-only via Mount Host (preferred letter optional).
+    Q_INVOKABLE bool startMount(int source_disk_number, const QString& recovery_point_id,
+                                const QString& preferred_drive_letter = {},
+                                const QString& archive_password = {});
+    /// Mount one or more source disks (old MountBackend multi-select). Preferred letter applies
+    /// only to the first disk; later disks auto-assign. Busy stays true for the whole batch.
+    Q_INVOKABLE bool startMountDisks(const QVariantList& source_disk_numbers,
+                                     const QString& recovery_point_id,
+                                     const QString& preferred_drive_letter = {},
+                                     const QString& archive_password = {});
+    Q_INVOKABLE bool unmountSession(const QString& session_id);
+    Q_INVOKABLE void refreshMountSessions();
+    /// Free drive letters for Mount Options (Auto + unused C:–Z:), matching old MountBackend.
+    Q_INVOKABLE QVariantList availableDriveLetters() const;
     Q_INVOKABLE void cancelActiveBackup();
     Q_INVOKABLE void dismissToast();
     /// Show a top toast (success/info). Safe for QML schedule Run feedback.
@@ -241,6 +269,12 @@ class ServiceClient final : public QObject {
     void restoreCommandChanged();
     void restoreStartSucceeded();
     void restoreStartFailed(const QString& message);
+    void mountCommandChanged();
+    void mountSessionsChanged();
+    void mountStartSucceeded(const QString& sessionId);
+    void mountStartFailed(const QString& message);
+    void unmountSucceeded(const QString& sessionId);
+    void unmountFailed(const QString& message);
 
   private:
     enum class State : std::uint8_t {
@@ -274,6 +308,9 @@ class ServiceClient final : public QObject {
     [[nodiscard]] RequestDisposition handle_prepare_restore_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_start_restore_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_cancel_job_frame(const QByteArray& body);
+    [[nodiscard]] RequestDisposition handle_mount_list_frame(const QByteArray& body);
+    [[nodiscard]] RequestDisposition handle_mount_command_frame(const QByteArray& body);
+    [[nodiscard]] RequestDisposition handle_unmount_command_frame(const QByteArray& body);
     void finish_repository_failure(const QString& message_code);
     void finish_recovery_point_layout_failure(const QString& message_code);
     void finish_job_failure(const QString& message_code);
@@ -287,6 +324,16 @@ class ServiceClient final : public QObject {
     void finish_backup_command_failure(const QString& message_code);
     void finish_restore_command_failure(const QString& message_code);
     void finish_cancel_command_failure(const QString& message_code);
+    void finish_mount_command_failure(const QString& message_code);
+    void finish_mount_list_failure(const QString& message_code);
+    void start_mount_session_query();
+    void reset_mount_sessions();
+    void reset_mount_command();
+    void clear_mount_disk_queue();
+    void finish_mount_disk_batch();
+    [[nodiscard]] bool begin_next_mount_from_queue();
+    [[nodiscard]] bool is_disk_already_mounted(int source_disk_number,
+                                               const QString& recovery_point_id) const;
     void reset_repository();
     void reset_recovery_point_layout();
     void reset_jobs();
@@ -391,6 +438,11 @@ class ServiceClient final : public QObject {
     bool restore_preflight_available_{false};
     bool restore_start_available_{false};
     bool restore_command_busy_{false};
+    bool mount_list_available_{false};
+    bool mount_start_available_{false};
+    bool mount_unmount_available_{false};
+    bool mount_command_busy_{false};
+    bool mount_sessions_loading_{false};
     bool job_cancel_available_{false};
     bool backup_command_busy_{false};
     bool cancel_command_busy_{false};
@@ -406,6 +458,23 @@ class ServiceClient final : public QObject {
     QString restore_prepare_request_id_;
     QString restore_start_request_id_;
     QString restore_start_idempotency_key_;
+    QString mount_list_request_id_;
+    QString mount_command_request_id_;
+    QString mount_command_idempotency_key_;
+    QString unmount_command_request_id_;
+    QString unmount_command_idempotency_key_;
+    QString mount_command_error_code_;
+    QString mount_sessions_error_code_;
+    QVariantList mount_sessions_;
+    /// Multi-disk mount batch (old MountBackend sequential mounts).
+    QVector<int> mount_disk_queue_;
+    QString mount_queue_recovery_point_id_;
+    QString mount_queue_archive_password_;
+    QString mount_queue_preferred_letter_;
+    bool mount_queue_preferred_applied_{false};
+    int mount_queue_ok_count_{0};
+    int mount_queue_skip_count_{0};
+    int mount_queue_fail_count_{0};
     bool active_backup_progress_visible_{false};
     bool active_backup_terminal_{false};
     bool active_backup_cancellable_{false};

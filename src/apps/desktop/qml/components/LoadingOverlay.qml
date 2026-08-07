@@ -7,7 +7,7 @@ import ".."
  */
 Rectangle {
     id: root
-    color: "#99000000"
+    color: Theme.colorScrim
     visible: false
     z: 1000
     opacity: visible ? 1 : 0
@@ -38,7 +38,7 @@ Rectangle {
         anchors.centerIn: parent
         width: Math.max(160, msgText.implicitWidth + 48)
         height: 120
-        radius: 10
+        radius: Theme.radiusCard
         color: Theme.colorCard
         border.width: 1
         border.color: Theme.colorBorder

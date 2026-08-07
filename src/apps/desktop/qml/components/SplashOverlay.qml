@@ -10,6 +10,7 @@ Rectangle {
     id: root
     visible: !windowAppReady
     anchors.fill: parent
+    radius: Theme.radiusWindow
     color: Theme.colorCard
     z: 1000
     focus: visible
@@ -58,15 +59,14 @@ Rectangle {
         }
     }
 
-    // Close (same as old splash ✕)
+    // Close (self-drawn Canvas control)
     WindowButton {
         anchors.top: parent.top
         anchors.right: parent.right
         anchors.topMargin: 4
         anchors.rightMargin: 4
         z: 3
-        icon: "\u2715"
-        isClose: true
+        role: "close"
         onClicked: root.quitRequested()
     }
 

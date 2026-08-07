@@ -5,31 +5,50 @@ import ".."
 Rectangle {
     id: root
     property string title: ""
+    property string actionText: ""
+    signal actionClicked()
 
-    color: Theme.colorCard
-    radius: 4
+    // Pure white background matching CoachPro design mockup
+    color: "#ffffff"
+    radius: 20
     border.width: 1
-    border.color: Theme.colorBorder
+    border.color: "#ebf3f2"
 
-    // Title with blue accent
-    Row {
-        x: 12
-        y: 12
-        spacing: 8
-
-        Rectangle {
-            width: 3
-            height: 18
-            color: Theme.colorAccentBlue
-        }
+    RowLayout {
+        id: headerRow
+        visible: root.title.length > 0
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.leftMargin: 22
+        anchors.rightMargin: 22
+        anchors.topMargin: 20
+        height: 24
 
         Text {
             text: root.title
-            color: Theme.colorTextWhite
-            font.pixelSize: 14
+            color: "#111111"
+            font.pixelSize: 16
             font.bold: true
             font.family: Theme.fontFamily
-            anchors.verticalCenter: parent.children[0].verticalCenter
+            Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
+        }
+
+        Item { Layout.fillWidth: true }
+
+        Text {
+            visible: root.actionText.length > 0
+            text: root.actionText
+            color: "#2A7982"
+            font.pixelSize: 12
+            font.bold: true
+            font.family: Theme.fontFamily
+            Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.actionClicked()
+            }
         }
     }
 }

@@ -513,14 +513,17 @@ parse_recovery_point_source_volume(const Json& payload) {
                 {"recovery_point_id", summary.recovery_point_id},
                 {"state", static_cast<std::uint8_t>(summary.state)},
                 {"mount_point", summary.mount_point},
+                {"source_disk_number", summary.source_disk_number},
+                {"disk_size_bytes", summary.disk_size_bytes},
                 {"started_utc_ms", summary.started_utc_ms},
                 {"message_code", summary.message_code}};
 }
 
 [[nodiscard]] contracts::MountSessionSummary parse_mount_session(const Json& payload) {
-    constexpr std::array<std::string_view, 6> keys{"session_id",     "recovery_point_id",
-                                                   "state",          "mount_point",
-                                                   "started_utc_ms", "message_code"};
+    constexpr std::array<std::string_view, 8> keys{
+        "session_id",         "recovery_point_id", "state",
+        "mount_point",        "source_disk_number", "disk_size_bytes",
+        "started_utc_ms",     "message_code"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("mount session fields are invalid");
     }
@@ -530,6 +533,8 @@ parse_recovery_point_source_volume(const Json& payload) {
     summary.state =
         static_cast<contracts::MountSessionState>(unsigned_value<std::uint8_t>(payload, "state"));
     summary.mount_point = payload.at("mount_point").get<std::string>();
+    summary.source_disk_number = unsigned_value<std::uint32_t>(payload, "source_disk_number");
+    summary.disk_size_bytes = unsigned_value<std::uint64_t>(payload, "disk_size_bytes");
     summary.started_utc_ms = unsigned_value<std::uint64_t>(payload, "started_utc_ms");
     summary.message_code = payload.at("message_code").get<std::string>();
     return summary;

@@ -47,6 +47,18 @@
         <source>Expand menu</source>
         <translation>Expand menu</translation>
     </message>
+    <message id="aegra.shell.last_sync_just_now">
+        <source>Last sync · just now</source>
+        <translation>Last sync · just now</translation>
+    </message>
+    <message id="aegra.shell.service_offline">
+        <source>Service offline</source>
+        <translation>Service offline</translation>
+    </message>
+    <message id="aegra.shell.service_running">
+        <source>Service is running</source>
+        <translation>Service is running</translation>
+    </message>
     <message id="aegra.shell.service_label">
         <source>Service %1</source>
         <translation>Service %1</translation>
@@ -1237,6 +1249,90 @@ Server: %1</translation>
         <source>Unmount</source>
         <translation>Unmount</translation>
     </message>
+    <message id="aegra.mount.busy_loading">
+        <source>Mounting / unmounting...</source>
+        <translation>Mounting / unmounting...</translation>
+    </message>
+    <message id="aegra.mount.disk_name">
+        <source>Disk %1</source>
+        <translation>Disk %1</translation>
+    </message>
+    <message id="aegra.mount.state.mounting">
+        <source>Mounting</source>
+        <translation>Mounting</translation>
+    </message>
+    <message id="aegra.mount.state.mounted">
+        <source>Mounted</source>
+        <translation>Mounted</translation>
+    </message>
+    <message id="aegra.mount.state.unmounting">
+        <source>Unmounting</source>
+        <translation>Unmounting</translation>
+    </message>
+    <message id="aegra.mount.state.failed">
+        <source>Failed</source>
+        <translation>Failed</translation>
+    </message>
+    <message id="aegra.mount.capability_missing">
+        <source>Service does not support mount</source>
+        <translation>Service does not support mount</translation>
+    </message>
+    <message id="aegra.mount.busy">
+        <source>A mount command is already in progress</source>
+        <translation>A mount command is already in progress</translation>
+    </message>
+    <message id="aegra.mount.select_required">
+        <source>Select a checkpoint and at least one source disk</source>
+        <translation>Select a checkpoint and at least one source disk</translation>
+    </message>
+    <message id="aegra.mount.invalid_drive_letter">
+        <source>Preferred drive letter must be a single letter A–Z</source>
+        <translation>Preferred drive letter must be a single letter A–Z</translation>
+    </message>
+    <message id="aegra.mount.select_session">
+        <source>Select a mounted session to unmount</source>
+        <translation>Select a mounted session to unmount</translation>
+    </message>
+    <message id="aegra.mount.started">
+        <source>Mount started</source>
+        <translation>Mount started</translation>
+    </message>
+    <message id="aegra.mount.already_mounted_selection">
+        <source>Selected disk(s) are already mounted</source>
+        <translation>Selected disk(s) are already mounted</translation>
+    </message>
+    <message id="aegra.mount.unmounted">
+        <source>Unmounted</source>
+        <translation>Unmounted</translation>
+    </message>
+    <message id="aegra.error.mount.command_failed">
+        <source>Mount command failed</source>
+        <translation>Mount command failed</translation>
+    </message>
+    <message id="aegra.error.mount.list_failed">
+        <source>Failed to list mount sessions</source>
+        <translation>Failed to list mount sessions</translation>
+    </message>
+    <message id="aegra.error.mount.host_unavailable">
+        <source>Mount host is unavailable</source>
+        <translation>Mount host is unavailable</translation>
+    </message>
+    <message id="aegra.error.mount.already_mounted">
+        <source>This disk is already mounted</source>
+        <translation>This disk is already mounted</translation>
+    </message>
+    <message id="aegra.error.mount.dokan_unavailable">
+        <source>Dokan driver is not available</source>
+        <translation>Dokan driver is not available</translation>
+    </message>
+    <message id="aegra.error.mount.disk_not_found">
+        <source>Source disk was not found in the recovery point</source>
+        <translation>Source disk was not found in the recovery point</translation>
+    </message>
+    <message id="aegra.error.mount.host_failed">
+        <source>Mount host failed</source>
+        <translation>Mount host failed</translation>
+    </message>
     <message id="aegra.mount.checkpoint_panel_empty">
         <source>Recovery point list will appear when mount Service APIs are connected</source>
         <translation>Recovery point list will appear when mount Service APIs are connected</translation>
@@ -1314,8 +1410,8 @@ Server: %1</translation>
         <translation>Choose a color theme for the desktop client</translation>
     </message>
     <message id="aegra.settings.theme.blue_extra">
-        <source>Blue Extra</source>
-        <translation>Blue Extra</translation>
+        <source>Glass</source>
+        <translation>Glass</translation>
     </message>
     <message id="aegra.settings.theme.dark">
         <source>Dark</source>

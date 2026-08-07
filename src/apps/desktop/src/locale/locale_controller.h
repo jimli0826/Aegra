@@ -18,7 +18,7 @@ class LocaleController final : public QObject {
     Q_PROPERTY(QString language READ language NOTIFY languageChanged)
     Q_PROPERTY(QString languageLabel READ languageLabel NOTIFY languageChanged)
     Q_PROPERTY(QVariantList availableLanguages READ availableLanguages CONSTANT)
-    // Desktop theme id: blueExtra | dark | light (same keys as backup SystemBackend).
+    // Desktop theme id: blueExtra (glass default) | dark | light.
     Q_PROPERTY(QString theme READ theme WRITE setTheme NOTIFY themeChanged)
 
   public:

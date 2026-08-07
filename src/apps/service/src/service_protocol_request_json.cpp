@@ -321,17 +321,27 @@ parse_restore_preflight_request(const Json& payload) {
 
 [[nodiscard]] Json
 encode_mount_recovery_point(const contracts::MountRecoveryPointCommand& command) {
-    return Json{{"recovery_point_id", command.recovery_point_id},
-                {"preferred_drive_letter", optional_string_json(command.preferred_drive_letter)}};
+    return Json{{"repository_connection_id", command.repository_connection_id},
+                {"recovery_point_id", command.recovery_point_id},
+                {"source_disk_number", command.source_disk_number},
+                {"preferred_drive_letter", optional_string_json(command.preferred_drive_letter)},
+                {"archive_password", command.archive_password}};
 }
 
 [[nodiscard]] contracts::MountRecoveryPointCommand parse_mount_recovery_point(const Json& payload) {
-    constexpr std::array<std::string_view, 2> keys{"recovery_point_id", "preferred_drive_letter"};
+    constexpr std::array<std::string_view, 5> keys{
+        "repository_connection_id", "recovery_point_id", "source_disk_number",
+        "preferred_drive_letter",   "archive_password"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("mount recovery point fields are invalid");
     }
-    return {payload.at("recovery_point_id").get<std::string>(),
-            optional_string(payload.at("preferred_drive_letter"))};
+    contracts::MountRecoveryPointCommand command;
+    command.repository_connection_id = payload.at("repository_connection_id").get<std::string>();
+    command.recovery_point_id = payload.at("recovery_point_id").get<std::string>();
+    command.source_disk_number = unsigned_value<std::uint32_t>(payload, "source_disk_number");
+    command.preferred_drive_letter = optional_string(payload.at("preferred_drive_letter"));
+    command.archive_password = payload.at("archive_password").get<std::string>();
+    return command;
 }
 
 [[nodiscard]] Json encode_schedule_trigger(const contracts::ScheduleTrigger& trigger) {

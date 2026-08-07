@@ -2,6 +2,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 
 add_library(aegra_app_service STATIC
     src/backup_catalog_registrar.cpp
+    src/mount_supervisor.cpp
     src/recovery_point_layout_service.cpp
     src/schedule_service.cpp
     src/service_host.cpp

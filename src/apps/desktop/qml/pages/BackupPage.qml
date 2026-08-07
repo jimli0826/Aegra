@@ -251,6 +251,39 @@ Item {
         return palette[i]
     }
 
+    /// Job-list revision + active progress so Status cells rebind while a backup runs.
+    readonly property int jobsStatusRevision: {
+        var jobs = serviceClient.jobs
+        var rev = jobs && jobs.revision !== undefined ? jobs.revision : 0
+        var pct = serviceClient.activeBackupProgressPercent || 0
+        var active = jobs && jobs.activeCount !== undefined ? jobs.activeCount : 0
+        return rev * 10000 + active * 1000 + pct
+    }
+
+    /// Resolve backup status for a schedule row (success / failed / running+%).
+    /// Returns { statusKey, progressPercent, stateText }.
+    function scheduleBackupStatus(schedule) {
+        var _ = root.jobsStatusRevision
+        if (!schedule)
+            return { statusKey: "none", progressPercent: 0, stateText: "" }
+        var jobs = serviceClient.jobs
+        if (!jobs || typeof jobs.latestBackupStatus !== "function")
+            return { statusKey: "none", progressPercent: 0, stateText: "" }
+        var sources = schedule.sourceIds || []
+        var conn = schedule.connectionId || ""
+        var st = jobs.latestBackupStatus(sources, conn)
+        if (!st)
+            return { statusKey: "none", progressPercent: 0, stateText: "" }
+        return {
+            statusKey: st.statusKey || "none",
+            progressPercent: st.progressPercent || 0,
+            stateText: st.stateText || ""
+        }
+    }
+
+    /// Pending wizard create payload while the first-backup confirm dialog is open.
+    property var pendingCreatePayload: null
+
     function createScheduleFromWizard() {
         var sources = selectedSources()
         var connId = selectedConnectionId()
@@ -283,14 +316,37 @@ Item {
                 return
             }
         }
-        // Create schedule (password stored by Service); first Full run after create ack.
-        if (!serviceClient.createSchedule(sources, connId, frequency, timeOfDay, excludePage,
-                                          encryption, encryption ? password : "", true)) {
+        // Ask whether to run the first Full backup immediately, then create.
+        root.pendingCreatePayload = {
+            sources: sources,
+            connId: connId,
+            frequency: frequency,
+            timeOfDay: timeOfDay,
+            excludePage: excludePage,
+            encryption: encryption,
+            password: encryption ? password : ""
+        }
+        firstBackupConfirm.open()
+    }
+
+    function commitPendingCreate(startFirstBackup) {
+        var p = root.pendingCreatePayload
+        root.pendingCreatePayload = null
+        if (!p)
+            return
+        if (!serviceClient.createSchedule(p.sources, p.connId, p.frequency, p.timeOfDay,
+                                          p.excludePage, p.encryption, p.password,
+                                          !!startFirstBackup)) {
             //% "Could not save schedule"
             serviceClient.showToast(qsTrId("aegra.backup.schedule.save_failed"))
             return
         }
+        // Stay on Backup / Schedules page after create (do not jump to Home).
         closeWizard()
+    }
+
+    function cancelPendingCreate() {
+        root.pendingCreatePayload = null
     }
 
     function pad2(n) {
@@ -324,14 +380,91 @@ Item {
         target: serviceClient
         function onBackupStartSucceeded(jobId) {
             root.pendingRunScheduleId = ""
-            // Old product navigates to Home so the Tasks table shows the new job.
-            root.navigateHomeRequested()
+            // Stay on Schedules page after a backup starts (no auto-navigate to Home).
         }
         function onBackupStartFailed(message) {
             root.pendingRunScheduleId = ""
         }
         function onSchedulesChanged() {
             // Schedules reloaded from Service after create/toggle/delete.
+        }
+    }
+
+    // Confirm: start first Full backup immediately after creating the schedule?
+    Popup {
+        id: firstBackupConfirm
+        parent: Overlay.overlay
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape
+        anchors.centerIn: Overlay.overlay
+        width: Math.min(420, Overlay.overlay ? Overlay.overlay.width - 48 : 420)
+        padding: 20
+        /// When true, onClosed must not drop the pending create (button already committed).
+        property bool committing: false
+
+        onClosed: {
+            firstBackupConfirm.committing = false
+            // Escape dismiss without choosing — drop pending create, keep wizard open.
+            if (root.pendingCreatePayload)
+                root.cancelPendingCreate()
+        }
+
+        background: Rectangle {
+            color: Theme.colorPopup
+            radius: 16
+            border.width: 1
+            border.color: Theme.colorBorder
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 16
+
+            Text {
+                Layout.fillWidth: true
+                //% "Start first backup?"
+                text: qsTrId("aegra.backup.schedule.first_backup_title")
+                color: Theme.colorTextWhite
+                font.pixelSize: 16
+                font.bold: true
+                font.family: Theme.fontFamily
+                wrapMode: Text.WordWrap
+            }
+            Text {
+                Layout.fillWidth: true
+                //% "The schedule will be saved. Do you want to start the first full backup now?"
+                text: qsTrId("aegra.backup.schedule.first_backup_message")
+                color: Theme.colorTextGrey
+                font.pixelSize: 13
+                font.family: Theme.fontFamily
+                wrapMode: Text.WordWrap
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 10
+                Item { Layout.fillWidth: true }
+                AppButton {
+                    //% "Later"
+                    text: qsTrId("aegra.backup.schedule.first_backup_later")
+                    Layout.preferredHeight: 36
+                    onClicked: {
+                        firstBackupConfirm.committing = true
+                        root.commitPendingCreate(false)
+                        firstBackupConfirm.close()
+                    }
+                }
+                AppButton {
+                    //% "Start now"
+                    text: qsTrId("aegra.backup.schedule.first_backup_now")
+                    primary: true
+                    Layout.preferredHeight: 36
+                    onClicked: {
+                        firstBackupConfirm.committing = true
+                        root.commitPendingCreate(true)
+                        firstBackupConfirm.close()
+                    }
+                }
+            }
         }
     }
 
@@ -730,8 +863,8 @@ Item {
                         }
                         Text {
                             Layout.preferredWidth: 110
-                            //% "Last run"
-                            text: qsTrId("aegra.backup.column.last_run").toUpperCase()
+                            //% "Status"
+                            text: qsTrId("aegra.backup.column.status").toUpperCase()
                             color: Theme.colorTextDim
                             font.pixelSize: 11
                             font.bold: true
@@ -923,16 +1056,164 @@ Item {
                                     elide: Text.ElideRight
                                 }
 
-                                // Last run
-                                Text {
+                                // Status: success / failed / running+progress%
+                                Item {
+                                    id: statusCell
                                     Layout.preferredWidth: 110
-                                    text: root.timeOrNa(modelData.lastRun)
-                                    color: Theme.colorTextGrey
-                                    font.pixelSize: 13
-                                    font.bold: true
-                                    font.family: Theme.fontFamily
-                                    horizontalAlignment: Text.AlignHCenter
-                                    elide: Text.ElideRight
+                                    Layout.fillHeight: true
+                                    readonly property var backupStatus: root.scheduleBackupStatus(modelData)
+                                    readonly property string statusKey: backupStatus.statusKey || "none"
+                                    readonly property int progressPct: backupStatus.progressPercent || 0
+
+                                    Row {
+                                        anchors.centerIn: parent
+                                        spacing: 6
+
+                                        // Icon badge: ✓ success · ⚠ failed · ↻↻ running · – none
+                                        Item {
+                                            id: statusIcon
+                                            width: 22
+                                            height: 22
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            property real spinAngle: 0
+                                            rotation: statusCell.statusKey === "running" ? spinAngle : 0
+
+                                            Rectangle {
+                                                anchors.fill: parent
+                                                radius: width / 2
+                                                color: {
+                                                    if (statusCell.statusKey === "success")
+                                                        return Qt.rgba(Theme.colorGreen.r,
+                                                                       Theme.colorGreen.g,
+                                                                       Theme.colorGreen.b, 0.18)
+                                                    if (statusCell.statusKey === "failed")
+                                                        return Qt.rgba(Theme.colorAccentRed.r,
+                                                                       Theme.colorAccentRed.g,
+                                                                       Theme.colorAccentRed.b, 0.18)
+                                                    if (statusCell.statusKey === "running")
+                                                        return Qt.rgba(Theme.colorAccentBlue.r,
+                                                                       Theme.colorAccentBlue.g,
+                                                                       Theme.colorAccentBlue.b, 0.18)
+                                                    return Theme.colorProgressTrack
+                                                }
+                                            }
+                                            Text {
+                                                anchors.centerIn: parent
+                                                visible: statusCell.statusKey !== "running"
+                                                text: {
+                                                    if (statusCell.statusKey === "success")
+                                                        return "\u2713"
+                                                    if (statusCell.statusKey === "failed")
+                                                        return "\u26A0"
+                                                    return "\u2013"
+                                                }
+                                                color: {
+                                                    if (statusCell.statusKey === "success")
+                                                        return Theme.colorGreen
+                                                    if (statusCell.statusKey === "failed")
+                                                        return Theme.colorAccentRed
+                                                    return Theme.colorTextDim
+                                                }
+                                                font.pixelSize: statusCell.statusKey === "failed" ? 11 : 12
+                                                font.bold: true
+                                                font.family: Theme.fontFamily
+                                            }
+
+                                            // Dual circular arrows (sync) — rotates while running
+                                            Canvas {
+                                                id: syncCanvas
+                                                anchors.centerIn: parent
+                                                width: 16
+                                                height: 16
+                                                visible: statusCell.statusKey === "running"
+                                                antialiasing: true
+                                                onVisibleChanged: if (visible)
+                                                    requestPaint()
+                                                Component.onCompleted: requestPaint()
+                                                onPaint: {
+                                                    var ctx = getContext("2d")
+                                                    ctx.reset()
+                                                    ctx.clearRect(0, 0, width, height)
+                                                    var ink = Theme.colorAccentBlue
+                                                    ctx.strokeStyle = ink
+                                                    ctx.fillStyle = ink
+                                                    ctx.lineWidth = 1.6
+                                                    ctx.lineCap = "round"
+                                                    ctx.lineJoin = "round"
+
+                                                    var cx = width / 2
+                                                    var cy = height / 2
+                                                    var r = Math.min(width, height) / 2 - 2.2
+
+                                                    function drawArcArrow(startAng, endAng) {
+                                                        // Arc body
+                                                        ctx.beginPath()
+                                                        ctx.arc(cx, cy, r, startAng, endAng, false)
+                                                        ctx.stroke()
+                                                        // Filled arrowhead at end, tangent-aligned
+                                                        var tipX = cx + Math.cos(endAng) * r
+                                                        var tipY = cy + Math.sin(endAng) * r
+                                                        var tang = endAng + Math.PI / 2
+                                                        var hx = Math.cos(tang)
+                                                        var hy = Math.sin(tang)
+                                                        var nx = Math.cos(endAng)
+                                                        var ny = Math.sin(endAng)
+                                                        var len = 3.2
+                                                        var wing = 2.2
+                                                        ctx.beginPath()
+                                                        ctx.moveTo(tipX + hx * len, tipY + hy * len)
+                                                        ctx.lineTo(tipX - nx * wing - hx * 0.4,
+                                                                   tipY - ny * wing - hy * 0.4)
+                                                        ctx.lineTo(tipX + nx * wing - hx * 0.4,
+                                                                   tipY + ny * wing - hy * 0.4)
+                                                        ctx.closePath()
+                                                        ctx.fill()
+                                                    }
+
+                                                    // Two opposing arcs with arrowheads (classic sync glyph)
+                                                    drawArcArrow(-Math.PI * 0.85, -Math.PI * 0.15)
+                                                    drawArcArrow(Math.PI * 0.15, Math.PI * 0.85)
+                                                }
+                                            }
+
+                                            NumberAnimation on spinAngle {
+                                                running: statusCell.statusKey === "running"
+                                                from: 0
+                                                to: 360
+                                                loops: Animation.Infinite
+                                                duration: 1200
+                                            }
+                                        }
+
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            visible: statusCell.statusKey === "running"
+                                            text: statusCell.progressPct + "%"
+                                            color: Theme.colorAccentBlue
+                                            font.pixelSize: 12
+                                            font.bold: true
+                                            font.family: Theme.fontFamily
+                                        }
+
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            visible: statusCell.statusKey === "none"
+                                            text: qsTrId("aegra.common.not_available")
+                                            color: Theme.colorTextDim
+                                            font.pixelSize: 12
+                                            font.bold: true
+                                            font.family: Theme.fontFamily
+                                        }
+                                    }
+
+                                    Accessible.name: {
+                                        var st = statusCell.backupStatus
+                                        if (st.statusKey === "running")
+                                            return (st.stateText || "") + " " + st.progressPercent + "%"
+                                        if (st.stateText && st.stateText.length > 0)
+                                            return st.stateText
+                                        return qsTrId("aegra.common.not_available")
+                                    }
                                 }
 
                                 // Next run — emphasized like PTS
@@ -2065,18 +2346,18 @@ Item {
                             }
                         }
 
-                        // Footer: Cancel + Next (wizard step 1)
+                        // Footer: Back + Next (wizard step 1)
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 15
                             Item { Layout.fillWidth: true }
 
                             AppButton {
-                                //% "Cancel"
-                                text: qsTrId("aegra.common.cancel")
+                                //% "Back"
+                                text: qsTrId("aegra.common.back")
                                 Layout.preferredWidth: 100
                                 Layout.preferredHeight: 40
-                                onClicked: root.closeWizard()
+                                onClicked: root.wizardStep = 0
                             }
                             AppButton {
                                 //% "Next"

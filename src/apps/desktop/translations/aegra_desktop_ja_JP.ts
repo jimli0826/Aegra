@@ -917,6 +917,22 @@ Server: %1</source>
         <source>Select a repository destination (Locations)</source>
         <translation>リポジトリ接続先（Locations）を選択してください</translation>
     </message>
+    <message id="aegra.backup.schedule.first_backup_title">
+        <source>Start first backup?</source>
+        <translation>初回バックアップを開始しますか？</translation>
+    </message>
+    <message id="aegra.backup.schedule.first_backup_message">
+        <source>The schedule will be saved. Do you want to start the first full backup now?</source>
+        <translation>スケジュールは保存されます。初回のフルバックアップを今すぐ開始しますか？</translation>
+    </message>
+    <message id="aegra.backup.schedule.first_backup_now">
+        <source>Start now</source>
+        <translation>今すぐ開始</translation>
+    </message>
+    <message id="aegra.backup.schedule.first_backup_later">
+        <source>Later</source>
+        <translation>後で</translation>
+    </message>
     <message id="aegra.backup.schedule.save_failed">
         <source>Could not save schedule</source>
         <translation>スケジュールを保存できませんでした</translation>

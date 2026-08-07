@@ -56,6 +56,7 @@ void JobModel::set_rows(QVector<JobRow> rows) {
     endResetModel();
     emit countChanged();
     emit countsChanged();
+    bump_revision();
 }
 
 void JobModel::upsert_job(JobRow row) {
@@ -66,6 +67,7 @@ void JobModel::upsert_job(JobRow row) {
             emit dataChanged(idx, idx);
             recompute_counts(rows_, running_count_, failed_count_, succeeded_count_, active_count_);
             emit countsChanged();
+            bump_revision();
             return;
         }
     }
@@ -75,6 +77,7 @@ void JobModel::upsert_job(JobRow row) {
     recompute_counts(rows_, running_count_, failed_count_, succeeded_count_, active_count_);
     emit countChanged();
     emit countsChanged();
+    bump_revision();
 }
 
 void JobModel::clear() {
@@ -90,6 +93,7 @@ void JobModel::clear() {
     endResetModel();
     emit countChanged();
     emit countsChanged();
+    bump_revision();
 }
 
 void JobModel::retranslate() {
@@ -97,6 +101,7 @@ void JobModel::retranslate() {
         return;
     }
     emit dataChanged(index(0, 0), index(rows_.size() - 1, 0));
+    bump_revision();
 }
 
 int JobModel::runningCount() const noexcept { return running_count_; }
@@ -107,6 +112,13 @@ int JobModel::succeededCount() const noexcept { return succeeded_count_; }
 
 int JobModel::activeCount() const noexcept { return active_count_; }
 
+int JobModel::revision() const noexcept { return revision_; }
+
+void JobModel::bump_revision() {
+    ++revision_;
+    emit revisionChanged();
+}
+
 bool JobModel::has_active_jobs() const noexcept { return active_count_ > 0; }
 
 std::optional<JobRow> JobModel::find_job(const QString& job_id) const {
@@ -116,6 +128,81 @@ std::optional<JobRow> JobModel::find_job(const QString& job_id) const {
         }
     }
     return std::nullopt;
+}
+
+namespace {
+
+constexpr std::int64_t kOperationBackup = 1;
+
+[[nodiscard]] bool source_ids_overlap(const QStringList& job_sources,
+                                      const QVariantList& schedule_sources) {
+    if (job_sources.isEmpty() || schedule_sources.isEmpty()) {
+        return false;
+    }
+    for (const auto& schedule_source : schedule_sources) {
+        const auto id = schedule_source.toString();
+        if (!id.isEmpty() && job_sources.contains(id)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+[[nodiscard]] QString status_key_for_state(const std::int64_t state) noexcept {
+    if (state == kStateQueued || state == kStateRunning || state == kStateCancelling) {
+        return QStringLiteral("running");
+    }
+    if (state == kStateSucceeded) {
+        return QStringLiteral("success");
+    }
+    if (state == kStateFailed || state == kStateCancelled || state == kStateInterrupted) {
+        return QStringLiteral("failed");
+    }
+    return QStringLiteral("none");
+}
+
+} // namespace
+
+QVariantMap JobModel::latestBackupStatus(const QVariantList& source_ids,
+                                         const QString& connection_id) const {
+    QVariantMap empty{{QStringLiteral("statusKey"), QStringLiteral("none")},
+                      {QStringLiteral("progressPercent"), 0},
+                      {QStringLiteral("stateText"), QString{}},
+                      {QStringLiteral("stateValue"), 0}};
+    if (connection_id.isEmpty() || source_ids.isEmpty()) {
+        return empty;
+    }
+
+    const JobRow* best_active = nullptr;
+    const JobRow* best_terminal = nullptr;
+    for (const auto& row : rows_) {
+        if (row.operation != kOperationBackup || row.connection_id != connection_id) {
+            continue;
+        }
+        if (!source_ids_overlap(row.source_ids, source_ids)) {
+            continue;
+        }
+        if (is_active_state(row.state)) {
+            if (best_active == nullptr || row.created_utc_ms >= best_active->created_utc_ms) {
+                best_active = &row;
+            }
+            continue;
+        }
+        if (is_terminal_state(row.state)) {
+            if (best_terminal == nullptr || row.created_utc_ms >= best_terminal->created_utc_ms) {
+                best_terminal = &row;
+            }
+        }
+    }
+
+    const JobRow* chosen = best_active != nullptr ? best_active : best_terminal;
+    if (chosen == nullptr) {
+        return empty;
+    }
+    return {{QStringLiteral("statusKey"), status_key_for_state(chosen->state)},
+            {QStringLiteral("progressPercent"), progress_percent(*chosen)},
+            {QStringLiteral("stateText"), state_text(chosen->state)},
+            {QStringLiteral("stateValue"), static_cast<qint64>(chosen->state)}};
 }
 
 int JobModel::rowCount(const QModelIndex& parent) const {
@@ -164,6 +251,10 @@ QVariant JobModel::data(const QModelIndex& index, const int role) const {
                    : row.destination_name;
     case DestinationPathRole:
         return row.destination_path;
+    case SourceIdsRole:
+        return row.source_ids;
+    case ConnectionIdRole:
+        return row.connection_id;
     default:
         return {};
     }
@@ -184,7 +275,9 @@ QHash<int, QByteArray> JobModel::roleNames() const {
             {IsActiveRole, "isActive"},
             {SourceNameRole, "sourceName"},
             {DestinationNameRole, "destinationName"},
-            {DestinationPathRole, "destinationPath"}};
+            {DestinationPathRole, "destinationPath"},
+            {SourceIdsRole, "sourceIds"},
+            {ConnectionIdRole, "connectionId"}};
 }
 
 QString JobModel::operation_text(const std::int64_t operation) const {

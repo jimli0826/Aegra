@@ -917,6 +917,22 @@ Server: %1</translation>
         <source>Select a repository destination (Locations)</source>
         <translation>Select a repository destination (Locations)</translation>
     </message>
+    <message id="aegra.backup.schedule.first_backup_title">
+        <source>Start first backup?</source>
+        <translation>Start first backup?</translation>
+    </message>
+    <message id="aegra.backup.schedule.first_backup_message">
+        <source>The schedule will be saved. Do you want to start the first full backup now?</source>
+        <translation>The schedule will be saved. Do you want to start the first full backup now?</translation>
+    </message>
+    <message id="aegra.backup.schedule.first_backup_now">
+        <source>Start now</source>
+        <translation>Start now</translation>
+    </message>
+    <message id="aegra.backup.schedule.first_backup_later">
+        <source>Later</source>
+        <translation>Later</translation>
+    </message>
     <message id="aegra.backup.schedule.save_failed">
         <source>Could not save schedule</source>
         <translation>Could not save schedule</translation>

@@ -917,6 +917,22 @@ Server: %1</source>
         <source>Select a repository destination (Locations)</source>
         <translation>請選擇備份目標（Locations 中的 Repository 連線）</translation>
     </message>
+    <message id="aegra.backup.schedule.first_backup_title">
+        <source>Start first backup?</source>
+        <translation>立即開始首次備份？</translation>
+    </message>
+    <message id="aegra.backup.schedule.first_backup_message">
+        <source>The schedule will be saved. Do you want to start the first full backup now?</source>
+        <translation>排程將會儲存。是否立即開始首次完整備份？</translation>
+    </message>
+    <message id="aegra.backup.schedule.first_backup_now">
+        <source>Start now</source>
+        <translation>立即開始</translation>
+    </message>
+    <message id="aegra.backup.schedule.first_backup_later">
+        <source>Later</source>
+        <translation>稍後</translation>
+    </message>
     <message id="aegra.backup.schedule.save_failed">
         <source>Could not save schedule</source>
         <translation>無法儲存排程</translation>

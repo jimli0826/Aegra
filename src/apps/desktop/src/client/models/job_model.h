@@ -4,6 +4,7 @@
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
+#include <QVariantMap>
 #include <QVector>
 
 #include <cstdint>
@@ -40,6 +41,8 @@ class JobModel final : public QAbstractListModel {
     Q_PROPERTY(int failedCount READ failedCount NOTIFY countsChanged)
     Q_PROPERTY(int succeededCount READ succeededCount NOTIFY countsChanged)
     Q_PROPERTY(int activeCount READ activeCount NOTIFY countsChanged)
+    /// Bumps when job rows or progress change so QML bindings can re-query status.
+    Q_PROPERTY(int revision READ revision NOTIFY revisionChanged)
 
   public:
     enum Role : int {
@@ -58,6 +61,8 @@ class JobModel final : public QAbstractListModel {
         SourceNameRole,
         DestinationNameRole,
         DestinationPathRole,
+        SourceIdsRole,
+        ConnectionIdRole,
     };
 
     explicit JobModel(QObject* parent = nullptr);
@@ -73,8 +78,14 @@ class JobModel final : public QAbstractListModel {
     [[nodiscard]] int failedCount() const noexcept;
     [[nodiscard]] int succeededCount() const noexcept;
     [[nodiscard]] int activeCount() const noexcept;
+    [[nodiscard]] int revision() const noexcept;
     [[nodiscard]] bool has_active_jobs() const noexcept;
     [[nodiscard]] std::optional<JobRow> find_job(const QString& job_id) const;
+
+    /// Latest backup job matching schedule sources + repository connection.
+    /// Keys: statusKey (none|running|success|failed), progressPercent, stateText, stateValue.
+    Q_INVOKABLE [[nodiscard]] QVariantMap latestBackupStatus(const QVariantList& source_ids,
+                                                             const QString& connection_id) const;
 
     [[nodiscard]] int rowCount(const QModelIndex& parent = QModelIndex()) const override;
     [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
@@ -83,6 +94,7 @@ class JobModel final : public QAbstractListModel {
   signals:
     void countChanged();
     void countsChanged();
+    void revisionChanged();
 
   private:
     [[nodiscard]] QString operation_text(std::int64_t operation) const;
@@ -92,6 +104,7 @@ class JobModel final : public QAbstractListModel {
     [[nodiscard]] static bool is_active_state(std::int64_t state) noexcept;
     [[nodiscard]] static int progress_percent(const JobRow& row) noexcept;
     [[nodiscard]] static bool progress_visible(const JobRow& row) noexcept;
+    void bump_revision();
 
     LocaleFormat* format_{nullptr};
     QVector<JobRow> rows_;
@@ -99,6 +112,7 @@ class JobModel final : public QAbstractListModel {
     int failed_count_{0};
     int succeeded_count_{0};
     int active_count_{0};
+    int revision_{0};
 };
 
 [[nodiscard]] QVector<JobRow> jobs_from_variant_list(const QVariantList& items);

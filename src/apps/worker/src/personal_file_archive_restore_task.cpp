@@ -39,9 +39,10 @@ base::Result<void> validate_task(const contracts::JobRequest& job,
     }
     if (job.content_kind != contracts::ContentKind::kFileSet ||
         job.operation != contracts::JobOperation::kRestore || !job.file_restore_target ||
-        job.source_refs.size() != 1 || job.credential_refs.size() != 1 || !job.target_ref.empty()) {
-        return invalid(
-            "file_set restore requires content_kind=file_set, one source, file_restore_target");
+        job.source_refs.empty() || job.source_refs.size() > contracts::kMaximumFileChainDepth ||
+        job.credential_refs.size() != job.source_refs.size() || !job.target_ref.empty()) {
+        return invalid("file_set restore requires content_kind=file_set, base-first source chain, "
+                       "matching credentials, file_restore_target");
     }
     if (options.memory_budget_bytes == 0) {
         return invalid("file_set restore memory budget is invalid");
@@ -152,13 +153,13 @@ class EmptyPasswordSecret final : public ports::IResolvedSecret {
 };
 
 [[nodiscard]] base::Result<std::unique_ptr<ports::IResolvedSecret>>
-resolve_restore_secret(const contracts::JobRequest& job, ports::ICredentialResolver& credentials,
-                       const base::CancellationToken& cancellation) {
-    if (job.credential_refs.front().value.empty()) {
+resolve_one_secret(const contracts::SecretRef& credential, ports::ICredentialResolver& credentials,
+                   const base::CancellationToken& cancellation) {
+    if (credential.value.empty()) {
         return base::Result<std::unique_ptr<ports::IResolvedSecret>>::success(
             std::make_unique<EmptyPasswordSecret>());
     }
-    auto resolved = credentials.resolve(job.credential_refs.front(), cancellation);
+    auto resolved = credentials.resolve(credential, cancellation);
     if (!resolved || resolved.value() == nullptr || resolved.value()->view().empty()) {
         const auto code = !resolved && resolved.error().code == base::ErrorCode::kCancelled
                               ? base::ErrorCode::kCancelled
@@ -167,6 +168,23 @@ resolve_restore_secret(const contracts::JobRequest& job, ports::ICredentialResol
             {code, !resolved ? resolved.error().message : "archive credential is unavailable"});
     }
     return resolved;
+}
+
+[[nodiscard]] base::Result<std::vector<std::unique_ptr<ports::IResolvedSecret>>>
+resolve_restore_secrets(const contracts::JobRequest& job, ports::ICredentialResolver& credentials,
+                        const base::CancellationToken& cancellation) {
+    std::vector<std::unique_ptr<ports::IResolvedSecret>> secrets;
+    secrets.reserve(job.credential_refs.size());
+    for (const auto& credential : job.credential_refs) {
+        auto resolved = resolve_one_secret(credential, credentials, cancellation);
+        if (!resolved) {
+            return base::Result<std::vector<std::unique_ptr<ports::IResolvedSecret>>>::failure(
+                resolved.error());
+        }
+        secrets.push_back(std::move(resolved).value());
+    }
+    return base::Result<std::vector<std::unique_ptr<ports::IResolvedSecret>>>::success(
+        std::move(secrets));
 }
 
 [[nodiscard]] int path_hex_value(const char character) noexcept {
@@ -353,28 +371,35 @@ run_file_set_restore(const contracts::JobRequest& job,
         (job.deadline_utc_ms > 0 && context.clock.now_utc_ms() >= job.deadline_utc_ms)) {
         return validated_result(failed_result(job, base::ErrorCode::kCancelled));
     }
-    std::unique_ptr<ports::IResolvedSecret> secret;
+    std::vector<std::unique_ptr<ports::IResolvedSecret>> secrets;
     {
         ScopedStage stage(task_log.get(), "resolve_credentials");
-        auto resolved = resolve_restore_secret(job, context.credentials, cancellation);
+        auto resolved = resolve_restore_secrets(job, context.credentials, cancellation);
         if (!resolved) {
             stage.fail(resolved.error(), "resolve_secret",
                        restore_hint_for(resolved.error().code, resolved.error().message));
             return validated_result(failed_result(job, resolved.error().code, &resolved.error()));
         }
-        secret = std::move(resolved).value();
+        secrets = std::move(resolved).value();
     }
-    std::unique_ptr<adapters::personal_archive::PersonalFileArchiveReader> reader;
+    std::unique_ptr<adapters::personal_archive::PersonalFileArchiveChainReader> reader;
     {
-        ScopedStage stage(task_log.get(), "open_archive");
-        adapters::personal_archive::ArchiveOpenRequest request;
-        request.source = path_from_utf8(job.source_refs.front());
-        request.password = secret->view();
-        request.maximum_chunk_payload_size = options.memory_budget_bytes;
-        request.maximum_chunk_logical_size = options.memory_budget_bytes;
-        auto opened = adapters::personal_archive::PersonalFileArchiveReader::open(request);
+        ScopedStage stage(task_log.get(), "open_chain");
+        adapters::personal_archive::ArchiveChainOpenRequest open_request;
+        open_request.maximum_chain_depth = contracts::kMaximumFileChainDepth;
+        open_request.layers.reserve(job.source_refs.size());
+        for (std::size_t index = 0; index < job.source_refs.size(); ++index) {
+            adapters::personal_archive::ArchiveOpenRequest layer;
+            layer.source = path_from_utf8(job.source_refs[index]);
+            layer.password = secrets[index]->view();
+            layer.maximum_chunk_payload_size = options.memory_budget_bytes;
+            layer.maximum_chunk_logical_size = options.memory_budget_bytes;
+            open_request.layers.push_back(std::move(layer));
+        }
+        auto opened =
+            adapters::personal_archive::PersonalFileArchiveChainReader::open(open_request);
         if (!opened) {
-            stage.fail(opened.error(), "PersonalFileArchiveReader::open",
+            stage.fail(opened.error(), "PersonalFileArchiveChainReader::open",
                        restore_hint_for(opened.error().code, opened.error().message));
             return validated_result(failed_result(job, opened.error().code, &opened.error()));
         }
@@ -413,7 +438,7 @@ run_file_set_restore(const contracts::JobRequest& job,
     plan.entry_ids = std::move(entry_ids).value();
     plan.conflict_policy = job.file_restore_target->conflict_policy;
     plan.restore_security = job.file_restore_target->restore_security;
-    plan.restore_ads = job.file_restore_target->restore_ads;
+
     const auto buffer = static_cast<std::uint32_t>((std::min)(
         options.memory_budget_bytes,
         static_cast<std::uint64_t>((std::numeric_limits<std::uint32_t>::max)())));
@@ -437,7 +462,6 @@ run_file_set_restore(const contracts::JobRequest& job,
         task_log->field_u64("conflict_policy",
                             static_cast<std::uint64_t>(plan.conflict_policy));
         task_log->field_bool("restore_security", plan.restore_security);
-        task_log->field_bool("restore_ads", plan.restore_ads);
         task_log->field_u64("entries_requested", summary.value().stats.entries_requested);
         task_log->field_u64("entries_restored", summary.value().stats.entries_restored);
         task_log->field_u64("entries_failed", summary.value().stats.entries_failed);

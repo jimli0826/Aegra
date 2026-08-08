@@ -3,7 +3,9 @@
 #include "aegra/base/uuid.h"
 
 #include <algorithm>
+#include <cstring>
 #include <set>
+#include <span>
 #include <string_view>
 #include <utility>
 
@@ -29,7 +31,21 @@ base::Result<void> invalid(std::string message) {
 }
 
 [[nodiscard]] bool valid_volume_identity(const std::string_view value) noexcept {
-    return !value.empty() && value.size() <= 512;
+    return !value.empty() && value.size() <= kMaximumVolumeIdentityBytes;
+}
+
+[[nodiscard]] bool is_known_file_journal_unavailable_reason(
+    const FileJournalUnavailableReason reason) noexcept {
+    switch (reason) {
+    case FileJournalUnavailableReason::kNone:
+    case FileJournalUnavailableReason::kOpenFailed:
+    case FileJournalUnavailableReason::kUnsupported:
+    case FileJournalUnavailableReason::kInactive:
+    case FileJournalUnavailableReason::kAccessDenied:
+    case FileJournalUnavailableReason::kInvalidResponse:
+        return true;
+    }
+    return false;
 }
 
 [[nodiscard]] bool valid_relative_component_bytes(const std::vector<std::byte>& bytes) noexcept {
@@ -82,6 +98,67 @@ base::Result<void> invalid(std::string message) {
     return true;
 }
 
+[[nodiscard]] bool file_id_is_zero(const std::array<std::byte, kStableFileIdBytes>& file_id) noexcept {
+    return std::all_of(file_id.begin(), file_id.end(),
+                       [](const std::byte item) { return item == std::byte{0}; });
+}
+
+void append_u8(std::vector<std::byte>& out, const std::uint8_t value) {
+    out.push_back(static_cast<std::byte>(value));
+}
+
+void append_u32_le(std::vector<std::byte>& out, const std::uint32_t value) {
+    for (std::size_t index = 0; index < 4; ++index) {
+        out.push_back(static_cast<std::byte>((value >> (index * 8U)) & 0xFFU));
+    }
+}
+
+void append_bytes(std::vector<std::byte>& out, const std::span<const std::byte> bytes) {
+    out.insert(out.end(), bytes.begin(), bytes.end());
+}
+
+void append_string_bytes(std::vector<std::byte>& out, const std::string_view text) {
+    append_bytes(out, std::span<const std::byte>(reinterpret_cast<const std::byte*>(text.data()),
+                                                 text.size()));
+}
+
+[[nodiscard]] std::string path_sort_key(const FileSourceRef& ref) {
+    std::string key = ref.volume_identity;
+    key.push_back('\0');
+    for (const auto& component : ref.relative_components) {
+        key.append(reinterpret_cast<const char*>(component.bytes.data()), component.bytes.size());
+        key.push_back('\0');
+    }
+    key.append(ref.selection_id);
+    return key;
+}
+
+[[nodiscard]] base::Result<void> validate_local_stream_extents(const FileStreamDesc& stream) {
+    std::uint64_t covered = 0;
+    std::uint64_t next_offset = 0;
+    for (const auto& extent : stream.extents) {
+        if (extent.logical_size == 0 || !valid_wire_u64(extent.file_offset) ||
+            !valid_wire_u64(extent.logical_size) || extent.file_offset < next_offset) {
+            return invalid("file stream extents are invalid");
+        }
+        if (extent.logical_size > stream.logical_size - extent.file_offset) {
+            return invalid("file stream extent exceeds logical_size");
+        }
+        next_offset = extent.file_offset + extent.logical_size;
+        covered += extent.logical_size;
+    }
+    if (stream.logical_size == 0) {
+        if (!stream.extents.empty()) {
+            return invalid("empty stream must have no extents");
+        }
+        return base::Result<void>::success();
+    }
+    if (covered != stream.logical_size || next_offset != stream.logical_size) {
+        return invalid("file stream extents do not cover logical_size");
+    }
+    return base::Result<void>::success();
+}
+
 } // namespace
 
 bool is_known_content_kind(const ContentKind kind) noexcept {
@@ -93,8 +170,7 @@ bool is_known_name_encoding(const NameEncoding encoding) noexcept {
 }
 
 bool is_known_file_entry_kind(const FileEntryKind kind) noexcept {
-    return kind == FileEntryKind::kDirectory || kind == FileEntryKind::kFile ||
-           kind == FileEntryKind::kReparse || kind == FileEntryKind::kOther;
+    return kind == FileEntryKind::kDirectory || kind == FileEntryKind::kFile;
 }
 
 bool is_known_file_recursion(const FileRecursion recursion) noexcept {
@@ -106,12 +182,158 @@ bool is_known_file_conflict_policy(const FileConflictPolicy policy) noexcept {
            policy == FileConflictPolicy::kRename;
 }
 
+bool is_known_file_stream_kind(const FileStreamKind kind) noexcept {
+    return kind == FileStreamKind::kMain;
+}
+
+bool is_known_file_content_storage(const FileContentStorage storage) noexcept {
+    return storage == FileContentStorage::kLocal || storage == FileContentStorage::kParent;
+}
+
+bool is_known_file_change_reason(const FileChangeReason reason) noexcept {
+    switch (reason) {
+    case FileChangeReason::kNone:
+    case FileChangeReason::kContent:
+    case FileChangeReason::kNamespace:
+    case FileChangeReason::kMetadata:
+    case FileChangeReason::kAmbiguous:
+        return true;
+    }
+    return false;
+}
+
+bool is_known_incremental_downgrade_reason(const IncrementalDowngradeReason reason) noexcept {
+    switch (reason) {
+    case IncrementalDowngradeReason::kNone:
+    case IncrementalDowngradeReason::kNoParent:
+    case IncrementalDowngradeReason::kSelectionChanged:
+    case IncrementalDowngradeReason::kChainIncomplete:
+    case IncrementalDowngradeReason::kJournalMissing:
+    case IncrementalDowngradeReason::kJournalReset:
+    case IncrementalDowngradeReason::kJournalWrapped:
+    case IncrementalDowngradeReason::kJournalInaccessible:
+    case IncrementalDowngradeReason::kVolumeIdentityChanged:
+    case IncrementalDowngradeReason::kBaselineInvalid:
+        return true;
+    }
+    return false;
+}
+
+bool is_known_selection_fingerprint_algorithm(const std::uint8_t algorithm_id) noexcept {
+    return algorithm_id == kSelectionFingerprintAlgorithmSha256V1;
+}
+
+bool is_null_stable_file_identity(const StableFileIdentity& identity) noexcept {
+    return identity.volume_identity.empty() && file_id_is_zero(identity.file_id);
+}
+
+bool is_zero_selection_fingerprint(const FileSelectionFingerprint& fingerprint) noexcept {
+    return std::all_of(fingerprint.digest.begin(), fingerprint.digest.end(),
+                       [](const std::byte item) { return item == std::byte{0}; });
+}
+
 base::Result<void> validate_encoded_name(const EncodedName& name) {
     if (!is_known_name_encoding(name.encoding)) {
         return invalid("name encoding is invalid");
     }
     if (!valid_relative_component_bytes(name.bytes)) {
         return invalid("encoded name bytes are invalid");
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void> validate_stable_file_identity(const StableFileIdentity& identity,
+                                                 const bool allow_null) {
+    if (is_null_stable_file_identity(identity)) {
+        return allow_null ? base::Result<void>::success()
+                          : invalid("stable file identity is required");
+    }
+    if (!valid_volume_identity(identity.volume_identity) || file_id_is_zero(identity.file_id)) {
+        return invalid("stable file identity is invalid");
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void> validate_file_journal_checkpoint(const FileJournalCheckpoint& checkpoint) {
+    if (!valid_volume_identity(checkpoint.volume_identity) || checkpoint.journal_id == 0 ||
+        checkpoint.next_usn < 0) {
+        return invalid("file journal checkpoint is invalid");
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void>
+validate_file_journal_checkpoints(const std::vector<FileJournalCheckpoint>& checkpoints) {
+    if (checkpoints.size() > kMaximumJournalCheckpoints) {
+        return invalid("file journal checkpoint count exceeds limit");
+    }
+    std::string previous;
+    for (const auto& checkpoint : checkpoints) {
+        auto valid = validate_file_journal_checkpoint(checkpoint);
+        if (!valid) {
+            return valid;
+        }
+        if (!previous.empty() && checkpoint.volume_identity <= previous) {
+            return invalid("file journal checkpoints must be sorted unique by volume_identity");
+        }
+        previous = checkpoint.volume_identity;
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void> validate_file_journal_state(const FileJournalState& state) {
+    if (!valid_volume_identity(state.volume_identity)) {
+        return invalid("file journal state volume_identity is invalid");
+    }
+    if (!is_known_file_journal_unavailable_reason(state.unavailable_reason)) {
+        return invalid("file journal unavailable reason is invalid");
+    }
+    if (!state.available) {
+        if (state.unavailable_reason == FileJournalUnavailableReason::kNone) {
+            return invalid("unavailable file journal state requires a reason");
+        }
+        return base::Result<void>::success();
+    }
+    if (state.journal_id == 0 || state.lowest_valid_usn < 0 || state.next_usn < 0 ||
+        state.lowest_valid_usn > state.next_usn ||
+        state.unavailable_reason != FileJournalUnavailableReason::kNone ||
+        state.native_error_code != 0) {
+        return invalid("file journal state range is invalid");
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void> validate_file_change_hint(const FileChangeHint& hint) {
+    auto identity = validate_stable_file_identity(hint.identity, false);
+    if (!identity) {
+        return identity;
+    }
+    if (!is_known_file_change_reason(hint.reason) || hint.reason == FileChangeReason::kNone) {
+        return invalid("file change reason is invalid");
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void> validate_file_change_batch(const FileChangeBatch& batch) {
+    if (batch.hints.size() > kMaximumChangeHintsPerBatch) {
+        return invalid("file change batch exceeds limit");
+    }
+    for (const auto& hint : batch.hints) {
+        auto valid = validate_file_change_hint(hint);
+        if (!valid) {
+            return valid;
+        }
+    }
+    if (batch.next_start_usn && *batch.next_start_usn < 0) {
+        return invalid("file change batch next_start_usn is invalid");
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void> validate_file_selection_fingerprint(const FileSelectionFingerprint& fingerprint) {
+    if (!is_known_selection_fingerprint_algorithm(fingerprint.algorithm_id) ||
+        is_zero_selection_fingerprint(fingerprint)) {
+        return invalid("file selection fingerprint is invalid");
     }
     return base::Result<void>::success();
 }
@@ -126,7 +348,6 @@ base::Result<void> validate_file_source_ref(const FileSourceRef& ref) {
         return invalid("file source relative components count is invalid");
     }
     if (!is_known_file_entry_kind(ref.entry_kind) || !is_known_file_recursion(ref.recursion) ||
-        ref.reparse_policy != FileReparsePolicy::kCaptureNoFollow ||
         ref.unreadable_policy != FileUnreadablePolicy::kFailJob) {
         return invalid("file source policies or kind are invalid");
     }
@@ -170,6 +391,72 @@ base::Result<void> validate_file_source_refs(const std::vector<FileSourceRef>& r
     return base::Result<void>::success();
 }
 
+base::Result<void> validate_file_stream_desc(const FileStreamDesc& stream) {
+    if (!is_known_file_stream_kind(stream.stream_kind) || stream.stream_index == 0) {
+        return invalid("file stream kind or index is invalid");
+    }
+    if (!is_known_name_encoding(stream.name.encoding) || !stream.name.bytes.empty()) {
+        return invalid("main stream name must be empty");
+    }
+    if (!is_known_file_content_storage(stream.content_storage) || !valid_wire_u64(stream.logical_size)) {
+        return invalid("file stream content_storage or logical_size is invalid");
+    }
+    if (stream.content_storage == FileContentStorage::kLocal) {
+        if (stream.parent_stream_index != 0) {
+            return invalid("local stream cannot carry parent_stream_index");
+        }
+        return validate_local_stream_extents(stream);
+    }
+    // parent storage: no local extents; direct parent stream index required.
+    if (!stream.extents.empty() || stream.parent_stream_index == 0) {
+        return invalid("parent stream requires parent_stream_index and empty extents");
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void> validate_file_entry_desc(const FileEntryDesc& entry) {
+    if (entry.entry_id == 0 || !is_known_file_entry_kind(entry.kind)) {
+        return invalid("file entry id or kind is invalid");
+    }
+    auto name = validate_encoded_name(entry.name);
+    if (!name) {
+        return name;
+    }
+    auto identity = validate_stable_file_identity(entry.stable_identity, false);
+    if (!identity) {
+        return identity;
+    }
+    // Portable Windows attribute bits that imply unsupported object types (FI0).
+    constexpr std::uint32_t kAttributeSparseFile = 0x00000200U;
+    constexpr std::uint32_t kAttributeReparsePoint = 0x00000400U;
+    if ((entry.attributes & (kAttributeSparseFile | kAttributeReparsePoint)) != 0) {
+        return invalid("file entry attributes imply unsupported object type");
+    }
+    if ((entry.flags & ~kEntryFlagsKnownMask) != 0) {
+        return invalid("file entry flags contain unsupported bits");
+    }
+    if (entry.platform_metadata.size() > kMaximumPlatformMetadataBytes) {
+        return invalid("file_source.metadata_limit");
+    }
+    if (entry.kind == FileEntryKind::kDirectory) {
+        if (entry.logical_size != 0 || !entry.streams.empty()) {
+            return invalid("directory entry must not carry streams or logical_size");
+        }
+        return base::Result<void>::success();
+    }
+    if (entry.streams.size() != 1) {
+        return invalid("regular file must have exactly one main stream");
+    }
+    auto stream = validate_file_stream_desc(entry.streams.front());
+    if (!stream) {
+        return stream;
+    }
+    if (entry.logical_size != entry.streams.front().logical_size) {
+        return invalid("file logical_size must match main stream");
+    }
+    return base::Result<void>::success();
+}
+
 base::Result<void> validate_file_restore_target(const FileRestoreTarget& target) {
     if (target.target_root_identity.empty() ||
         target.target_root_identity.size() > kMaximumTargetRootIdentityBytes) {
@@ -178,8 +465,7 @@ base::Result<void> validate_file_restore_target(const FileRestoreTarget& target)
     if (target.entry_ids.empty() || target.entry_ids.size() > kMaximumFileRestoreEntryIds) {
         return invalid("file restore entry_ids count is invalid");
     }
-    if (!is_known_file_conflict_policy(target.conflict_policy) || !target.restore_security ||
-        !target.restore_ads) {
+    if (!is_known_file_conflict_policy(target.conflict_policy) || !target.restore_security) {
         return invalid("file restore policy is invalid");
     }
     std::set<std::uint64_t> seen;
@@ -207,6 +493,76 @@ base::Result<void> validate_partial_restore_stats(const PartialRestoreStats& sta
         if (code.empty() || code.size() > 128) {
             return invalid("partial restore error code is invalid");
         }
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<std::vector<std::byte>>
+encode_file_selection_fingerprint_preimage(const std::vector<FileSourceRef>& refs) {
+    auto valid = validate_file_source_refs(refs);
+    if (!valid) {
+        return base::Result<std::vector<std::byte>>::failure(valid.error());
+    }
+    std::vector<const FileSourceRef*> ordered;
+    ordered.reserve(refs.size());
+    for (const auto& ref : refs) {
+        ordered.push_back(&ref);
+    }
+    std::ranges::sort(ordered, [](const FileSourceRef* left, const FileSourceRef* right) {
+        return path_sort_key(*left) < path_sort_key(*right);
+    });
+
+    // Label + algorithm + sorted selections. display_label is not authoritative and is omitted.
+    constexpr std::string_view kLabel = "aegra-file-selection-fp-v1";
+    std::vector<std::byte> preimage;
+    preimage.reserve(64 + refs.size() * 64);
+    append_string_bytes(preimage, kLabel);
+    append_u8(preimage, 0);
+    append_u8(preimage, kSelectionFingerprintAlgorithmSha256V1);
+    append_u32_le(preimage, static_cast<std::uint32_t>(ordered.size()));
+    for (const auto* ref : ordered) {
+        // selection_id is canonical UUID text; encode as UTF-8 bytes with length.
+        append_u32_le(preimage, static_cast<std::uint32_t>(ref->selection_id.size()));
+        append_string_bytes(preimage, ref->selection_id);
+        append_u32_le(preimage, static_cast<std::uint32_t>(ref->volume_identity.size()));
+        append_string_bytes(preimage, ref->volume_identity);
+        append_u8(preimage, static_cast<std::uint8_t>(ref->entry_kind));
+        append_u8(preimage, static_cast<std::uint8_t>(ref->recursion));
+        append_u8(preimage, static_cast<std::uint8_t>(ref->unreadable_policy));
+        append_u32_le(preimage, static_cast<std::uint32_t>(ref->relative_components.size()));
+        for (const auto& component : ref->relative_components) {
+            append_u8(preimage, static_cast<std::uint8_t>(component.encoding));
+            append_u32_le(preimage, static_cast<std::uint32_t>(component.bytes.size()));
+            append_bytes(preimage, component.bytes);
+        }
+    }
+    return base::Result<std::vector<std::byte>>::success(std::move(preimage));
+}
+
+base::Result<void> validate_journal_continuity(const FileJournalCheckpoint& parent,
+                                               const FileJournalState& current) {
+    auto parent_ok = validate_file_journal_checkpoint(parent);
+    if (!parent_ok) {
+        return parent_ok;
+    }
+    auto current_ok = validate_file_journal_state(current);
+    if (!current_ok) {
+        return current_ok;
+    }
+    if (!current.available) {
+        return invalid("file_backup.journal_inaccessible");
+    }
+    if (parent.volume_identity != current.volume_identity) {
+        return invalid("file_backup.volume_identity_changed");
+    }
+    if (parent.journal_id != current.journal_id) {
+        return invalid("file_backup.journal_reset");
+    }
+    if (parent.next_usn < current.lowest_valid_usn) {
+        return invalid("file_backup.journal_wrapped");
+    }
+    if (parent.next_usn > current.next_usn) {
+        return invalid("file_backup.baseline_invalid");
     }
     return base::Result<void>::success();
 }

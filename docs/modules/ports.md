@@ -7,9 +7,14 @@
 ## 端口集合
 
 - 数据面：`IBlockSource`、`IBlockSink`、`ISequentialWriter`、`IRandomAccessReader`。
-- 文件数据面（F1，`file_*.h`）：`IFileTreeEnumerator`、`IFileStreamReader`、`IFileSourceBrowser`、
-  `IFileBackupSession`、`IFileRecoveryPointReader`、`IFileStagedSink` 等；输入/输出使用 opaque node
-  identity 与 `contracts::FileEntryDesc`，禁止路径类型与 Win32 HANDLE。
+- 文件数据面（F1/FI1/FI5，`file_*.h`）：`IFileTreeEnumerator`、`IFileStreamReader`、`IFileSourceBrowser`、
+  `IFileBackupSession`、`IFileRecoveryPointReader`、`IFileStagedSink` 等；`IFileSnapshotView` 提供
+  `query_journal_state` / `read_change_batch`（平台无关 USN 合同；Windows FI2 已实现 snapshot
+  journal，不可用时 `available=false`）；输入/输出使用 opaque node
+  identity 与 `contracts::FileEntryDesc`（含 `StableFileIdentity`），禁止路径类型与 Win32 HANDLE。
+  `IFileRecoveryPointReader` 可为单层或完整 base-first 链：browse/describe 仅 tip Index；
+  `read_stream` 解析 direct-parent stream（深度 ≤ `kMaximumFileChainDepth`）；单层实现拒绝 parent
+  storage。链 open 的路径/凭据生命周期由 Adapter 定义，不进入 Port。
 - Repository Storage：`IObjectReader`、`IStagedObjectWriter`、`IPrefixEnumerator`、
   `IObjectPublisher`、`IObjectDeleter`。
 - 生命周期：`ISnapshotSession`、`IBackupSession`、`IRecoveryPointReader`。

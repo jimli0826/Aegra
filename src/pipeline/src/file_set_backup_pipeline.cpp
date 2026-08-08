@@ -2,10 +2,12 @@
 
 #include "aegra/base/error.h"
 #include "aegra/format/personal_archive.h"
+#include "aegra/pipeline/file_set_change_planner.h"
 
 #include <algorithm>
 #include <limits>
-#include <unordered_map>
+#include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -62,6 +64,19 @@ class SessionGuard final {
         return base::Result<void>::failure(
             err(base::ErrorCode::kInsufficientSpace, "file backup memory budget is insufficient"));
     }
+    if (plan.effective_type == contracts::BackupType::kIncremental) {
+        if (plan.parent_reader == nullptr || plan.parent_checkpoints.empty()) {
+            return base::Result<void>::failure(
+                err(base::ErrorCode::kInvalidArgument, "file_backup.parent_required"));
+        }
+        auto checkpoints = contracts::validate_file_journal_checkpoints(plan.parent_checkpoints);
+        if (!checkpoints) {
+            return base::Result<void>::failure(checkpoints.error());
+        }
+    } else if (plan.effective_type != contracts::BackupType::kFull) {
+        return base::Result<void>::failure(
+            err(base::ErrorCode::kInvalidArgument, "file backup type is unsupported"));
+    }
     return contracts::validate_file_source_refs(plan.selections);
 }
 
@@ -75,9 +90,14 @@ void publish(ports::IProgressSink* sink, const FileSetBackupPlan& plan,
     progress.job_id = plan.job_id;
     progress.trace_id = plan.trace_id;
     progress.phase = phase;
-    progress.logical_bytes = summary.logical_bytes == 0 ? std::nullopt
-                                                        : std::optional(summary.logical_bytes);
-    progress.processed_bytes = summary.stored_bytes;
+    // Progress uses local materialization work only. Incremental tip-visible logical_bytes
+    // includes parent-referenced streams that are never written this layer; using that total
+    // fails completed validation (processed != logical) and forces worker.progress_failed.
+    progress.logical_bytes = summary.progress_logical_bytes == 0
+                                 ? std::nullopt
+                                 : std::optional(summary.progress_logical_bytes);
+    // processed_bytes is logical source progress; stored_bytes may be smaller after zstd.
+    progress.processed_bytes = summary.processed_bytes;
     progress.stored_bytes = summary.stored_bytes;
     progress.discovered_entries = summary.entry_count;
     progress.processed_entries = summary.processed_entries;
@@ -140,71 +160,149 @@ enumerate_all(ports::IFileSnapshotView& snapshot, const FileSetBackupPlan& plan,
     return base::Result<std::vector<contracts::FileEntryDesc>>::success(std::move(all));
 }
 
-struct StreamWork final {
-    std::uint64_t entry_id{0};
-    std::uint32_t stream_index{0};
-    std::size_t entry_pos{0};
-    std::size_t stream_pos{0};
-    bool materialize{true};
+[[nodiscard]] std::vector<std::string> unique_volume_identities(
+    const std::vector<contracts::FileSourceRef>& selections) {
+    std::vector<std::string> volumes;
+    for (const auto& selection : selections) {
+        volumes.push_back(selection.volume_identity);
+    }
+    std::sort(volumes.begin(), volumes.end());
+    volumes.erase(std::unique(volumes.begin(), volumes.end()), volumes.end());
+    return volumes;
+}
+
+[[nodiscard]] const contracts::FileJournalCheckpoint*
+find_checkpoint(const std::vector<contracts::FileJournalCheckpoint>& checkpoints,
+                const std::string& volume_identity) noexcept {
+    for (const auto& checkpoint : checkpoints) {
+        if (checkpoint.volume_identity == volume_identity) {
+            return &checkpoint;
+        }
+    }
+    return nullptr;
+}
+
+/// Collect current snapshot journal checkpoints for all selected volumes.
+/// If any volume is unavailable, returns empty list (baseline not usable for next Incremental).
+[[nodiscard]] base::Result<std::vector<contracts::FileJournalCheckpoint>>
+collect_current_checkpoints(ports::IFileSnapshotView& snapshot,
+                            const std::vector<std::string>& volumes,
+                            const base::CancellationToken& cancellation) {
+    std::vector<contracts::FileJournalCheckpoint> checkpoints;
+    checkpoints.reserve(volumes.size());
+    for (const auto& volume_identity : volumes) {
+        if (cancellation.stop_requested()) {
+            return base::Result<std::vector<contracts::FileJournalCheckpoint>>::failure(
+                err(base::ErrorCode::kCancelled, "file backup journal query cancelled"));
+        }
+        auto state = snapshot.query_journal_state(volume_identity, cancellation);
+        if (!state) {
+            return base::Result<std::vector<contracts::FileJournalCheckpoint>>::failure(
+                state.error());
+        }
+        if (!state.value().available) {
+            return base::Result<std::vector<contracts::FileJournalCheckpoint>>::success({});
+        }
+        contracts::FileJournalCheckpoint checkpoint;
+        checkpoint.volume_identity = volume_identity;
+        checkpoint.journal_id = state.value().journal_id;
+        checkpoint.next_usn = state.value().next_usn;
+        checkpoints.push_back(std::move(checkpoint));
+    }
+    return base::Result<std::vector<contracts::FileJournalCheckpoint>>::success(
+        std::move(checkpoints));
+}
+
+[[nodiscard]] base::Result<std::vector<contracts::FileChangeHint>>
+read_volume_change_hints(ports::IFileSnapshotView& snapshot, const std::string& volume_identity,
+                         const std::int64_t start_usn, const std::int64_t end_usn,
+                         const base::CancellationToken& cancellation) {
+    std::vector<contracts::FileChangeHint> hints;
+    std::int64_t cursor = start_usn;
+    while (cursor < end_usn) {
+        if (cancellation.stop_requested()) {
+            return base::Result<std::vector<contracts::FileChangeHint>>::failure(
+                err(base::ErrorCode::kCancelled, "file backup journal read cancelled"));
+        }
+        auto batch = snapshot.read_change_batch(volume_identity, cursor, end_usn,
+                                                contracts::kMaximumChangeHintsPerBatch, cancellation);
+        if (!batch) {
+            return base::Result<std::vector<contracts::FileChangeHint>>::failure(batch.error());
+        }
+        for (auto& hint : batch.value().hints) {
+            hints.push_back(std::move(hint));
+        }
+        if (!batch.value().next_start_usn.has_value()) {
+            break;
+        }
+        if (batch.value().next_start_usn.value() <= cursor) {
+            return base::Result<std::vector<contracts::FileChangeHint>>::failure(
+                err(base::ErrorCode::kConflict, "file_backup.journal_wrapped"));
+        }
+        cursor = batch.value().next_start_usn.value();
+    }
+    return base::Result<std::vector<contracts::FileChangeHint>>::success(std::move(hints));
+}
+
+/// Defense-in-depth continuity check + USN range read for Incremental.
+[[nodiscard]] base::Result<std::vector<contracts::FileChangeHint>>
+collect_incremental_hints(ports::IFileSnapshotView& snapshot, const FileSetBackupPlan& plan,
+                          const base::CancellationToken& cancellation) {
+    if (!plan.change_hints.empty()) {
+        return base::Result<std::vector<contracts::FileChangeHint>>::success(plan.change_hints);
+    }
+    std::vector<contracts::FileChangeHint> all_hints;
+    const auto volumes = unique_volume_identities(plan.selections);
+    for (const auto& volume_identity : volumes) {
+        const auto* parent_cp = find_checkpoint(plan.parent_checkpoints, volume_identity);
+        if (parent_cp == nullptr) {
+            return base::Result<std::vector<contracts::FileChangeHint>>::failure(
+                err(base::ErrorCode::kConflict, "file_backup.journal_missing"));
+        }
+        auto state = snapshot.query_journal_state(volume_identity, cancellation);
+        if (!state) {
+            return base::Result<std::vector<contracts::FileChangeHint>>::failure(state.error());
+        }
+        if (!state.value().available) {
+            return base::Result<std::vector<contracts::FileChangeHint>>::failure(
+                err(base::ErrorCode::kConflict, "file_backup.journal_inaccessible"));
+        }
+        if (state.value().journal_id != parent_cp->journal_id) {
+            return base::Result<std::vector<contracts::FileChangeHint>>::failure(
+                err(base::ErrorCode::kConflict, "file_backup.journal_reset"));
+        }
+        if (state.value().lowest_valid_usn > parent_cp->next_usn ||
+            parent_cp->next_usn > state.value().next_usn) {
+            return base::Result<std::vector<contracts::FileChangeHint>>::failure(
+                err(base::ErrorCode::kConflict, "file_backup.journal_wrapped"));
+        }
+        auto volume_hints = read_volume_change_hints(snapshot, volume_identity, parent_cp->next_usn,
+                                                     state.value().next_usn, cancellation);
+        if (!volume_hints) {
+            return base::Result<std::vector<contracts::FileChangeHint>>::failure(
+                volume_hints.error());
+        }
+        all_hints.insert(all_hints.end(), std::make_move_iterator(volume_hints.value().begin()),
+                         std::make_move_iterator(volume_hints.value().end()));
+    }
+    return base::Result<std::vector<contracts::FileChangeHint>>::success(std::move(all_hints));
+}
+
+struct StreamWriteContext final {
+    ports::IFileSnapshotView& snapshot;
+    ports::IFileBackupSession& session;
+    const FileSetBackupPlan& plan;
+    FileSetBackupSummary& summary;
+    std::uint64_t& next_chunk_index;
+    ports::IProgressSink* progress{nullptr};
 };
 
 [[nodiscard]] base::Result<void>
-plan_streams(std::vector<contracts::FileEntryDesc>& entries, std::vector<StreamWork>& work,
-             FileSetBackupSummary& summary) {
-    std::unordered_map<std::uint64_t, std::pair<std::size_t, std::size_t>> hard_link_source;
-    std::uint32_t next_stream_index = 1;
-    for (std::size_t entry_pos = 0; entry_pos < entries.size(); ++entry_pos) {
-        auto& entry = entries[entry_pos];
-        if (entry.entry_id == 0) {
-            return base::Result<void>::failure(
-                err(base::ErrorCode::kInvalidArgument, "file entry id must be non-zero"));
-        }
-        if (entry.hard_link_group != 0) {
-            const auto existing = hard_link_source.find(entry.hard_link_group);
-            if (existing != hard_link_source.end()) {
-                entry.streams = entries[existing->second.first].streams;
-                continue;
-            }
-            hard_link_source.emplace(entry.hard_link_group, std::pair{entry_pos, 0});
-        }
-        for (std::size_t stream_pos = 0; stream_pos < entry.streams.size(); ++stream_pos) {
-            auto& stream = entry.streams[stream_pos];
-            if (stream.stream_index == 0) {
-                stream.stream_index = next_stream_index++;
-            } else {
-                next_stream_index = (std::max)(next_stream_index, stream.stream_index + 1);
-            }
-            stream.extents.clear();
-            if (stream.logical_size == 0) {
-                continue;
-            }
-            StreamWork item;
-            item.entry_id = entry.entry_id;
-            item.stream_index = stream.stream_index;
-            item.entry_pos = entry_pos;
-            item.stream_pos = stream_pos;
-            work.push_back(item);
-            auto next = checked_add(summary.stream_count, 1);
-            if (!next) {
-                return base::Result<void>::failure(next.error());
-            }
-            summary.stream_count = next.value();
-            auto bytes = checked_add(summary.logical_bytes, stream.logical_size);
-            if (!bytes) {
-                return base::Result<void>::failure(bytes.error());
-            }
-            summary.logical_bytes = bytes.value();
-        }
-    }
-    return base::Result<void>::success();
-}
-
-[[nodiscard]] base::Result<void>
-write_stream_content(ports::IFileSnapshotView& snapshot, ports::IFileBackupSession& session,
-                     contracts::FileEntryDesc& entry, contracts::FileStreamDesc& stream,
-                     const FileSetBackupPlan& plan, FileSetBackupSummary& summary,
-                     std::uint64_t& next_chunk_index, const base::CancellationToken& cancellation) {
-    auto reader = snapshot.open_stream_reader(entry.entry_id, stream.stream_index, cancellation);
+write_stream_content(StreamWriteContext& context, contracts::FileEntryDesc& entry,
+                     contracts::FileStreamDesc& stream,
+                     const base::CancellationToken& cancellation) {
+    auto reader =
+        context.snapshot.open_stream_reader(entry.entry_id, stream.stream_index, cancellation);
     if (!reader) {
         return base::Result<void>::failure(reader.error());
     }
@@ -212,7 +310,7 @@ write_stream_content(ports::IFileSnapshotView& snapshot, ports::IFileBackupSessi
         return base::Result<void>::failure(
             err(base::ErrorCode::kConflict, "file stream size changed during backup"));
     }
-    std::vector<std::byte> buffer(plan.chunk_size_bytes);
+    std::vector<std::byte> buffer(context.plan.chunk_size_bytes);
     std::uint64_t offset = 0;
     std::uint64_t logical_block = 0;
     while (offset < stream.logical_size) {
@@ -222,7 +320,7 @@ write_stream_content(ports::IFileSnapshotView& snapshot, ports::IFileBackupSessi
         }
         const auto remaining = stream.logical_size - offset;
         const auto want = static_cast<std::size_t>(
-            (std::min)(remaining, static_cast<std::uint64_t>(plan.block_size_bytes)));
+            (std::min)(remaining, static_cast<std::uint64_t>(context.plan.block_size_bytes)));
         auto read = reader.value()->read(offset, std::span(buffer).first(want), cancellation);
         if (!read) {
             return base::Result<void>::failure(read.error());
@@ -232,31 +330,39 @@ write_stream_content(ports::IFileSnapshotView& snapshot, ports::IFileBackupSessi
                 err(base::ErrorCode::kIoFailure, "file stream short read before end"));
         }
         ports::FileChunkWriteRequest request;
-        request.chunk_index = next_chunk_index;
+        request.chunk_index = context.next_chunk_index;
         request.stream_index = stream.stream_index;
         request.logical_block_index = logical_block;
         request.logical_size = static_cast<std::uint32_t>(want);
-        request.block_flags = format::personal_archive::kBlockFlagRaw;
+        // Logical payload only; session applies opportunistic zstd (V7 COMPRESSION_ZSTD).
         request.payload = std::span<const std::byte>(buffer.data(), want);
-        auto written = session.write_stream_chunk(request, cancellation);
+        auto written = context.session.write_stream_chunk(request, cancellation);
         if (!written) {
-            return written;
+            return base::Result<void>::failure(written.error());
         }
         contracts::FileStreamExtentDesc extent;
-        extent.chunk_index = next_chunk_index;
+        extent.chunk_index = context.next_chunk_index;
         extent.block_entry_index = 0;
         extent.file_offset = offset;
         extent.logical_size = want;
         stream.extents.push_back(extent);
-        ++next_chunk_index;
+        ++context.next_chunk_index;
         ++logical_block;
         offset += want;
-        auto stored = checked_add(summary.stored_bytes, want);
+        auto processed = checked_add(context.summary.processed_bytes, want);
+        if (!processed) {
+            return base::Result<void>::failure(processed.error());
+        }
+        context.summary.processed_bytes = processed.value();
+        auto stored = checked_add(context.summary.stored_bytes, written.value());
         if (!stored) {
             return base::Result<void>::failure(stored.error());
         }
-        summary.stored_bytes = stored.value();
-        ++summary.chunk_count;
+        context.summary.stored_bytes = stored.value();
+        ++context.summary.chunk_count;
+        // Publish after each stream quantum so Desktop can poll live percent while writing.
+        publish(context.progress, context.plan, contracts::TaskPhase::kWriting, context.summary,
+                "file_backup.writing");
     }
     return base::Result<void>::success();
 }
@@ -278,28 +384,74 @@ FileSetBackupPipeline::run(const FileSetBackupPlan& plan,
     SessionGuard guard(session_);
     FileSetBackupSummary summary;
     publish(progress_, plan, contracts::TaskPhase::kPreparing, summary, "file_backup.preparing");
+
+    const auto volumes = unique_volume_identities(plan.selections);
+    auto current_checkpoints = collect_current_checkpoints(snapshot_, volumes, cancellation);
+    if (!current_checkpoints) {
+        return base::Result<FileSetBackupSummary>::failure(current_checkpoints.error());
+    }
+    summary.journal_checkpoints = std::move(current_checkpoints).value();
+
+    std::vector<contracts::FileChangeHint> hints;
+    if (plan.effective_type == contracts::BackupType::kIncremental) {
+        auto collected = collect_incremental_hints(snapshot_, plan, cancellation);
+        if (!collected) {
+            return base::Result<FileSetBackupSummary>::failure(collected.error());
+        }
+        hints = std::move(collected).value();
+    }
+
     auto entries = enumerate_all(snapshot_, plan, cancellation, summary, progress_);
     if (!entries) {
         return base::Result<FileSetBackupSummary>::failure(entries.error());
     }
-    std::vector<StreamWork> work;
-    auto planned = plan_streams(entries.value(), work, summary);
+
+    FileSetChangePlannerRequest planner_request;
+    planner_request.effective_type = plan.effective_type;
+    planner_request.parent_reader = plan.parent_reader;
+    planner_request.change_hints = std::move(hints);
+    planner_request.parent_index_budget_bytes =
+        plan.memory_budget_bytes > plan.chunk_size_bytes
+            ? plan.memory_budget_bytes - plan.chunk_size_bytes
+            : plan.memory_budget_bytes;
+
+    auto planned =
+        plan_file_set_streams(std::move(entries).value(), planner_request, cancellation);
     if (!planned) {
         return base::Result<FileSetBackupSummary>::failure(planned.error());
     }
+    summary.stream_count = planned.value().stream_count;
+    summary.logical_bytes = planned.value().logical_bytes;
+    // Denominator for live percent = local payload only (matches write_stream_content loop).
+    std::uint64_t local_logical = 0;
+    for (const auto& item : planned.value().local_streams) {
+        const auto& entry = planned.value().entries[item.entry_pos];
+        if (item.stream_pos >= entry.streams.size()) {
+            return base::Result<FileSetBackupSummary>::failure(
+                err(base::ErrorCode::kInternal, "file backup local stream plan is inconsistent"));
+        }
+        auto next = checked_add(local_logical, entry.streams[item.stream_pos].logical_size);
+        if (!next) {
+            return base::Result<FileSetBackupSummary>::failure(next.error());
+        }
+        local_logical = next.value();
+    }
+    summary.progress_logical_bytes = local_logical;
+
     publish(progress_, plan, contracts::TaskPhase::kReading, summary, "file_backup.reading");
     std::uint64_t next_chunk_index = 0;
-    for (const auto& item : work) {
-        auto& entry = entries.value()[item.entry_pos];
+    StreamWriteContext write_context{snapshot_, session_, plan, summary, next_chunk_index,
+                                     progress_};
+    for (const auto& item : planned.value().local_streams) {
+        auto& entry = planned.value().entries[item.entry_pos];
         auto& stream = entry.streams[item.stream_pos];
-        auto written = write_stream_content(snapshot_, session_, entry, stream, plan, summary,
-                                            next_chunk_index, cancellation);
+        auto written = write_stream_content(write_context, entry, stream, cancellation);
         if (!written) {
             return base::Result<FileSetBackupSummary>::failure(written.error());
         }
     }
     publish(progress_, plan, contracts::TaskPhase::kWriting, summary, "file_backup.indexing");
-    for (const auto& entry : entries.value()) {
+    for (const auto& entry : planned.value().entries) {
         if (cancellation.stop_requested()) {
             return base::Result<FileSetBackupSummary>::failure(
                 err(base::ErrorCode::kCancelled, "file backup cancelled"));
@@ -313,6 +465,8 @@ FileSetBackupPipeline::run(const FileSetBackupPlan& plan,
             return base::Result<FileSetBackupSummary>::failure(next.error());
         }
         summary.processed_entries = next.value();
+        // Keep last_progress fresh while indexing (bytes already complete; entries advance).
+        publish(progress_, plan, contracts::TaskPhase::kWriting, summary, "file_backup.indexing");
     }
     publish(progress_, plan, contracts::TaskPhase::kCommitting, summary, "file_backup.finalizing");
     auto finalized = session_.finalize(cancellation);

@@ -4,7 +4,9 @@
 #include "aegra/base/error.h"
 #include "aegra/base/result.h"
 #include "aegra/contracts/file_set.h"
+#include "aegra/contracts/job.h"
 #include "aegra/pipeline/file_set_backup_pipeline.h"
+#include "aegra/ports/file_recovery_point.h"
 #include "aegra/ports/progress.h"
 
 #include <array>
@@ -28,6 +30,19 @@ struct WindowsFileSetBackupRequest final {
     bool encryption_enabled{false};
     std::array<std::byte, 16> file_uuid{};
     std::array<std::byte, 16> backup_set_uuid{};
+    /// Requested wire type (Full or Incremental).
+    contracts::BackupType requested_type{contracts::BackupType::kFull};
+    /// Initial effective type after Service demotion (Full when service_full_reason set).
+    /// May demote further Incremental→Full after snapshot USN checks.
+    contracts::BackupType effective_type{contracts::BackupType::kFull};
+    /// Service Catalog demotion reason when Incremental was already forced to Full.
+    std::optional<contracts::IncrementalDowngradeReason> service_full_reason;
+    /// Direct parent Recovery Point file_uuid (zero for Full).
+    std::array<std::byte, 16> parent_uuid{};
+    /// Parent USN checkpoints from the parent Recovery Point (required for Incremental).
+    std::vector<contracts::FileJournalCheckpoint> parent_checkpoints;
+    /// Non-owning parent Index reader for Incremental planning (required for Incremental).
+    ports::IFileRecoveryPointReader* parent_reader{nullptr};
     std::uint32_t block_size_bytes{0};
     std::uint32_t chunk_size_bytes{0};
     std::size_t memory_budget_bytes{0};
@@ -42,6 +57,10 @@ struct WindowsFileSetBackupRequest final {
 struct WindowsFileSetBackupResult final {
     pipeline::FileSetBackupSummary backup;
     std::optional<base::Error> snapshot_cleanup_error;
+    contracts::BackupType effective_type{contracts::BackupType::kFull};
+    /// Canonical UUID text when effective Incremental; empty for Full.
+    std::string effective_parent_uuid;
+    std::optional<contracts::IncrementalDowngradeReason> incremental_downgrade_reason;
 };
 
 namespace detail {

@@ -481,8 +481,9 @@ base::Result<void> validate_upsert_schedule_command(const UpsertScheduleCommand&
         return invalid("upsert schedule command is invalid");
     }
     if (command.protection.content_kind == ContentKind::kFileSet &&
-        command.backup_type != BackupType::kFull) {
-        return invalid("file_set schedule requires full backup type");
+        command.backup_type != BackupType::kFull &&
+        command.backup_type != BackupType::kIncremental) {
+        return invalid("file_set schedule requires full or incremental backup type");
     }
     auto protection = validate_protection_spec_input(command.protection, !command.schedule_id);
     if (!protection) {
@@ -718,8 +719,7 @@ base::Result<void> validate_protection_spec_input(const ProtectionSpecInput& pro
     if (!protection.volume_source_ids.empty()) {
         return invalid("file protection cannot include volume source ids");
     }
-    if (protection.file_options.reparse_policy != FileReparsePolicy::kCaptureNoFollow ||
-        protection.file_options.unreadable_policy != FileUnreadablePolicy::kFailJob) {
+    if (protection.file_options.unreadable_policy != FileUnreadablePolicy::kFailJob) {
         return invalid("file protection options are invalid");
     }
     if (!is_create) {
@@ -823,7 +823,6 @@ base::Result<void> validate_prepare_file_restore_request(const PrepareFileRestor
         request.target_node_token.empty() ||
         request.target_node_token.size() > kMaximumNodeTokenBytes ||
         !is_known_file_conflict_policy(request.conflict_policy) || !request.restore_security ||
-        !request.restore_ads ||
         (request.archive_secret_ref && request.archive_secret_ref->size() > 512)) {
         return invalid("prepare file restore request is invalid");
     }

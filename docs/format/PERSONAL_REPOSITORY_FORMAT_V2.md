@@ -1,5 +1,9 @@
 # 个人版 Repository Descriptor 与 Catalog V2
 
+> **范围变更：** [ADR-0018](../adr/0018-file-set-incremental-usn-and-chain.md) 已允许 file_set Incremental。
+> Catalog V2 的 file Full-only 规则及 exact keys 将在 FI1/FI6 直接修订；旧开发 Catalog 不双读、不迁移。
+> 目标字段和父链规则以[增量设计](../architecture/FILE_SET_INCREMENTAL_BACKUP_RESTORE.md) §10 为准。
+
 | 属性 | 内容 |
 | --- | --- |
 | 状态 | 权威格式规范 |
@@ -82,7 +86,9 @@ Descriptor 不保存显示名称、Storage URI、凭据、Archive 口令或 UI �
   "file_entry_count": 0,
   "file_stream_count": 0,
   "structural_state": "complete",
-  "catalog_generation": 1
+  "catalog_generation": 1,
+  "file_selection_fingerprint": "",
+  "file_baseline_available": false
 }
 ```
 
@@ -95,8 +101,8 @@ Descriptor 不保存显示名称、Storage URI、凭据、Archive 口令或 UI �
 | `repository_uuid` | 匹配 Descriptor |
 | `file_uuid` | 匹配文件名与 Archive Header |
 | `backup_set_uuid` | 匹配 Archive Header |
-| `parent_uuid` | volume full 为 `null`；volume inc/diff 为父 `file_uuid`；**file_set 必须 `null`** |
-| `backup_type` | `full` / `incremental` / `differential`；file_set 仅 `full` |
+| `parent_uuid` | volume/file full 为 `null`；volume inc/diff 与 **file_set incremental** 为父 `file_uuid` |
+| `backup_type` | `full` / `incremental` / `differential`；file_set 仅 `full` 或 `incremental` |
 | `content_kind` | `volume_set` 或 `file_set`；必须匹配 Header |
 | `format_version` | 必须为 `7` |
 
@@ -116,6 +122,8 @@ Descriptor 不保存显示名称、Storage URI、凭据、Archive 口令或 UI �
 | `file_stream_count` | file_set 认证后 stream 总数；volume_set 必须 0；未认证 0 |
 | `structural_state` | 持久化固定 `complete` |
 | `catalog_generation` | 从 1 起，替换同一 Entry 时递增 |
+| `file_selection_fingerprint` | **file_set**：小写 hex（64 字符）的 selection fingerprint，或空；**volume_set** 必须 `""` |
+| `file_baseline_available` | **file_set**：true 当认证 baseline（fingerprint + journal checkpoints）可用；**volume_set** 必须 false |
 
 ### 3.3 禁止字段
 
@@ -216,19 +224,23 @@ generation 变化或 UUID 冲突时拒绝。
 | 项 | volume_set | file_set |
 | --- | --- | --- |
 | `content_kind` | `volume_set` | `file_set` |
-| `backup_type` | full/inc/diff | full only |
-| `parent_uuid` | 链规则 | 必须 null |
+| `backup_type` | full/inc/diff | full 或 incremental |
+| `parent_uuid` | 链规则 | full null；incremental = 父 file_uuid |
 | `has_sidecar` | 按实现 | 必须 false |
 | `source_volume_ids` | 几何匹配必填（认证后） | `[]` |
 | `file_entry_count` | 0 | 认证后 ≥ 0 |
-| 增量选父 | 使用 volume 几何 + sidecar | 不适用 |
+| `file_selection_fingerprint` | `""` | hex 或空 |
+| `file_baseline_available` | false | true 当 baseline 可用 |
+| 增量选父 | 使用 volume 几何 + sidecar | fingerprint + baseline + chain |
 
 ## 10. 拒绝规则（Catalog Reader）
 
 - 未知 `schema_version` / `kind` / `content_kind` / `backup_type`；
 - `format_version != 7`；
-- file_set 且（`has_sidecar==true` 或 `parent_uuid!=null` 或 `backup_type!="full"` 或
-  `source_volume_ids` 非空）；
+- file_set 且（`has_sidecar==true` 或 `source_volume_ids` 非空 或 `backup_type` 非 full/incremental）；
+- file_set incremental 且 `parent_uuid` 为空；
+- file_set 且 `file_baseline_available==true` 但 fingerprint 为空；
+- volume_set 且（非空 fingerprint 或 `file_baseline_available`）；
 - volume_set 且认证后 `source_volume_ids.length != source_count`；
 - 字符串超长（UUID 字段固定；`archive_main_key` ≤ 512 字节；path 段规则见 §5）；
 - 额外未知关键字段：V2 exact_keys 模式下拒绝未列出字段。
@@ -240,5 +252,5 @@ schema_version, kind, repository_uuid, file_uuid, backup_set_uuid, parent_uuid,
 backup_type, content_kind, archive_main_key, split_part_count, has_sidecar,
 format_version, created_utc_ms, logical_size_bytes, stored_size_bytes, source_count,
 source_volume_ids, file_entry_count, file_stream_count, structural_state,
-catalog_generation
+catalog_generation, file_selection_fingerprint, file_baseline_available
 ```

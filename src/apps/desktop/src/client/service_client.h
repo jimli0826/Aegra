@@ -103,7 +103,12 @@ class ServiceClient final : public QObject {
     Q_PROPERTY(QString splashErrorText READ splashErrorText NOTIFY splashChanged)
     Q_PROPERTY(bool toastVisible READ toastVisible NOTIFY toastChanged)
     Q_PROPERTY(QString toastText READ toastText NOTIFY toastChanged)
+    Q_PROPERTY(bool toastIsError READ toastIsError NOTIFY toastChanged)
     Q_PROPERTY(bool globalLoading READ globalLoading NOTIFY loadingChanged)
+    /// Server chain-aware delete plan (targets only; Desktop does not recompute dependents).
+    Q_PROPERTY(bool deletePlanBusy READ deletePlanBusy NOTIFY deletePlanChanged)
+    Q_PROPERTY(QVariantMap deletePlan READ deletePlan NOTIFY deletePlanChanged)
+    Q_PROPERTY(QString deletePlanErrorText READ deletePlanErrorText NOTIFY deletePlanChanged)
 
   public:
     explicit ServiceClient(QObject* parent = nullptr);
@@ -176,6 +181,7 @@ class ServiceClient final : public QObject {
     [[nodiscard]] QString splashErrorText() const;
     [[nodiscard]] bool toastVisible() const noexcept;
     [[nodiscard]] QString toastText() const;
+    [[nodiscard]] bool toastIsError() const noexcept;
     [[nodiscard]] bool globalLoading() const noexcept;
     [[nodiscard]] bool recoveryPointLayoutLoading() const noexcept;
     [[nodiscard]] QVariantList recoveryPointSourceDisks() const;
@@ -207,22 +213,28 @@ class ServiceClient final : public QObject {
                                      const QString& time_of_day,
                                      bool exclude_page_and_hibernation_files = true,
                                      bool encryption_enabled = false,
-                                     const QString& archive_password = {});
+                                     const QString& archive_password = {},
+                                     int backup_type = 1);
     /// Creates one schedule containing all selected volumes.
-    /// When start_full_backup_after_create is true, a Full StartBackup runs after create ack.
+    /// When start_full_backup_after_create is true, a Full StartBackup runs after create ack
+    /// (establishes a baseline even if the durable schedule type is Incremental).
+    /// backup_type: 1 full, 2 incremental (wizard never offers Differential).
     Q_INVOKABLE bool createSchedule(const QVariantList& sources, const QString& connection_id,
                                     const QString& frequency, const QString& time_of_day,
                                     bool exclude_page_and_hibernation_files = true,
                                     bool encryption_enabled = false,
                                     const QString& archive_password = {},
-                                    bool start_full_backup_after_create = false);
+                                    bool start_full_backup_after_create = false,
+                                    int backup_type = 1);
     /// Creates a file_set schedule from the current fileBrowseSources selection (opaque tokens).
+    /// backup_type: 1 full, 2 incremental (Differential is not offered for file_set).
     Q_INVOKABLE bool createFileSetSchedule(const QString& connection_id, const QString& frequency,
                                            const QString& time_of_day,
                                            bool exclude_page_and_hibernation_files = true,
                                            bool encryption_enabled = false,
                                            const QString& archive_password = {},
-                                           bool start_full_backup_after_create = false);
+                                           bool start_full_backup_after_create = false,
+                                           int backup_type = 1);
     Q_INVOKABLE bool deleteSchedule(const QString& schedule_id);
     Q_INVOKABLE bool setScheduleEnabled(const QString& schedule_id, bool enabled);
     Q_INVOKABLE void selectRepositoryConnection(const QString& connection_id);
@@ -262,8 +274,15 @@ class ServiceClient final : public QObject {
     Q_INVOKABLE QVariantList availableDriveLetters() const;
     Q_INVOKABLE void cancelActiveBackup();
     Q_INVOKABLE void dismissToast();
-    /// Show a top toast (success/info). Safe for QML schedule Run feedback.
-    Q_INVOKABLE void showToast(const QString& text);
+    /// Show a top toast. Pass isError=true for validation/command failures (red banner).
+    Q_INVOKABLE void showToast(const QString& text, bool isError = false);
+    /// Prepare file restore only (capacity / eligibility). Does not start the job.
+    /// Emits restorePreflightSucceeded or restorePreflightFailed when finished.
+    Q_INVOKABLE bool prepareFileRestore(const QString& recovery_point_id, int conflict_policy = 1,
+                                        const QString& archive_password = {},
+                                        bool restore_security = true);
+    /// Start file restore using a successful prepareFileRestore preflight token.
+    Q_INVOKABLE bool startPreparedFileRestore();
     Q_INVOKABLE bool hasCapability(const QString& capability) const;
     Q_INVOKABLE QString defaultConnectionId() const;
     /// First selectable inventory source id, or empty.
@@ -275,11 +294,22 @@ class ServiceClient final : public QObject {
     /// Loads Recovery Point file Index roots (ListRecoveryPointEntries parent=0).
     Q_INVOKABLE void loadFileRecoverRoots(const QString& recovery_point_id,
                                           const QString& archive_password = {});
+    /// Clears file-restore archive tree, target tree, and prepare token (wizard reset / Done).
+    Q_INVOKABLE void clearFileRestoreState();
     /// Prepare + Start file restore from fileRecoverEntries + fileRestoreTargets selection.
-    /// conflict_policy: 1 fail, 2 replace, 3 rename. restore_security / restore_ads default on.
+    /// conflict_policy: 1 fail, 2 replace, 3 rename. restore_security defaults on.
     Q_INVOKABLE bool startFileRestore(const QString& recovery_point_id, int conflict_policy = 1,
                                       const QString& archive_password = {},
-                                      bool restore_security = true, bool restore_ads = true);
+                                      bool restore_security = true);
+    /// Query Service PlanDeleteRecoveryPoints for one tip RP (chain-aware targets).
+    Q_INVOKABLE bool planDeleteRecoveryPoint(const QString& recovery_point_id,
+                                             const QString& archive_password = {});
+    /// Confirm and execute the pending delete plan token from planDeleteRecoveryPoint.
+    Q_INVOKABLE bool executeDeletePlan();
+    Q_INVOKABLE void clearDeletePlan();
+    [[nodiscard]] bool deletePlanBusy() const noexcept;
+    [[nodiscard]] QVariantMap deletePlan() const;
+    [[nodiscard]] QString deletePlanErrorText() const;
 
   signals:
     void stateChanged();
@@ -302,12 +332,20 @@ class ServiceClient final : public QObject {
     void restoreCommandChanged();
     void restoreStartSucceeded();
     void restoreStartFailed(const QString& message);
+    /// File restore prepare (preflight) finished successfully; token is ready for start.
+    void restorePreflightSucceeded();
+    /// File restore prepare failed (localized message already toasted as error).
+    void restorePreflightFailed(const QString& message);
     void mountCommandChanged();
     void mountSessionsChanged();
     void mountStartSucceeded(const QString& sessionId);
     void mountStartFailed(const QString& message);
     void unmountSucceeded(const QString& sessionId);
     void unmountFailed(const QString& message);
+    void deletePlanChanged();
+    void deletePlanReady();
+    void deleteExecuted();
+    void deletePlanFailed(const QString& message);
 
   private:
     enum class State : std::uint8_t {
@@ -355,6 +393,10 @@ class ServiceClient final : public QObject {
     void reset_file_models();
     void finish_repository_failure(const QString& message_code);
     void finish_recovery_point_layout_failure(const QString& message_code);
+    [[nodiscard]] RequestDisposition handle_plan_delete_frame(const QByteArray& body);
+    [[nodiscard]] RequestDisposition handle_execute_delete_plan_frame(const QByteArray& body);
+    void finish_plan_delete_failure(const QString& message_code);
+    void finish_execute_delete_failure(const QString& message_code);
     void finish_job_failure(const QString& message_code);
     void finish_inventory_failure(const QString& message_code);
     void finish_connection_failure(const QString& message_code);
@@ -393,7 +435,8 @@ class ServiceClient final : public QObject {
     void update_active_backup_observe();
     void publish_terminal_toasts(const QVector<JobRow>& rows);
     void seed_terminal_toast_baseline(const QVector<JobRow>& rows);
-    void show_toast(const QString& text);
+    void show_toast(const QString& text, bool is_error = false);
+    void finish_restore_preflight_failure(const QString& message_code);
     void update_splash_for_state();
 
     LocaleController* locale_controller_{nullptr};
@@ -463,6 +506,9 @@ class ServiceClient final : public QObject {
     QString active_backup_message_text_;
     quint32 api_version_{0};
     quint64 toast_generation_{0};
+    bool toast_is_error_{false};
+    /// When true, prepare handler stops after preflight (wizard Next). When false, auto-starts.
+    bool restore_prepare_only_{false};
     int active_backup_progress_percent_{0};
     State state_{State::kDisconnected};
     bool repository_configured_{false};
@@ -486,7 +532,7 @@ class ServiceClient final : public QObject {
     QString file_restore_target_token_;
     int file_restore_conflict_policy_{1};
     bool file_restore_security_{true};
-    bool file_restore_ads_{true};
+
     bool schedules_loading_{false};
     bool schedules_available_{false};
     bool schedule_command_busy_{false};
@@ -494,6 +540,12 @@ class ServiceClient final : public QObject {
     bool connections_available_{false};
     bool repository_command_busy_{false};
     int repository_command_kind_{0};
+    bool delete_plan_busy_{false};
+    QString delete_plan_request_id_;
+    QString execute_delete_request_id_;
+    QString execute_delete_idempotency_key_;
+    QString delete_plan_error_code_;
+    QVariantMap delete_plan_;
     bool backup_start_available_{false};
     bool restore_preflight_available_{false};
     bool restore_start_available_{false};

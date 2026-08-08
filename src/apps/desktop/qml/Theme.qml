@@ -69,8 +69,8 @@ QtObject {
     property color colorScrim: "#66000000"
 
     property var volumeColors: [
-        "#7fc4b4", "#6a9fd4", "#c4a06a", "#8b7fd9",
-        "#e87ba8", "#5ba8c9", "#3ab0a8", "#e9a85c"
+        "#a8d8ce", "#9bbfe0", "#d4bc8e", "#b0a8e0",
+        "#f0a8c4", "#8cc8e0", "#7accc8", "#f0c490"
     ]
     property color colorVolumeText: "#1a2f2c"
     property color colorUnallocated: "#e8eeec"

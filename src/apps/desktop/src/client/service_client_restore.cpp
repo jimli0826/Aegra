@@ -51,28 +51,28 @@ bool ServiceClient::startDiskRestore(const int source_disk_number, const int tar
                                      const bool auto_expand_last_partition) {
     if (state_ != State::kReady) {
         //% "Service is not connected"
-        show_toast(qtTrId("aegra.error.service.disconnected"));
+        show_toast(qtTrId("aegra.error.service.disconnected"), true);
         return false;
     }
     if (!restore_start_available_ || !restore_preflight_available_) {
         //% "Service does not support restore"
-        show_toast(qtTrId("aegra.restore.capability_missing"));
+        show_toast(qtTrId("aegra.restore.capability_missing"), true);
         return false;
     }
     if (restore_command_busy_) {
         //% "A restore command is already in progress"
-        show_toast(qtTrId("aegra.restore.busy"));
+        show_toast(qtTrId("aegra.restore.busy"), true);
         return false;
     }
     if (source_disk_number < 0 || target_disk_number < 0 || recovery_point_id.isEmpty()) {
         //% "Select a checkpoint and map a source disk to a target disk"
-        show_toast(qtTrId("aegra.restore.map_required"));
+        show_toast(qtTrId("aegra.restore.map_required"), true);
         return false;
     }
     const auto connection_id = defaultConnectionId();
     if (connection_id.isEmpty()) {
         //% "No repository connection is available"
-        show_toast(qtTrId("aegra.restore.no_repository"));
+        show_toast(qtTrId("aegra.restore.no_repository"), true);
         return false;
     }
 
@@ -112,29 +112,29 @@ bool ServiceClient::startVolumeRestore(const int source_volume_index,
                                        const QString& archive_password) {
     if (state_ != State::kReady) {
         //% "Service is not connected"
-        show_toast(qtTrId("aegra.error.service.disconnected"));
+        show_toast(qtTrId("aegra.error.service.disconnected"), true);
         return false;
     }
     if (!restore_start_available_ || !restore_preflight_available_) {
         //% "Service does not support restore"
-        show_toast(qtTrId("aegra.restore.capability_missing"));
+        show_toast(qtTrId("aegra.restore.capability_missing"), true);
         return false;
     }
     if (restore_command_busy_) {
         //% "A restore command is already in progress"
-        show_toast(qtTrId("aegra.restore.busy"));
+        show_toast(qtTrId("aegra.restore.busy"), true);
         return false;
     }
     if (source_volume_index < 0 || target_source_id.isEmpty() || recovery_point_id.isEmpty() ||
         !target_source_id.startsWith(QStringLiteral("vol."))) {
         //% "Select a checkpoint and map a source volume to a target volume"
-        show_toast(qtTrId("aegra.restore.volume_map_required"));
+        show_toast(qtTrId("aegra.restore.volume_map_required"), true);
         return false;
     }
     const auto connection_id = defaultConnectionId();
     if (connection_id.isEmpty()) {
         //% "No repository connection is available"
-        show_toast(qtTrId("aegra.restore.no_repository"));
+        show_toast(qtTrId("aegra.restore.no_repository"), true);
         return false;
     }
 
@@ -208,11 +208,23 @@ RequestDisposition ServiceClient::handle_start_restore_frame(const QByteArray& b
 
 void ServiceClient::finish_restore_command_failure(const QString& message_code) {
     restore_command_busy_ = false;
+    restore_prepare_only_ = false;
     restore_archive_password_.clear();
     emit restoreCommandChanged();
     const auto msg = localize_message_code(message_code);
-    show_toast(msg);
+    show_toast(msg, true);
     emit restoreStartFailed(msg);
+}
+
+void ServiceClient::finish_restore_preflight_failure(const QString& message_code) {
+    restore_command_busy_ = false;
+    restore_prepare_only_ = false;
+    restore_preflight_token_.clear();
+    restore_archive_password_.clear();
+    emit restoreCommandChanged();
+    const auto msg = localize_message_code(message_code);
+    show_toast(msg, true);
+    emit restorePreflightFailed(msg);
 }
 
 } // namespace aegra::desktop

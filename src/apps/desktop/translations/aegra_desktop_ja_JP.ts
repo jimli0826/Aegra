@@ -690,8 +690,8 @@ Server: %1</source>
         <translation>選択したファイルが多すぎます。選択を減らして再試行してください。</translation>
     </message>
     <message id="aegra.error.file_restore.target_capability_missing">
-        <source>The target folder does not support required features (for example ACL or alternate streams). Choose an NTFS folder.</source>
-        <translation>ターゲットフォルダーが必要な機能（ACL や代替ストリームなど）に対応していません。NTFS フォルダーを選んでください。</translation>
+        <source>The target folder does not support required features (for example ACL). Choose an NTFS folder.</source>
+        <translation>ターゲットフォルダーが必要な機能（ACL など）に対応していません。NTFS フォルダーを選んでください。</translation>
     </message>
     <message id="aegra.error.file_restore.target_not_directory">
         <source>Select a folder as the restore destination.</source>
@@ -753,6 +753,142 @@ Server: %1</source>
         <source>Files</source>
         <translation>ファイル</translation>
     </message>
+    <message id="aegra.restore.change_type">
+        <source>Change type</source>
+        <translation>種類を変更</translation>
+    </message>
+    <message id="aegra.restore.wizard.step.type">
+        <source>Restore type</source>
+        <translation>復元の種類</translation>
+    </message>
+    <message id="aegra.restore.wizard.step.source_dest">
+        <source>Source &amp; destination</source>
+        <translation>ソースと保存先</translation>
+    </message>
+    <message id="aegra.restore.wizard.step.summary">
+        <source>Summary</source>
+        <translation>概要</translation>
+    </message>
+    <message id="aegra.restore.summary.title">
+        <source>Restore summary</source>
+        <translation>復元の概要</translation>
+    </message>
+    <message id="aegra.restore.summary.type_label">
+        <source>Type</source>
+        <translation>種類</translation>
+    </message>
+    <message id="aegra.restore.summary.checkpoint_label">
+        <source>Checkpoint</source>
+        <translation>チェックポイント</translation>
+    </message>
+    <message id="aegra.restore.summary.mappings_label">
+        <source>Mappings</source>
+        <translation>マッピング数</translation>
+    </message>
+    <message id="aegra.restore.summary.ready">
+        <source>Review the selection, then start restore.</source>
+        <translation>内容を確認してから復元を開始してください。</translation>
+    </message>
+    <message id="aegra.restore.summary.checking">
+        <source>Checking...</source>
+        <translation>確認中...</translation>
+    </message>
+    <message id="aegra.restore.summary.files_selected">
+        <source>Files selected</source>
+        <translation>選択ファイル</translation>
+    </message>
+    <message id="aegra.restore.summary.target_folder">
+        <source>Target folder</source>
+        <translation>保存先フォルダー</translation>
+    </message>
+    <message id="aegra.restore.summary.volume_options_note">
+        <source>Volume restore uses the mapped target volume; partition layout is not rewritten.</source>
+        <translation>ボリューム復元はマップした対象ボリュームへ書き込み、パーティション配置は変更しません。</translation>
+    </message>
+    <message id="aegra.common.on">
+        <source>On</source>
+        <translation>オン</translation>
+    </message>
+    <message id="aegra.common.off">
+        <source>Off</source>
+        <translation>オフ</translation>
+    </message>
+    <message id="aegra.restore.summary.starting">
+        <source>Starting restore...</source>
+        <translation>復元を開始しています…</translation>
+    </message>
+    <message id="aegra.restore.summary.waiting">
+        <source>Waiting for restore progress...</source>
+        <translation>復元の進捗を待っています…</translation>
+    </message>
+    <message id="aegra.restore.summary.finished">
+        <source>Restore completed</source>
+        <translation>復元が完了しました</translation>
+    </message>
+    <message id="aegra.restore.summary.finished_errors">
+        <source>Restore finished with errors</source>
+        <translation>復元はエラー付きで完了しました</translation>
+    </message>
+    <message id="aegra.restore.summary.back">
+        <source>Back</source>
+        <translation>戻る</translation>
+    </message>
+    <message id="aegra.restore.summary.done">
+        <source>Done</source>
+        <translation>完了</translation>
+    </message>
+    <message id="aegra.restore.file.volume_free_total">
+        <source>%1 free, %2 total</source>
+        <translation>%1 空き, 合計 %2</translation>
+    </message>
+    <message id="aegra.restore.type_title">
+        <source>Choose restore type</source>
+        <translation>復元の種類を選択</translation>
+    </message>
+    <message id="aegra.restore.type_subtitle">
+        <source>Select whole-disk recovery, volume-to-volume restore, or file and folder restore from a recovery point</source>
+        <translation>ディスク全体、ボリューム単位、またはファイル／フォルダー復元を選択します</translation>
+    </message>
+    <message id="aegra.restore.type.disk_title">
+        <source>Disk restore</source>
+        <translation>ディスク復元</translation>
+    </message>
+    <message id="aegra.restore.type.disk_desc">
+        <source>Restore an entire physical disk from a volume-set recovery point onto a target disk (layout, partitions, and options).</source>
+        <translation>ボリュームセットの回復ポイントから物理ディスク全体をターゲットへ復元します。</translation>
+    </message>
+    <message id="aegra.restore.type.disk_action">
+        <source>Choose Disk restore →</source>
+        <translation>ディスク復元を選択 →</translation>
+    </message>
+    <message id="aegra.restore.type.volume_title">
+        <source>Volume restore</source>
+        <translation>ボリューム復元</translation>
+    </message>
+    <message id="aegra.restore.type.volume_desc">
+        <source>Map one backup volume onto an existing non-system volume of equal or larger size without rewriting the whole disk.</source>
+        <translation>バックアップの 1 ボリュームを、同サイズ以上の非システムボリュームへマップします（ディスク全体は書き換えません）。</translation>
+    </message>
+    <message id="aegra.restore.type.volume_action">
+        <source>Choose Volume restore →</source>
+        <translation>ボリューム復元を選択 →</translation>
+    </message>
+    <message id="aegra.restore.type.files_title">
+        <source>Files / folders</source>
+        <translation>ファイル / フォルダー</translation>
+    </message>
+    <message id="aegra.restore.type.files_desc">
+        <source>Selectively restore files and folders from a file-set recovery point into a chosen target directory.</source>
+        <translation>ファイルセットの回復ポイントからファイル／フォルダーを選び、指定フォルダーへ復元します。</translation>
+    </message>
+    <message id="aegra.restore.type.files_action">
+        <source>Choose Files restore →</source>
+        <translation>ファイル復元を選択 →</translation>
+    </message>
+    <message id="aegra.restore.type_mismatch">
+        <source>This checkpoint does not match the selected restore type</source>
+        <translation>このチェックポイントは選択した復元種類と一致しません</translation>
+    </message>
     <message id="aegra.restore.file.capability_missing">
         <source>Service does not support file restore</source>
         <translation>Service はファイル復元に対応していません</translation>
@@ -808,14 +944,6 @@ Server: %1</source>
     <message id="aegra.restore.file.restore_security_hint">
         <source>Apply Owner, Group, DACL, and SACL from the archive. Uncheck to keep target default permissions (timestamps and attributes are still restored).</source>
         <translation>アーカイブから所有者・グループ・DACL・SACL を適用します。オフにするとターゲット既定のアクセス権を維持します（タイムスタンプと属性は復元されます）。</translation>
-    </message>
-    <message id="aegra.restore.file.restore_ads">
-        <source>Restore alternate data streams</source>
-        <translation>代替データ ストリームを復元</translation>
-    </message>
-    <message id="aegra.restore.file.restore_ads_hint">
-        <source>Restore NTFS alternate data streams (ADS) when present in the archive.</source>
-        <translation>アーカイブに含まれる場合、NTFS 代替データ ストリーム（ADS）を復元します。</translation>
     </message>
     <message id="aegra.restore.file.conflict_policy">
         <source>If a file already exists</source>
@@ -1628,6 +1756,178 @@ Server: %1</source>
     <message id="aegra.settings.service.connection">
         <source>Connection</source>
         <translation>接続</translation>
+    </message>
+    <message id="aegra.backup.column.backup_type">
+        <source>Backup type</source>
+        <translation>バックアップの種類</translation>
+    </message>
+    <message id="aegra.backup.file.incremental_baseline_note">
+        <source>Changing the file selection later creates a new full baseline. Incremental runs only when the selection is unchanged and a valid parent exists.</source>
+        <translation>後から選択範囲を変更すると新しいフル基準が作成されます。増分は選択が変わらず有効な親がある場合のみ実行されます。</translation>
+    </message>
+    <message id="aegra.backup.downgrade.no_parent">
+        <source>No eligible parent recovery point; a new full baseline was created.</source>
+        <translation>利用可能な親リカバリ ポイントがないため、新しいフル基準を作成しました。</translation>
+    </message>
+    <message id="aegra.backup.downgrade.selection_changed">
+        <source>Backup selection changed; a new full baseline was created.</source>
+        <translation>バックアップ選択が変更されたため、新しいフル基準を作成しました。</translation>
+    </message>
+    <message id="aegra.backup.downgrade.chain_incomplete">
+        <source>Parent backup chain is incomplete; a new full baseline was created.</source>
+        <translation>親バックアップ チェーンが不完全なため、新しいフル基準を作成しました。</translation>
+    </message>
+    <message id="aegra.backup.downgrade.journal_missing">
+        <source>Change journal was unavailable; a new full baseline was created.</source>
+        <translation>変更ジャーナルを利用できないため、新しいフル基準を作成しました。</translation>
+    </message>
+    <message id="aegra.backup.downgrade.journal_reset">
+        <source>Change journal was reset; a new full baseline was created.</source>
+        <translation>変更ジャーナルがリセットされたため、新しいフル基準を作成しました。</translation>
+    </message>
+    <message id="aegra.backup.downgrade.journal_wrapped">
+        <source>Change journal wrapped; a new full baseline was created.</source>
+        <translation>変更ジャーナルがラップしたため、新しいフル基準を作成しました。</translation>
+    </message>
+    <message id="aegra.backup.downgrade.journal_inaccessible">
+        <source>Change journal was inaccessible; a new full baseline was created.</source>
+        <translation>変更ジャーナルにアクセスできないため、新しいフル基準を作成しました。</translation>
+    </message>
+    <message id="aegra.backup.downgrade.volume_identity_changed">
+        <source>Volume identity changed; a new full baseline was created.</source>
+        <translation>ボリューム識別が変更されたため、新しいフル基準を作成しました。</translation>
+    </message>
+    <message id="aegra.backup.downgrade.baseline_invalid">
+        <source>Parent baseline is invalid; a new full baseline was created.</source>
+        <translation>親基準が無効なため、新しいフル基準を作成しました。</translation>
+    </message>
+    <message id="aegra.backup.downgrade.generic">
+        <source>Incremental was not eligible; a full backup was created instead.</source>
+        <translation>増分の条件を満たさないため、代わりにフル バックアップを作成しました。</translation>
+    </message>
+    <message id="aegra.repository.parent.baseline">
+        <source>Baseline (no parent)</source>
+        <translation>基準（親なし）</translation>
+    </message>
+    <message id="aegra.repository.parent.id_only">
+        <source>Parent %1</source>
+        <translation>親 %1</translation>
+    </message>
+    <message id="aegra.repository.parent.summary">
+        <source>Parent %1 · %2</source>
+        <translation>親 %1 · %2</translation>
+    </message>
+    <message id="aegra.repository.chain.depth">
+        <source>Depth %1</source>
+        <translation>深さ %1</translation>
+    </message>
+    <message id="aegra.repository.delete.title">
+        <source>Delete recovery points</source>
+        <translation>リカバリ ポイントの削除</translation>
+    </message>
+    <message id="aegra.repository.delete.plan_message">
+        <source>The service planned to delete %1 recovery point(s) in this chain. Other recovery points are kept. This cannot be undone.</source>
+        <translation>サービスはこのチェーン内の %1 個のリカバリ ポイントを削除する予定です。他のポイントは保持されます。元に戻せません。</translation>
+    </message>
+    <message id="aegra.repository.delete.retained_hint">
+        <source>Approximately %1 other recovery point(s) currently listed will remain.</source>
+        <translation>現在の一覧の約 %1 個の他のリカバリ ポイントは残ります。</translation>
+    </message>
+    <message id="aegra.repository.delete.confirm">
+        <source>Delete permanently</source>
+        <translation>完全に削除</translation>
+    </message>
+    <message id="aegra.repository.delete.plan_failed">
+        <source>Could not prepare delete plan</source>
+        <translation>削除プランを準備できませんでした</translation>
+    </message>
+    <message id="aegra.repository.delete.execute_failed">
+        <source>Could not delete recovery points</source>
+        <translation>リカバリ ポイントを削除できませんでした</translation>
+    </message>
+    <message id="aegra.repository.delete.done">
+        <source>Recovery points deleted</source>
+        <translation>リカバリ ポイントを削除しました</translation>
+    </message>
+    <message id="aegra.error.file_recover.parent_missing">
+        <source>A required parent recovery point is missing. Restore is not possible for this chain.</source>
+        <translation>必要な親リカバリ ポイントがないため、このチェーンは復元できません。</translation>
+    </message>
+    <message id="aegra.error.file_recover.parent_reference_invalid">
+        <source>A parent content reference is invalid. The chain is damaged; do not attempt a partial restore.</source>
+        <translation>親コンテンツ参照が無効です。チェーンが破損しています。部分復元は行わないでください。</translation>
+    </message>
+    <message id="aegra.error.file_recover.chain_depth_limit">
+        <source>The backup chain is too deep to open. Contact support or create a new full backup.</source>
+        <translation>バックアップ チェーンが深すぎて開けません。サポートに問い合わせるか、新しいフル バックアップを作成してください。</translation>
+    </message>
+    <message id="aegra.error.file_recover.token_invalid">
+        <source>The browse session expired. Reload the recovery point and try again.</source>
+        <translation>参照セッションの有効期限が切れました。リカバリ ポイントを再読み込みして再試行してください。</translation>
+    </message>
+    <message id="aegra.error.file_backup.incremental_downgraded_full">
+        <source>Incremental was not eligible; a full backup was created instead.</source>
+        <translation>増分の条件を満たさないため、代わりにフル バックアップを作成しました。</translation>
+    </message>
+    <message id="aegra.error.file_backup.parent_chain_invalid">
+        <source>The parent backup chain is invalid. Run a full backup.</source>
+        <translation>親バックアップ チェーンが無効です。フル バックアップを実行してください。</translation>
+    </message>
+    <message id="aegra.error.file_backup.selection_fingerprint_mismatch">
+        <source>Backup selection no longer matches the parent baseline. A full backup is required.</source>
+        <translation>バックアップ選択が親基準と一致しなくなりました。フル バックアップが必要です。</translation>
+    </message>
+    <message id="aegra.error.file_backup.journal_missing">
+        <source>Change journal unavailable; incremental cannot continue.</source>
+        <translation>変更ジャーナルを利用できないため、増分を続行できません。</translation>
+    </message>
+    <message id="aegra.error.file_backup.journal_reset">
+        <source>Change journal was reset; a full backup is required.</source>
+        <translation>変更ジャーナルがリセットされたため、フル バックアップが必要です。</translation>
+    </message>
+    <message id="aegra.error.file_backup.journal_wrapped">
+        <source>Change journal wrapped; a full backup is required.</source>
+        <translation>変更ジャーナルがラップしたため、フル バックアップが必要です。</translation>
+    </message>
+    <message id="aegra.error.file_backup.journal_inaccessible">
+        <source>Change journal inaccessible; a full backup is required.</source>
+        <translation>変更ジャーナルにアクセスできないため、フル バックアップが必要です。</translation>
+    </message>
+    <message id="aegra.error.file_backup.unsupported_incremental">
+        <source>Incremental backup is not supported for this selection.</source>
+        <translation>この選択では増分バックアップはサポートされていません。</translation>
+    </message>
+    <message id="aegra.error.file_source.unsupported_reparse">
+        <source>Reparse points are not supported and were not skipped. Backup stopped.</source>
+        <translation>リparse ポイントはサポートされず、スキップもされません。バックアップを停止しました。</translation>
+    </message>
+    <message id="aegra.error.file_source.unsupported_hard_link">
+        <source>Hard links are not supported and were not skipped. Backup stopped.</source>
+        <translation>ハード リンクはサポートされず、スキップもされません。バックアップを停止しました。</translation>
+    </message>
+    <message id="aegra.error.file_source.unsupported_sparse">
+        <source>Sparse files are not supported and were not skipped. Backup stopped.</source>
+        <translation>スパース ファイルはサポートされず、スキップもされません。バックアップを停止しました。</translation>
+    </message>
+    <message id="aegra.error.file_source.unsupported_ads">
+        <source>Alternate data streams are not supported and were not skipped. Backup stopped.</source>
+        <translation>代替データ ストリームはサポートされず、スキップもされません。バックアップを停止しました。</translation>
+    </message>
+    <message id="aegra.error.file_source.unsupported_unc">
+        <source>Network (UNC) paths are not supported for file backup.</source>
+        <translation>ファイル バックアップではネットワーク (UNC) パスはサポートされていません。</translation>
+    </message>
+    <message id="aegra.error.file_source.unsupported_filesystem">
+        <source>This filesystem is not supported for file backup.</source>
+        <translation>このファイル システムはファイル バックアップでサポートされていません。</translation>
+    </message>
+    <message id="aegra.error.file_source.unsupported_efs">
+        <source>EFS-encrypted files are not supported for file backup.</source>
+        <translation>EFS 暗号化ファイルはファイル バックアップでサポートされていません。</translation>
+    </message>
+    <message id="aegra.error.file_source.unsupported_cloud_placeholder">
+        <source>Cloud placeholder files are not supported for file backup.</source>
+        <translation>クラウド プレースホルダー ファイルはファイル バックアップでサポートされていません。</translation>
     </message>
 </context>
 </TS>

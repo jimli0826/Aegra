@@ -4,84 +4,82 @@ import QtQuick.Layouts 1.15
 import ".."
 import "../components"
 
-// Visual baseline: backup/src/gui SettingsPage as right drawer content.
 Item {
     id: root
     signal closeRequested()
     //% "Settings"
     Accessible.name: qsTrId("aegra.nav.settings")
 
+    // Close button — top right
+    Button {
+        id: closeBtn
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.topMargin: 10
+        anchors.rightMargin: 10
+        width: 32
+        height: 28
+        z: 10
+        text: "\u2715"
+        background: Rectangle {
+            color: parent.hovered ? Theme.colorHover : "transparent"
+            radius: 4
+        }
+        contentItem: Text {
+            text: parent.text
+            color: Theme.colorTextWhite
+            font.pixelSize: 14
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+        onClicked: root.closeRequested()
+    }
+
     Flickable {
-        anchors.fill: parent
+        anchors.top: closeBtn.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.topMargin: 4
         contentWidth: width
-        contentHeight: mainCol.implicitHeight + 40
+        contentHeight: mainCol.implicitHeight + 24
         clip: true
         boundsBehavior: Flickable.StopAtBounds
 
         ColumnLayout {
             id: mainCol
-            width: parent.width
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: 20
-            spacing: 20
+            anchors.leftMargin: 16
+            anchors.rightMargin: 16
+            anchors.topMargin: 4
+            spacing: 16
 
-            RowLayout {
+            // ── Language card ─────────────────────────────────────
+            Rectangle {
                 Layout.fillWidth: true
-                spacing: 8
-                Rectangle {
-                    width: 3
-                    height: 20
-                    color: Theme.colorAccentBlue
-                    Layout.alignment: Qt.AlignVCenter
-                }
-                Text {
-                    //% "Settings"
-                    text: qsTrId("aegra.nav.settings")
-                    color: Theme.colorTextWhite
-                    font.pixelSize: 18
-                    font.bold: true
-                    font.family: Theme.fontFamily
-                    Layout.fillWidth: true
-                    Layout.alignment: Qt.AlignVCenter
-                }
-                Button {
-                    Layout.preferredWidth: 32
-                    Layout.preferredHeight: 28
-                    text: "\u2715"
-                    background: Rectangle {
-                        color: parent.hovered ? Theme.colorButtonHover : "transparent"
-                        radius: 4
-                    }
-                    contentItem: Text {
-                        text: parent.text
-                        color: Theme.colorTextWhite
-                        font.pixelSize: 14
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
-                    onClicked: root.closeRequested()
-                }
-            }
-
-            Card {
-                Layout.fillWidth: true
-                Layout.preferredHeight: languageColumn.implicitHeight + 70
-                //% "Language"
-                title: qsTrId("aegra.settings.language")
+                radius: 16
+                color: Theme.colorCard
+                border.width: 0
+                implicitHeight: langInner.implicitHeight + 40
 
                 ColumnLayout {
-                    id: languageColumn
+                    id: langInner
                     anchors.left: parent.left
                     anchors.right: parent.right
                     anchors.top: parent.top
-                    anchors.topMargin: 50
-                    anchors.leftMargin: 20
-                    anchors.rightMargin: 20
-                    anchors.bottomMargin: 16
-                    spacing: 12
+                    anchors.margins: 20
+                    spacing: 10
 
+                    Text {
+                        //% "Language"
+                        text: qsTrId("aegra.settings.language")
+                        color: Theme.colorTextWhite
+                        font.pixelSize: 15
+                        font.bold: true
+                        font.family: Theme.fontFamily
+                    }
                     Text {
                         Layout.fillWidth: true
                         //% "Choose the display language for the desktop client"
@@ -91,7 +89,6 @@ Item {
                         font.family: Theme.fontFamily
                         wrapMode: Text.WordWrap
                     }
-
                     ComboBox {
                         id: languageCombo
                         Layout.preferredWidth: 280
@@ -113,7 +110,7 @@ Item {
                         }
                         background: Rectangle {
                             color: Theme.colorInput
-                            radius: 4
+                            radius: 6
                             border.width: 1
                             border.color: languageCombo.activeFocus || languageCombo.popup.visible
                                           ? Theme.colorAccentBlue : Theme.colorBorder
@@ -143,7 +140,7 @@ Item {
                             background: Rectangle {
                                 color: Theme.colorPopup
                                 border.color: Theme.colorBorder
-                                radius: 4
+                                radius: 6
                             }
                         }
                         delegate: ItemDelegate {
@@ -165,23 +162,30 @@ Item {
                 }
             }
 
-            Card {
+            // ── Theme card ────────────────────────────────────────
+            Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: themeColumn.implicitHeight + 70
-                //% "Theme"
-                title: qsTrId("aegra.settings.theme")
+                radius: 16
+                color: Theme.colorCard
+                border.width: 0
+                implicitHeight: themeInner.implicitHeight + 40
 
                 ColumnLayout {
-                    id: themeColumn
+                    id: themeInner
                     anchors.left: parent.left
                     anchors.right: parent.right
                     anchors.top: parent.top
-                    anchors.topMargin: 50
-                    anchors.leftMargin: 20
-                    anchors.rightMargin: 20
-                    anchors.bottomMargin: 16
-                    spacing: 12
+                    anchors.margins: 20
+                    spacing: 10
 
+                    Text {
+                        //% "Theme"
+                        text: qsTrId("aegra.settings.theme")
+                        color: Theme.colorTextWhite
+                        font.pixelSize: 15
+                        font.bold: true
+                        font.family: Theme.fontFamily
+                    }
                     Text {
                         Layout.fillWidth: true
                         //% "Choose a color theme for the desktop client"
@@ -191,7 +195,6 @@ Item {
                         font.family: Theme.fontFamily
                         wrapMode: Text.WordWrap
                     }
-
                     Flow {
                         Layout.fillWidth: true
                         spacing: 12
@@ -202,12 +205,13 @@ Item {
                                 id: themeCard
                                 required property var modelData
                                 readonly property bool selected: Theme.themeId === modelData.id
-                                width: 148
-                                height: 112
-                                radius: 6
+                                width: 140
+                                height: 106
+                                radius: 10
                                 color: Theme.colorInput
                                 border.width: selected ? 2 : 1
                                 border.color: selected ? Theme.colorAccentBlue : Theme.colorBorder
+                                Behavior on border.color { ColorAnimation { duration: 150 } }
 
                                 ColumnLayout {
                                     anchors.fill: parent
@@ -215,45 +219,21 @@ Item {
                                     spacing: 6
                                     Rectangle {
                                         Layout.fillWidth: true
-                                        Layout.preferredHeight: 52
-                                        radius: 4
+                                        Layout.preferredHeight: 50
+                                        radius: 6
                                         color: modelData.previewBg
-                                        border.width: 1
-                                        border.color: Theme.colorBorder
                                         clip: true
                                         Row {
                                             anchors.fill: parent
                                             anchors.margins: 6
                                             spacing: 4
-                                            Rectangle {
-                                                width: 18
-                                                height: parent.height
-                                                radius: 2
-                                                color: modelData.previewCard
-                                            }
+                                            Rectangle { width: 16; height: parent.height; radius: 2; color: modelData.previewCard }
                                             Column {
                                                 anchors.verticalCenter: parent.verticalCenter
                                                 spacing: 3
-                                                Rectangle {
-                                                    width: 70
-                                                    height: 8
-                                                    radius: 2
-                                                    color: modelData.previewAccent
-                                                }
-                                                Rectangle {
-                                                    width: 54
-                                                    height: 6
-                                                    radius: 2
-                                                    color: modelData.previewText
-                                                    opacity: 0.55
-                                                }
-                                                Rectangle {
-                                                    width: 40
-                                                    height: 6
-                                                    radius: 2
-                                                    color: modelData.previewText
-                                                    opacity: 0.35
-                                                }
+                                                Rectangle { width: 64; height: 7; radius: 2; color: modelData.previewAccent }
+                                                Rectangle { width: 50; height: 5; radius: 2; color: modelData.previewText; opacity: 0.55 }
+                                                Rectangle { width: 36; height: 5; radius: 2; color: modelData.previewText; opacity: 0.35 }
                                             }
                                         }
                                     }
@@ -261,19 +241,24 @@ Item {
                                         Layout.fillWidth: true
                                         text: Theme.themeLabel(modelData)
                                         color: Theme.colorTextWhite
-                                        font.pixelSize: 12
+                                        font.pixelSize: 11
                                         font.bold: themeCard.selected
                                         font.family: Theme.fontFamily
                                         horizontalAlignment: Text.AlignHCenter
                                         elide: Text.ElideRight
                                     }
-                                    Text {
+                                    Item {
                                         Layout.alignment: Qt.AlignHCenter
-                                        text: "\u2713"
-                                        color: Theme.colorAccentBlue
-                                        font.pixelSize: 12
-                                        font.bold: true
-                                        visible: themeCard.selected
+                                        Layout.preferredWidth: 16
+                                        Layout.preferredHeight: 14
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "\u2713"
+                                            color: Theme.colorAccentBlue
+                                            font.pixelSize: 12
+                                            font.bold: true
+                                            visible: themeCard.selected
+                                        }
                                     }
                                 }
 
@@ -282,6 +267,13 @@ Item {
                                     hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
                                     onClicked: Theme.setTheme(modelData.id)
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: themeCard.radius
+                                        color: Theme.colorHover
+                                        opacity: parent.containsMouse && !themeCard.selected ? 0.3 : 0
+                                        Behavior on opacity { NumberAnimation { duration: 120 } }
+                                    }
                                 }
                             }
                         }
@@ -289,23 +281,30 @@ Item {
                 }
             }
 
-            Card {
+            // ── Service card ──────────────────────────────────────
+            Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: serviceColumn.implicitHeight + 70
-                //% "Service"
-                title: qsTrId("aegra.home.card.service")
+                radius: 16
+                color: Theme.colorCard
+                border.width: 0
+                implicitHeight: serviceInner.implicitHeight + 40
 
                 ColumnLayout {
-                    id: serviceColumn
+                    id: serviceInner
                     anchors.left: parent.left
                     anchors.right: parent.right
                     anchors.top: parent.top
-                    anchors.topMargin: 50
-                    anchors.leftMargin: 20
-                    anchors.rightMargin: 20
-                    anchors.bottomMargin: 16
+                    anchors.margins: 20
                     spacing: 8
 
+                    Text {
+                        //% "Service"
+                        text: qsTrId("aegra.home.card.service")
+                        color: Theme.colorTextWhite
+                        font.pixelSize: 15
+                        font.bold: true
+                        font.family: Theme.fontFamily
+                    }
                     Text {
                         //% "Connection"
                         text: qsTrId("aegra.settings.service.connection")
@@ -330,7 +329,7 @@ Item {
                 }
             }
 
-            Item { Layout.preferredHeight: 20 }
+            Item { Layout.preferredHeight: 8 }
         }
     }
 }

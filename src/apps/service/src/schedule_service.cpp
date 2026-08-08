@@ -350,7 +350,6 @@ ScheduleService::upsert_schedule(const contracts::UpsertScheduleCommand& command
             if (!resolved) {
                 return base::Result<contracts::CommandAcknowledgement>::failure(resolved.error());
             }
-            resolved.value().reparse_policy = command.protection.file_options.reparse_policy;
             resolved.value().unreadable_policy = command.protection.file_options.unreadable_policy;
             resolved_files.push_back(std::move(resolved).value());
         }

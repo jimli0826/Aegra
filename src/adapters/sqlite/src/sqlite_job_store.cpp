@@ -26,8 +26,10 @@ base::Result<void> JobStore::insert(const ports::JobRecord& record,
         "started_utc_ms, completed_utc_ms, source_ids, repository_connection_id, target_source_id, "
         "backup_type, parent_recovery_point_id, preflight_token, message_code, idempotency_key, "
         "result_error_code, result_outcome, result_message_code, "
-        "exclude_page_and_hibernation_files, request_fingerprint) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+        "exclude_page_and_hibernation_files, request_fingerprint, "
+        "result_requested_backup_type, result_effective_backup_type, "
+        "result_effective_parent_uuid, result_incremental_downgrade_reason) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     if (!statement) {
         return base::Result<void>::failure(statement.error());
     }
@@ -116,6 +118,36 @@ base::Result<void> JobStore::insert(const ports::JobRecord& record,
     if (auto bound = stmt.bind_text(21, record.request_fingerprint); !bound) {
         return bound;
     }
+    if (record.result_requested_backup_type) {
+        if (auto bound =
+                stmt.bind_int64(22, static_cast<std::int64_t>(*record.result_requested_backup_type));
+            !bound) {
+            return bound;
+        }
+    } else if (auto bound = stmt.bind_null(22); !bound) {
+        return bound;
+    }
+    if (record.result_effective_backup_type) {
+        if (auto bound =
+                stmt.bind_int64(23, static_cast<std::int64_t>(*record.result_effective_backup_type));
+            !bound) {
+            return bound;
+        }
+    } else if (auto bound = stmt.bind_null(23); !bound) {
+        return bound;
+    }
+    if (auto bound = stmt.bind_text_nullable(24, record.result_effective_parent_uuid); !bound) {
+        return bound;
+    }
+    if (record.result_incremental_downgrade_reason) {
+        if (auto bound = stmt.bind_int64(
+                25, static_cast<std::int64_t>(*record.result_incremental_downgrade_reason));
+            !bound) {
+            return bound;
+        }
+    } else if (auto bound = stmt.bind_null(25); !bound) {
+        return bound;
+    }
     auto stepped = stmt.step();
     if (!stepped) {
         return base::Result<void>::failure(stepped.error());
@@ -176,7 +208,10 @@ base::Result<contracts::JobPage> JobStore::list(const contracts::JobListRequest&
         "completed_utc_ms, source_ids, repository_connection_id, target_source_id, backup_type, "
         "parent_recovery_point_id, preflight_token, message_code, idempotency_key, "
         "result_error_code, result_outcome, result_message_code, "
-        "exclude_page_and_hibernation_files, request_fingerprint FROM jobs WHERE 1=1";
+        "exclude_page_and_hibernation_files, request_fingerprint, "
+        "result_requested_backup_type, result_effective_backup_type, "
+        "result_effective_parent_uuid, result_incremental_downgrade_reason "
+        "FROM jobs WHERE 1=1";
     if (request.operation) {
         sql += " AND operation = ?";
     }
@@ -303,7 +338,9 @@ base::Result<ports::JobRecord> JobStore::transition(const ports::JobStateTransit
     auto statement = SqliteStatement::prepare(
         state_.db,
         "UPDATE jobs SET state = ?, started_utc_ms = ?, completed_utc_ms = ?, message_code = ?, "
-        "result_error_code = ?, result_outcome = ?, result_message_code = ? "
+        "result_error_code = ?, result_outcome = ?, result_message_code = ?, "
+        "result_requested_backup_type = ?, result_effective_backup_type = ?, "
+        "result_effective_parent_uuid = ?, result_incremental_downgrade_reason = ? "
         "WHERE job_id = ? AND state = ?");
     if (!statement) {
         return base::Result<ports::JobRecord>::failure(statement.error());
@@ -341,10 +378,40 @@ base::Result<ports::JobRecord> JobStore::transition(const ports::JobStateTransit
     if (auto bound = stmt.bind_text_nullable(7, transition.result_message_code); !bound) {
         return base::Result<ports::JobRecord>::failure(bound.error());
     }
-    if (auto bound = stmt.bind_text(8, transition.job_id); !bound) {
+    if (transition.result_requested_backup_type) {
+        if (auto bound = stmt.bind_int64(
+                8, static_cast<std::int64_t>(*transition.result_requested_backup_type));
+            !bound) {
+            return base::Result<ports::JobRecord>::failure(bound.error());
+        }
+    } else if (auto bound = stmt.bind_null(8); !bound) {
         return base::Result<ports::JobRecord>::failure(bound.error());
     }
-    if (auto bound = stmt.bind_int64(9, static_cast<std::int64_t>(transition.expected_state));
+    if (transition.result_effective_backup_type) {
+        if (auto bound = stmt.bind_int64(
+                9, static_cast<std::int64_t>(*transition.result_effective_backup_type));
+            !bound) {
+            return base::Result<ports::JobRecord>::failure(bound.error());
+        }
+    } else if (auto bound = stmt.bind_null(9); !bound) {
+        return base::Result<ports::JobRecord>::failure(bound.error());
+    }
+    if (auto bound = stmt.bind_text_nullable(10, transition.result_effective_parent_uuid); !bound) {
+        return base::Result<ports::JobRecord>::failure(bound.error());
+    }
+    if (transition.result_incremental_downgrade_reason) {
+        if (auto bound = stmt.bind_int64(
+                11, static_cast<std::int64_t>(*transition.result_incremental_downgrade_reason));
+            !bound) {
+            return base::Result<ports::JobRecord>::failure(bound.error());
+        }
+    } else if (auto bound = stmt.bind_null(11); !bound) {
+        return base::Result<ports::JobRecord>::failure(bound.error());
+    }
+    if (auto bound = stmt.bind_text(12, transition.job_id); !bound) {
+        return base::Result<ports::JobRecord>::failure(bound.error());
+    }
+    if (auto bound = stmt.bind_int64(13, static_cast<std::int64_t>(transition.expected_state));
         !bound) {
         return base::Result<ports::JobRecord>::failure(bound.error());
     }

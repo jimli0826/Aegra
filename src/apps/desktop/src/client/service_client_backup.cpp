@@ -454,7 +454,7 @@ void ServiceClient::finish_backup_command_failure(const QString& message_code) {
     emit backupCommandChanged();
     update_active_backup_observe();
     const auto msg = localize_message_code(message_code);
-    show_toast(msg);
+    show_toast(msg, true);
     emit backupStartFailed(msg);
 }
 

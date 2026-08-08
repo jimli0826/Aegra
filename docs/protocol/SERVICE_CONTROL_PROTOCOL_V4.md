@@ -1,5 +1,9 @@
 # 本地 Service 控制面协议 V4（详细说明）
 
+> [ADR-0018](../adr/0018-file-set-incremental-usn-and-chain.md) 已接受 file_set Incremental。FI7 将直接扩展
+> current V4 的 Schedule/Job/Recovery Point 字段，不增加 V5 或 V4 兼容分支；目标控制面语义见
+> [增量设计](../architecture/FILE_SET_INCREMENTAL_BACKUP_RESTORE.md) §4。
+
 | 属性 | 内容 |
 | --- | --- |
 | 状态 | 权威 wire 说明 |
@@ -236,7 +240,6 @@
       }
     ],
     "options": {
-      "reparse_policy": 1,
       "unreadable_policy": 1
     }
   }
@@ -251,7 +254,7 @@
 | 更新 Schedule | `file_set` 必须 null 或省略变更；不得提交新 token 改源 |
 | 查询 Schedule | 只返回 `selection_id`、`display_label`、`entry_kind`、`recursion` |
 
-`reparse_policy` 固定 `1=capture_no_follow`；`unreadable_policy` 固定 `1=fail_job`。其它值拒绝。
+`unreadable_policy` 固定 `1=fail_job`。其它值拒绝。FI0 已删除 `reparse_policy`（reparse 一律 backup strict fail）。
 
 ### 4.9 RecoveryPointSummary V4
 
@@ -261,7 +264,20 @@ exact keys（11）：
 `created_utc_ms`, `logical_size_bytes`, `stored_size_bytes`, `source_count`, `has_sidecar`
 
 - `content_kind`：1 或 2；
-- file_set：`parent_uuid` null，`has_sidecar` false，`backup_type` Full。
+- file_set：`has_sidecar` false；`backup_type` 为 Full(1) 或 Incremental(2)；Incremental 时
+  `parent_uuid` 为直接父层 file_uuid，Full 时 `parent_uuid` null。
+
+### 4.9a JobSummary V4（FI7）
+
+exact keys（16）：
+
+`job_id`, `trace_id`, `operation`, `state`, `content_kind`, `created_utc_ms`, `started_utc_ms`,
+`completed_utc_ms`, `progress`, `message_code`, `source_ids`, `repository_connection_id`,
+`requested_backup_type` (u8|null), `effective_backup_type` (u8|null),
+`effective_parent_uuid` (string|null), `incremental_downgrade_reason` (u8|null)
+
+- 备份 Job：`requested_backup_type` 为创建时请求类型；终端成功后 `effective_*` 来自 TaskResult；
+- 非备份或未完成：后四字段可为 null；volume 备份通常无 `incremental_downgrade_reason`。
 
 ### 4.10 TaskProgress / TaskResult
 
@@ -279,7 +295,11 @@ exact keys（11）：
 
 `schema_version`(=4), `job_id`, `trace_id`, `outcome`, `error_code`, `logical_bytes`,
 `stored_bytes`, `chunk_count`, `entry_count`, `stream_count`, `message_code`, `warning_codes`,
-`partial_restore` (object|null)
+`partial_restore` (object|null), `requested_backup_type` (u8|null), `effective_backup_type`
+(u8|null), `effective_parent_uuid` (string|null), `incremental_downgrade_reason` (u8|null)
+
+file_set backup 成功时 `requested_backup_type` / `effective_backup_type` 为 1=full 或 2=incremental；
+volume 任务与非 backup 结果四字段均为 null。
 
 `partial_restore`（仅文件恢复 partial）：
 
@@ -306,7 +326,7 @@ exact keys（11）：
 | 1 GetServiceInfo | api 仅 4；capabilities 可含 `file.*` |
 | 2 ListRecoveryPoints | item 含 `content_kind` |
 | 4 ListSourceInventory | 仍以 Volume 为主；不返回任意文件系统树 |
-| 5 ListJobs | summary 可含 `content_kind`（1\|2\|null） |
+| 5 ListJobs | summary 含 `content_kind` 与 requested/effective backup 投影（FI7） |
 | 6 ListSchedules | summary 含 `content_kind` 与 file selection 安全摘要 |
 | 9 PrepareRestore | **仅 volume_set** RP；file_set RP 必须用 kind 15 |
 | 12 GetRecoveryPointLayout | volume geometry；file_set 返回稳定 unsupported |
@@ -421,12 +441,15 @@ exact keys（11）：
 
 **规则：**
 
-- 必须先认证 metadata + index root；失败区分 `file_recover.credential_required` /
-  `file_recover.credential_failed` / `file_recover.corrupt`；
-- continuation 绑定 repository UUID、file UUID、index root digest、parent_entry_id、caller；
+- 必须先打开并认证 tip→Full 完整链，再分页 tip Index；失败区分
+  `file_recover.credential_required` / `file_recover.credential_failed` /
+  `file_recover.corrupt` / `file_recover.parent_missing` /
+  `file_recover.parent_reference_invalid` / `file_recover.chain_depth_limit`；
+- 响应 `index_generation` 为 tip Index root digest；continuation 另绑定完整
+  `chain_generation`（各层 index digest）+ tip digest + parent_entry_id + reader offset；
 - 不返回 stream offset、descriptor、Archive key；
 - volume_set RP → `service.content_kind_mismatch`；
-- Catalog-only 未打开 Archive → 不得返回条目。
+- Catalog-only 或链不完整 → 不得返回条目。
 
 ### 6.3 kind 15 — PrepareFileRestore
 
@@ -443,7 +466,9 @@ exact keys（11）：
 | `target_node_token` | string | 浏览得到的目录 token |
 | `conflict_policy` | number | FileConflictPolicy |
 | `archive_secret_ref` | string \| null |
-| `options` | object | exact: `restore_security` bool, `restore_ads` bool（首版均必须 true） |
+| `restore_security` | bool | 首版必须 true（应用 Owner/Group/DACL/SACL） |
+
+FI0：不再有 `restore_ads`；Archive 不含 ADS，恢复只写 unnamed main stream。
 
 **成功 payload — FileRestorePreflight：**
 
@@ -463,8 +488,9 @@ exact keys（11）：
 }
 ```
 
-durable preflight 保存：repository UUID、RP UUID、index root digest、selected entry IDs digest、
-target root identity、policy、counts、expiration、owner identity。  
+durable preflight 保存：repository UUID、RP UUID、tip index root digest、chain generation digest、
+chain depth、selected entry IDs、target root identity、policy、counts、expiration。
+Prepare 在写前解析选择闭包内全部 parent stream 引用到 local owner。
 **不**保存 Archive/target 绝对路径、Secret、文件树。
 
 目标缺能力 → `restore_eligible=false` 或直接 RequestFailed（首版：RequestFailed

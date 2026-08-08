@@ -277,13 +277,17 @@ Window {
                     Rectangle {
                         id: settingsPanel
                         width: Math.max(400, Math.min(parent.width * 0.55, 640))
-                        height: parent.height
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
+                        anchors.topMargin: 60
+                        anchors.bottomMargin: 0
                         property real slideProgress: window.settingsPanelOpen ? 0 : 1
                         x: parent.width - width + slideProgress * width
                         visible: slideProgress < 0.999 || window.settingsPanelOpen
                         color: Theme.colorBg
-                        border.width: 1
-                        border.color: Theme.colorBorder
+                        radius: 16
+                        clip: true
+                        border.width: 0
                         Behavior on slideProgress {
                             NumberAnimation {
                                 duration: 280

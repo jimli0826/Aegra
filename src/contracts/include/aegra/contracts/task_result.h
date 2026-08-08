@@ -20,6 +20,9 @@ enum class TaskOutcome : std::uint8_t {
     kCancelled = 4,
 };
 
+// Forward declare to avoid job.h cycle; values match contracts::BackupType.
+enum class BackupType : std::uint8_t;
+
 struct TaskResult final {
     std::uint32_t schema_version{kTaskResultSchemaVersion};
     std::string job_id;
@@ -34,6 +37,11 @@ struct TaskResult final {
     std::string message_code;
     std::vector<std::string> warning_codes;
     std::optional<PartialRestoreStats> partial_restore;
+    /// file_set backup: requested vs effective type and non-sensitive downgrade reason.
+    std::optional<std::uint8_t> requested_backup_type;
+    std::optional<std::uint8_t> effective_backup_type;
+    std::optional<std::string> effective_parent_uuid;
+    std::optional<IncrementalDowngradeReason> incremental_downgrade_reason;
 };
 
 [[nodiscard]] base::Result<void> validate_task_result(const TaskResult& result);

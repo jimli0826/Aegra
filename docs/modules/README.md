@@ -25,10 +25,12 @@
 | Repository Catalog 查询 | [personal_repository_catalog_query.md](personal_repository_catalog_query.md) | Scanner、Service 分页查询与 Desktop 列表 |
 | 个人版 Verify | [personal_archive_verify.md](personal_archive_verify.md) | `.bkf` 完整只读认证与解压校验 |
 | Windows 个人版恢复 | [windows_personal_restore.md](windows_personal_restore.md) | 卷恢复；Full/Incremental tip 整盘 disk→disk（Worker + Service + Desktop） |
-| Windows 文件集备份 | [windows_file_set_backup.md](windows_file_set_backup.md) | schema 4 file_set Full：VSS + Filesystem Adapter + FileSet Pipeline + V7 Archive |
+| Windows 文件集备份 | [windows_file_set_backup.md](windows_file_set_backup.md) | schema 4 file_set Full/Incremental（FI0–FI10 已完成） |
 | Desktop / Service 完成计划 | [../migration/DESKTOP_SERVICE_COMPLETION_PLAN.md](../migration/DESKTOP_SERVICE_COMPLETION_PLAN.md) | UI 国际化、剩余页面迁移、Service 控制面与 agent 分工 |
 | 文件集备份与恢复设计 | [../architecture/FILE_SET_BACKUP_RESTORE.md](../architecture/FILE_SET_BACKUP_RESTORE.md) | 文件/目录保护、V7 Archive、V4 Service、Windows 文件语义与恢复边界 |
 | 文件集备份与恢复开发计划 | [../development/FILE_SET_BACKUP_DEVELOPMENT_PLAN.md](../development/FILE_SET_BACKUP_DEVELOPMENT_PLAN.md) | F0-F11 工作包、agent 文件所有权、前置关系与验收 |
+| 文件集增量设计 | [../architecture/FILE_SET_INCREMENTAL_BACKUP_RESTORE.md](../architecture/FILE_SET_INCREMENTAL_BACKUP_RESTORE.md) | USN 基线、完整 tip Index、父 stream 与链式恢复 |
+| 文件集增量开发计划 | [../development/FILE_SET_INCREMENTAL_DEVELOPMENT_PLAN.md](../development/FILE_SET_INCREMENTAL_DEVELOPMENT_PLAN.md) | FI0-FI10 工作包、文件所有权、构建和人工验收 |
 | 文件集产品上限与稳定码 | [../development/FILE_SET_PRODUCT_LIMITS_AND_CODES.md](../development/FILE_SET_PRODUCT_LIMITS_AND_CODES.md) | 上限、message_code、人工损坏/失败矩阵 |
 | 个人版 `.bkf` V7 | [../format/PERSONAL_BACKUP_FORMAT_V7.md](../format/PERSONAL_BACKUP_FORMAT_V7.md) | volume_set/file_set Archive 字节布局与 File Index |
 | Repository Catalog V2 | [../format/PERSONAL_REPOSITORY_FORMAT_V2.md](../format/PERSONAL_REPOSITORY_FORMAT_V2.md) | content_kind 与文件统计可重建摘要 |
@@ -48,4 +50,4 @@
 
 ## 当前阶段
 
-阶段 1 至阶段 13 已建立核心模块、个人版 Archive/Repository、Windows 数据源与 Worker、Service IPC、SQLite 控制面和 Qt Desktop 的主要纵向切片。当前 S4 已完成 Inventory、Repository connection 和多连接 Recovery Point API 并接入 Service composition root。file_set 首版工作包 **F0–F10 已完成**（V7 Archive、Catalog V2、Service V4、Worker Full 备份/Verify/选择性恢复、Desktop UX、发布门禁）；**F11 文件级 Incremental 暂缓**。后续阶段继续遵循本索引中的模块边界。仓库不维护测试用例，阶段验收使用生产 Target 构建、静态/架构检查和必要的人工运行或 UI 验证。
+阶段 1 至阶段 13 已建立核心模块、个人版 Archive/Repository、Windows 数据源与 Worker、Service IPC、SQLite 控制面和 Qt Desktop 的主要纵向切片。当前 S4 已完成 Inventory、Repository connection 和多连接 Recovery Point API 并接入 Service composition root。file_set 首版工作包 **F0–F10 已完成**（V7 Archive、Catalog V2、Service V4、Worker Full 备份/Verify/选择性恢复、Desktop UX、发布门禁）；文件 Incremental 已由 ADR-0018 接受，**FI0–FI10 已完成**（USN 合同与 source、change planner、Incremental Archive writer/parent stream、chain reader/Verify、Catalog 选父/降级/retention、计划任务编排、Browse/Restore 多链、Desktop Incremental UX、发布门禁）。本期不支持 reparse、hard link、sparse 或 ADS 的备份与还原。仓库不维护测试用例，阶段验收使用生产 Target 构建、静态/架构检查和必要的人工运行或 UI 验证。

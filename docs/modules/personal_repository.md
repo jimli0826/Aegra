@@ -21,16 +21,21 @@ src/personal_repository/
 ├── CMakeLists.txt
 ├── include/aegra/personal_repository/
 │   ├── catalog.h
+│   ├── catalog_scanner.h
 │   ├── chain_graph.h
 │   ├── delete_plan.h
-│   ├── repository.h
-│   └── scanner.h
+│   ├── parent_selector.h
+│   └── retention.h
 └── src/
     ├── catalog_codec.cpp
+    ├── catalog_scanner.cpp
+    ├── catalog_validation.cpp
     ├── chain_graph.cpp
     ├── delete_plan.cpp
-    ├── repository.cpp
-    └── scanner.cpp
+    ├── deletion_codec.cpp
+    ├── json_codec.cpp
+    ├── parent_selector.cpp
+    └── retention.cpp
 ```
 
 Target：`aegra_personal_repository` / `Aegra::PersonalRepository`。
@@ -75,35 +80,34 @@ state: discovery, structural, authentication, chain, verification projection
 Full → Inc → … → Full → Inc（后继 Full 仍属同一 set；Archive/Catalog 中 Full 的 `parent_uuid` 仍为
 null，set 内为森林）。
 
-#### Service 增量选父与「树完整」判定
+#### 增量选父与「树完整」判定
 
-由 Service（`worker_job_service`）在启动增量 Job 前完成。StartBackup 不传 parent；**父候选唯一来源**是
-控制面 `schedules.last_recovery_point_id`（下称 last_rp）。**不做 Catalog tip 扫描回退。**
+StartBackup 不传 parent；**父候选唯一来源**是控制面 `schedules.last_recovery_point_id`（下称 last_rp）。
+**不做 Catalog tip 扫描回退，也不向后跳选旧祖先。**
 
-1. **读 last_rp**  
-   - 空 / 缺失 → **降级 Full**（仍用 `schedules.backup_set_uuid`）  
-   - 有值 → 按 key `catalog/recovery-points/<file_uuid>.entry` 读单条 Catalog Entry  
+**volume_set**（Service 编排 + `is_volume_chainable_parent`）：
 
-2. **父点自身合格**  
-   - `has_sidecar`、`structural_state == "complete"`  
-   - `source_volume_ids` 与本次 Job 有序一致  
-   - 类型 Full 或 Incremental  
-   - `backup_set_uuid` 等于本 Schedule 的 set  
-   - 任一项失败 → **降级 Full**（不重算 tip）  
+1. last_rp 空 / Catalog 缺失 → 降级 Full（仍用 `schedules.backup_set_uuid`）
+2. 父点：`has_sidecar`、`structural_state == complete`、`source_volume_ids` 有序一致、类型 Full/Inc、
+   同 `backup_set_uuid`
+3. 祖先链完整（深度 ≤ 128，终点 Full）；IO/解码失败为硬错误
+4. 成功 → Incremental，parent = last_rp
 
-3. **祖先链完整**（从 last_rp 沿 `parent_uuid` 逐条读 Catalog，深度上限 128）  
-   - 每一步父 entry 必须存在且同 set  
-   - 无环；终点为 `backup_type == Full` 且无 parent  
-   - 缺层 / 环 / 超深 / 跨 set → **降级 Full**  
-   - 存储 IO 或 JSON 解码失败 → 硬错误（拒绝 StartBackup）  
+**file_set**（`select_file_incremental_parent`，纯 Catalog 决策；Service 在 FI7 接线）：
 
-4. **成功挂父** → 本次 Job 为 Incremental，parent = last_rp  
+1. last_rp 空 / 缺失 → `kNoParent` → Full
+2. tip 非 `file_set` / 结构不完整 / 跨 set / 非法类型 → `kChainIncomplete` → Full
+3. tip 无 `file_baseline_available` 或 fingerprint 空 → `kBaselineInvalid` → Full
+4. tip fingerprint 与 Schedule 当前 selection fingerprint 不一致 → `kSelectionChanged` → Full
+5. `resolve_chain` 失败或链上任一层 fingerprint/结构不合格 → 对应 stable reason → Full
+6. 成功 → Incremental，parent = last_rp，`reason = kNone`
+7. 期刊/USN 资格（journal missing/reset/wrap/inaccessible）由 Worker 在 FI7 判定，不在本模块
 
-5. **推进 tip**  
-   - 仅在 Worker 成功且 **Catalog Entry 发布成功** 后，将 `last_recovery_point_id` 更新为本次
-     `file_uuid`（Full 与 Inc 均更新）  
-   - Job 失败 / 取消 / Catalog 未发布 → tip 不变  
-   - 更换 Schedule 的 `repository_connection_id` → 清空 tip
+**推进 tip**（volume/file 相同）：
+
+- 仅在 Worker 成功且 **Catalog Entry 发布成功** 后，将 `last_recovery_point_id` 更新为本次 `file_uuid`
+- Job 失败 / 取消 / Catalog 未发布 → tip 不变
+- 更换 Schedule 的 `repository_connection_id` → 清空 tip
 
 同一字段存在多个来源时采用固定优先级：认证 Archive > 结构扫描 Archive > Catalog Entry。任何身份冲突
 都返回损坏/冲突，不进行 last-writer-wins。
@@ -128,8 +132,10 @@ publish 写入对应 Catalog Entry。文件名、Archive Header 和 Catalog Entr
 
 ### RecoveryPointGraph
 
-以 `file_uuid` 为节点、`parent_uuid` 为有向边。构建时检测重复 UUID、自环、环、跨 Backup Set 父引用、
-非法备份类型和深度上限。图可以包含结构完整但缺父的节点；此类节点不可生成 Restore Chain。
+以 `file_uuid` 为节点、`parent_uuid` 为有向边。构建时检测重复 UUID、自环、环、跨 Repository/Backup Set、
+跨 `content_kind`、非法备份类型和深度上限。**file_set** 额外校验：父类型仅 Full/Incremental；父子双方
+均有非空 `file_selection_fingerprint` 时必须相等。图可以包含结构完整但缺父的节点；此类节点不可生成
+Restore Chain。
 
 `resolve_chain(file_uuid)` 从指定点沿 `parent_uuid` 上溯到 Full，得到 base-first 祖先列表。完整条件：
 
@@ -137,13 +143,24 @@ publish 写入对应 Catalog Entry。文件名、Archive Header 和 Catalog Entr
 - 路径终点的 Entry 类型为 Full（增量/差异终点不是 Full 即 incomplete）；
 - 深度不超过图的 `maximum_chain_depth`（默认 128）。
 
-增量选父与恢复预检共用该定义：Service 用它判定 tip/显式父的祖先链是否可挂增量；Application 用它
-生成 Restore/Mount 的 base-first 层列表。二者都只依赖 Catalog 图，不在图构建阶段打开 Archive。
+增量选父与恢复预检共用该定义：`parent_selector` / Service 用它判定 tip 祖先链是否可挂增量；Application
+用它生成 Restore/Mount 的 base-first 层列表。二者都只依赖 Catalog 图，不在图构建阶段打开 Archive。
+
+### Parent selector 与 Retention
+
+- `select_file_incremental_parent`：file_set 选父/降级 Full 的稳定 reason（contracts
+  `IncrementalDowngradeReason`）；只认 last_rp tip。
+- `is_volume_chainable_parent`：volume 父点几何 + sidecar 资格。
+- `compute_retention_ancestor_closure`：保留 tip 集合到 Full 的祖先闭包；可选链深阈值触发
+  `request_new_full`（不实现 chain rewrite）。
+- `select_recent_recovery_point_tips`：按 `created_utc_ms` 取最近 N 个 RP（再与闭包组合）。
+- `recovery_point_has_catalog_descendants`：有 Catalog 后代时禁止“单删祖先而不含后代”。
 
 ### DeletePlan
 
 计划包含 operation ID、按后代优先排序的 Recovery Point、每个 Catalog generation 和所有已发现 Archive
-成员。Plan 创建与执行分离；执行前重新校验图和 generation，禁止边扫描边删除。
+成员。Plan 创建与执行分离；执行前重新校验图和 generation，禁止边扫描边删除。`file_set` 成员列表不含
+`.bhx`；整链删除始终 descendant-first。
 
 ## 用例与状态机
 
@@ -249,7 +266,18 @@ S5 已增加 `delete_plan`：descendant-first 计划、带 Storage generation �
 Catalog Reconcile（从 Archive 结构补建 Entry）仍属后续工作。
 
 F2 已将 Catalog Entry 升至 schema 2：`content_kind`（`volume_set`|`file_set`）、文件统计字段与
-`format_version=7` 校验；`file_set` 禁止 sidecar/source_volume_ids，且 `backup_type` 必须为 Full。
+`format_version=7` 校验；`file_set` 禁止 sidecar/source_volume_ids。
+
+**FI6** 已实现 file chain 生命周期核心：
+
+- Catalog V2 exact keys 含 `file_selection_fingerprint` / `file_baseline_available`；file Incremental
+  允许 `parent_uuid`；
+- `RecoveryPointGraph` 对 file/volume 分别校验 content_kind、fingerprint 与父类型；
+- `parent_selector` 提供 file Incremental 选父与 stable downgrade reason；
+- `retention` 提供 tip 祖先闭包与“请求新 Full”信号；删除计划继续 descendant-first 且 file 无 `.bhx`；
+- 认证发布路径在 fingerprint 非空时投影 `file_baseline_available=true`（无凭据扫描仍为 false）。
+
+Service/Worker 计划任务真正请求 Incremental 仍属 **FI7**。
 
 S4 Add 业务闭环已实现创建路径：仅缺失或空目标可初始化；Application 生成 Descriptor、通过 staging +
 create-only publish 写入 `aegra.repository`，并在持久化 Available 连接前读回验证。Import 仍只打开并验证已有

@@ -173,34 +173,33 @@ per-file Archive Credential 映射与 Local Storage 故障恢复验证仍待补�
 - **Catalog 发布**：`BackupCatalogRegistrar` 按 `content_kind` 写 Catalog V2（file_set 无 sidecar /
   source_volume_ids，写入 entry/stream 计数）。
 
-### F7：Recovery Point 文件查询与 Verify
+### F7 / FI8：Recovery Point 文件查询与 Verify
 
 - **API**：kind 14 `ListRecoveryPointEntries`（capability `file.recover_browse`）。
-- **实现**：`file_recovery_point_query` 经 Catalog V2 定位 `file_set` Archive →
-  `PersonalFileArchiveReader` 认证 metadata/index → 分页 `list_children`；
-  `display_name` 为 UTF-16LE 名称的可打印 ASCII 投影（非路径）；响应不含 Archive key / stream offset。
-- **Continuation**：绑定 `index_generation`（index root digest）+ `parent_entry_id` + reader offset；
-  generation 变化或 parent 不匹配时拒绝。
-- **错误码**：`file_recover.credential_required|failed|corrupt|catalog_only`、
-  `service.content_kind_mismatch`（volume_set RP）。
-- **凭证**：先空口令打开未加密 Archive；失败且 connection 声明 `archive.default_credential` 时
-  使用 connection SecretRef；请求可带 `archive_secret_ref`（`dpapi-lm:`）。
-- **Verify**：runtime 声明 `recovery_point.verify`；`prepare_verify` 从 Catalog 设置 Job
-  `content_kind`；file_set 走 Worker 全量 stream 读取认证。
+- **实现**：`file_recovery_chain` 经 Catalog V2 解析 tip→Full 链 →
+  `PersonalFileArchiveChainReader` 认证全链 → 仅 tip Index 分页 `list_children`；
+  响应不含 Archive key / stream offset。
+- **Continuation**：绑定 `chain_generation`（各层 index digest 的 `+` 拼接）+ tip
+  `index_generation` + `parent_entry_id` + reader offset；任一层 generation 或 parent 不匹配时拒绝。
+- **错误码**：`file_recover.credential_required|failed|corrupt|catalog_only|parent_missing|
+  parent_reference_invalid|chain_depth_limit`、`service.content_kind_mismatch`。
+- **凭证**：先空口令；失败且 connection 声明 `archive.default_credential` 时使用 connection
+  SecretRef；请求可带 `archive_secret_ref`。
+- **Verify**：file_set `prepare_verify` 注入 base-first `source_refs`（全链）与匹配
+  `credential_refs`；Worker 经 chain reader 做可恢复性 Verify。
 
-### F8：文件选择性恢复
+### F8 / FI8：文件选择性恢复
 
-- **API**：kind 15 `PrepareFileRestore` + kind 48 `StartFileRestore`（capability `file.restore`，
-  与 `file.browse` 同条件启用）。
-- **Prepare**：`FileBrowseService::resolve_selection` 解析 target 目录 token → inventory 拒绝 system /
-  read-only → `WindowsFileTreeSink` 探测 free_bytes 与 security 能力（ADS/sparse/reparse/hard link
-  本期仅 capabilities 声明，完整恢复不在本期）→ 打开 V7 File Archive 累加
-  entry logical size → 写入 durable preflight（TTL 30 min）：
-  - `chain_fingerprint` = `filec|archive_key|file_uuid|index_digest|…|target_root_identity`
-  - `entry_ids` 存 companion 表 `restore_preflight_entry_ids`（控制面 schema **12**）
+- **API**：kind 15 `PrepareFileRestore` + kind 48 `StartFileRestore`（capability `file.restore`）。
+- **Prepare**：解析 target 目录 token → inventory/capability/free space → 打开认证完整链 →
+  tip 选择闭包累加 logical size，并对每个普通文件 `resolve_stream_reference`（写前解析 parent）→
+  durable preflight（TTL 30 min）：
+  - `chain_fingerprint` =
+    `filec|archive_key|file_uuid|tip_digest|chain_gen|depth|conflict|sec|count|logical|target`
+  - `chain_depth` = Catalog 链层数；`entry_ids` 存 companion 表
   - 不存 Archive/target 绝对路径或明文 Secret
-- **Start**：校验 token 未过期、`filec|` 前缀、唯一占用；重开 Archive 比对 `index_root_digest`；
-  构造 schema 4 Worker Job（`content_kind=file_set`、`file_restore_target`、DPAPI credential）。
+- **Start**：校验 token 未过期/`filec|`/唯一占用；重开全链比对 tip digest 与 chain generation；
+  Worker Job `source_refs` 为 base-first 全链路径 + 同密文凭据（每层一份）。
 - **错误码**：`file_restore.preflight_ok|expired|consumed|target_full|system_directory_unsupported`
   等；volume preflight token 不得启动 file restore。
 

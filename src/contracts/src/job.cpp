@@ -47,21 +47,65 @@ base::Result<void> validate_backup_options(const JobRequest& request) {
     if (!request.backup || !is_known_backup_type(request.backup->type)) {
         return invalid("backup options are required and must have a known type");
     }
-    if (request.content_kind == ContentKind::kFileSet &&
-        request.backup->type != BackupType::kFull) {
-        return invalid("file_set backup only allows full");
-    }
-    const bool has_parent_source = !request.backup->parent_source_ref.empty();
-    const bool has_parent_credential = !request.backup->parent_credential_ref.value.empty();
-    if (has_parent_credential && !has_parent_source) {
-        return invalid("backup parent credential requires a parent source");
-    }
-    if (request.backup->type == BackupType::kFull &&
-        (has_parent_source || has_parent_credential)) {
-        return invalid("full backup cannot have a parent");
-    }
-    if (request.backup->type != BackupType::kFull && !has_parent_source) {
-        return invalid("non-full backup requires a parent source");
+    if (request.content_kind == ContentKind::kFileSet) {
+        if (request.backup->type != BackupType::kFull &&
+            request.backup->type != BackupType::kIncremental) {
+            return invalid("file_set backup allows full or incremental only");
+        }
+        // Parent archive path reuses parent_source_ref; volume parent credential is unused.
+        if (!request.backup->parent_credential_ref.value.empty()) {
+            return invalid("file_set backup must not set parent_credential_ref");
+        }
+        if (!request.backup->candidate_parent_uuid.empty() &&
+            !base::is_canonical_uuid(request.backup->candidate_parent_uuid)) {
+            return invalid("file_set candidate_parent_uuid is invalid");
+        }
+        if (request.backup->type == BackupType::kFull) {
+            if (!request.backup->candidate_parent_uuid.empty() ||
+                !request.backup->parent_source_ref.empty() || request.backup->service_full_reason) {
+                return invalid("full file_set backup cannot carry parent or demotion fields");
+            }
+        } else if (request.backup->service_full_reason) {
+            // Service catalog demotion: requested Incremental, forced Full before Worker USN checks.
+            if (!is_known_incremental_downgrade_reason(*request.backup->service_full_reason) ||
+                *request.backup->service_full_reason == IncrementalDowngradeReason::kNone) {
+                return invalid("file_set service_full_reason is invalid");
+            }
+            if (!request.backup->candidate_parent_uuid.empty() ||
+                !request.backup->parent_source_ref.empty()) {
+                return invalid("service-demoted file_set backup cannot carry parent fields");
+            }
+        } else {
+            // Viable Incremental: tip UUID + absolute parent archive path required.
+            if (request.backup->candidate_parent_uuid.empty() ||
+                request.backup->parent_source_ref.empty()) {
+                return invalid("file_set incremental requires candidate parent and parent path");
+            }
+        }
+        if (!request.backup->selection_fingerprint) {
+            return invalid("file_set backup requires selection_fingerprint");
+        }
+        auto fingerprint = validate_file_selection_fingerprint(*request.backup->selection_fingerprint);
+        if (!fingerprint) {
+            return fingerprint;
+        }
+    } else {
+        if (request.backup->selection_fingerprint || !request.backup->candidate_parent_uuid.empty() ||
+            request.backup->service_full_reason) {
+            return invalid("volume_set backup cannot carry file selection baseline fields");
+        }
+        const bool has_parent_source = !request.backup->parent_source_ref.empty();
+        const bool has_parent_credential = !request.backup->parent_credential_ref.value.empty();
+        if (has_parent_credential && !has_parent_source) {
+            return invalid("backup parent credential requires a parent source");
+        }
+        if (request.backup->type == BackupType::kFull &&
+            (has_parent_source || has_parent_credential)) {
+            return invalid("full backup cannot have a parent");
+        }
+        if (request.backup->type != BackupType::kFull && !has_parent_source) {
+            return invalid("non-full backup requires a parent source");
+        }
     }
     if (!base::is_canonical_uuid(request.backup->file_uuid) ||
         request.backup->created_utc_ms <= 0) {
@@ -72,8 +116,16 @@ base::Result<void> validate_backup_options(const JobRequest& request) {
         (!has_set || request.backup->backup_set_uuid == request.backup->file_uuid)) {
         return invalid("full backup requires a distinct backup set UUID");
     }
-    if (request.backup->type != BackupType::kFull && !request.backup->backup_set_uuid.empty()) {
+    // file_set Incremental keeps the schedule backup_set_uuid on the request; volume non-full
+    // inherits from parent and must leave the field empty.
+    if (request.content_kind == ContentKind::kVolumeSet &&
+        request.backup->type != BackupType::kFull && !request.backup->backup_set_uuid.empty()) {
         return invalid("non-full backup inherits its backup set UUID from the parent");
+    }
+    if (request.content_kind == ContentKind::kFileSet &&
+        request.backup->type == BackupType::kIncremental &&
+        (!has_set || request.backup->backup_set_uuid == request.backup->file_uuid)) {
+        return invalid("file_set incremental requires a distinct backup set UUID");
     }
     return base::Result<void>::success();
 }
@@ -123,8 +175,10 @@ base::Result<void> validate_file_sources(const JobRequest& request) {
             !request.target_ref.empty()) {
             return invalid("file_set verify payload is invalid");
         }
-        if (request.source_refs.size() != 1 || request.source_refs.front().empty()) {
-            return invalid("file_set verify requires one archive source_ref");
+        // Base-first Full..tip chain (1..kMaximumFileChainDepth). Composition supplies parents.
+        if (!non_empty_refs(request.source_refs) ||
+            request.source_refs.size() > kMaximumFileChainDepth) {
+            return invalid("file_set verify requires base-first archive source_refs");
         }
         return base::Result<void>::success();
     }
@@ -132,8 +186,10 @@ base::Result<void> validate_file_sources(const JobRequest& request) {
     if (!request.file_source_refs.empty() || request.restore || !request.target_ref.empty()) {
         return invalid("file_set restore has mixed volume/file payload");
     }
-    if (request.source_refs.size() != 1 || request.source_refs.front().empty()) {
-        return invalid("file_set restore requires one archive source_ref");
+    // Base-first Full..tip chain; single Full remains size==1.
+    if (!non_empty_refs(request.source_refs) ||
+        request.source_refs.size() > kMaximumFileChainDepth) {
+        return invalid("file_set restore requires base-first archive source_refs");
     }
     if (!request.file_restore_target) {
         return invalid("file_set restore requires file_restore_target");

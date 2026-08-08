@@ -5,6 +5,7 @@
 - 决策者：Aegra 项目
 - 关联模块：contracts、ports、format、pipeline、application、personal_repository、adapters/windows_filesystem、apps/worker、apps/service、apps/desktop
 - 关联文档：[文件集备份与恢复设计](../architecture/FILE_SET_BACKUP_RESTORE.md)、[分阶段开发计划](../development/FILE_SET_BACKUP_DEVELOPMENT_PLAN.md)、[个人版 `.bkf` V7](../format/PERSONAL_BACKUP_FORMAT_V7.md)、[Repository Catalog V2](../format/PERSONAL_REPOSITORY_FORMAT_V2.md)、[Service 控制面 V4](../protocol/SERVICE_CONTROL_PROTOCOL_V4.md)、[产品上限与错误码](../development/FILE_SET_PRODUCT_LIMITS_AND_CODES.md)
+- 后续决策：文件 Incremental 与 reparse/hard link/sparse/ADS 范围已由 [ADR-0018](0018-file-set-incremental-usn-and-chain.md) 替代；本文其它边界仍有效
 
 ## 背景
 

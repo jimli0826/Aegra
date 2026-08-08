@@ -24,8 +24,10 @@ Item {
         y: serviceClient.toastVisible ? 12 : -height - 20
         opacity: serviceClient.toastVisible ? 1 : 0
         border.width: 1
-        border.color: Theme.colorToastSuccessBorder
-        color: Theme.colorToastSuccessBg
+        border.color: serviceClient.toastIsError ? Theme.colorToastErrorBorder
+                                                : Theme.colorToastSuccessBorder
+        color: serviceClient.toastIsError ? Theme.colorToastErrorBg
+                                          : Theme.colorToastSuccessBg
 
         Behavior on y { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
         Behavior on opacity { NumberAnimation { duration: 180 } }
@@ -42,7 +44,8 @@ Item {
                 width: 4
                 Layout.fillHeight: true
                 radius: 2
-                color: Theme.colorToastSuccessBorder
+                color: serviceClient.toastIsError ? Theme.colorToastErrorBorder
+                                                 : Theme.colorToastSuccessBorder
             }
 
             Text {

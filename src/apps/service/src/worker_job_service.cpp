@@ -1,16 +1,20 @@
 #include "aegra/apps/service/worker_job_service.h"
 
+#include "file_recovery_chain.h"
 #include "worker_job_service_detail.h"
 
+#include "aegra/adapters/crypto_sodium/content_hash.h"
 #include "aegra/adapters/personal_archive/personal_archive.h"
 #include "aegra/adapters/windows_system/windows_system.h"
 #include "aegra/application/source_inventory_query.h"
 #include "aegra/apps/service/worker_supervisor.h"
 #include "aegra/base/uuid.h"
+#include "aegra/contracts/file_set.h"
 #include "aegra/format/manifest.h"
 #include "aegra/personal_repository/catalog.h"
 #include "aegra/personal_repository/catalog_scanner.h"
 #include "aegra/personal_repository/chain_graph.h"
+#include "aegra/personal_repository/parent_selector.h"
 #include "aegra/ports/clock.h"
 #include "aegra/ports/control_plane.h"
 #include "aegra/ports/random.h"
@@ -272,11 +276,10 @@ struct PreparedBackup final {
 
 [[nodiscard]] bool is_chainable_parent_entry(
     const personal_repository::CatalogEntry& entry,
-    const std::vector<std::string>& source_volume_ids) noexcept {
-    return entry.has_sidecar && entry.structural_state == "complete" &&
-           entry.source_volume_ids == source_volume_ids &&
-           (entry.backup_type == format::BackupType::kFull ||
-            entry.backup_type == format::BackupType::kIncremental);
+    const std::vector<std::string>& source_volume_ids,
+    const std::string_view schedule_backup_set_uuid) noexcept {
+    return personal_repository::is_volume_chainable_parent(entry, source_volume_ids,
+                                                           schedule_backup_set_uuid);
 }
 
 [[nodiscard]] base::Result<ResolvedBackupPlan>
@@ -301,9 +304,11 @@ resolve_backup_plan(ports::IControlPlaneDatabase& control_plane,
             {base::ErrorCode::kUnauthorized, "encrypted schedule is missing a protected password"});
     }
     if (record.content_kind == contracts::ContentKind::kFileSet &&
-        command.backup_type != contracts::BackupType::kFull) {
+        command.backup_type != contracts::BackupType::kFull &&
+        command.backup_type != contracts::BackupType::kIncremental) {
         return base::Result<ResolvedBackupPlan>::failure(
-            {base::ErrorCode::kInvalidArgument, "file_set backup requires full backup type"});
+            {base::ErrorCode::kInvalidArgument,
+             "file_set backup requires full or incremental backup type"});
     }
     ResolvedBackupPlan plan;
     plan.schedule_id = command.schedule_id;
@@ -422,8 +427,8 @@ resolve_incremental_parent(ports::IRepositoryStorageAccess& storage,
     if (!entry) {
         return base::Result<IncrementalParentResolution>::failure(entry.error());
     }
-    if (!entry.value() || !is_chainable_parent_entry(*entry.value(), source_volume_ids) ||
-        entry.value()->backup_set_uuid != schedule_backup_set_uuid) {
+    if (!entry.value() ||
+        !is_chainable_parent_entry(*entry.value(), source_volume_ids, schedule_backup_set_uuid)) {
         return base::Result<IncrementalParentResolution>::success(
             demote_to_full(std::optional<std::string>{schedule_backup_set_uuid}));
     }
@@ -704,6 +709,81 @@ revalidate_file_set_volumes(const std::vector<contracts::FileSourceRef>& selecti
     return base::Result<void>::success();
 }
 
+[[nodiscard]] base::Result<contracts::FileSelectionFingerprint>
+compute_file_selection_fingerprint(const std::vector<contracts::FileSourceRef>& selections) {
+    auto preimage = contracts::encode_file_selection_fingerprint_preimage(selections);
+    if (!preimage) {
+        return base::Result<contracts::FileSelectionFingerprint>::failure(preimage.error());
+    }
+    auto digest = adapters::crypto_sodium::sha256(preimage.value());
+    if (!digest) {
+        return base::Result<contracts::FileSelectionFingerprint>::failure(digest.error());
+    }
+    contracts::FileSelectionFingerprint fingerprint;
+    fingerprint.algorithm_id = contracts::kSelectionFingerprintAlgorithmSha256V1;
+    fingerprint.digest = digest.value();
+    return base::Result<contracts::FileSelectionFingerprint>::success(std::move(fingerprint));
+}
+
+[[nodiscard]] std::string fingerprint_digest_to_hex(const std::array<std::byte, 32>& digest) {
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string hex(digest.size() * 2, '\0');
+    for (std::size_t index = 0; index < digest.size(); ++index) {
+        const auto value = static_cast<unsigned char>(digest[index]);
+        hex[index * 2] = kHex[value >> 4U];
+        hex[index * 2 + 1] = kHex[value & 0x0FU];
+    }
+    return hex;
+}
+
+/// Owned Catalog decision for file_set Incremental (no dangling graph pointers).
+struct FileParentSelection final {
+    bool incremental{false};
+    std::string parent_file_uuid;
+    std::string parent_archive_main_key;
+    contracts::IncrementalDowngradeReason reason{contracts::IncrementalDowngradeReason::kNone};
+};
+
+/// Catalog tip selection only — never opens Archive or reads USN (Worker owns those).
+[[nodiscard]] base::Result<FileParentSelection>
+resolve_file_incremental_parent(const ResolvedBackupPlan& plan,
+                                const ports::RepositoryConnectionRecord& repository,
+                                ports::IRepositoryStorageFactory& storage_factory,
+                                const std::string& expected_fingerprint_hex,
+                                const base::CancellationToken cancellation) {
+    auto storage = storage_factory.open(repository.locator, cancellation);
+    if (!storage) {
+        return base::Result<FileParentSelection>::failure(storage.error());
+    }
+    personal_repository::RepositoryCatalogScanner scanner(storage.value()->reader(),
+                                                          storage.value()->enumerator());
+    auto loaded = scanner.load_entries(cancellation);
+    if (!loaded) {
+        return base::Result<FileParentSelection>::failure(loaded.error());
+    }
+    auto graph = personal_repository::RecoveryPointGraph::build(std::move(loaded).value().entries);
+    if (!graph) {
+        return base::Result<FileParentSelection>::failure(graph.error());
+    }
+    personal_repository::FileIncrementalParentRequest request;
+    request.last_recovery_point_id =
+        plan.last_recovery_point_id ? std::string_view(*plan.last_recovery_point_id)
+                                    : std::string_view{};
+    request.schedule_backup_set_uuid = plan.backup_set_uuid;
+    request.expected_selection_fingerprint = expected_fingerprint_hex;
+    const auto decision =
+        personal_repository::select_file_incremental_parent(graph.value(), request);
+    FileParentSelection selected;
+    selected.reason = decision.reason;
+    if (decision.incremental && decision.parent != nullptr) {
+        selected.incremental = true;
+        selected.parent_file_uuid = decision.parent->file_uuid;
+        selected.parent_archive_main_key = decision.parent->archive_main_key;
+        selected.reason = contracts::IncrementalDowngradeReason::kNone;
+    }
+    return base::Result<FileParentSelection>::success(std::move(selected));
+}
+
 [[nodiscard]] base::Result<PreparedBackup>
 prepare_file_set_backup(const ResolvedBackupPlan& plan, PrepareBackupContext& context,
                         const base::CancellationToken cancellation) {
@@ -730,15 +810,45 @@ prepare_file_set_backup(const ResolvedBackupPlan& plan, PrepareBackupContext& co
     if (!identity) {
         return base::Result<PreparedBackup>::failure(identity.error());
     }
-    IncrementalParentResolution no_parent{};
-    const BackupOptionsInput options_input{plan, identity.value(), no_parent,
-                                           repository.value().locator};
-    auto backup = make_backup_options(options_input);
-    if (!backup) {
-        return base::Result<PreparedBackup>::failure(backup.error());
+    auto fingerprint = compute_file_selection_fingerprint(plan.file_selections);
+    if (!fingerprint) {
+        return base::Result<PreparedBackup>::failure(fingerprint.error());
     }
-    backup.value().type = contracts::BackupType::kFull;
-    backup.value().backup_set_uuid = plan.backup_set_uuid;
+    contracts::BackupOptions backup;
+    backup.type = plan.backup_type;
+    backup.file_uuid = identity.value().file_uuid;
+    backup.created_utc_ms = identity.value().created_utc_ms;
+    backup.exclude_page_and_hibernation_files = plan.exclude_page_and_hibernation_files;
+    backup.encryption_enabled = plan.encryption_enabled;
+    backup.backup_set_uuid = plan.backup_set_uuid;
+    backup.selection_fingerprint = std::move(fingerprint).value();
+    std::optional<std::string> parent_id;
+    if (plan.backup_type == contracts::BackupType::kIncremental) {
+        const auto fingerprint_hex =
+            fingerprint_digest_to_hex(backup.selection_fingerprint->digest);
+        auto decision = resolve_file_incremental_parent(plan, repository.value(),
+                                                        context.storage_factory, fingerprint_hex,
+                                                        cancellation);
+        if (!decision) {
+            return base::Result<PreparedBackup>::failure(decision.error());
+        }
+        if (decision.value().incremental) {
+            auto parent_path = resolve_archive_absolute_path(
+                repository.value().locator, decision.value().parent_archive_main_key);
+            if (!parent_path) {
+                return base::Result<PreparedBackup>::failure(parent_path.error());
+            }
+            backup.candidate_parent_uuid = decision.value().parent_file_uuid;
+            backup.parent_source_ref = std::move(parent_path).value();
+            parent_id = decision.value().parent_file_uuid;
+        } else {
+            // Catalog demotion: keep requested Incremental on the wire; Worker writes Full.
+            backup.service_full_reason = decision.value().reason;
+            if (*backup.service_full_reason == contracts::IncrementalDowngradeReason::kNone) {
+                backup.service_full_reason = contracts::IncrementalDowngradeReason::kNoParent;
+            }
+        }
+    }
     contracts::JobRequest worker;
     worker.job_id = identity.value().job_id;
     worker.tenant_id = "personal";
@@ -752,7 +862,7 @@ prepare_file_set_backup(const ResolvedBackupPlan& plan, PrepareBackupContext& co
     if (!credentials) {
         return base::Result<PreparedBackup>::failure(credentials.error());
     }
-    worker.backup = std::move(backup).value();
+    worker.backup = std::move(backup);
     std::vector<std::string> selection_ids;
     selection_ids.reserve(plan.file_selections.size());
     for (const auto& selection : plan.file_selections) {
@@ -762,6 +872,7 @@ prepare_file_set_backup(const ResolvedBackupPlan& plan, PrepareBackupContext& co
     request.worker_request = std::move(worker);
     request.source_ids = std::move(selection_ids);
     request.repository_connection_id = plan.repository_connection_id;
+    request.parent_recovery_point_id = std::move(parent_id);
     request.request_fingerprint = backup_request_fingerprint(plan);
     request.schedule_id = plan.schedule_id;
     request.backup_archive_key = identity.value().archive_key;
@@ -825,6 +936,52 @@ persist_cancel_command(ports::IControlPlaneDatabase& control_plane, ports::ICloc
 }
 
 [[nodiscard]] base::Result<PreparedBackup>
+prepare_file_set_verify(const contracts::StartVerifyCommand& command,
+                        ports::IControlPlaneDatabase& control_plane,
+                        ports::IRepositoryStorageFactory& storage_factory,
+                        ports::IRandomSource& random, const base::CancellationToken cancellation) {
+    // Open Catalog chain + authenticate Archives so Incremental tips get base-first source_refs.
+    auto chain = open_file_recovery_chain(control_plane, storage_factory,
+                                          command.repository_connection_id,
+                                          command.recovery_point_id, std::nullopt, cancellation);
+    if (!chain) {
+        return base::Result<PreparedBackup>::failure(chain.error());
+    }
+    auto job_id = random_id("job-", random, cancellation);
+    auto trace_id = random_id("trace-", random, cancellation);
+    if (!job_id || !trace_id) {
+        return base::Result<PreparedBackup>::failure(!job_id ? job_id.error() : trace_id.error());
+    }
+    contracts::JobRequest worker;
+    worker.job_id = job_id.value();
+    worker.tenant_id = "personal";
+    worker.operation = contracts::JobOperation::kVerify;
+    worker.content_kind = contracts::ContentKind::kFileSet;
+    worker.source_refs = chain.value().archive_paths_utf8;
+    worker.target_ref.clear();
+    if (chain.value().password.empty()) {
+        worker.credential_refs.assign(worker.source_refs.size(), contracts::SecretRef{});
+    } else {
+        auto protected_secret = adapters::windows_system::protect_local_machine_secret(
+            chain.value().password, job_id.value());
+        if (!protected_secret) {
+            return base::Result<PreparedBackup>::failure(protected_secret.error());
+        }
+        worker.credential_refs.reserve(worker.source_refs.size());
+        for (std::size_t index = 0; index < worker.source_refs.size(); ++index) {
+            worker.credential_refs.push_back(protected_secret.value());
+        }
+    }
+    worker.trace_id = trace_id.value();
+    WorkerJobRequest request;
+    request.worker_request = std::move(worker);
+    request.source_ids = {command.recovery_point_id};
+    request.repository_connection_id = command.repository_connection_id;
+    request.request_fingerprint = verify_request_fingerprint(command);
+    return base::Result<PreparedBackup>::success({std::move(request), std::move(job_id).value()});
+}
+
+[[nodiscard]] base::Result<PreparedBackup>
 prepare_verify(const contracts::StartVerifyCommand& command,
                ports::IControlPlaneDatabase& control_plane,
                ports::IRepositoryStorageFactory& storage_factory, ports::IRandomSource& random,
@@ -874,12 +1031,11 @@ prepare_verify(const contracts::StartVerifyCommand& command,
         return base::Result<PreparedBackup>::failure(
             {base::ErrorCode::kConflict, "file_recover.catalog_only"});
     }
-    const bool is_file_set =
-        found->content_kind == personal_repository::kCatalogContentKindFileSet;
-    // Archive credential selection: never reuse a connection SecretRef without an explicit
-    // repository_uuid+file_uuid mapping. Mapping store is not yet durable; refuse with
-    // credential_required rather than guessing with the repository connection credential.
-    static_cast<void>(found->repository_uuid);
+    if (found->content_kind == personal_repository::kCatalogContentKindFileSet) {
+        return prepare_file_set_verify(command, control_plane, storage_factory, random,
+                                       cancellation);
+    }
+    // Volume-set Verify: single tip Archive (existing path).
     const auto& capabilities = repository.value()->capabilities;
     const bool allows_connection_secret =
         std::find(capabilities.begin(), capabilities.end(), "archive.default_credential") !=
@@ -887,10 +1043,6 @@ prepare_verify(const contracts::StartVerifyCommand& command,
     std::optional<contracts::SecretRef> credential;
     if (allows_connection_secret && repository.value()->credential_ref) {
         credential = *repository.value()->credential_ref;
-    } else if (is_file_set) {
-        // Unencrypted file_set archives open with an empty password. Encrypted archives without
-        // archive.default_credential need a durable per-file mapping (future).
-        credential = contracts::SecretRef{};
     } else if (!repository.value()->credential_ref || !allows_connection_secret) {
         return base::Result<PreparedBackup>::failure(
             {base::ErrorCode::kUnauthorized, "archive.credential_required"});
@@ -908,8 +1060,7 @@ prepare_verify(const contracts::StartVerifyCommand& command,
     worker.job_id = job_id.value();
     worker.tenant_id = "personal";
     worker.operation = contracts::JobOperation::kVerify;
-    worker.content_kind =
-        is_file_set ? contracts::ContentKind::kFileSet : contracts::ContentKind::kVolumeSet;
+    worker.content_kind = contracts::ContentKind::kVolumeSet;
     worker.source_refs = {archive_path.value()};
     worker.target_ref.clear();
     worker.credential_refs = {credential.value_or(contracts::SecretRef{})};

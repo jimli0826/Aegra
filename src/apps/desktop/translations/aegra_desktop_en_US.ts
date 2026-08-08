@@ -690,8 +690,8 @@ Server: %1</translation>
         <translation>Too many files selected. Narrow the selection and try again.</translation>
     </message>
     <message id="aegra.error.file_restore.target_capability_missing">
-        <source>The target folder does not support required features (for example ACL or alternate streams). Choose an NTFS folder.</source>
-        <translation>The target folder does not support required features (for example ACL or alternate streams). Choose an NTFS folder.</translation>
+        <source>The target folder does not support required features (for example ACL). Choose an NTFS folder.</source>
+        <translation>The target folder does not support required features (for example ACL). Choose an NTFS folder.</translation>
     </message>
     <message id="aegra.error.file_restore.target_not_directory">
         <source>Select a folder as the restore destination.</source>
@@ -753,6 +753,142 @@ Server: %1</translation>
         <source>Files</source>
         <translation>Files</translation>
     </message>
+    <message id="aegra.restore.change_type">
+        <source>Change type</source>
+        <translation>Change type</translation>
+    </message>
+    <message id="aegra.restore.wizard.step.type">
+        <source>Restore type</source>
+        <translation>Restore type</translation>
+    </message>
+    <message id="aegra.restore.wizard.step.source_dest">
+        <source>Source &amp; destination</source>
+        <translation>Source &amp; destination</translation>
+    </message>
+    <message id="aegra.restore.wizard.step.summary">
+        <source>Summary</source>
+        <translation>Summary</translation>
+    </message>
+    <message id="aegra.restore.summary.title">
+        <source>Restore summary</source>
+        <translation>Restore summary</translation>
+    </message>
+    <message id="aegra.restore.summary.type_label">
+        <source>Type</source>
+        <translation>Type</translation>
+    </message>
+    <message id="aegra.restore.summary.checkpoint_label">
+        <source>Checkpoint</source>
+        <translation>Checkpoint</translation>
+    </message>
+    <message id="aegra.restore.summary.mappings_label">
+        <source>Mappings</source>
+        <translation>Mappings</translation>
+    </message>
+    <message id="aegra.restore.summary.ready">
+        <source>Review the selection, then start restore.</source>
+        <translation>Review the selection, then start restore.</translation>
+    </message>
+    <message id="aegra.restore.summary.checking">
+        <source>Checking...</source>
+        <translation>Checking...</translation>
+    </message>
+    <message id="aegra.restore.summary.files_selected">
+        <source>Files selected</source>
+        <translation>Files selected</translation>
+    </message>
+    <message id="aegra.restore.summary.target_folder">
+        <source>Target folder</source>
+        <translation>Target folder</translation>
+    </message>
+    <message id="aegra.restore.summary.volume_options_note">
+        <source>Volume restore uses the mapped target volume; partition layout is not rewritten.</source>
+        <translation>Volume restore uses the mapped target volume; partition layout is not rewritten.</translation>
+    </message>
+    <message id="aegra.common.on">
+        <source>On</source>
+        <translation>On</translation>
+    </message>
+    <message id="aegra.common.off">
+        <source>Off</source>
+        <translation>Off</translation>
+    </message>
+    <message id="aegra.restore.summary.starting">
+        <source>Starting restore...</source>
+        <translation>Starting restore...</translation>
+    </message>
+    <message id="aegra.restore.summary.waiting">
+        <source>Waiting for restore progress...</source>
+        <translation>Waiting for restore progress...</translation>
+    </message>
+    <message id="aegra.restore.summary.finished">
+        <source>Restore completed</source>
+        <translation>Restore completed</translation>
+    </message>
+    <message id="aegra.restore.summary.finished_errors">
+        <source>Restore finished with errors</source>
+        <translation>Restore finished with errors</translation>
+    </message>
+    <message id="aegra.restore.summary.back">
+        <source>Back</source>
+        <translation>Back</translation>
+    </message>
+    <message id="aegra.restore.summary.done">
+        <source>Done</source>
+        <translation>Done</translation>
+    </message>
+    <message id="aegra.restore.file.volume_free_total">
+        <source>%1 free, %2 total</source>
+        <translation>%1 free, %2 total</translation>
+    </message>
+    <message id="aegra.restore.type_title">
+        <source>Choose restore type</source>
+        <translation>Choose restore type</translation>
+    </message>
+    <message id="aegra.restore.type_subtitle">
+        <source>Select whole-disk recovery, volume-to-volume restore, or file and folder restore from a recovery point</source>
+        <translation>Select whole-disk recovery, volume-to-volume restore, or file and folder restore from a recovery point</translation>
+    </message>
+    <message id="aegra.restore.type.disk_title">
+        <source>Disk restore</source>
+        <translation>Disk restore</translation>
+    </message>
+    <message id="aegra.restore.type.disk_desc">
+        <source>Restore an entire physical disk from a volume-set recovery point onto a target disk (layout, partitions, and options).</source>
+        <translation>Restore an entire physical disk from a volume-set recovery point onto a target disk (layout, partitions, and options).</translation>
+    </message>
+    <message id="aegra.restore.type.disk_action">
+        <source>Choose Disk restore →</source>
+        <translation>Choose Disk restore →</translation>
+    </message>
+    <message id="aegra.restore.type.volume_title">
+        <source>Volume restore</source>
+        <translation>Volume restore</translation>
+    </message>
+    <message id="aegra.restore.type.volume_desc">
+        <source>Map one backup volume onto an existing non-system volume of equal or larger size without rewriting the whole disk.</source>
+        <translation>Map one backup volume onto an existing non-system volume of equal or larger size without rewriting the whole disk.</translation>
+    </message>
+    <message id="aegra.restore.type.volume_action">
+        <source>Choose Volume restore →</source>
+        <translation>Choose Volume restore →</translation>
+    </message>
+    <message id="aegra.restore.type.files_title">
+        <source>Files / folders</source>
+        <translation>Files / folders</translation>
+    </message>
+    <message id="aegra.restore.type.files_desc">
+        <source>Selectively restore files and folders from a file-set recovery point into a chosen target directory.</source>
+        <translation>Selectively restore files and folders from a file-set recovery point into a chosen target directory.</translation>
+    </message>
+    <message id="aegra.restore.type.files_action">
+        <source>Choose Files restore →</source>
+        <translation>Choose Files restore →</translation>
+    </message>
+    <message id="aegra.restore.type_mismatch">
+        <source>This checkpoint does not match the selected restore type</source>
+        <translation>This checkpoint does not match the selected restore type</translation>
+    </message>
     <message id="aegra.restore.file.capability_missing">
         <source>Service does not support file restore</source>
         <translation>Service does not support file restore</translation>
@@ -808,14 +944,6 @@ Server: %1</translation>
     <message id="aegra.restore.file.restore_security_hint">
         <source>Apply Owner, Group, DACL, and SACL from the archive. Uncheck to keep target default permissions (timestamps and attributes are still restored).</source>
         <translation>Apply Owner, Group, DACL, and SACL from the archive. Uncheck to keep target default permissions (timestamps and attributes are still restored).</translation>
-    </message>
-    <message id="aegra.restore.file.restore_ads">
-        <source>Restore alternate data streams</source>
-        <translation>Restore alternate data streams</translation>
-    </message>
-    <message id="aegra.restore.file.restore_ads_hint">
-        <source>Restore NTFS alternate data streams (ADS) when present in the archive.</source>
-        <translation>Restore NTFS alternate data streams (ADS) when present in the archive.</translation>
     </message>
     <message id="aegra.restore.file.conflict_policy">
         <source>If a file already exists</source>
@@ -1628,6 +1756,178 @@ Server: %1</translation>
     <message id="aegra.settings.service.connection">
         <source>Connection</source>
         <translation>Connection</translation>
+    </message>
+    <message id="aegra.backup.column.backup_type">
+        <source>Backup type</source>
+        <translation>Backup type</translation>
+    </message>
+    <message id="aegra.backup.file.incremental_baseline_note">
+        <source>Changing the file selection later creates a new full baseline. Incremental runs only when the selection is unchanged and a valid parent exists.</source>
+        <translation>Changing the file selection later creates a new full baseline. Incremental runs only when the selection is unchanged and a valid parent exists.</translation>
+    </message>
+    <message id="aegra.backup.downgrade.no_parent">
+        <source>No eligible parent recovery point; a new full baseline was created.</source>
+        <translation>No eligible parent recovery point; a new full baseline was created.</translation>
+    </message>
+    <message id="aegra.backup.downgrade.selection_changed">
+        <source>Backup selection changed; a new full baseline was created.</source>
+        <translation>Backup selection changed; a new full baseline was created.</translation>
+    </message>
+    <message id="aegra.backup.downgrade.chain_incomplete">
+        <source>Parent backup chain is incomplete; a new full baseline was created.</source>
+        <translation>Parent backup chain is incomplete; a new full baseline was created.</translation>
+    </message>
+    <message id="aegra.backup.downgrade.journal_missing">
+        <source>Change journal was unavailable; a new full baseline was created.</source>
+        <translation>Change journal was unavailable; a new full baseline was created.</translation>
+    </message>
+    <message id="aegra.backup.downgrade.journal_reset">
+        <source>Change journal was reset; a new full baseline was created.</source>
+        <translation>Change journal was reset; a new full baseline was created.</translation>
+    </message>
+    <message id="aegra.backup.downgrade.journal_wrapped">
+        <source>Change journal wrapped; a new full baseline was created.</source>
+        <translation>Change journal wrapped; a new full baseline was created.</translation>
+    </message>
+    <message id="aegra.backup.downgrade.journal_inaccessible">
+        <source>Change journal was inaccessible; a new full baseline was created.</source>
+        <translation>Change journal was inaccessible; a new full baseline was created.</translation>
+    </message>
+    <message id="aegra.backup.downgrade.volume_identity_changed">
+        <source>Volume identity changed; a new full baseline was created.</source>
+        <translation>Volume identity changed; a new full baseline was created.</translation>
+    </message>
+    <message id="aegra.backup.downgrade.baseline_invalid">
+        <source>Parent baseline is invalid; a new full baseline was created.</source>
+        <translation>Parent baseline is invalid; a new full baseline was created.</translation>
+    </message>
+    <message id="aegra.backup.downgrade.generic">
+        <source>Incremental was not eligible; a full backup was created instead.</source>
+        <translation>Incremental was not eligible; a full backup was created instead.</translation>
+    </message>
+    <message id="aegra.repository.parent.baseline">
+        <source>Baseline (no parent)</source>
+        <translation>Baseline (no parent)</translation>
+    </message>
+    <message id="aegra.repository.parent.id_only">
+        <source>Parent %1</source>
+        <translation>Parent %1</translation>
+    </message>
+    <message id="aegra.repository.parent.summary">
+        <source>Parent %1 · %2</source>
+        <translation>Parent %1 · %2</translation>
+    </message>
+    <message id="aegra.repository.chain.depth">
+        <source>Depth %1</source>
+        <translation>Depth %1</translation>
+    </message>
+    <message id="aegra.repository.delete.title">
+        <source>Delete recovery points</source>
+        <translation>Delete recovery points</translation>
+    </message>
+    <message id="aegra.repository.delete.plan_message">
+        <source>The service planned to delete %1 recovery point(s) in this chain. Other recovery points are kept. This cannot be undone.</source>
+        <translation>The service planned to delete %1 recovery point(s) in this chain. Other recovery points are kept. This cannot be undone.</translation>
+    </message>
+    <message id="aegra.repository.delete.retained_hint">
+        <source>Approximately %1 other recovery point(s) currently listed will remain.</source>
+        <translation>Approximately %1 other recovery point(s) currently listed will remain.</translation>
+    </message>
+    <message id="aegra.repository.delete.confirm">
+        <source>Delete permanently</source>
+        <translation>Delete permanently</translation>
+    </message>
+    <message id="aegra.repository.delete.plan_failed">
+        <source>Could not prepare delete plan</source>
+        <translation>Could not prepare delete plan</translation>
+    </message>
+    <message id="aegra.repository.delete.execute_failed">
+        <source>Could not delete recovery points</source>
+        <translation>Could not delete recovery points</translation>
+    </message>
+    <message id="aegra.repository.delete.done">
+        <source>Recovery points deleted</source>
+        <translation>Recovery points deleted</translation>
+    </message>
+    <message id="aegra.error.file_recover.parent_missing">
+        <source>A required parent recovery point is missing. Restore is not possible for this chain.</source>
+        <translation>A required parent recovery point is missing. Restore is not possible for this chain.</translation>
+    </message>
+    <message id="aegra.error.file_recover.parent_reference_invalid">
+        <source>A parent content reference is invalid. The chain is damaged; do not attempt a partial restore.</source>
+        <translation>A parent content reference is invalid. The chain is damaged; do not attempt a partial restore.</translation>
+    </message>
+    <message id="aegra.error.file_recover.chain_depth_limit">
+        <source>The backup chain is too deep to open. Contact support or create a new full backup.</source>
+        <translation>The backup chain is too deep to open. Contact support or create a new full backup.</translation>
+    </message>
+    <message id="aegra.error.file_recover.token_invalid">
+        <source>The browse session expired. Reload the recovery point and try again.</source>
+        <translation>The browse session expired. Reload the recovery point and try again.</translation>
+    </message>
+    <message id="aegra.error.file_backup.incremental_downgraded_full">
+        <source>Incremental was not eligible; a full backup was created instead.</source>
+        <translation>Incremental was not eligible; a full backup was created instead.</translation>
+    </message>
+    <message id="aegra.error.file_backup.parent_chain_invalid">
+        <source>The parent backup chain is invalid. Run a full backup.</source>
+        <translation>The parent backup chain is invalid. Run a full backup.</translation>
+    </message>
+    <message id="aegra.error.file_backup.selection_fingerprint_mismatch">
+        <source>Backup selection no longer matches the parent baseline. A full backup is required.</source>
+        <translation>Backup selection no longer matches the parent baseline. A full backup is required.</translation>
+    </message>
+    <message id="aegra.error.file_backup.journal_missing">
+        <source>Change journal unavailable; incremental cannot continue.</source>
+        <translation>Change journal unavailable; incremental cannot continue.</translation>
+    </message>
+    <message id="aegra.error.file_backup.journal_reset">
+        <source>Change journal was reset; a full backup is required.</source>
+        <translation>Change journal was reset; a full backup is required.</translation>
+    </message>
+    <message id="aegra.error.file_backup.journal_wrapped">
+        <source>Change journal wrapped; a full backup is required.</source>
+        <translation>Change journal wrapped; a full backup is required.</translation>
+    </message>
+    <message id="aegra.error.file_backup.journal_inaccessible">
+        <source>Change journal inaccessible; a full backup is required.</source>
+        <translation>Change journal inaccessible; a full backup is required.</translation>
+    </message>
+    <message id="aegra.error.file_backup.unsupported_incremental">
+        <source>Incremental backup is not supported for this selection.</source>
+        <translation>Incremental backup is not supported for this selection.</translation>
+    </message>
+    <message id="aegra.error.file_source.unsupported_reparse">
+        <source>Reparse points are not supported and were not skipped. Backup stopped.</source>
+        <translation>Reparse points are not supported and were not skipped. Backup stopped.</translation>
+    </message>
+    <message id="aegra.error.file_source.unsupported_hard_link">
+        <source>Hard links are not supported and were not skipped. Backup stopped.</source>
+        <translation>Hard links are not supported and were not skipped. Backup stopped.</translation>
+    </message>
+    <message id="aegra.error.file_source.unsupported_sparse">
+        <source>Sparse files are not supported and were not skipped. Backup stopped.</source>
+        <translation>Sparse files are not supported and were not skipped. Backup stopped.</translation>
+    </message>
+    <message id="aegra.error.file_source.unsupported_ads">
+        <source>Alternate data streams are not supported and were not skipped. Backup stopped.</source>
+        <translation>Alternate data streams are not supported and were not skipped. Backup stopped.</translation>
+    </message>
+    <message id="aegra.error.file_source.unsupported_unc">
+        <source>Network (UNC) paths are not supported for file backup.</source>
+        <translation>Network (UNC) paths are not supported for file backup.</translation>
+    </message>
+    <message id="aegra.error.file_source.unsupported_filesystem">
+        <source>This filesystem is not supported for file backup.</source>
+        <translation>This filesystem is not supported for file backup.</translation>
+    </message>
+    <message id="aegra.error.file_source.unsupported_efs">
+        <source>EFS-encrypted files are not supported for file backup.</source>
+        <translation>EFS-encrypted files are not supported for file backup.</translation>
+    </message>
+    <message id="aegra.error.file_source.unsupported_cloud_placeholder">
+        <source>Cloud placeholder files are not supported for file backup.</source>
+        <translation>Cloud placeholder files are not supported for file backup.</translation>
     </message>
 </context>
 </TS>

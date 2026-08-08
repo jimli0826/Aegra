@@ -81,6 +81,34 @@ base::Result<void> validate_task_result(const TaskResult& result) {
         result.stream_count > kMaximumWireInteger) {
         return invalid("task result integer exceeds wire range");
     }
+    const bool has_type_pair =
+        result.requested_backup_type.has_value() || result.effective_backup_type.has_value() ||
+        result.effective_parent_uuid.has_value() || result.incremental_downgrade_reason.has_value();
+    if (has_type_pair) {
+        if (!result.requested_backup_type || !result.effective_backup_type) {
+            return invalid("task result backup type pair is incomplete");
+        }
+        const auto requested = *result.requested_backup_type;
+        const auto effective = *result.effective_backup_type;
+        // 1=full, 2=incremental (matches BackupType); differential not used for file_set results.
+        if ((requested != 1 && requested != 2) || (effective != 1 && effective != 2)) {
+            return invalid("task result backup type is invalid");
+        }
+        if (result.effective_parent_uuid) {
+            if (result.effective_parent_uuid->empty() || result.effective_parent_uuid->size() > 36) {
+                return invalid("task result effective_parent_uuid is invalid");
+            }
+        }
+        if (result.incremental_downgrade_reason) {
+            if (!is_known_incremental_downgrade_reason(*result.incremental_downgrade_reason) ||
+                *result.incremental_downgrade_reason == IncrementalDowngradeReason::kNone) {
+                return invalid("task result incremental_downgrade_reason is invalid");
+            }
+            if (effective != 1) {
+                return invalid("downgrade reason requires effective full");
+            }
+        }
+    }
     switch (result.outcome) {
     case TaskOutcome::kSucceeded:
         return validate_success(result);

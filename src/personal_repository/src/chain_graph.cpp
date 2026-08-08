@@ -28,10 +28,29 @@ namespace {
     if (child.backup_set_uuid != parent.backup_set_uuid) {
         return base::Result<void>::failure(conflict("recovery point parent crosses backup sets"));
     }
+    if (child.content_kind != parent.content_kind) {
+        return base::Result<void>::failure(
+            conflict("recovery point parent crosses content kinds"));
+    }
     if (child.backup_type == format::BackupType::kDifferential &&
         parent.backup_type != format::BackupType::kFull) {
         return base::Result<void>::failure(
             conflict("differential recovery point parent is not full"));
+    }
+    if (child.content_kind == kCatalogContentKindFileSet) {
+        // file_set chains never use volume geometry or differential layers.
+        if (parent.backup_type != format::BackupType::kFull &&
+            parent.backup_type != format::BackupType::kIncremental) {
+            return base::Result<void>::failure(
+                conflict("file_set recovery point parent type is invalid"));
+        }
+        // Authenticated fingerprints are authoritative projections; mismatch is corrupt.
+        if (!child.file_selection_fingerprint.empty() &&
+            !parent.file_selection_fingerprint.empty() &&
+            child.file_selection_fingerprint != parent.file_selection_fingerprint) {
+            return base::Result<void>::failure(
+                conflict("file_set recovery point parent selection fingerprint mismatch"));
+        }
     }
     return base::Result<void>::success();
 }

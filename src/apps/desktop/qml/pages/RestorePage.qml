@@ -40,18 +40,36 @@ Item {
     property string panelSelectedDate: ""
     property var panelCheckpoints: []
     property int panelCheckpointsEpoch: 0
-    /// "disk" = full-disk restore; "volume" = volume→volume restore; "files" = file_set.
+    /// 0 = restore type; 1 = source & destination workspace; 2 = summary + progress.
+    property int restoreStep: 0
+    /// "disk" | "volume" | "files" — fixed after type card selection (not a mid-page toggle).
     property string restoreMode: "disk"
     readonly property bool isVolumeMode: root.restoreMode === "volume"
     readonly property bool isFileMode: root.restoreMode === "files"
+    readonly property bool onTypeStep: root.restoreStep === 0
+    readonly property bool onWorkspaceStep: root.restoreStep === 1
+    readonly property bool onSummaryStep: root.restoreStep === 2
+    /// Step labels for the progress header (aligned with Backup wizard).
+    readonly property var restoreStepLabels: [
+        qsTrId("aegra.restore.wizard.step.type"),
+        qsTrId("aegra.restore.wizard.step.source_dest"),
+        qsTrId("aegra.restore.wizard.step.summary")
+    ]
+    /// Session tracking for summary progress (ms since epoch; 0 = inactive).
+    property double restoreSessionStartMs: 0
+    property bool restoreJobsSubmitted: false
+    /// True when the last start attempt failed (allows Back with no job rows).
+    property bool restoreSessionFailed: false
+    /// Localized error for the summary progress card (start failure or job failure).
+    property string restoreSessionErrorText: ""
+    /// True while workspace Next is waiting on file-restore preflight (capacity check).
+    property bool filePreflightPending: false
     /// 1 volume_set, 2 file_set — taken from selected checkpoint.
     property int selectedContentKind: 1
     /// File restore conflict policy: 1 fail, 2 replace, 3 rename.
     property int fileConflictPolicy: 1
     /// File restore: apply Owner/Group/DACL/SACL from archive (default on).
     property bool fileRestoreSecurity: true
-    /// File restore: restore NTFS alternate data streams (default on).
-    property bool fileRestoreAds: true
 
     /// Source disks from Service GetRecoveryPointLayout (Manifest volumes). Empty until a
     /// checkpoint is selected and the layout query succeeds.
@@ -107,23 +125,360 @@ Item {
         root.mappingDropBlockReason = ""
     }
 
-    function setRestoreMode(mode) {
-        if (mode !== "disk" && mode !== "volume")
+    function resetFileRestoreOptions() {
+        root.fileConflictPolicy = 1
+        root.fileRestoreSecurity = true
+    }
+
+    function selectRestoreType(mode) {
+        if (mode !== "disk" && mode !== "volume" && mode !== "files")
             return
-        // File-set recovery points stay in files mode; do not switch to disk/volume layout.
-        if (root.selectedContentKind === 2)
-            return
-        if (root.restoreMode === mode)
+        if (mode === "files" && serviceClient.fileRestoreAvailable !== true)
             return
         root.restoreMode = mode
-        root.clearDiskMappings()
-        root.clearVolumeMappings()
-        if (root.hasCheckpoint && !root.sourceLayoutLoading) {
-            if (mode === "disk")
-                root.initDefaultMappings()
-            else
-                root.initDefaultVolumeMappings()
+        root.restoreStep = 1
+        root.restoreSessionStartMs = 0
+        root.restoreJobsSubmitted = false
+        root.restoreSessionFailed = false
+        root.restoreSessionErrorText = ""
+        root.resetFileRestoreOptions()
+        root.applySelectedCheckpoint(null)
+        root.checkpointPanelOpen = false
+        root.optionsCollapsed = false
+        // Target folder is local PC inventory — show immediately, no checkpoint needed.
+        if (mode === "files" && typeof serviceClient.loadFileRestoreTargetRoots === "function")
+            serviceClient.loadFileRestoreTargetRoots()
+    }
+
+    function clearRestoreSession() {
+        root.restoreSessionStartMs = 0
+        root.restoreJobsSubmitted = false
+        root.restoreSessionFailed = false
+        root.restoreSessionErrorText = ""
+        root.pendingRestoreQueue = []
+        root.multiRestoreActive = false
+        root.filePreflightPending = false
+    }
+
+    function goBackToTypeSelection() {
+        root.clearRestoreSession()
+        root.restoreStep = 0
+        root.checkpointPanelOpen = false
+        root.resetFileRestoreOptions()
+        root.applySelectedCheckpoint(null)
+    }
+
+    /// True while a restore start is in-flight or jobs from this session are still active.
+    /// Preflight-only (Next) busy must not block the step-bar Back button.
+    readonly property bool restoreSessionRunning: {
+        if (root.multiRestoreActive)
+            return true
+        if (serviceClient.restoreCommandBusy && !root.filePreflightPending
+                && root.restoreSessionStarted)
+            return true
+        if (!root.restoreJobsSubmitted || root.restoreSessionFailed)
+            return false
+        var st = root.restoreSessionStatus
+        return st && st.jobCount > 0 && st.allTerminal !== true
+    }
+
+    /// One step back (Backup-aligned: simple decrement). Blocked only while restore runs.
+    function stepBarBack() {
+        if (root.restoreStep <= 0)
+            return
+        if (root.restoreSessionRunning)
+            return
+        if (root.restoreStep === 2) {
+            root.clearRestoreSession()
+            root.restoreStep = 1
+            return
         }
+        // step 1 → type selection
+        root.goBackToTypeSelection()
+    }
+
+    function goToSummary() {
+        if (!root.canRestore || root.filePreflightPending)
+            return
+        if (root.isFileMode) {
+            // Capacity / eligibility check on Next (not on Restore start).
+            root.filePreflightPending = true
+            if (!serviceClient.prepareFileRestore(root.selectedCheckpointId,
+                                                  root.fileConflictPolicy,
+                                                  root.pendingLayoutPassword,
+                                                  root.fileRestoreSecurity)) {
+                root.filePreflightPending = false
+            }
+            return
+        }
+        root.clearRestoreSession()
+        root.restoreStep = 2
+    }
+
+    /// Normalize inventory mount letter to "X:" (accepts "X", "X:", "X:\\").
+    function normalizeDriveLetter(raw) {
+        var s = (raw || "").toString().replace(/[\\/]/g, "").trim().toUpperCase()
+        if (s.length === 0)
+            return ""
+        var ch = s.charAt(0)
+        if (ch < "A" || ch > "Z")
+            return ""
+        return ch + ":"
+    }
+
+    /// Extract drive letter from browse root labels such as "新加卷 (Z:)" or "System (C:)".
+    function extractDriveLetterFromLabel(displayName) {
+        var dn = (displayName || "").toString()
+        var m = dn.match(/\(([A-Za-z]):\)/)
+        if (m && m[1])
+            return m[1].toUpperCase() + ":"
+        m = dn.match(/^([A-Za-z]):\s*$/)
+        if (m && m[1])
+            return m[1].toUpperCase() + ":"
+        return ""
+    }
+
+    /// Inventory volume for a file-browse root, matched by drive letter only.
+    function volumeInventoryForLabel(displayName) {
+        var want = root.extractDriveLetterFromLabel(displayName)
+        if (want.length === 0)
+            return null
+        var vols = root.targetVolumes || []
+        for (var i = 0; i < vols.length; ++i) {
+            var v = vols[i]
+            if (!v)
+                continue
+            if (root.normalizeDriveLetter(v.letter) === want)
+                return v
+        }
+        return null
+    }
+
+    /// Format: "7.03 GB free, 29.90 GB total" / "7.03 GB 可用, 共 29.90 GB".
+    function volumeFreeTotalText(displayName) {
+        var v = root.volumeInventoryForLabel(displayName)
+        if (!v)
+            return ""
+        var freeText = (v.free || "").toString()
+        var totalText = (v.size || "").toString()
+        if (freeText.length > 0 && totalText.length > 0)
+            //% "%1 free, %2 total"
+            return qsTrId("aegra.restore.file.volume_free_total").arg(freeText).arg(totalText)
+        if (totalText.length > 0)
+            return totalText
+        return ""
+    }
+
+    /// Used fraction 0..1 for volume-root background fill (capacity − free).
+    function volumeUsedRatio(displayName) {
+        var v = root.volumeInventoryForLabel(displayName)
+        if (!v)
+            return 0
+        var cap = Number(v.capacityBytes) || 0
+        if (cap <= 0)
+            return 0
+        var free = Number(v.freeBytes)
+        if (isNaN(free) || free < 0)
+            free = 0
+        if (free > cap)
+            free = cap
+        return Math.min(1, Math.max(0, (cap - free) / cap))
+    }
+
+    /// True only after the user has pressed Restore on the summary step.
+    readonly property bool restoreSessionStarted: root.restoreSessionStartMs > 0
+            || root.restoreJobsSubmitted
+
+    /// Live restore progress for the current summary session (depends on jobs.revision).
+    /// Before start: never query historical jobs — that painted a false progress bar.
+    readonly property var restoreSessionStatus: {
+        var empty = {
+            jobCount: 0, activeCount: 0, progressPercent: 0, stateText: "",
+            messageText: "", sourceName: "", statusKey: "none",
+            allTerminal: false, anyFailed: false
+        }
+        if (!root.restoreSessionStarted)
+            return empty
+        var rev = serviceClient.jobs ? serviceClient.jobs.revision : 0
+        var _busy = serviceClient.restoreCommandBusy
+        var _multi = root.multiRestoreActive
+        var since = root.restoreSessionStartMs > 0
+                    ? Math.floor(root.restoreSessionStartMs) - 5000
+                    : 0
+        if (!serviceClient.jobs || typeof serviceClient.jobs.restoreSessionStatus !== "function")
+            return empty
+        var st = serviceClient.jobs.restoreSessionStatus(since)
+        return st || empty
+    }
+
+    readonly property bool restoreSessionComplete: {
+        if (!root.onSummaryStep || !root.restoreSessionStarted)
+            return false
+        if (serviceClient.restoreCommandBusy || root.multiRestoreActive)
+            return false
+        if (!root.restoreJobsSubmitted)
+            return false
+        var st = root.restoreSessionStatus
+        // Wait for job rows to become terminal when the Service lists them.
+        if (st.jobCount > 0)
+            return st.allTerminal === true
+        // No job rows: only finish early on an explicit start failure so Back is available.
+        return root.restoreSessionFailed
+    }
+
+    readonly property int restoreProgressPercent: {
+        if (!root.restoreSessionStarted)
+            return 0
+        var st = root.restoreSessionStatus
+        if (st && st.jobCount > 0)
+            return st.progressPercent || 0
+        if (serviceClient.restoreCommandBusy || root.multiRestoreActive)
+            return 0
+        if (root.restoreSessionComplete)
+            return 100
+        return 0
+    }
+
+    readonly property bool restoreProgressActive: root.restoreSessionStarted
+            && !root.restoreSessionComplete
+            && (serviceClient.restoreCommandBusy
+                || root.multiRestoreActive
+                || (root.restoreSessionStatus && root.restoreSessionStatus.activeCount > 0))
+
+    /// Failed start or terminal job failure — red progress fill.
+    readonly property bool restoreProgressFailed: {
+        if (root.restoreSessionFailed)
+            return true
+        var st = root.restoreSessionStatus
+        return !!(st && st.anyFailed)
+    }
+
+    /// Session finished without failure — green progress fill.
+    readonly property bool restoreProgressSucceeded: root.restoreSessionComplete
+            && !root.restoreProgressFailed
+
+    readonly property string restoreProgressErrorText: {
+        if (root.restoreSessionErrorText && root.restoreSessionErrorText.length > 0)
+            return root.restoreSessionErrorText
+        var st = root.restoreSessionStatus
+        if (st && st.anyFailed && st.messageText && st.messageText.length > 0)
+            return st.messageText
+        return ""
+    }
+
+    readonly property color restoreProgressFillColor: {
+        if (root.restoreProgressFailed)
+            return Theme.colorAccentRed
+        if (root.restoreProgressSucceeded)
+            return Theme.colorGreen
+        if (root.restoreProgressActive)
+            return Theme.colorAccentBlue
+        return Theme.colorTextDim
+    }
+
+    readonly property string restoreProgressLabel: {
+        if (!root.restoreSessionStarted) {
+            //% "Review the selection, then start restore."
+            return qsTrId("aegra.restore.summary.ready")
+        }
+        if (root.restoreSessionComplete) {
+            if (root.restoreProgressFailed)
+                //% "Restore finished with errors"
+                return qsTrId("aegra.restore.summary.finished_errors")
+            //% "Restore completed"
+            return qsTrId("aegra.restore.summary.finished")
+        }
+        if (serviceClient.restoreCommandBusy || root.multiRestoreActive)
+            //% "Starting restore..."
+            return qsTrId("aegra.restore.summary.starting")
+        var st = root.restoreSessionStatus
+        if (st && st.stateText && st.stateText.length > 0) {
+            var name = st.sourceName || ""
+            if (name.length > 0)
+                return name + " — " + st.stateText
+            return st.stateText
+        }
+        //% "Waiting for restore progress..."
+        return qsTrId("aegra.restore.summary.waiting")
+    }
+
+    readonly property string restoreModeTitle: {
+        if (root.isFileMode)
+            //% "Files / folders"
+            return qsTrId("aegra.restore.type.files_title")
+        if (root.isVolumeMode)
+            //% "Volume restore"
+            return qsTrId("aegra.restore.type.volume_title")
+        //% "Disk restore"
+        return qsTrId("aegra.restore.type.disk_title")
+    }
+
+    readonly property string fileConflictPolicyLabel: {
+        if (root.fileConflictPolicy === 2)
+            //% "Overwrite existing"
+            return qsTrId("aegra.restore.file.conflict_replace")
+        if (root.fileConflictPolicy === 3)
+            //% "Rename restored file"
+            return qsTrId("aegra.restore.file.conflict_rename")
+        //% "Skip (fail on conflict)"
+        return qsTrId("aegra.restore.file.conflict_fail")
+    }
+
+    function optionOnOff(enabled) {
+        //% "On"
+        //% "Off"
+        return enabled ? qsTrId("aegra.common.on") : qsTrId("aegra.common.off")
+    }
+
+    // Staggered entrance for type cards (Backup-style OutBack).
+    property bool typeCardAnim1: false
+    property bool typeCardAnim2: false
+    property bool typeCardAnim3: false
+
+    function playTypeCardsEntrance() {
+        typeCardAnim1 = false
+        typeCardAnim2 = false
+        typeCardAnim3 = false
+        typeCardAnimTimer1.restart()
+        typeCardAnimTimer2.restart()
+        typeCardAnimTimer3.restart()
+    }
+
+    Timer { id: typeCardAnimTimer1; interval: 40;  repeat: false; onTriggered: root.typeCardAnim1 = true }
+    Timer { id: typeCardAnimTimer2; interval: 120; repeat: false; onTriggered: root.typeCardAnim2 = true }
+    Timer { id: typeCardAnimTimer3; interval: 200; repeat: false; onTriggered: root.typeCardAnim3 = true }
+
+    onVisibleChanged: {
+        if (visible && root.restoreStep === 0)
+            root.playTypeCardsEntrance()
+    }
+    onRestoreStepChanged: {
+        if (root.restoreStep === 0)
+            root.playTypeCardsEntrance()
+    }
+    Component.onCompleted: {
+        if (root.restoreStep === 0)
+            root.playTypeCardsEntrance()
+        if (serviceClient.connected)
+            serviceClient.refreshRepository()
+    }
+
+    function modeMatchesContentKind(kind) {
+        var k = Number(kind || 1)
+        if (root.isFileMode)
+            return k === 2
+        // Disk and volume restore both use volume_set recovery points.
+        return k === 1
+    }
+
+    function filterCheckpointsForMode(list) {
+        var out = []
+        var items = list || []
+        for (var i = 0; i < items.length; ++i) {
+            if (root.modeMatchesContentKind(items[i].contentKind))
+                out.push(items[i])
+        }
+        return out
     }
 
     readonly property int mappedCount: {
@@ -562,12 +917,22 @@ Item {
         return out
     }
 
+    function beginRestoreSession() {
+        root.restoreSessionStartMs = Date.now()
+        root.restoreJobsSubmitted = false
+        root.restoreSessionFailed = false
+        root.restoreSessionErrorText = ""
+        root.filePreflightPending = false
+        if (root.restoreStep !== 2)
+            root.restoreStep = 2
+    }
+
     function startNextQueuedRestore() {
         var q = root.pendingRestoreQueue || []
         if (q.length === 0) {
             root.multiRestoreActive = false
-            // All Jobs accepted — show them on Home Tasks.
-            root.navigateHomeRequested()
+            // All Jobs accepted — stay on Summary and show progress.
+            root.restoreJobsSubmitted = true
             return
         }
         var pair = q[0]
@@ -589,19 +954,30 @@ Item {
         if (!ok) {
             root.pendingRestoreQueue = []
             root.multiRestoreActive = false
+            root.restoreJobsSubmitted = true
+            root.restoreSessionFailed = true
         }
     }
 
     function startMappedRestore() {
+        // Summary step owns the Restore action; workspace only advances via Next.
+        if (root.restoreStep !== 2)
+            return
         if (!root.canRestore)
             return
+        if (root.restoreJobsSubmitted && !root.restoreSessionFailed && !root.restoreSessionComplete)
+            return
+        root.beginRestoreSession()
         if (root.isFileMode) {
+            // Reuses the Next-step preflight token when selection is unchanged.
             if (!serviceClient.startFileRestore(root.selectedCheckpointId,
                                                 root.fileConflictPolicy,
                                                 root.pendingLayoutPassword,
-                                                root.fileRestoreSecurity,
-                                                root.fileRestoreAds)) {
-                // Toast already shown by ServiceClient when selection is incomplete.
+                                                root.fileRestoreSecurity)) {
+                root.restoreJobsSubmitted = true
+                root.restoreSessionFailed = true
+                //% "Could not start file restore"
+                root.restoreSessionErrorText = qsTrId("aegra.error.file_restore.command_failed")
             }
             return
         }
@@ -612,7 +988,12 @@ Item {
                 //% "Choose “Restore to” on a source volume"
                 ? qsTrId("aegra.restore.volume_map_required")
                 //% "Choose “Restore to” on a source disk"
-                : qsTrId("aegra.restore.map_required"))
+                : qsTrId("aegra.restore.map_required"), true)
+            root.restoreJobsSubmitted = true
+            root.restoreSessionFailed = true
+            root.restoreSessionErrorText = root.isVolumeMode
+                ? qsTrId("aegra.restore.volume_map_required")
+                : qsTrId("aegra.restore.map_required")
             return
         }
         root.pendingRestoreQueue = pairs
@@ -622,17 +1003,32 @@ Item {
 
     Connections {
         target: serviceClient
+        function onRestorePreflightSucceeded() {
+            if (!root.filePreflightPending)
+                return
+            root.filePreflightPending = false
+            root.clearRestoreSession()
+            root.restoreStep = 2
+        }
+        function onRestorePreflightFailed(message) {
+            root.filePreflightPending = false
+            // Stay on workspace; red toast already shown by ServiceClient.
+        }
         function onRestoreStartSucceeded() {
             if (root.multiRestoreActive) {
-                // Start the next mapped disk (or navigate Home when the queue is empty).
+                // Start the next mapped disk (or mark submitted when the queue is empty).
                 root.startNextQueuedRestore()
                 return
             }
-            root.navigateHomeRequested()
+            // Single-job (file) path — stay on Summary.
+            root.restoreJobsSubmitted = true
         }
         function onRestoreStartFailed(message) {
             root.pendingRestoreQueue = []
             root.multiRestoreActive = false
+            root.restoreJobsSubmitted = true
+            root.restoreSessionFailed = true
+            root.restoreSessionErrorText = message || ""
         }
     }
 
@@ -650,8 +1046,8 @@ Item {
         if (!serviceClient.recoveryPoints || root.panelSelectedDate.length === 0) {
             root.panelCheckpoints = []
         } else {
-            root.panelCheckpoints =
-                    serviceClient.recoveryPoints.checkpointsForDate(root.panelSelectedDate)
+            root.panelCheckpoints = root.filterCheckpointsForMode(
+                    serviceClient.recoveryPoints.checkpointsForDate(root.panelSelectedDate))
         }
         root.panelCheckpointsEpoch++
     }
@@ -670,15 +1066,23 @@ Item {
             root.selectedCheckpointId = ""
             root.selectedCheckpointLabel = ""
             root.selectedContentKind = 1
-            root.restoreMode = "disk"
             root.pendingLayoutPassword = ""
             root.clearDiskMappings()
             root.clearVolumeMappings()
             serviceClient.loadRecoveryPointLayout("")
+            // Drop prior file-restore tree / target selection so Done → Files starts clean.
+            if (typeof serviceClient.clearFileRestoreState === "function")
+                serviceClient.clearFileRestoreState()
+            return
+        }
+        var kind = Number(item.contentKind || 1)
+        if (!root.modeMatchesContentKind(kind)) {
+            //% "This checkpoint does not match the selected restore type"
+            serviceClient.showToast(qsTrId("aegra.restore.type_mismatch"), true)
             return
         }
         root.selectedCheckpointId = item.fileUuid || ""
-        root.selectedContentKind = Number(item.contentKind || 1)
+        root.selectedContentKind = kind
         root.pendingLayoutPassword = ""
         root.clearDiskMappings()
         root.clearVolumeMappings()
@@ -695,18 +1099,22 @@ Item {
             bits.push(item.backupType)
         if (item.sizeText)
             bits.push(item.sizeText)
-        if (root.selectedContentKind === 2)
+        if (kind === 2)
             //% "Files"
             bits.push(qsTrId("aegra.restore.mode_files"))
+        else if (root.isVolumeMode)
+            //% "Volume"
+            bits.push(qsTrId("aegra.restore.mode_volume"))
+        else
+            //% "Disk"
+            bits.push(qsTrId("aegra.restore.mode_disk"))
         root.selectedCheckpointLabel = bits.join("  ·  ")
-        if (root.selectedContentKind === 2) {
-            root.restoreMode = "files"
+        if (root.isFileMode) {
             serviceClient.loadFileRecoverRoots(root.selectedCheckpointId, "")
             serviceClient.loadFileRestoreTargetRoots()
             return
         }
-        root.restoreMode = "disk"
-        // Try empty password first (unencrypted). Encrypted archives prompt for password.
+        // Disk / volume: same volume_set layout; mapping UI differs by restoreMode.
         serviceClient.loadRecoveryPointLayout(root.selectedCheckpointId, "")
     }
 
@@ -766,11 +1174,6 @@ Item {
         parent: Overlay.overlay
         onAccepted: function(password) { root.submitLayoutPassword(password) }
         onCancelled: { root.pendingLayoutPassword = "" }
-    }
-
-    Component.onCompleted: {
-        if (serviceClient.connected)
-            serviceClient.refreshRepository()
     }
 
     Connections {
@@ -845,17 +1248,14 @@ Item {
         radius: 6
         color: Theme.colorListItem
         border.width: {
-            if ((rowRoot.dropHover && rowRoot.dropAccepted) || rowRoot.highlightAsTarget)
-                return 2
-            return 1
+            if (rowRoot.dropHover && rowRoot.dropAccepted) return 2
+            if (rowRoot.highlightAsTarget) return 2
+            return 0
         }
         border.color: {
-            // Only highlight droppable targets; invalid ones stay normal (toast on drop).
-            if (rowRoot.dropHover && rowRoot.dropAccepted)
-                return Theme.colorAccentBlue
-            if (rowRoot.highlightAsTarget)
-                return root.restoreTargetBorder
-            return Theme.colorBorder
+            if (rowRoot.dropHover && rowRoot.dropAccepted) return Theme.colorAccentBlue
+            if (rowRoot.highlightAsTarget) return root.restoreTargetBorder
+            return "transparent"
         }
 
         property var displayVolumes: root.displayVolumesForDisk(diskData)
@@ -1106,10 +1506,9 @@ Item {
                                 }
                                 radius: 2
                                 color: isUnalloc ? Theme.colorUnallocated
-                                                 : Theme.volumeColor(index)
-                                border.width: 1
-                                border.color: Theme.colorBorder
-                                opacity: isUnalloc ? 1.0 : 0.92
+                                                 : Theme.colorAccentBlue
+                                border.width: 0
+                                opacity: isUnalloc ? 1.0 : 0.45
                                 clip: true
 
                                 Canvas {
@@ -1317,16 +1716,32 @@ Item {
         radius: 6
         color: Theme.colorListItem
         border.width: {
-            if ((volRoot.dropHover && volRoot.dropAccepted) || volRoot.highlightAsTarget)
-                return 2
-            return 1
+            if (volRoot.dropHover && volRoot.dropAccepted) return 2
+            if (volRoot.highlightAsTarget) return 2
+            return 0
         }
         border.color: {
-            if (volRoot.dropHover && volRoot.dropAccepted)
-                return Theme.colorAccentBlue
-            if (volRoot.highlightAsTarget)
-                return root.restoreTargetBorder
-            return Theme.colorBorder
+            if (volRoot.dropHover && volRoot.dropAccepted) return Theme.colorAccentBlue
+            if (volRoot.highlightAsTarget) return root.restoreTargetBorder
+            return "transparent"
+        }
+
+        // Capacity fill bar (used/total ratio)
+        Rectangle {
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: {
+                var cap = Number(volRoot.volumeData ? volRoot.volumeData.capacityBytes : 0) || 0
+                var free = Number(volRoot.volumeData ? volRoot.volumeData.freeBytes : 0)
+                if (isNaN(free) || free < 0) free = 0
+                if (cap <= 0) return 0
+                var ratio = Math.min(1, Math.max(0, (cap - free) / cap))
+                return parent.width * ratio
+            }
+            color: Theme.colorAccentBlue
+            opacity: 0.18
+            radius: parent.radius
         }
 
         MouseArea {
@@ -1515,7 +1930,7 @@ Item {
                                 return volRoot.volumeData.title
                                        || qsTrId("aegra.restore.source_volume").arg(volRoot.volumeIndex)
                             var lab = volRoot.volumeData.letter
-                                      ? (volRoot.volumeData.letter + ": ") : ""
+                                      ? (volRoot.volumeData.letter + " ") : ""
                             return lab + (volRoot.volumeData.name || volRoot.sourceId)
                         }
                         color: Theme.colorTextWhite
@@ -1657,110 +2072,487 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 16
+        anchors.topMargin: 40
+        anchors.leftMargin: 16
+        anchors.rightMargin: 16
+        anchors.bottomMargin: 16
         spacing: 12
 
+        // Header: back + 3-step progress bar (Backup-aligned; no page title / type badges)
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 28
-            Row {
-                spacing: 8
+            Layout.preferredHeight: 64
+            spacing: 8
+
+            Item {
+                Layout.preferredWidth: 40
+                Layout.preferredHeight: 40
+                Layout.alignment: Qt.AlignTop
+                // Keep above step content so the first press is never swallowed.
+                z: 20
+
+                readonly property bool backEnabled: root.restoreStep > 0
+                                                    && !root.restoreSessionRunning
+
                 Rectangle {
-                    width: 3
-                    height: 20
+                    anchors.top: parent.top
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: 32
+                    height: 32
+                    radius: 16
+                    opacity: parent.backEnabled ? 1 : 0
+                    color: restoreBackMouse.containsMouse && parent.backEnabled
+                           ? Theme.colorHover : "transparent"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "\u25C0"
+                        font.pixelSize: 11
+                        color: Theme.colorTextGrey
+                    }
+                }
+                // Full slot hit-target (not nested under opacity-gated Rectangle).
+                MouseArea {
+                    id: restoreBackMouse
+                    anchors.fill: parent
+                    enabled: parent.backEnabled
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    //% "Back"
+                    Accessible.name: qsTrId("aegra.common.back")
+                    onPressed: function(mouse) {
+                        mouse.accepted = true
+                        root.stepBarBack()
+                    }
+                }
+            }
+
+            Item {
+                id: restoreStepBar
+                Layout.fillWidth: true
+                Layout.preferredHeight: 56
+                Layout.alignment: Qt.AlignVCenter
+
+                readonly property int stepCount: 3
+                readonly property real slotW: width / stepCount
+                readonly property real lineY: 14
+                readonly property real lineLeft: slotW * 0.5
+                readonly property real lineSpan: slotW * (stepCount - 1)
+
+                Rectangle {
+                    x: restoreStepBar.lineLeft
+                    y: restoreStepBar.lineY
+                    width: restoreStepBar.lineSpan
+                    height: 3
+                    radius: 1.5
+                    color: Theme.colorBorder
+                }
+                Rectangle {
+                    x: restoreStepBar.lineLeft
+                    y: restoreStepBar.lineY
+                    width: restoreStepBar.lineSpan
+                         * (root.restoreStep / Math.max(1, restoreStepBar.stepCount - 1))
+                    height: 3
+                    radius: 1.5
                     color: Theme.colorAccentBlue
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-                Text {
-                    //% "Restore"
-                    text: qsTrId("aegra.nav.restore")
-                    color: Theme.colorTextWhite
-                    font.pixelSize: 18
-                    font.bold: true
-                    font.family: Theme.fontFamily
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-            }
-            Item { Layout.fillWidth: true }
-            // Disk / Volume restore mode (hidden for file_set recovery points)
-            Row {
-                spacing: 0
-                Layout.alignment: Qt.AlignVCenter
-                visible: !root.isFileMode
-                Rectangle {
-                    width: Math.max(88, diskModeLabel.implicitWidth + 20)
-                    height: 28
-                    radius: 4
-                    color: !root.isVolumeMode ? Theme.colorAccentBlue : Theme.colorInput
-                    border.width: 1
-                    border.color: Theme.colorBorder
-                    Text {
-                        id: diskModeLabel
-                        anchors.centerIn: parent
-                        //% "Disk"
-                        text: qsTrId("aegra.restore.mode_disk")
-                        color: Theme.colorTextWhite
-                        font.pixelSize: 12
-                        font.bold: !root.isVolumeMode
-                        font.family: Theme.fontFamily
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.setRestoreMode("disk")
+                    Behavior on width {
+                        NumberAnimation { duration: 280; easing.type: Easing.OutCubic }
                     }
                 }
-                Rectangle {
-                    width: Math.max(88, volModeLabel.implicitWidth + 20)
-                    height: 28
-                    radius: 4
-                    color: root.isVolumeMode ? Theme.colorAccentBlue : Theme.colorInput
-                    border.width: 1
-                    border.color: Theme.colorBorder
-                    Text {
-                        id: volModeLabel
-                        anchors.centerIn: parent
-                        //% "Volume"
-                        text: qsTrId("aegra.restore.mode_volume")
-                        color: Theme.colorTextWhite
-                        font.pixelSize: 12
-                        font.bold: root.isVolumeMode
-                        font.family: Theme.fontFamily
+
+                Repeater {
+                    model: restoreStepBar.stepCount
+                    delegate: Item {
+                        width: restoreStepBar.slotW
+                        height: restoreStepBar.height
+                        x: index * restoreStepBar.slotW
+                        y: 0
+
+                        readonly property bool done: index < root.restoreStep
+                        readonly property bool current: index === root.restoreStep
+
+                        Rectangle {
+                            id: restoreStepDot
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            y: 2
+                            width: 26
+                            height: 26
+                            radius: 13
+                            border.width: (parent.done || parent.current) ? 0 : 2
+                            border.color: Theme.colorBorder
+                            color: (parent.done || parent.current)
+                                   ? Theme.colorAccentBlue
+                                   : Theme.colorCard
+                            Behavior on color {
+                                ColorAnimation { duration: 200 }
+                            }
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: parent.parent.done
+                                      ? "\u2713"
+                                      : ("" + (index + 1))
+                                color: (parent.parent.done || parent.parent.current)
+                                       ? "#ffffff"
+                                       : Theme.colorTextDim
+                                font.pixelSize: parent.parent.done ? 12 : 11
+                                font.bold: true
+                                font.family: Theme.fontFamily
+                            }
+                        }
+
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.top: restoreStepDot.bottom
+                            anchors.topMargin: 6
+                            width: parent.width - 4
+                            horizontalAlignment: Text.AlignHCenter
+                            elide: Text.ElideRight
+                            text: root.restoreStepLabels[index] || ""
+                            color: parent.current ? Theme.colorTextWhite
+                                   : (parent.done ? Theme.colorAccentBlue
+                                                  : Theme.colorTextDim)
+                            font.pixelSize: 11
+                            font.bold: parent.current
+                            font.family: Theme.fontFamily
+                        }
                     }
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.setRestoreMode("volume")
-                    }
-                }
-            }
-            Rectangle {
-                Layout.alignment: Qt.AlignVCenter
-                visible: root.isFileMode
-                width: Math.max(88, filesModeLabel.implicitWidth + 20)
-                height: 28
-                radius: 4
-                color: Theme.colorGreen
-                border.width: 1
-                border.color: Theme.colorBorder
-                Text {
-                    id: filesModeLabel
-                    anchors.centerIn: parent
-                    //% "Files"
-                    text: qsTrId("aegra.restore.mode_files")
-                    color: Theme.colorTextWhite
-                    font.pixelSize: 12
-                    font.bold: true
-                    font.family: Theme.fontFamily
                 }
             }
         }
 
-        // Main: Source + Target (left) | Options (right) — old 2/3 | 1/3
-        RowLayout {
-            id: mainSplitRow
+        // Steps share a clipped container so transitions slide like Backup.
+        Item {
+            id: restoreStepContainer
             Layout.fillWidth: true
             Layout.fillHeight: true
+            clip: true
+
+        // -------- Step 0: restore type cards (Disk / Volume / Files) --------
+        Item {
+            id: restoreStep0
+            width: parent.width
+            height: parent.height
+            visible: opacity > 0.001
+            opacity: root.restoreStep === 0 ? 1 : 0
+            x: root.restoreStep === 0 ? 0
+               : (root.restoreStep > 0 ? -restoreStepContainer.width
+                                       : restoreStepContainer.width)
+            Behavior on opacity { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
+            Behavior on x { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
+
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 24
+
+                Item { height: 8 }
+
+                ColumnLayout {
+                    spacing: 6
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.fillWidth: true
+                    opacity: root.typeCardAnim1 ? 1 : 0
+                    Behavior on opacity { NumberAnimation { duration: 360; easing.type: Easing.OutCubic } }
+                    Text {
+                        //% "Choose restore type"
+                        text: qsTrId("aegra.restore.type_title")
+                        color: Theme.colorTextWhite
+                        font.pixelSize: 22
+                        font.bold: true
+                        font.family: Theme.fontFamily
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+                    Text {
+                        //% "Select whole-disk recovery, volume-to-volume restore, or file and folder restore from a recovery point"
+                        text: qsTrId("aegra.restore.type_subtitle")
+                        color: Theme.colorTextGrey
+                        font.pixelSize: 13
+                        font.family: Theme.fontFamily
+                        Layout.alignment: Qt.AlignHCenter
+                        wrapMode: Text.WordWrap
+                        horizontalAlignment: Text.AlignHCenter
+                        Layout.fillWidth: true
+                        Layout.maximumWidth: 720
+                    }
+                }
+
+                Item { height: 4 }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignHCenter | Qt.AlignTop
+                    spacing: 20
+
+                    // Card: Disk restore
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredWidth: 280
+                        Layout.maximumWidth: 340
+                        implicitHeight: 300
+                        radius: 20
+                        color: diskTypeMouse.containsMouse ? Theme.colorHover : Theme.colorCard
+                        border.width: 2
+                        border.color: diskTypeMouse.containsMouse ? Theme.colorAccentBlue : "#ffffff"
+                        opacity: root.typeCardAnim1 ? 1 : 0
+                        scale: root.typeCardAnim1 ? 1.0 : 0.88
+                        transformOrigin: Item.Center
+                        Behavior on color { ColorAnimation { duration: 150 } }
+                        Behavior on opacity { NumberAnimation { duration: 380; easing.type: Easing.OutCubic } }
+                        Behavior on scale {
+                            NumberAnimation { duration: 560; easing.type: Easing.OutBack; easing.overshoot: 1.35 }
+                        }
+                        MouseArea {
+                            id: diskTypeMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.selectRestoreType("disk")
+                        }
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 22
+                            spacing: 14
+                            Rectangle {
+                                width: 56
+                                height: 56
+                                radius: 18
+                                Layout.alignment: Qt.AlignHCenter
+                                gradient: Gradient {
+                                    GradientStop { position: 0.0; color: "#3B82F6" }
+                                    GradientStop { position: 1.0; color: "#2563EB" }
+                                }
+                                DiskIcon { anchors.centerIn: parent; size: 34; variant: "system" }
+                            }
+                            Text {
+                                //% "Disk restore"
+                                text: qsTrId("aegra.restore.type.disk_title")
+                                color: Theme.colorTextWhite
+                                font.pixelSize: 17
+                                font.bold: true
+                                font.family: Theme.fontFamily
+                                Layout.alignment: Qt.AlignHCenter
+                            }
+                            Text {
+                                //% "Restore an entire physical disk from a volume-set recovery point onto a target disk (layout, partitions, and options)."
+                                text: qsTrId("aegra.restore.type.disk_desc")
+                                color: Theme.colorTextGrey
+                                font.pixelSize: 12
+                                wrapMode: Text.WordWrap
+                                horizontalAlignment: Text.AlignHCenter
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                            }
+                            Rectangle {
+                                height: 38
+                                Layout.fillWidth: true
+                                radius: 19
+                                color: Theme.colorAccentBlue
+                                Text {
+                                    anchors.centerIn: parent
+                                    //% "Choose Disk restore →"
+                                    text: qsTrId("aegra.restore.type.disk_action")
+                                    color: "#ffffff"
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                    font.family: Theme.fontFamily
+                                }
+                            }
+                        }
+                    }
+
+                    // Card: Volume restore
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredWidth: 280
+                        Layout.maximumWidth: 340
+                        implicitHeight: 300
+                        radius: 20
+                        color: volumeTypeMouse.containsMouse ? Theme.colorHover : Theme.colorCard
+                        border.width: 2
+                        border.color: volumeTypeMouse.containsMouse ? "#6366F1" : "#ffffff"
+                        opacity: root.typeCardAnim2 ? 1 : 0
+                        scale: root.typeCardAnim2 ? 1.0 : 0.88
+                        transformOrigin: Item.Center
+                        Behavior on color { ColorAnimation { duration: 150 } }
+                        Behavior on opacity { NumberAnimation { duration: 420; easing.type: Easing.OutCubic } }
+                        Behavior on scale {
+                            NumberAnimation { duration: 580; easing.type: Easing.OutBack; easing.overshoot: 1.35 }
+                        }
+                        MouseArea {
+                            id: volumeTypeMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.selectRestoreType("volume")
+                        }
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 22
+                            spacing: 14
+                            Rectangle {
+                                width: 56
+                                height: 56
+                                radius: 18
+                                Layout.alignment: Qt.AlignHCenter
+                                gradient: Gradient {
+                                    GradientStop { position: 0.0; color: "#818CF8" }
+                                    GradientStop { position: 1.0; color: "#4F46E5" }
+                                }
+                                DiskIcon { anchors.centerIn: parent; size: 34; variant: "hdd" }
+                            }
+                            Text {
+                                //% "Volume restore"
+                                text: qsTrId("aegra.restore.type.volume_title")
+                                color: Theme.colorTextWhite
+                                font.pixelSize: 17
+                                font.bold: true
+                                font.family: Theme.fontFamily
+                                Layout.alignment: Qt.AlignHCenter
+                            }
+                            Text {
+                                //% "Map one backup volume onto an existing non-system volume of equal or larger size without rewriting the whole disk."
+                                text: qsTrId("aegra.restore.type.volume_desc")
+                                color: Theme.colorTextGrey
+                                font.pixelSize: 12
+                                wrapMode: Text.WordWrap
+                                horizontalAlignment: Text.AlignHCenter
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                            }
+                            Rectangle {
+                                height: 38
+                                Layout.fillWidth: true
+                                radius: 19
+                                color: "#4F46E5"
+                                Text {
+                                    anchors.centerIn: parent
+                                    //% "Choose Volume restore →"
+                                    text: qsTrId("aegra.restore.type.volume_action")
+                                    color: "#ffffff"
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                    font.family: Theme.fontFamily
+                                }
+                            }
+                        }
+                    }
+
+                    // Card: Files / folders restore
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredWidth: 280
+                        Layout.maximumWidth: 340
+                        implicitHeight: 300
+                        radius: 20
+                        color: filesTypeMouse.containsMouse ? Theme.colorHover : Theme.colorCard
+                        border.width: 2
+                        border.color: filesTypeMouse.containsMouse ? Theme.colorGreen : "#ffffff"
+                        opacity: root.typeCardAnim3 ? 1 : 0
+                        scale: root.typeCardAnim3 ? 1.0 : 0.88
+                        transformOrigin: Item.Center
+                        Behavior on color { ColorAnimation { duration: 150 } }
+                        Behavior on opacity { NumberAnimation { duration: 460; easing.type: Easing.OutCubic } }
+                        Behavior on scale {
+                            NumberAnimation { duration: 600; easing.type: Easing.OutBack; easing.overshoot: 1.35 }
+                        }
+                        MouseArea {
+                            id: filesTypeMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            enabled: serviceClient.fileRestoreAvailable === true
+                            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ForbiddenCursor
+                            onClicked: root.selectRestoreType("files")
+                        }
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: 20
+                            color: "#80000000"
+                            visible: serviceClient.fileRestoreAvailable !== true
+                            z: 5
+                            Text {
+                                anchors.centerIn: parent
+                                width: parent.width - 32
+                                horizontalAlignment: Text.AlignHCenter
+                                wrapMode: Text.WordWrap
+                                //% "File restore is not available on this Service"
+                                text: qsTrId("aegra.restore.file.capability_missing")
+                                color: Theme.colorTextWhite
+                                font.pixelSize: 12
+                                font.family: Theme.fontFamily
+                            }
+                        }
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 22
+                            spacing: 14
+                            Rectangle {
+                                width: 56
+                                height: 56
+                                radius: 18
+                                Layout.alignment: Qt.AlignHCenter
+                                gradient: Gradient {
+                                    GradientStop { position: 0.0; color: "#10B981" }
+                                    GradientStop { position: 1.0; color: "#059669" }
+                                }
+                                Text { anchors.centerIn: parent; text: "📁"; font.pixelSize: 26 }
+                            }
+                            Text {
+                                //% "Files / folders"
+                                text: qsTrId("aegra.restore.type.files_title")
+                                color: Theme.colorTextWhite
+                                font.pixelSize: 17
+                                font.bold: true
+                                font.family: Theme.fontFamily
+                                Layout.alignment: Qt.AlignHCenter
+                            }
+                            Text {
+                                //% "Selectively restore files and folders from a file-set recovery point into a chosen target directory."
+                                text: qsTrId("aegra.restore.type.files_desc")
+                                color: Theme.colorTextGrey
+                                font.pixelSize: 12
+                                wrapMode: Text.WordWrap
+                                horizontalAlignment: Text.AlignHCenter
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                            }
+                            Rectangle {
+                                height: 38
+                                Layout.fillWidth: true
+                                radius: 19
+                                color: Theme.colorGreen
+                                Text {
+                                    anchors.centerIn: parent
+                                    //% "Choose Files restore →"
+                                    text: qsTrId("aegra.restore.type.files_action")
+                                    color: "#ffffff"
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                    font.family: Theme.fontFamily
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Item { Layout.fillHeight: true }
+            }
+        } // restoreStep0
+
+        // -------- Step 1: Source + Target (left) | Options (right) --------
+        Item {
+            id: restoreStep1
+            width: parent.width
+            height: parent.height
+            visible: opacity > 0.001
+            opacity: root.restoreStep === 1 ? 1 : 0
+            x: root.restoreStep === 1 ? 0
+               : (root.restoreStep < 1 ? restoreStepContainer.width
+                                       : -restoreStepContainer.width)
+            Behavior on opacity { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
+            Behavior on x { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
+
+        RowLayout {
+            id: mainSplitRow
+            anchors.fill: parent
             spacing: 0
 
             ColumnLayout {
@@ -1780,9 +2572,8 @@ Item {
                     Layout.preferredHeight: Math.round(1000 * root.sourceTargetRatio)
                     Layout.minimumHeight: 120
                     color: Theme.colorCard
-                    radius: 4
-                    border.width: 1
-                    border.color: Theme.colorBorder
+                    radius: Theme.radiusCard
+                    border.width: 0
 
                     ColumnLayout {
                         anchors.fill: parent
@@ -1827,14 +2618,25 @@ Item {
                                 elide: Text.ElideRight
                                 Layout.fillWidth: true
                             }
-                            AppButton {
+                            // Same card-action link style as Backup "+ Add"
+                            Text {
+                                id: selectCheckpointLink
                                 //% "Select checkpoint"
-                                text: qsTrId("aegra.restore.select_checkpoint")
-                                Layout.preferredHeight: 28
-                                // Do not let the fill-width hint squeeze this label.
-                                Layout.preferredWidth: Math.max(148, implicitWidth)
-                                Layout.minimumWidth: Math.max(148, implicitWidth)
-                                onClicked: root.openCheckpointPanel()
+                                text: "+ " + qsTrId("aegra.restore.select_checkpoint")
+                                color: selectCheckpointHover.containsMouse
+                                       ? Theme.colorLinkHover : Theme.colorAccentBlue
+                                font.pixelSize: 13
+                                font.bold: true
+                                font.family: Theme.fontFamily
+                                Layout.alignment: Qt.AlignVCenter
+                                MouseArea {
+                                    id: selectCheckpointHover
+                                    anchors.fill: parent
+                                    anchors.margins: -6
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.openCheckpointPanel()
+                                }
                             }
                         }
 
@@ -1855,8 +2657,11 @@ Item {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             clip: true
-                            spacing: 2
+                            spacing: 0
                             visible: root.isFileMode
+                            ScrollBar.vertical: ScrollBar {
+                                policy: ScrollBar.AsNeeded
+                            }
                             model: serviceClient.fileRecoverEntries
                             delegate: Rectangle {
                                 required property string entryId
@@ -1868,26 +2673,44 @@ Item {
                                 required property bool nodeLoading
                                 required property int checkState
                                 width: fileRecoverList.width
-                                height: 34
+                                height: 26
                                 radius: 4
-                                color: Theme.colorListItem
+                                color: "transparent"
+                                // Hover highlight
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: parent.radius
+                                    color: Theme.colorHover
+                                    opacity: archiveRowHover.containsMouse ? 1.0 : 0.0
+                                    Behavior on opacity { NumberAnimation { duration: 120 } }
+                                }
+                                MouseArea {
+                                    id: archiveRowHover
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.NoButton
+                                }
+                                // Expand on row click (checkbox keeps its own hit target).
+                                MouseArea {
+                                    anchors.fill: parent
+                                    enabled: hasChildren
+                                    z: 0
+                                    cursorShape: hasChildren ? Qt.PointingHandCursor
+                                                             : Qt.ArrowCursor
+                                    onClicked: serviceClient.fileRecoverEntries
+                                                   .toggleExpanded(entryId)
+                                }
                                 RowLayout {
                                     anchors.fill: parent
                                     anchors.leftMargin: 8 + Math.max(0, depth) * 14
                                     anchors.rightMargin: 8
                                     spacing: 8
+                                    z: 1
                                     Text {
                                         text: hasChildren ? (expanded ? "▾" : "▸") : " "
                                         color: Theme.colorTextGrey
                                         font.pixelSize: 12
                                         Layout.preferredWidth: 14
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            enabled: hasChildren
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: serviceClient.fileRecoverEntries
-                                                           .toggleExpanded(entryId)
-                                        }
                                     }
                                     Rectangle {
                                         width: 16
@@ -1912,9 +2735,13 @@ Item {
                                         }
                                         MouseArea {
                                             anchors.fill: parent
+                                            z: 2
                                             cursorShape: Qt.PointingHandCursor
-                                            onClicked: serviceClient.fileRecoverEntries
-                                                           .toggleChecked(entryId)
+                                            onClicked: function(mouse) {
+                                                mouse.accepted = true
+                                                serviceClient.fileRecoverEntries
+                                                    .toggleChecked(entryId)
+                                            }
                                         }
                                     }
                                     Loader {
@@ -2088,9 +2915,8 @@ Item {
                     Layout.preferredHeight: Math.round(1000 * (1.0 - root.sourceTargetRatio))
                     Layout.minimumHeight: 120
                     color: Theme.colorCard
-                    radius: 4
-                    border.width: 1
-                    border.color: Theme.colorBorder
+                    radius: Theme.radiusCard
+                    border.width: 0
 
                     ColumnLayout {
                         anchors.fill: parent
@@ -2137,29 +2963,16 @@ Item {
                             }
                         }
 
-                        Text {
-                            Layout.fillWidth: true
-                            visible: root.isFileMode
-                                     && serviceClient.fileRestoreTargets
-                                     && serviceClient.fileRestoreTargets.selectedCount > 0
-                            //% "Selected: %1"
-                            text: qsTrId("aegra.file.browse.selected_label").arg(
-                                      serviceClient.fileRestoreTargets
-                                      ? serviceClient.fileRestoreTargets.selectionSummary
-                                      : "")
-                            color: Theme.colorAccentBlue
-                            font.pixelSize: 11
-                            font.family: Theme.fontFamily
-                            elide: Text.ElideMiddle
-                        }
-
                         ListView {
                             id: fileTargetList
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             clip: true
-                            spacing: 2
+                            spacing: 0
                             visible: root.isFileMode
+                            ScrollBar.vertical: ScrollBar {
+                                policy: ScrollBar.AsNeeded
+                            }
                             model: serviceClient.fileRestoreTargets
                             delegate: Rectangle {
                                 required property string nodeToken
@@ -2172,15 +2985,31 @@ Item {
                                 required property int checkState
                                 required property bool isSelectable
                                 width: fileTargetList.width
-                                height: 34
+                                height: 26
                                 radius: 4
-                                color: Theme.colorListItem
+                                color: "transparent"
                                 opacity: isSelectable ? 1.0 : 0.55
+                                clip: true
+                                // Hover highlight
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: parent.radius
+                                    color: Theme.colorHover
+                                    opacity: targetRowHover.containsMouse ? 1.0 : 0.0
+                                    Behavior on opacity { NumberAnimation { duration: 120 } }
+                                }
+                                MouseArea {
+                                    id: targetRowHover
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.NoButton
+                                }
                                 RowLayout {
                                     anchors.fill: parent
                                     anchors.leftMargin: 8 + Math.max(0, depth) * 14
                                     anchors.rightMargin: 8
                                     spacing: 8
+                                    z: 1
                                     Text {
                                         text: hasChildren ? (expanded ? "▾" : "▸") : " "
                                         color: Theme.colorTextGrey
@@ -2394,9 +3223,8 @@ Item {
                                      ? root.optionsCollapsedWidth
                                      : parent.width * 0.48
                 color: Theme.colorCard
-                radius: 4
-                border.width: 1
-                border.color: Theme.colorBorder
+                radius: Theme.radiusCard
+                border.width: 0
                 clip: true
 
                 // Collapsed strip
@@ -2654,56 +3482,6 @@ Item {
                         wrapMode: Text.WordWrap
                     }
 
-                    CheckBox {
-                        id: restoreAdsBox
-                        Layout.fillWidth: true
-                        Layout.topMargin: 8
-                        visible: root.isFileMode
-                        //% "Restore alternate data streams"
-                        text: qsTrId("aegra.restore.file.restore_ads")
-                        checked: root.fileRestoreAds
-                        onToggled: root.fileRestoreAds = checked
-                        font.pixelSize: 12
-                        font.family: Theme.fontFamily
-                        spacing: 10
-                        indicator: Rectangle {
-                            implicitWidth: 18
-                            implicitHeight: 18
-                            x: restoreAdsBox.leftPadding
-                            y: parent.height / 2 - height / 2
-                            radius: 3
-                            color: restoreAdsBox.checked ? Theme.colorAccentBlue
-                                                         : Theme.colorInput
-                            border.width: 1
-                            border.color: Theme.colorBorder
-                            Text {
-                                anchors.centerIn: parent
-                                text: restoreAdsBox.checked ? "\u2713" : ""
-                                color: Theme.colorTextWhite
-                                font.pixelSize: 12
-                                font.bold: true
-                            }
-                        }
-                        contentItem: Text {
-                            text: restoreAdsBox.text
-                            color: Theme.colorTextWhite
-                            font: restoreAdsBox.font
-                            leftPadding: restoreAdsBox.indicator.width + restoreAdsBox.spacing
-                            wrapMode: Text.WordWrap
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                    }
-                    Text {
-                        Layout.fillWidth: true
-                        visible: root.isFileMode
-                        //% "Restore NTFS alternate data streams (ADS) when present in the archive."
-                        text: qsTrId("aegra.restore.file.restore_ads_hint")
-                        color: Theme.colorTextGrey
-                        font.pixelSize: 11
-                        font.family: Theme.fontFamily
-                        wrapMode: Text.WordWrap
-                    }
-
                     Text {
                         Layout.fillWidth: true
                         Layout.topMargin: 12
@@ -2805,18 +3583,406 @@ Item {
                     Item { Layout.fillHeight: true }
                 }
             }
-        }
+        } // mainSplitRow
+        } // restoreStep1
 
-        // Footer Restore button (old layout — bottom right, not inside Options)
+        // -------- Step 2: Summary + restore progress --------
+        Item {
+            id: restoreStep2
+            width: parent.width
+            height: parent.height
+            visible: opacity > 0.001
+            opacity: root.restoreStep === 2 ? 1 : 0
+            x: root.restoreStep === 2 ? 0
+               : (root.restoreStep < 2 ? restoreStepContainer.width
+                                       : -restoreStepContainer.width)
+            Behavior on opacity { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
+            Behavior on x { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
+
+            Flickable {
+                anchors.fill: parent
+                contentWidth: width
+                contentHeight: summaryOuterCol.implicitHeight + 24
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+
+            ColumnLayout {
+                id: summaryOuterCol
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: Math.min(parent.width - 48, 560)
+                y: 12
+                spacing: 16
+
+                Text {
+                    Layout.fillWidth: true
+                    horizontalAlignment: Text.AlignHCenter
+                    //% "Restore summary"
+                    text: qsTrId("aegra.restore.summary.title")
+                    color: Theme.colorTextWhite
+                    font.pixelSize: 22
+                    font.bold: true
+                    font.family: Theme.fontFamily
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    radius: 12
+                    color: Theme.colorCard
+                    border.width: 1
+                    border.color: Theme.colorBorder
+                    implicitHeight: summaryInfoCol.implicitHeight + 32
+
+                    ColumnLayout {
+                        id: summaryInfoCol
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.margins: 16
+                        spacing: 10
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text {
+                                //% "Type"
+                                text: qsTrId("aegra.restore.summary.type_label")
+                                color: Theme.colorTextGrey
+                                font.pixelSize: 12
+                                font.family: Theme.fontFamily
+                                Layout.preferredWidth: 140
+                            }
+                            Text {
+                                text: root.restoreModeTitle
+                                color: Theme.colorTextWhite
+                                font.pixelSize: 13
+                                font.bold: true
+                                font.family: Theme.fontFamily
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                            }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text {
+                                //% "Checkpoint"
+                                text: qsTrId("aegra.restore.summary.checkpoint_label")
+                                color: Theme.colorTextGrey
+                                font.pixelSize: 12
+                                font.family: Theme.fontFamily
+                                Layout.preferredWidth: 140
+                            }
+                            Text {
+                                text: root.selectedCheckpointLabel.length > 0
+                                      ? root.selectedCheckpointLabel
+                                      : root.selectedCheckpointId
+                                color: Theme.colorTextWhite
+                                font.pixelSize: 13
+                                font.family: Theme.fontFamily
+                                Layout.fillWidth: true
+                                elide: Text.ElideMiddle
+                            }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            visible: !root.isFileMode
+                            Text {
+                                //% "Mappings"
+                                text: qsTrId("aegra.restore.summary.mappings_label")
+                                color: Theme.colorTextGrey
+                                font.pixelSize: 12
+                                font.family: Theme.fontFamily
+                                Layout.preferredWidth: 140
+                            }
+                            Text {
+                                text: "" + root.mappedCount
+                                color: Theme.colorTextWhite
+                                font.pixelSize: 13
+                                font.family: Theme.fontFamily
+                                Layout.fillWidth: true
+                            }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            visible: root.isFileMode
+                            Text {
+                                //% "Files selected"
+                                text: qsTrId("aegra.restore.summary.files_selected")
+                                color: Theme.colorTextGrey
+                                font.pixelSize: 12
+                                font.family: Theme.fontFamily
+                                Layout.preferredWidth: 140
+                            }
+                            Text {
+                                text: {
+                                    var entries = serviceClient.fileRecoverEntries
+                                    return entries ? ("" + entries.selectedCount) : "0"
+                                }
+                                color: Theme.colorTextWhite
+                                font.pixelSize: 13
+                                font.family: Theme.fontFamily
+                                Layout.fillWidth: true
+                            }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            visible: root.isFileMode
+                            Text {
+                                //% "Target folder"
+                                text: qsTrId("aegra.restore.summary.target_folder")
+                                color: Theme.colorTextGrey
+                                font.pixelSize: 12
+                                font.family: Theme.fontFamily
+                                Layout.preferredWidth: 140
+                            }
+                            Text {
+                                text: {
+                                    var t = serviceClient.fileRestoreTargets
+                                    return (t && t.selectionSummary) ? t.selectionSummary : "—"
+                                }
+                                color: Theme.colorTextWhite
+                                font.pixelSize: 13
+                                font.family: Theme.fontFamily
+                                Layout.fillWidth: true
+                                elide: Text.ElideMiddle
+                            }
+                        }
+                    }
+                }
+
+                // Options card — mirrors the Options pane choices for this restore mode.
+                Rectangle {
+                    Layout.fillWidth: true
+                    radius: 12
+                    color: Theme.colorCard
+                    border.width: 1
+                    border.color: Theme.colorBorder
+                    implicitHeight: summaryOptionsCol.implicitHeight + 32
+
+                    ColumnLayout {
+                        id: summaryOptionsCol
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.margins: 16
+                        spacing: 10
+
+                        Text {
+                            //% "Options"
+                            text: qsTrId("aegra.restore.options")
+                            color: Theme.colorTextWhite
+                            font.pixelSize: 14
+                            font.bold: true
+                            font.family: Theme.fontFamily
+                        }
+
+                        // Disk options
+                        RowLayout {
+                            Layout.fillWidth: true
+                            visible: !root.isFileMode && !root.isVolumeMode
+                            Text {
+                                //% "Preserve disk signature"
+                                text: qsTrId("aegra.restore.preserve_signature")
+                                color: Theme.colorTextGrey
+                                font.pixelSize: 12
+                                font.family: Theme.fontFamily
+                                Layout.preferredWidth: 200
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                            }
+                            Text {
+                                text: root.optionOnOff(root.preserveSignature)
+                                color: Theme.colorTextWhite
+                                font.pixelSize: 13
+                                font.family: Theme.fontFamily
+                            }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            visible: !root.isFileMode && !root.isVolumeMode
+                            Text {
+                                //% "Auto-extend last partition"
+                                text: qsTrId("aegra.restore.auto_extend")
+                                color: Theme.colorTextGrey
+                                font.pixelSize: 12
+                                font.family: Theme.fontFamily
+                                Layout.preferredWidth: 200
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                            }
+                            Text {
+                                text: root.optionOnOff(root.autoExtend)
+                                color: Theme.colorTextWhite
+                                font.pixelSize: 13
+                                font.family: Theme.fontFamily
+                            }
+                        }
+
+                        // Volume mode: no extra disk options — show a short note
+                        Text {
+                            Layout.fillWidth: true
+                            visible: root.isVolumeMode
+                            //% "Volume restore uses the mapped target volume; partition layout is not rewritten."
+                            text: qsTrId("aegra.restore.summary.volume_options_note")
+                            color: Theme.colorTextGrey
+                            font.pixelSize: 12
+                            font.family: Theme.fontFamily
+                            wrapMode: Text.WordWrap
+                        }
+
+                        // File options
+                        RowLayout {
+                            Layout.fillWidth: true
+                            visible: root.isFileMode
+                            Text {
+                                //% "Restore security (ACL)"
+                                text: qsTrId("aegra.restore.file.restore_security")
+                                color: Theme.colorTextGrey
+                                font.pixelSize: 12
+                                font.family: Theme.fontFamily
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                            }
+                            Text {
+                                text: root.optionOnOff(root.fileRestoreSecurity)
+                                color: Theme.colorTextWhite
+                                font.pixelSize: 13
+                                font.family: Theme.fontFamily
+                            }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            visible: root.isFileMode
+                            Text {
+                                //% "If a file already exists"
+                                text: qsTrId("aegra.restore.file.conflict_policy")
+                                color: Theme.colorTextGrey
+                                font.pixelSize: 12
+                                font.family: Theme.fontFamily
+                                Layout.preferredWidth: 160
+                            }
+                            Text {
+                                text: root.fileConflictPolicyLabel
+                                color: Theme.colorTextWhite
+                                font.pixelSize: 13
+                                font.family: Theme.fontFamily
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                                horizontalAlignment: Text.AlignRight
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    radius: 12
+                    color: Theme.colorCard
+                    border.width: 1
+                    border.color: Theme.colorBorder
+                    implicitHeight: summaryProgressCol.implicitHeight + 32
+
+                    ColumnLayout {
+                        id: summaryProgressCol
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.margins: 16
+                        spacing: 12
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: root.restoreProgressLabel
+                            color: root.restoreProgressFailed
+                                   ? Theme.colorAccentRed
+                                   : (root.restoreProgressSucceeded
+                                      ? Theme.colorGreen : Theme.colorTextWhite)
+                            font.pixelSize: 14
+                            font.family: Theme.fontFamily
+                            wrapMode: Text.WordWrap
+                        }
+
+                        TaskProgressBar {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 10
+                            value: root.restoreProgressFailed
+                                   ? Math.max(root.restoreProgressPercent, 8)
+                                   : (root.restoreProgressSucceeded
+                                      ? 100 : root.restoreProgressPercent)
+                            active: root.restoreProgressActive
+                                    || root.restoreProgressFailed
+                                    || root.restoreProgressSucceeded
+                            fillColor: root.restoreProgressFillColor
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            horizontalAlignment: Text.AlignRight
+                            visible: root.restoreSessionStarted && !root.restoreProgressFailed
+                            text: (root.restoreProgressSucceeded
+                                   ? 100 : root.restoreProgressPercent) + "%"
+                            color: root.restoreProgressSucceeded
+                                   ? Theme.colorGreen : Theme.colorTextGrey
+                            font.pixelSize: 12
+                            font.family: Theme.fontFamily
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            visible: root.restoreProgressFailed
+                                     && root.restoreProgressErrorText.length > 0
+                            text: root.restoreProgressErrorText
+                            color: Theme.colorAccentRed
+                            font.pixelSize: 13
+                            font.family: Theme.fontFamily
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+                }
+            }
+            } // Flickable
+        } // restoreStep2
+        } // restoreStepContainer
+
+        // Footer: Next on workspace; Restore while pending; Done after session ends.
         RowLayout {
             Layout.fillWidth: true
             Layout.preferredHeight: 44
+            visible: root.onWorkspaceStep
+                     || (root.onSummaryStep && !root.restoreSessionRunning)
             spacing: 12
             Item { Layout.fillWidth: true }
+            AppButton {
+                id: nextButton
+                Layout.preferredWidth: 140
+                Layout.preferredHeight: 40
+                visible: root.onWorkspaceStep
+                text: {
+                    if (root.filePreflightPending || serviceClient.restoreCommandBusy)
+                        //% "Checking..."
+                        return qsTrId("aegra.restore.summary.checking")
+                    //% "Next"
+                    return qsTrId("aegra.common.next")
+                }
+                primary: true
+                enabled: !root.filePreflightPending && !serviceClient.restoreCommandBusy
+                onClicked: {
+                    if (!root.canRestore) {
+                        var reason = root.restoreBlockReason
+                        serviceClient.showToast(
+                            reason.length > 0 ? reason : qsTrId("aegra.restore.cannot_restore"),
+                            true)
+                        return
+                    }
+                    root.goToSummary()
+                }
+            }
             AppButton {
                 id: restoreButton
                 Layout.preferredWidth: 140
                 Layout.preferredHeight: 40
+                visible: root.onSummaryStep
+                         && !root.restoreSessionComplete
+                         && !root.restoreJobsSubmitted
+                         && !root.restoreSessionRunning
                 text: {
                     if (serviceClient.restoreCommandBusy)
                         //% "Restoring..."
@@ -2825,12 +3991,22 @@ Item {
                     return qsTrId("aegra.nav.restore")
                 }
                 primary: true
-                enabled: root.canRestore
+                enabled: root.canRestore && !serviceClient.restoreCommandBusy
                 ToolTip.delay: 400
                 ToolTip.visible: restoreButton.hovered && !root.canRestore
                                  && root.restoreBlockReason.length > 0
                 ToolTip.text: root.restoreBlockReason
                 onClicked: root.startMappedRestore()
+            }
+            AppButton {
+                id: summaryDoneButton
+                Layout.preferredWidth: 140
+                Layout.preferredHeight: 40
+                visible: root.onSummaryStep && root.restoreSessionComplete
+                //% "Done"
+                text: qsTrId("aegra.restore.summary.done")
+                primary: true
+                onClicked: root.goBackToTypeSelection()
             }
         }
     }

@@ -52,11 +52,11 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
 
 ## Schema 与不变量
 
-- `schema_meta.version` 当前为 `12`（`ports::kControlPlaneSchemaVersion`）。产品未发布：
-  - 新库 `CREATE IF NOT EXISTS` 即为当前完整表结构，再写入 version=12；
+- `schema_meta.version` 当前为 `13`（`ports::kControlPlaneSchemaVersion`）。产品未发布：
+  - 新库 `CREATE IF NOT EXISTS` 即为当前完整表结构，再写入 version=13；
   - **不提供** 历史 schema 的 `ALTER` 迁移或兼容读取；旧开发库必须删除后重建；
   - 非 0 且非当前版本 → `kUnsupportedVersion`。
-- `restore_preflight_entry_ids`（schema 12）：file_set 选择性恢复 preflight 的 entry_id 列表
+- `restore_preflight_entry_ids`（schema 12+）：file_set 选择性恢复 preflight 的 entry_id 列表
   （`preflight_token`、`ordinal`、`entry_id`）；volume preflight 无行。`RestorePreflightRecord.entry_ids`
   在 insert/get 时与主表同事务写入/附加。file 指纹 `chain_fingerprint` 以 `filec|` 前缀区分。
 - `jobs.content_kind`：`1=volume_set`，`2=file_set`；backup/restore/verify job 必填。
@@ -66,6 +66,9 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
   `schedule_id`、**请求的** `backup_type`（非降级后的 effective 类型）、`content_kind`、
   volume `source_ids` 或 file `selection_id` 列表、`repository_connection_id`、exclude、encryption；
   重放时只比指纹，不从 effective Job 状态猜 demote。有 `idempotency_key` 时指纹不得为空。
+- `jobs` FI7 结果投影（schema 13）：`result_requested_backup_type`、`result_effective_backup_type`、
+  `result_effective_parent_uuid`、`result_incremental_downgrade_reason`。终端 transition 从 TaskResult
+  写入；`backup_type`/`parent_recovery_point_id` 仍为请求侧 requested type 与 candidate parent。
 - `schedules.content_kind` + `schedules.owner_sid`：创建时写入；`content_kind` 终身不可改。
 - `schedule_file_selections`：file_set 专用子表（`selection_id`、`volume_identity`、相对路径 blob、
   entry/recursion/reparse/unreadable policy、display_label）；volume_set 时为空。

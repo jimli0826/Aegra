@@ -199,10 +199,109 @@ QVariantMap JobModel::latestBackupStatus(const QVariantList& source_ids,
     if (chosen == nullptr) {
         return empty;
     }
-    return {{QStringLiteral("statusKey"), status_key_for_state(chosen->state)},
-            {QStringLiteral("progressPercent"), progress_percent(*chosen)},
-            {QStringLiteral("stateText"), state_text(chosen->state)},
-            {QStringLiteral("stateValue"), static_cast<qint64>(chosen->state)}};
+    QVariantMap result{{QStringLiteral("statusKey"), status_key_for_state(chosen->state)},
+                       {QStringLiteral("progressPercent"), progress_percent(*chosen)},
+                       {QStringLiteral("stateText"), state_text(chosen->state)},
+                       {QStringLiteral("stateValue"), static_cast<qint64>(chosen->state)}};
+    if (chosen->requested_backup_type) {
+        result.insert(QStringLiteral("requestedBackupTypeText"),
+                      backup_type_text(*chosen->requested_backup_type));
+    }
+    if (chosen->effective_backup_type) {
+        result.insert(QStringLiteral("effectiveBackupTypeText"),
+                      backup_type_text(*chosen->effective_backup_type));
+    }
+    if (chosen->incremental_downgrade_reason) {
+        result.insert(QStringLiteral("hasDowngrade"), true);
+        result.insert(QStringLiteral("downgradeReasonText"),
+                      downgrade_reason_text(*chosen->incremental_downgrade_reason));
+    } else {
+        result.insert(QStringLiteral("hasDowngrade"), false);
+    }
+    if (!chosen->message_code.isEmpty()) {
+        result.insert(QStringLiteral("messageText"), localize_message_code(chosen->message_code));
+    }
+    return result;
+}
+
+QVariantMap JobModel::restoreSessionStatus(const qint64 since_utc_ms) const {
+    constexpr std::int64_t kOperationRestore = 2;
+    int job_count = 0;
+    int active_count = 0;
+    int terminal_count = 0;
+    int failed_count = 0;
+    int pct_sum = 0;
+    QString state_text_out;
+    QString message_text_out;
+    QString source_name_out;
+
+    for (const auto& row : rows_) {
+        if (row.operation != kOperationRestore) {
+            continue;
+        }
+        if (since_utc_ms > 0 && row.created_utc_ms < since_utc_ms) {
+            continue;
+        }
+        ++job_count;
+        pct_sum += progress_percent(row);
+        if (is_active_state(row.state)) {
+            ++active_count;
+            if (state_text_out.isEmpty()) {
+                state_text_out = state_text(row.state);
+            }
+            if (message_text_out.isEmpty() && !row.message_code.isEmpty()) {
+                message_text_out = localize_message_code(row.message_code);
+            }
+            if (source_name_out.isEmpty()) {
+                source_name_out =
+                    row.source_name.isEmpty()
+                        ? (row.source_ids.isEmpty() ? operation_text(row.operation)
+                                                    : row.source_ids.join(QStringLiteral(", ")))
+                        : row.source_name;
+            }
+        } else if (is_terminal_state(row.state)) {
+            ++terminal_count;
+            if (row.state == kStateFailed || row.state == kStateInterrupted ||
+                row.state == kStateCancelled) {
+                ++failed_count;
+            }
+            if (state_text_out.isEmpty()) {
+                state_text_out = state_text(row.state);
+            }
+            if (message_text_out.isEmpty() && !row.message_code.isEmpty()) {
+                message_text_out = localize_message_code(row.message_code);
+            }
+            if (source_name_out.isEmpty()) {
+                source_name_out =
+                    row.source_name.isEmpty()
+                        ? (row.source_ids.isEmpty() ? operation_text(row.operation)
+                                                    : row.source_ids.join(QStringLiteral(", ")))
+                        : row.source_name;
+            }
+        }
+    }
+
+    const bool all_terminal =
+        job_count > 0 && active_count == 0 && terminal_count == job_count;
+    QString status_key = QStringLiteral("none");
+    if (active_count > 0) {
+        status_key = QStringLiteral("running");
+    } else if (all_terminal && failed_count > 0) {
+        status_key = QStringLiteral("failed");
+    } else if (all_terminal) {
+        status_key = QStringLiteral("success");
+    }
+
+    const int progress = job_count > 0 ? pct_sum / job_count : 0;
+    return {{QStringLiteral("jobCount"), job_count},
+            {QStringLiteral("activeCount"), active_count},
+            {QStringLiteral("progressPercent"), progress},
+            {QStringLiteral("stateText"), state_text_out},
+            {QStringLiteral("messageText"), message_text_out},
+            {QStringLiteral("sourceName"), source_name_out},
+            {QStringLiteral("statusKey"), status_key},
+            {QStringLiteral("allTerminal"), all_terminal},
+            {QStringLiteral("anyFailed"), failed_count > 0}};
 }
 
 int JobModel::rowCount(const QModelIndex& parent) const {
@@ -255,6 +354,16 @@ QVariant JobModel::data(const QModelIndex& index, const int role) const {
         return row.source_ids;
     case ConnectionIdRole:
         return row.connection_id;
+    case RequestedBackupTypeTextRole:
+        return row.requested_backup_type ? backup_type_text(*row.requested_backup_type) : QString{};
+    case EffectiveBackupTypeTextRole:
+        return row.effective_backup_type ? backup_type_text(*row.effective_backup_type) : QString{};
+    case DowngradeReasonTextRole:
+        return row.incremental_downgrade_reason
+                   ? downgrade_reason_text(*row.incremental_downgrade_reason)
+                   : QString{};
+    case HasDowngradeRole:
+        return row.incremental_downgrade_reason.has_value();
     default:
         return {};
     }
@@ -277,7 +386,11 @@ QHash<int, QByteArray> JobModel::roleNames() const {
             {DestinationNameRole, "destinationName"},
             {DestinationPathRole, "destinationPath"},
             {SourceIdsRole, "sourceIds"},
-            {ConnectionIdRole, "connectionId"}};
+            {ConnectionIdRole, "connectionId"},
+            {RequestedBackupTypeTextRole, "requestedBackupTypeText"},
+            {EffectiveBackupTypeTextRole, "effectiveBackupTypeText"},
+            {DowngradeReasonTextRole, "downgradeReasonText"},
+            {HasDowngradeRole, "hasDowngrade"}};
 }
 
 QString JobModel::operation_text(const std::int64_t operation) const {
@@ -297,6 +410,60 @@ QString JobModel::operation_text(const std::int64_t operation) const {
     default:
         //% "Unknown"
         return qtTrId("aegra.common.unknown");
+    }
+}
+
+QString JobModel::backup_type_text(const std::int64_t backup_type) const {
+    switch (backup_type) {
+    case 1:
+        //% "Full"
+        return qtTrId("aegra.backup.type.full");
+    case 2:
+        //% "Incremental"
+        return qtTrId("aegra.backup.type.incremental");
+    case 3:
+        //% "Differential"
+        return qtTrId("aegra.backup.type.differential");
+    default:
+        //% "Unknown"
+        return qtTrId("aegra.common.unknown");
+    }
+}
+
+QString JobModel::downgrade_reason_text(const std::int64_t reason) const {
+    // Maps contracts::IncrementalDowngradeReason (1..9) to localized copy.
+    // Desktop never invents authority — only surfaces Service-projected reason codes.
+    switch (reason) {
+    case 1:
+        //% "No eligible parent recovery point; a new full baseline was created."
+        return qtTrId("aegra.backup.downgrade.no_parent");
+    case 2:
+        //% "Backup selection changed; a new full baseline was created."
+        return qtTrId("aegra.backup.downgrade.selection_changed");
+    case 3:
+        //% "Parent backup chain is incomplete; a new full baseline was created."
+        return qtTrId("aegra.backup.downgrade.chain_incomplete");
+    case 4:
+        //% "Change journal was unavailable; a new full baseline was created."
+        return qtTrId("aegra.backup.downgrade.journal_missing");
+    case 5:
+        //% "Change journal was reset; a new full baseline was created."
+        return qtTrId("aegra.backup.downgrade.journal_reset");
+    case 6:
+        //% "Change journal wrapped; a new full baseline was created."
+        return qtTrId("aegra.backup.downgrade.journal_wrapped");
+    case 7:
+        //% "Change journal was inaccessible; a new full baseline was created."
+        return qtTrId("aegra.backup.downgrade.journal_inaccessible");
+    case 8:
+        //% "Volume identity changed; a new full baseline was created."
+        return qtTrId("aegra.backup.downgrade.volume_identity_changed");
+    case 9:
+        //% "Parent baseline is invalid; a new full baseline was created."
+        return qtTrId("aegra.backup.downgrade.baseline_invalid");
+    default:
+        //% "Incremental was not eligible; a full backup was created instead."
+        return qtTrId("aegra.backup.downgrade.generic");
     }
 }
 
@@ -445,6 +612,20 @@ QVector<JobRow> jobs_from_variant_list(const QVariantList& items) {
         row.source_name = map.value(QStringLiteral("sourceName")).toString();
         row.destination_name = map.value(QStringLiteral("destinationName")).toString();
         row.destination_path = map.value(QStringLiteral("destinationPath")).toString();
+        if (map.contains(QStringLiteral("requestedBackupType")) &&
+            map.value(QStringLiteral("requestedBackupType")).isValid()) {
+            row.requested_backup_type = map.value(QStringLiteral("requestedBackupType")).toLongLong();
+        }
+        if (map.contains(QStringLiteral("effectiveBackupType")) &&
+            map.value(QStringLiteral("effectiveBackupType")).isValid()) {
+            row.effective_backup_type = map.value(QStringLiteral("effectiveBackupType")).toLongLong();
+        }
+        row.effective_parent_uuid = map.value(QStringLiteral("effectiveParentUuid")).toString();
+        if (map.contains(QStringLiteral("incrementalDowngradeReason")) &&
+            map.value(QStringLiteral("incrementalDowngradeReason")).isValid()) {
+            row.incremental_downgrade_reason =
+                map.value(QStringLiteral("incrementalDowngradeReason")).toLongLong();
+        }
         rows.push_back(std::move(row));
     }
     return rows;

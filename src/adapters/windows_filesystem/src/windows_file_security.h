@@ -11,10 +11,11 @@
 
 namespace aegra::adapters::windows_filesystem::detail {
 
-/// Enables SeBackupPrivilege, SeRestorePrivilege, and SeSecurityPrivilege on the process token.
-/// Best-effort: returns success when AdjustTokenPrivileges is accepted; individual privileges
-/// may still be unavailable if the account lacks them (caller fails later on SD I/O).
-[[nodiscard]] base::Result<void> enable_file_security_privileges();
+/// Enables the privileges required to read content and full security descriptors.
+[[nodiscard]] base::Result<void> enable_file_backup_privileges();
+
+/// Enables the privileges required to restore content and full security descriptors.
+[[nodiscard]] base::Result<void> enable_file_restore_privileges();
 
 /// Reads Owner/Group/DACL/SACL as a self-relative SECURITY_DESCRIPTOR.
 /// On failure after privileges: message is file_source.security_descriptor_unreadable.

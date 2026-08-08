@@ -381,10 +381,9 @@ encode_mount_recovery_point(const contracts::MountRecoveryPointCommand& command)
         }
         file = Json{{"selections", std::move(selections)},
                     {"options",
-                     Json{{"reparse_policy",
-                           static_cast<std::uint8_t>(protection.file_options.reparse_policy)},
-                          {"unreadable_policy",
-                           static_cast<std::uint8_t>(protection.file_options.unreadable_policy)}}}};
+                     Json{{"unreadable_policy",
+                           static_cast<std::uint8_t>(
+                               protection.file_options.unreadable_policy)}}}};
     }
     return Json{{"content_kind", static_cast<std::uint8_t>(protection.content_kind)},
                 {"volume_set", std::move(volume)},
@@ -419,12 +418,10 @@ encode_mount_recovery_point(const contracts::MountRecoveryPointCommand& command)
         throw std::invalid_argument("file protection fields are invalid");
     }
     const auto& options = payload.at("file_set").at("options");
-    constexpr std::array<std::string_view, 2> option_keys{"reparse_policy", "unreadable_policy"};
+    constexpr std::array<std::string_view, 1> option_keys{"unreadable_policy"};
     if (!exact_keys(options, option_keys)) {
         throw std::invalid_argument("file protection options are invalid");
     }
-    protection.file_options.reparse_policy = static_cast<contracts::FileReparsePolicy>(
-        unsigned_value<std::uint8_t>(options, "reparse_policy"));
     protection.file_options.unreadable_policy = static_cast<contracts::FileUnreadablePolicy>(
         unsigned_value<std::uint8_t>(options, "unreadable_policy"));
     for (const auto& item : payload.at("file_set").at("selections")) {
@@ -660,8 +657,7 @@ Json encode_request_payload(const contracts::ServiceRequest& request) {
                     {"target_node_token", body.target_node_token},
                     {"conflict_policy", static_cast<std::uint8_t>(body.conflict_policy)},
                     {"archive_secret_ref", optional_string_json(body.archive_secret_ref)},
-                    {"restore_security", body.restore_security},
-                    {"restore_ads", body.restore_ads}};
+                    {"restore_security", body.restore_security}};
     }
     case contracts::ServiceRequestKind::kStartFileRestore: {
         const auto& body = std::get<contracts::StartFileRestoreCommand>(request.payload);
@@ -760,9 +756,9 @@ contracts::ServiceRequestPayload parse_request_payload(const contracts::ServiceR
         return request;
     }
     case contracts::ServiceRequestKind::kPrepareFileRestore: {
-        constexpr std::array<std::string_view, 8> keys{
+        constexpr std::array<std::string_view, 7> keys{
             "repository_connection_id", "recovery_point_id", "entry_ids", "target_node_token",
-            "conflict_policy", "archive_secret_ref", "restore_security", "restore_ads"};
+            "conflict_policy", "archive_secret_ref", "restore_security"};
         if (!exact_keys(payload, keys)) {
             throw std::invalid_argument("prepare file restore fields are invalid");
         }
@@ -775,7 +771,6 @@ contracts::ServiceRequestPayload parse_request_payload(const contracts::ServiceR
             unsigned_value<std::uint8_t>(payload, "conflict_policy"));
         request.archive_secret_ref = optional_string(payload.at("archive_secret_ref"));
         request.restore_security = payload.at("restore_security").get<bool>();
-        request.restore_ads = payload.at("restore_ads").get<bool>();
         return request;
     }
     case contracts::ServiceRequestKind::kStartFileRestore: {

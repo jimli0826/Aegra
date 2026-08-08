@@ -22,7 +22,6 @@ struct FileSetRestorePlan final {
     std::vector<std::uint64_t> entry_ids;
     contracts::FileConflictPolicy conflict_policy{contracts::FileConflictPolicy::kFail};
     bool restore_security{true};
-    bool restore_ads{true};
     std::uint32_t read_buffer_bytes{4U * 1024U * 1024U};
 };
 

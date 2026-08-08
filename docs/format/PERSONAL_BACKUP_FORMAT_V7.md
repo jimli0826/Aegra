@@ -1,5 +1,14 @@
 # 个人版备份文件格式 V7（`.bkf`）
 
+> **范围变更：** [ADR-0018](../adr/0018-file-set-incremental-usn-and-chain.md) 已接受 file_set Incremental，
+> 并明确本期不支持 reparse、hard link、sparse 和 ADS。**FI0 已从 current V7 exact schema 删除**这些字段、
+> 枚举与 platform reparse section；Reader 对含旧字段/枚举的开发 Archive 统一 corrupt/unsupported，不兼容、不迁移。
+> 增量目标合同以 [增量设计](../architecture/FILE_SET_INCREMENTAL_BACKUP_RESTORE.md) §7 为准（FI1 起）。
+>
+> **[ADR-0019](../adr/0019-file-set-secondary-indexes-and-lazy-reader.md)：** file_set 增加 Entry ID / Stream /
+> Chunk 二级索引；internal child 含物理 offset；普通 open 为 O(1) 级（不扫全树）；全量校验仅
+> `verify_recoverability`。产品未发布，不兼容仅含 Namespace 树的开发期 Archive。
+
 | 属性 | 内容 |
 | --- | --- |
 | 状态 | 权威格式规范 |
@@ -17,8 +26,8 @@ V7 在固定二进制启动结构、加密 CBOR 元数据、分卷与 AEAD 模�
 
 - Header 明文 `content_kind`：`volume_set` 或 `file_set`；
 - 统一 **Archive Record** 前缀，使 volume chunk、file stream chunk、file index page 与 footer 可顺序扫描；
-- `file_set` 的分页 File Index（B+tree）与 stream 级数据 chunk；
-- Footer 中的 index root 跨分卷定位与根摘要。
+- `file_set` 的分页 File Index（四棵 B+tree：Namespace / Entry ID / Stream / Chunk）与 stream 级数据 chunk；
+- Footer 中各索引 root 的跨分卷定位与根摘要；internal child 携带物理 offset。
 
 `volume_set` 的 Volume 备份/增量/Sidecar 行为必须与既有产品功能等价，仅版本号与 record 包装升级到 V7。
 
@@ -56,8 +65,8 @@ constexpr uint8_t CONTENT_KIND_FILE_SET   = 2;
 
 - Header、Catalog、Job 与 Service 摘要必须一致。
 - `CONTENT_KIND_VOLUME_SET` 禁止出现 `source_type=file_stream` 或 index page record。
-- `CONTENT_KIND_FILE_SET` 禁止出现 `source_type=volume`；禁止 `.bhx` Sidecar；`parent_uuid` 必须全 0；
-  flags 必须含 FULL，不得含 INCREMENTAL/DIFFERENTIAL（首版）。
+- `CONTENT_KIND_FILE_SET` 禁止出现 `source_type=volume`；禁止 `.bhx` Sidecar；禁止 DIFFERENTIAL。
+  FULL：`parent_uuid` 全 0。INCREMENTAL：`parent_uuid` 非 0 且必须置位 `CAP_FILE_USN_BASELINE`。
 
 ## 2. BackupHeader
 
@@ -148,6 +157,7 @@ constexpr uint32_t BACKUP_FLAG_SPLIT        = 0x00000020;
 ```cpp
 constexpr uint32_t CAP_HAS_FILE_INDEX     = 0x00000001; // file_set 必须置位
 constexpr uint32_t CAP_VOLUME_SIDECAR_OK  = 0x00000002; // volume_set 增量链可用 sidecar
+constexpr uint32_t CAP_FILE_USN_BASELINE  = 0x00000004; // file_set Incremental 必须置位
 ```
 
 未知 bit 必须为 0；Reader 对未知非零 bit 拒绝（critical）。
@@ -178,7 +188,8 @@ constexpr uint8_t COMPRESSION_ZSTD      = 1;
 - 续卷：`cbor_size == 0` 且 `first_record_offset == 256`；
 - `split_part_index` 与文件名后缀不一致；
 - FULL 时 `parent_uuid` 必须全 0；INCREMENTAL/DIFFERENTIAL 时不得全 0；
-- file_set：必须 FULL、`parent_uuid` 全 0、`CAP_HAS_FILE_INDEX` 置位、不得置 `CAP_VOLUME_SIDECAR_OK`。
+- file_set：`CAP_HAS_FILE_INDEX` 置位、不得置 `CAP_VOLUME_SIDECAR_OK`、禁止 DIFFERENTIAL；
+  FULL 时 `parent_uuid` 全 0；INCREMENTAL 时 `parent_uuid` 非 0 且 `CAP_FILE_USN_BASELINE` 置位。
 
 Header 不保存文件名、路径、entry 数、index 位置或未加密客户 metadata。
 
@@ -448,18 +459,21 @@ key = (
 {
   "entry_id": u64,
   "parent_entry_id": u64,
-  "kind": u8,                    // 1=dir 2=file 3=reparse 4=other
+  "kind": u8,                    // 1=dir 2=file only
   "name_encoding": u8,           // 1
   "name": bstr,                  // UTF-16LE
   "selection_id": bstr,          // 16-byte UUID; only selection roots; else empty bstr length 0
-  "attributes": u32,             // portable Windows file attributes subset
-  "flags": u32,                  // ENTRY_FLAG_*
+  "stable_file_identity": {      // required non-null for dir/file; not for logical root
+    "volume_identity": bstr,     // UTF-8 canonical volume GUID path bytes
+    "file_id": bstr              // exactly 16 bytes (FILE_ID_128)
+  },
+  "attributes": u32,             // portable Windows file attributes subset; no reparse/sparse bits
+  "flags": u32,                  // ENTRY_FLAG_* (known mask only)
   "creation_time": u64,          // Windows FILETIME UTC 100ns
   "access_time": u64,
   "write_time": u64,
   "change_time": u64,
   "logical_size": u64,           // main stream logical size; dirs 0
-  "hard_link_group": u64,        // 0 = none; else group id
   "stream_count": u32,
   "streams": [ StreamDesc... ],
   "platform": bstr               // bounded opaque envelope; see §5.7
@@ -469,26 +483,27 @@ key = (
 ```cpp
 constexpr uint8_t ENTRY_KIND_DIRECTORY = 1;
 constexpr uint8_t ENTRY_KIND_FILE      = 2;
-constexpr uint8_t ENTRY_KIND_REPARSE   = 3;
-constexpr uint8_t ENTRY_KIND_OTHER     = 4;
 
 constexpr uint32_t ENTRY_FLAG_HAS_SECURITY   = 0x0001;
-constexpr uint32_t ENTRY_FLAG_SPARSE_MAIN    = 0x0002;
 constexpr uint32_t ENTRY_FLAG_CASE_SENSITIVE = 0x0004;
+// FI0: ENTRY_FLAG_SPARSE_MAIN and kinds reparse/other are removed from current format.
 ```
+
+Reader 拒绝：`kind∉{1,2}`、存在 `hard_link_group`、未知 flag 位、attributes 含 sparse/reparse 位。
 
 ### 5.5 StreamDesc
 
 ```text
 {
   "stream_index": u32,           // unique archive-wide among streams; 0 reserved = none
-  "stream_kind": u8,             // 1=main 2=ads
-  "name_encoding": u8,           // ads name; main may use empty name
-  "name": bstr,                  // main: empty; ads: UTF-16LE without trailing :$DATA
+  "stream_kind": u8,             // 1=main only
+  "name_encoding": u8,           // 1
+  "name": bstr,                  // main: empty only
   "logical_size": u64,
+  "content_storage": u8,         // 1=local 2=parent (Incremental only)
+  "parent_stream_index": u32,    // parent storage: direct parent stream_index; local must be 0
   "extent_count": u32,
-  "extents": [ ExtentDesc... ],
-  "allocated_ranges": [ AllocRange... ]  // sparse: allocated only; empty if fully allocated dense
+  "extents": [ ExtentDesc... ]
 }
 ```
 
@@ -499,33 +514,115 @@ ExtentDesc = {
   "file_offset": u64,            // logical offset in stream
   "logical_size": u64
 }
-
-AllocRange = {
-  "offset": u64,
-  "length": u64
-}
 ```
 
 规则：
 
-- `stream_index` 全局唯一且非 0（有数据 stream）；无数据的目录不分配 stream；
-- main stream 至多一个；ADS 名称在同一 entry 内唯一；
-- extents 按 `file_offset` 严格递增，不重叠，不越界 `logical_size`；
-- 空文件：`logical_size=0`，`extent_count=0`，无 chunk；
-- hard-link group：同组共享同一组 stream_index/extents；仅一份内容 chunk；
-- 单 entry ADS 数 ≤ 16；单 stream extent 数 ≤ 1_048_576；单 stream `logical_size` ≤ 16 TiB。
+- `stream_index` 全局唯一且非 0；目录 `stream_count=0` 且无 streams；
+- 普通文件恰有一个 `stream_kind=main`，`name` 为空；禁止 ADS / `allocated_ranges` 字段；
+- `content_storage=local`：extents 从 offset 0 起严格递增、密铺、不重叠，覆盖全部 `logical_size`；
+  `parent_stream_index` 必须为 0；
+- `content_storage=parent`：仅 Incremental；`extents` 必须为空且 `extent_count=0`；
+  `parent_stream_index` 指向直接父层 Index 中同 identity 的 main stream；禁止任意祖先；
+- 空文件（local）：`logical_size=0`，`extent_count=0`，无 chunk；
+- 单 stream extent 数 ≤ 1_048_576；单 stream `logical_size` ≤ 16 TiB。
 
-### 5.6 Internal page plaintext
+### 5.6 Internal page plaintext（Namespace）
 
 ```text
 {
   "page_kind": 2,
   "keys": [ KeyDesc... ],        // separator keys, sorted
-  "children": [ u64... ]         // page_id; length = keys+1
+  "children": [ ChildLocator... ] // length = keys+1
+}
+
+ChildLocator = {
+  "page_id": u64,                // non-zero
+  "offset":  u64                 // absolute file offset of child's ArchiveRecordPrefix
 }
 ```
 
 `KeyDesc` 与 leaf key 同构。最大 page 深度 8（root depth 0）。`page_id` 不得形成环；所有 leaf 可达。
+`offset` 必须指向该 Archive 内已写出的 index page record；Reader 不得依赖全局 page_id→offset 扫描表。
+
+Writer 必须自底向上构建多层 internal：当 leaf 数超过单层 internal 的 fanout（keys≤256 → 最多 257
+children）时提升 depth，直到单 root；在 depth 仍 ≤8 时不得因“仅实现两层”失败。单 leaf 时 root 即为该
+leaf。每页 plaintext 仍受 1 MiB 限制，因此大 entry/大 separator key 会降低实际 fanout。
+
+### 5.6.1 二级索引（ADR-0019）
+
+除 Namespace 树外，Writer 必须写出最多三棵二级 B+tree（与 Namespace 共享 `page_id` 分配空间与
+AEAD 页格式）。`FileIndexPageHeader.page_kind` / CBOR `page_kind`：
+
+| page_kind | 树 | 角色 |
+| --- | --- | --- |
+| 1 | Namespace | leaf（完整 `FileEntryDesc`，§5.4） |
+| 2 | Namespace | internal（§5.6） |
+| 3 | Entry ID | leaf |
+| 4 | Entry ID | internal |
+| 5 | Stream | leaf |
+| 6 | Stream | internal |
+| 7 | Chunk | leaf |
+| 8 | Chunk | internal |
+
+**Entry ID leaf（page_kind=3）**
+
+```text
+{
+  "page_kind": 3,
+  "records": [ {
+    "entry_id": u64,
+    "page_id": u64,              // Namespace leaf page holding full entry
+    "page_offset": u64,          // absolute ArchiveRecordPrefix of that Namespace leaf
+    "slot": u32,                 // 0-based index within that leaf
+    "parent_entry_id": u64,
+    "kind": u8                   // 1=dir 2=file
+  }, ... ]                       // sorted by entry_id ASC; unique; count 1..256
+}
+```
+
+**Stream leaf（page_kind=5）**
+
+```text
+{
+  "page_kind": 5,
+  "records": [ {
+    "stream_index": u32,
+    "entry_id": u64,
+    "stream_slot": u32           // index in entry.streams
+  }, ... ]                       // sorted by stream_index ASC; unique; count 1..256
+}
+```
+
+**Chunk leaf（page_kind=7）**
+
+```text
+{
+  "page_kind": 7,
+  "records": [ {
+    "chunk_index": u64,
+    "record_offset": u64,        // ArchiveRecordPrefix of the file stream chunk
+    "payload_offset": u64,       // absolute offset of chunk payload bytes
+    "payload_size": u64,
+    "block_entry_count": u32
+  }, ... ]                       // sorted by chunk_index ASC; unique; count 1..256
+}
+```
+
+**二级 internal（page_kind ∈ {4,6,8}）**
+
+```text
+{
+  "page_kind": 4|6|8,
+  "keys": [ u64... ],            // separator keys (Stream 树将 stream_index 零扩展为 u64)
+  "children": [ ChildLocator... ] // length = keys+1
+}
+```
+
+二级 internal 的 keys 为无符号整数升序；fanout/深度/1 MiB 限制与 Namespace 相同。
+
+写出顺序（file_set）：全部 local file stream chunk → Namespace pages → Entry ID pages →
+Stream pages（若 stream_count>0）→ Chunk pages（若 file_stream_chunk_count>0）→ Footer。
 
 ### 5.7 platform metadata envelope
 
@@ -540,29 +637,68 @@ struct PlatformEnvelope {
 }
 ```
 
-首版必选 section（若 `ENTRY_FLAG_HAS_SECURITY`）：
+FI0 仅允许 security section（若 `ENTRY_FLAG_HAS_SECURITY`）：
 
 | tag | 内容 |
 | ---: | --- |
 | 1 | self-relative SECURITY_DESCRIPTOR bytes（Owner/Group/DACL/SACL） |
-| 2 | reparse tag u32 + reparse data buffer（no-follow）；仅 reparse entry |
 
-未知 tag：若 high bit 表示 critical 则拒绝，否则忽略。首版 Writer 只写已知 tag。
+历史 reparse section（tag 2）及任何其它 tag（含 non-critical）一律拒绝。Writer 只写 tag 1。
 
 ### 5.8 Index root digest
 
+每棵树独立计算 root digest（Footer 各存 32 字节）：
+
 ```text
-index_root_digest = SHA-256(
+// Namespace（字段名 index_root_digest）
+SHA-256(
     "MYBACKUP-V7-INDEX-ROOT" ||
-    le64(root_page_id) ||
-    le64(page_count) ||
-    le64(entry_count) ||
-    le64(stream_count) ||
+    le64(root_page_id) || le64(0) ||
+    le64(entry_count) || le64(stream_count) ||
+    root_page.content_digest
+)
+
+// Entry ID
+SHA-256(
+    "MYBACKUP-V7-ENTRY-ID-INDEX-ROOT" ||
+    le64(root_page_id) || le64(0) ||
+    le64(entry_count) || le64(0) ||
+    root_page.content_digest
+)
+
+// Stream（stream_count==0 时 root 全 0，不计算）
+SHA-256(
+    "MYBACKUP-V7-STREAM-INDEX-ROOT" ||
+    le64(root_page_id) || le64(0) ||
+    le64(stream_count) || le64(0) ||
+    root_page.content_digest
+)
+
+// Chunk（file_stream_chunk_count==0 时 root 全 0，不计算）
+SHA-256(
+    "MYBACKUP-V7-CHUNK-INDEX-ROOT" ||
+    le64(root_page_id) || le64(0) ||
+    le64(file_stream_chunk_count) || le64(0) ||
     root_page.content_digest
 )
 ```
 
-Footer 存储该 32 字节摘要；Reader 在认证 root page 后重算比对。
+`index_page_count`（Footer）= 四棵树 page 数之和。预映像中树级 `page_count` 固定写 0（Footer 不存分树页数，避免 Reader 无法复算）。
+
+### 5.9 Reader 打开语义（ADR-0019）
+
+| 操作 | 成本 |
+| --- | --- |
+| 普通打开 Archive | O(1)：Header + Footer + 校验非零 root page |
+| 列目录 | O(log N + K) |
+| 按 Entry ID 查询 | O(log N) |
+| 解析 Stream | O(log S) |
+| 定位 Chunk | O(log C) |
+| Reader 常驻内存 | O(page cache size)（有界 LRU，单页 ≤ 1 MiB） |
+| 完整 Verify | O(N + S + C) |
+
+普通 browse/选择性恢复只认证访问路径；完整重复 ID / 父图 / 全部 payload 由
+`verify_recoverability` 完成。
 
 ## 6. Footer（kind=4）
 
@@ -573,6 +709,12 @@ Footer 存储该 32 字节摘要；Reader 在认证 root page 后重算比对。
 
 ```cpp
 #pragma pack(push, 1)
+struct IndexRootLocator {
+    uint64_t page_id;               // 0 = absent
+    uint64_t offset;                // ArchiveRecordPrefix absolute offset; 0 if absent
+    uint8_t  digest[32];            // root digest (§5.8); zero if absent
+};
+
 struct BackupFooterBody {
     char     magic[8];              // "MYBKEND\0"
     uint16_t footer_version;        // 2
@@ -581,7 +723,7 @@ struct BackupFooterBody {
 
     uint64_t volume_chunk_count;
     uint64_t file_stream_chunk_count;
-    uint64_t index_page_count;
+    uint64_t index_page_count;      // all index trees combined
     uint64_t total_block_entry_count;
     uint64_t total_payload_size;
     uint64_t logical_bytes;
@@ -589,15 +731,20 @@ struct BackupFooterBody {
     uint64_t entry_count;           // file_set; 0 for volume_set
     uint64_t stream_count;          // file_set; 0 for volume_set
 
-    uint32_t index_root_part_index; // file_set; else 0
+    uint32_t index_root_part_index; // Namespace root part; file_set; else 0
     uint32_t reserved0;
-    uint64_t index_root_offset;     // absolute offset of index root ArchiveRecordPrefix
+    uint64_t index_root_offset;     // Namespace root (alias of namespace_root)
     uint64_t index_root_page_id;
     uint8_t  index_root_digest[32];
 
     uint64_t part_file_size;        // this part size including footer record
     uint8_t  file_uuid[16];         // must match header
-    uint8_t  reserved[312];         // zero; body total 480
+
+    // body offset 168: secondary roots (ADR-0019); remainder reserved zero
+    IndexRootLocator entry_id_root; // 48 B
+    IndexRootLocator stream_root;   // 48 B
+    IndexRootLocator chunk_root;    // 48 B
+    uint8_t  reserved[168];         // zero; body total 480
 };
 static_assert(sizeof(BackupFooterBody) == 480);
 #pragma pack(pop)
@@ -607,11 +754,23 @@ Footer 无独立 AEAD；完整性依赖：
 
 - 末卷存在且 `part_file_size` 匹配；
 - 所有 chunk/page 各自 AEAD；
-- `index_root_digest` 与重算一致；
+- 各非零 root digest 与重算一致；
 - `file_uuid` 与 Header 一致。
 
-volume_set：`index_*` 与 `entry_count`/`stream_count` 必须为 0。  
-file_set：`index_page_count >= 1`，root 定位有效，`volume_chunk_count == 0`。
+volume_set：全部 index root 与 `entry_count`/`stream_count`/`index_page_count` 必须为 0。
+file_set：`entry_count > 0` 时 Namespace 与 Entry ID root 必须有效；`volume_chunk_count == 0`；
+`stream_count > 0` ⇔ Stream root 有效；`file_stream_chunk_count > 0` ⇔ Chunk root 有效。
+
+file_set Footer 计数语义（FI4）：
+
+| 字段 | 含义 |
+| --- | --- |
+| `entry_count` / `stream_count` | tip File Index 中的完整当前树（含 parent-referenced stream） |
+| `file_stream_chunk_count` / `total_block_entry_count` / `total_payload_size` | 仅本层 local stream payload |
+| `logical_bytes` | 仅本层 local payload 逻辑字节（不含 parent 引用） |
+
+Incremental 不得把 parent payload 复制进本层仍标 incremental；parent stream 在 Index 中只有
+`content_storage=parent` 与 `parent_stream_index`。
 
 ## 7. CBOR Metadata Envelope
 
@@ -659,48 +818,45 @@ AEAD AAD：
 {
   "schema_version": 1,
   "content_kind": 2,
+  "disks": [],
+  "volumes": [],
   "system": {...},
   "backup_job": {
-    "backup_type": 1,
+    "backup_type": 1|2,            // 1=full 2=incremental
     "created_utc": "...",
     "application_version": "...",
     "description": "..."
   },
-  "file_set": {
-    "selection_count": u32,
-    "selections": [
+  "file_set_baseline": {
+    "fingerprint_algorithm": 1,    // SHA-256 over canonical preimage (algorithm id 1)
+    "selection_fingerprint": bstr, // exactly 32 bytes; non-zero
+    "journal_checkpoints": [       // sorted unique by volume_identity
       {
-        "selection_id": bstr(16),
-        "volume_identity": tstr,     // canonical volume GUID path
-        "entry_kind": u8,
-        "recursion": u8,
-        "display_label": tstr        // non-authoritative; max 256 UTF-8 bytes
+        "volume_identity": tstr,
+        "journal_id": u64,
+        "next_usn": i64
       }
-    ],
-    "options": {
-      "reparse_policy": 1,           // capture_no_follow
-      "unreadable_policy": 1,        // fail_job
-      "consistency_level": 1         // filesystem
-    },
-    "vss": {
-      "snapshot_set_id": tstr,
-      "volumes": [
-        { "volume_identity": tstr, "snapshot_id": tstr }
-      ]
-    }
+    ]
   },
   "extensions": {}
 }
 ```
 
-禁止在 file_set CBOR 中嵌入完整文件树、ACL 或逐文件路径列表。`relative_components` 只存在于控制面
-durable selection 与 Worker Job，不进入 Catalog；Archive 内路径组件只存在于认证 File Index。
+规则：
+
+- Full/Incremental 均必须携带有效 `selection_fingerprint`；
+- Incremental 必须非空 `journal_checkpoints`，且 Header 置 `CAP_FILE_USN_BASELINE`；
+- Full 允许空 `journal_checkpoints`（USN 尚未可用时）；有 checkpoint 时按 volume 排序且唯一；
+- 禁止在 file_set CBOR 中嵌入完整文件树、ACL 或逐文件路径列表。`relative_components` 只存在于
+  控制面 durable selection 与 Worker Job，不进入 Catalog；Archive 内路径组件只存在于认证 File Index。
 
 ## 8. 压缩
 
+- Header `compression_method`：volume 与 file_set 默认均为 `COMPRESSION_ZSTD`（1）。
 - `COMPRESSION_ZSTD`：每个 BlockEntry 的 stored payload 为独立 zstd frame；
-- 解压后长度必须等于该 entry 的逻辑数据长度（RAW 时 stored 为明文长度）；
-- 解压输出上限 `min(block_size, remaining_stream_bytes)`；
+- file_set 写入为**机会性**压缩：仅当 zstd 输出严格小于逻辑块长度时使用 `COMPRESSED`，否则 `RAW`；
+- 解压后长度必须等于该 entry 的 `logical_size`（RAW 时 `stored_size == logical_size`）；
+- 解压输出上限 `min(block_size, entry.logical_size)`（file stream 最后一块可小于 block_size）；
 - 禁止共享 dictionary 跨 chunk。
 
 ## 9. Reader 顺序与拒绝

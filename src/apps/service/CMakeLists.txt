@@ -2,6 +2,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 
 add_library(aegra_app_service STATIC
     src/backup_catalog_registrar.cpp
+    src/file_recovery_chain.cpp
     src/file_recovery_point_query.cpp
     src/mount_supervisor.cpp
     src/recovery_point_layout_service.cpp
@@ -40,6 +41,7 @@ target_link_libraries(
         Aegra::AdapterWindowsIpc
     PRIVATE
         Aegra::AdapterPersonalArchive
+        Aegra::AdapterCryptoSodium
         Aegra::PersonalRepository
         Aegra::AdapterWindowsFilesystem
         Aegra::AdapterWindowsSystem

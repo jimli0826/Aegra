@@ -19,7 +19,7 @@ namespace aegra::ports {
 // Not Recovery Point / Archive / Chunk Index authority.
 // v11: content_kind on jobs/schedules + schedule_file_selections (file_set).
 // v12: restore_preflight_entry_ids for file_set selective restore preflight.
-inline constexpr std::uint32_t kControlPlaneSchemaVersion = 12;
+inline constexpr std::uint32_t kControlPlaneSchemaVersion = 13;
 
 // ---- Durable records (control-plane only; no plaintext secrets, no RP authority) ----
 
@@ -57,6 +57,11 @@ struct JobRecord final {
     std::optional<std::uint32_t> result_error_code;
     std::optional<std::uint32_t> result_outcome;
     std::optional<std::string> result_message_code;
+    /// file_set backup terminal result (from TaskResult); null for other jobs.
+    std::optional<std::uint8_t> result_requested_backup_type;
+    std::optional<std::uint8_t> result_effective_backup_type;
+    std::optional<std::string> result_effective_parent_uuid;
+    std::optional<std::uint8_t> result_incremental_downgrade_reason;
     /// Durable start-backup option; required for idempotent replay matching.
     /// nullopt for non-backup jobs (verify/restore/cancel).
     std::optional<bool> exclude_page_and_hibernation_files;
@@ -219,6 +224,11 @@ struct JobStateTransition final {
     std::optional<std::uint32_t> result_error_code;
     std::optional<std::uint32_t> result_outcome;
     std::optional<std::string> result_message_code;
+    /// file_set backup result projection; ignored for non-terminal / non-file backups.
+    std::optional<std::uint8_t> result_requested_backup_type;
+    std::optional<std::uint8_t> result_effective_backup_type;
+    std::optional<std::string> result_effective_parent_uuid;
+    std::optional<std::uint8_t> result_incremental_downgrade_reason;
 };
 
 class IJobStore {

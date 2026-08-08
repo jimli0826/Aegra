@@ -277,7 +277,9 @@ inline constexpr const char* kSelectJobSql =
     "SELECT job_id, trace_id, operation, state, content_kind, created_utc_ms, started_utc_ms, "
     "completed_utc_ms, source_ids, repository_connection_id, target_source_id, backup_type, "
     "parent_recovery_point_id, preflight_token, message_code, idempotency_key, result_error_code, "
-    "result_outcome, result_message_code, exclude_page_and_hibernation_files, request_fingerprint "
+    "result_outcome, result_message_code, exclude_page_and_hibernation_files, request_fingerprint, "
+    "result_requested_backup_type, result_effective_backup_type, result_effective_parent_uuid, "
+    "result_incremental_downgrade_reason "
     "FROM jobs WHERE job_id = ?";
 
 inline constexpr const char* kSelectCommandSql =

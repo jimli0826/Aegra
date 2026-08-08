@@ -56,6 +56,41 @@ std::int64_t optional_deadline(const Json& object) {
     throw std::out_of_range("worker request deadline is out of range");
 }
 
+[[nodiscard]] contracts::FileSelectionFingerprint
+parse_selection_fingerprint(const Json& object) {
+    const auto iterator = object.find("selection_fingerprint");
+    if (iterator == object.end() || iterator->is_null()) {
+        throw std::invalid_argument("worker request backup.selection_fingerprint is required");
+    }
+    if (!iterator->is_object()) {
+        throw std::invalid_argument("worker request backup.selection_fingerprint must be an object");
+    }
+    const auto algorithm = required_unsigned(*iterator, "algorithm_id");
+    if (algorithm > std::numeric_limits<std::uint8_t>::max()) {
+        throw std::out_of_range("worker request selection_fingerprint algorithm is out of range");
+    }
+    const auto digest = iterator->at("digest");
+    if (!digest.is_array()) {
+        throw std::invalid_argument("worker request selection_fingerprint.digest must be an array");
+    }
+    if (digest.size() != contracts::kSelectionFingerprintBytes) {
+        throw std::invalid_argument("worker request selection_fingerprint.digest length is invalid");
+    }
+    contracts::FileSelectionFingerprint fingerprint;
+    fingerprint.algorithm_id = static_cast<std::uint8_t>(algorithm);
+    for (std::size_t index = 0; index < fingerprint.digest.size(); ++index) {
+        if (!digest.at(index).is_number_unsigned()) {
+            throw std::invalid_argument("worker request selection_fingerprint digest element invalid");
+        }
+        const auto octet = digest.at(index).get<std::uint64_t>();
+        if (octet > 0xFFU) {
+            throw std::out_of_range("worker request selection_fingerprint digest element out of range");
+        }
+        fingerprint.digest[index] = static_cast<std::byte>(octet);
+    }
+    return fingerprint;
+}
+
 std::optional<contracts::BackupOptions> optional_backup(const Json& root) {
     const auto iterator = root.find("backup");
     if (iterator == root.end()) {
@@ -88,6 +123,19 @@ std::optional<contracts::BackupOptions> optional_backup(const Json& root) {
         throw std::invalid_argument("worker request backup.encryption_enabled is required");
     }
     result.encryption_enabled = encryption->get<bool>();
+    result.candidate_parent_uuid = iterator->value("candidate_parent_uuid", std::string{});
+    if (iterator->contains("selection_fingerprint") &&
+        !iterator->at("selection_fingerprint").is_null()) {
+        result.selection_fingerprint = parse_selection_fingerprint(*iterator);
+    }
+    if (iterator->contains("service_full_reason") && !iterator->at("service_full_reason").is_null()) {
+        const auto reason = iterator->at("service_full_reason").get<std::uint64_t>();
+        if (reason > std::numeric_limits<std::uint8_t>::max()) {
+            throw std::out_of_range("worker request backup.service_full_reason is out of range");
+        }
+        result.service_full_reason =
+            static_cast<contracts::IncrementalDowngradeReason>(static_cast<std::uint8_t>(reason));
+    }
     return result;
 }
 
@@ -203,18 +251,14 @@ std::optional<contracts::RestoreOptions> optional_restore(const Json& root) {
         }
         const auto entry_kind = required_unsigned(item, "entry_kind");
         const auto recursion = required_unsigned(item, "recursion");
-        const auto reparse = required_unsigned(item, "reparse_policy");
         const auto unreadable = required_unsigned(item, "unreadable_policy");
         if (entry_kind > std::numeric_limits<std::uint8_t>::max() ||
             recursion > std::numeric_limits<std::uint8_t>::max() ||
-            reparse > std::numeric_limits<std::uint8_t>::max() ||
             unreadable > std::numeric_limits<std::uint8_t>::max()) {
             throw std::out_of_range("worker request file_source_ref enum is out of range");
         }
         ref.entry_kind = static_cast<contracts::FileEntryKind>(static_cast<std::uint8_t>(entry_kind));
         ref.recursion = static_cast<contracts::FileRecursion>(static_cast<std::uint8_t>(recursion));
-        ref.reparse_policy =
-            static_cast<contracts::FileReparsePolicy>(static_cast<std::uint8_t>(reparse));
         ref.unreadable_policy =
             static_cast<contracts::FileUnreadablePolicy>(static_cast<std::uint8_t>(unreadable));
         ref.display_label = required<std::string>(item, "display_label");
@@ -242,13 +286,10 @@ optional_file_restore_target(const Json& root) {
     target.conflict_policy =
         static_cast<contracts::FileConflictPolicy>(static_cast<std::uint8_t>(conflict));
     const auto security = iterator->find("restore_security");
-    const auto ads = iterator->find("restore_ads");
-    if (security == iterator->end() || !security->is_boolean() || ads == iterator->end() ||
-        !ads->is_boolean()) {
+    if (security == iterator->end() || !security->is_boolean()) {
         throw std::invalid_argument("worker request file_restore_target flags are required");
     }
     target.restore_security = security->get<bool>();
-    target.restore_ads = ads->get<bool>();
     return target;
 }
 
@@ -327,6 +368,10 @@ Json encode_task_result(const contracts::TaskResult& result) {
         {"message_code", result.message_code},
         {"warning_codes", result.warning_codes},
         {"partial_restore", nullptr},
+        {"requested_backup_type", nullptr},
+        {"effective_backup_type", nullptr},
+        {"effective_parent_uuid", nullptr},
+        {"incremental_downgrade_reason", nullptr},
     };
     if (result.partial_restore) {
         encoded["partial_restore"] =
@@ -335,6 +380,19 @@ Json encode_task_result(const contracts::TaskResult& result) {
                  {"entries_failed", result.partial_restore->entries_failed},
                  {"bytes_restored", result.partial_restore->bytes_restored},
                  {"stable_error_codes", result.partial_restore->stable_error_codes}};
+    }
+    if (result.requested_backup_type) {
+        encoded["requested_backup_type"] = *result.requested_backup_type;
+    }
+    if (result.effective_backup_type) {
+        encoded["effective_backup_type"] = *result.effective_backup_type;
+    }
+    if (result.effective_parent_uuid) {
+        encoded["effective_parent_uuid"] = *result.effective_parent_uuid;
+    }
+    if (result.incremental_downgrade_reason) {
+        encoded["incremental_downgrade_reason"] =
+            static_cast<std::uint8_t>(*result.incremental_downgrade_reason);
     }
     return encoded;
 }

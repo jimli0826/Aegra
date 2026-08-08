@@ -452,7 +452,7 @@ void ServiceClient::finish_mount_command_failure(const QString& message_code) {
     emit loadingChanged();
     const auto text = localize_message_code(message_code);
     emit mountStartFailed(text);
-    show_toast(text);
+    show_toast(text, true);
 }
 
 void ServiceClient::finish_mount_list_failure(const QString& message_code) {

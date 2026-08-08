@@ -56,7 +56,6 @@ encode_supervisor_job_request(const contracts::JobRequest& request) {
                          {"relative_components", std::move(components)},
                          {"entry_kind", static_cast<std::uint8_t>(ref.entry_kind)},
                          {"recursion", static_cast<std::uint8_t>(ref.recursion)},
-                         {"reparse_policy", static_cast<std::uint8_t>(ref.reparse_policy)},
                          {"unreadable_policy", static_cast<std::uint8_t>(ref.unreadable_policy)},
                          {"display_label", ref.display_label}});
             }
@@ -68,8 +67,7 @@ encode_supervisor_job_request(const contracts::JobRequest& request) {
                      {"entry_ids", request.file_restore_target->entry_ids},
                      {"conflict_policy",
                       static_cast<std::uint8_t>(request.file_restore_target->conflict_policy)},
-                     {"restore_security", request.file_restore_target->restore_security},
-                     {"restore_ads", request.file_restore_target->restore_ads}};
+                     {"restore_security", request.file_restore_target->restore_security}};
         }
 
         if (!request.target_ref.empty()) {
@@ -99,6 +97,25 @@ encode_supervisor_job_request(const contracts::JobRequest& request) {
             backup["exclude_page_and_hibernation_files"] =
                 request.backup->exclude_page_and_hibernation_files;
             backup["encryption_enabled"] = request.backup->encryption_enabled;
+            if (!request.backup->candidate_parent_uuid.empty()) {
+                backup["candidate_parent_uuid"] = request.backup->candidate_parent_uuid;
+            }
+            if (request.backup->selection_fingerprint) {
+                std::vector<std::uint8_t> digest;
+                digest.reserve(request.backup->selection_fingerprint->digest.size());
+                for (const auto item : request.backup->selection_fingerprint->digest) {
+                    digest.push_back(static_cast<std::uint8_t>(item));
+                }
+                backup["selection_fingerprint"] =
+                    Json{{"algorithm_id", request.backup->selection_fingerprint->algorithm_id},
+                         {"digest", std::move(digest)}};
+            } else {
+                backup["selection_fingerprint"] = nullptr;
+            }
+            if (request.backup->service_full_reason) {
+                backup["service_full_reason"] =
+                    static_cast<std::uint8_t>(*request.backup->service_full_reason);
+            }
             root["backup"] = backup;
         }
 
@@ -204,6 +221,21 @@ decode_supervisor_worker_event(std::string_view json_text) {
                     stats.stable_error_codes =
                         partial.at("stable_error_codes").get<std::vector<std::string>>();
                     tr.partial_restore = std::move(stats);
+                }
+                if (t.contains("requested_backup_type") && !t.at("requested_backup_type").is_null()) {
+                    tr.requested_backup_type = t.at("requested_backup_type").get<std::uint8_t>();
+                }
+                if (t.contains("effective_backup_type") && !t.at("effective_backup_type").is_null()) {
+                    tr.effective_backup_type = t.at("effective_backup_type").get<std::uint8_t>();
+                }
+                if (t.contains("effective_parent_uuid") && !t.at("effective_parent_uuid").is_null()) {
+                    tr.effective_parent_uuid = t.at("effective_parent_uuid").get<std::string>();
+                }
+                if (t.contains("incremental_downgrade_reason") &&
+                    !t.at("incremental_downgrade_reason").is_null()) {
+                    tr.incremental_downgrade_reason =
+                        static_cast<contracts::IncrementalDowngradeReason>(
+                            t.at("incremental_downgrade_reason").get<std::uint8_t>());
                 }
                 response.task_result = tr;
             }

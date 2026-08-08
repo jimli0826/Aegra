@@ -1,6 +1,7 @@
 #include "client/service_client.h"
 
 #include "client/service_protocol.h"
+#include "locale/message_code_map.h"
 
 #include <QDateTime>
 #include <QJsonObject>
@@ -59,10 +60,8 @@ bool ServiceClient::schedulesLoading() const noexcept { return schedules_loading
 bool ServiceClient::schedulesAvailable() const noexcept { return schedules_available_; }
 
 QString ServiceClient::schedulesErrorText() const {
-    if (schedules_error_code_.isEmpty()) {
-        return {};
-    }
-    return schedules_error_code_;
+    return schedules_error_code_.isEmpty() ? QString{}
+                                           : localize_message_code(schedules_error_code_);
 }
 
 void ServiceClient::refreshSchedules() {
@@ -197,10 +196,14 @@ bool ServiceClient::upsertSchedule(const QString& schedule_id, const QString& di
                                    const QString& time_of_day,
                                    const bool exclude_page_and_hibernation_files,
                                    const bool encryption_enabled,
-                                   const QString& archive_password) {
+                                   const QString& archive_password, const int backup_type) {
     if (state_ != State::kReady || !schedules_available_ || schedule_command_busy_ ||
         source_ids.isEmpty() || source_ids.size() > 100 || connection_id.isEmpty() ||
         display_name.isEmpty()) {
+        return false;
+    }
+    // Volume schedules accept Full or Incremental on the wire; wizard never offers Differential.
+    if (backup_type != kBackupTypeFull && backup_type != kBackupTypeIncremental) {
         return false;
     }
     // Create may set encryption + password; update must not send password material and must keep
@@ -229,7 +232,7 @@ bool ServiceClient::upsertSchedule(const QString& schedule_id, const QString& di
     schedule_command_busy_ = true;
     const auto body = encode_upsert_schedule_request(
         request_id, idempotency_key, schedule_id, display_name, enabled, source_ids, connection_id,
-        kBackupTypeFull, trigger_kind, local_minute, 0, QStringLiteral("UTC"),
+        backup_type, trigger_kind, local_minute, 0, QStringLiteral("UTC"),
         exclude_page_and_hibernation_files, encryption_enabled, archive_password);
     const auto started =
         coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
@@ -247,9 +250,13 @@ bool ServiceClient::createSchedule(const QVariantList& sources, const QString& c
                                    const bool exclude_page_and_hibernation_files,
                                    const bool encryption_enabled,
                                    const QString& archive_password,
-                                   const bool start_full_backup_after_create) {
+                                   const bool start_full_backup_after_create,
+                                   const int backup_type) {
     if (state_ != State::kReady || !schedules_available_ || schedule_command_busy_ ||
         sources.isEmpty() || sources.size() > 100 || connection_id.isEmpty()) {
+        return false;
+    }
+    if (backup_type != kBackupTypeFull && backup_type != kBackupTypeIncremental) {
         return false;
     }
     QSet<QString> seen_source_ids;
@@ -270,7 +277,7 @@ bool ServiceClient::createSchedule(const QVariantList& sources, const QString& c
     const auto started =
         upsertSchedule({}, display_names.join(QStringLiteral(", ")), true, source_ids,
                        connection_id, frequency, time_of_day, exclude_page_and_hibernation_files,
-                       encryption_enabled, archive_password);
+                       encryption_enabled, archive_password, backup_type);
     if (!started) {
         start_full_backup_after_schedule_create_ = false;
     }
@@ -314,13 +321,15 @@ bool ServiceClient::setScheduleEnabled(const QString& schedule_id, const bool en
     }
     const auto exclude = found.value(QStringLiteral("excludePageAndHibernation"), true).toBool();
     const auto encryption = found.value(QStringLiteral("encryptionEnabled"), false).toBool();
-    // Preserve create-time sources, options, and encryption; only enabled (and other mutable
-    // fields supplied from the existing summary) may change.
+    const auto schedule_backup_type = found.value(QStringLiteral("backupType"), kBackupTypeFull).toInt();
+    // Preserve create-time sources, options, encryption, and backup_type; only enabled (and other
+    // mutable fields supplied from the existing summary) may change.
     return upsertSchedule(schedule_id, found.value(QStringLiteral("displayName")).toString(),
                           enabled, found.value(QStringLiteral("sourceIds")).toList(),
                           found.value(QStringLiteral("connectionId")).toString(),
                           found.value(QStringLiteral("frequency")).toString(),
-                          found.value(QStringLiteral("timeOfDay")).toString(), exclude, encryption);
+                          found.value(QStringLiteral("timeOfDay")).toString(), exclude, encryption,
+                          {}, schedule_backup_type);
 }
 
 RequestDisposition ServiceClient::handle_schedule_command_frame(const QByteArray& body) {
@@ -362,7 +371,7 @@ void ServiceClient::finish_schedule_command_failure(const QString& message_code)
     start_full_backup_after_schedule_create_ = false;
     schedules_error_code_ = message_code;
     emit schedulesChanged();
-    show_toast(message_code);
+    show_toast(message_code, true);
 }
 
 } // namespace aegra::desktop

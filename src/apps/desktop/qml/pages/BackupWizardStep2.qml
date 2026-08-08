@@ -12,6 +12,10 @@ Item {
     property var daysOfWeek: [1]
     property var daysOfMonth: [1]
     property string timeOfDay: "02:00"
+    /// 1 = Full, 2 = Incremental (file_set and volume; Differential not offered for files).
+    property int backupType: 1
+    /// When true, wizard shows file_set Incremental baseline guidance (no USN/path details).
+    property bool filesMode: false
     property bool enableDedup: true
     property bool excludePageHibernation: true
     property bool shutdownWhenComplete: false
@@ -114,6 +118,7 @@ Item {
         daysOfWeek = [1]
         daysOfMonth = [1]
         timeOfDay = "02:00"
+        backupType = 1
         enableDedup = true
         excludePageHibernation = true
         shutdownWhenComplete = false
@@ -158,6 +163,70 @@ Item {
                     anchors.topMargin: 56
                     anchors.margins: 20
                     spacing: 16
+
+                    // Backup type: Full | Incremental (no Differential for product file path)
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 16
+                        Text {
+                            Layout.preferredWidth: 100
+                            //% "Backup type"
+                            text: qsTrId("aegra.backup.column.backup_type")
+                            color: Theme.colorTextGrey
+                            font.pixelSize: 13
+                            font.family: Theme.fontFamily
+                        }
+                        Row {
+                            spacing: 8
+                            Repeater {
+                                model: [
+                                    { value: 1, label: qsTrId("aegra.backup.type.full") },
+                                    { value: 2, label: qsTrId("aegra.backup.type.incremental") }
+                                ]
+                                delegate: Rectangle {
+                                    required property var modelData
+                                    width: Math.max(100, typeLabel.implicitWidth + 28)
+                                    height: 34
+                                    radius: 4
+                                    color: root.backupType === modelData.value
+                                           ? Theme.colorAccentBlue
+                                           : (typeHover.containsMouse ? Theme.colorButtonHover
+                                                                      : Theme.colorButton)
+                                    border.width: root.backupType === modelData.value ? 0 : 1
+                                    border.color: Theme.colorBorder
+                                    Text {
+                                        id: typeLabel
+                                        anchors.centerIn: parent
+                                        text: modelData.label
+                                        color: Theme.colorTextWhite
+                                        font.pixelSize: 13
+                                        font.family: Theme.fontFamily
+                                        font.bold: root.backupType === modelData.value
+                                    }
+                                    MouseArea {
+                                        id: typeHover
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.backupType = modelData.value
+                                    }
+                                }
+                            }
+                        }
+                        Item { Layout.fillWidth: true }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 116
+                        visible: root.filesMode && root.backupType === 2
+                        wrapMode: Text.WordWrap
+                        //% "Changing the file selection later creates a new full baseline. Incremental runs only when the selection is unchanged and a valid parent exists."
+                        text: qsTrId("aegra.backup.file.incremental_baseline_note")
+                        color: Theme.colorTextGrey
+                        font.pixelSize: 12
+                        font.family: Theme.fontFamily
+                    }
 
                     // Frequency
                     RowLayout {

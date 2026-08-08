@@ -301,15 +301,35 @@ parse_repository_connection(const Json& payload) {
         {"progress", summary.progress ? encode_task_progress(*summary.progress) : Json(nullptr)},
         {"message_code", summary.message_code},
         {"source_ids", summary.source_ids},
-        {"repository_connection_id", optional_string_json(summary.repository_connection_id)}};
+        {"repository_connection_id", optional_string_json(summary.repository_connection_id)},
+        {"requested_backup_type",
+         summary.requested_backup_type ? Json(*summary.requested_backup_type) : Json(nullptr)},
+        {"effective_backup_type",
+         summary.effective_backup_type ? Json(*summary.effective_backup_type) : Json(nullptr)},
+        {"effective_parent_uuid", optional_string_json(summary.effective_parent_uuid)},
+        {"incremental_downgrade_reason",
+         summary.incremental_downgrade_reason ? Json(*summary.incremental_downgrade_reason)
+                                              : Json(nullptr)}};
 }
 
 [[nodiscard]] contracts::JobSummary parse_job(const Json& payload) {
-    constexpr std::array<std::string_view, 12> keys{
-        "job_id",         "trace_id",         "operation",
-        "state",          "content_kind",     "created_utc_ms",
-        "started_utc_ms", "completed_utc_ms", "progress",
-        "message_code",   "source_ids",       "repository_connection_id"};
+    constexpr std::array<std::string_view, 16> keys{
+        "job_id",
+        "trace_id",
+        "operation",
+        "state",
+        "content_kind",
+        "created_utc_ms",
+        "started_utc_ms",
+        "completed_utc_ms",
+        "progress",
+        "message_code",
+        "source_ids",
+        "repository_connection_id",
+        "requested_backup_type",
+        "effective_backup_type",
+        "effective_parent_uuid",
+        "incremental_downgrade_reason"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("job summary fields are invalid");
     }
@@ -330,6 +350,19 @@ parse_repository_connection(const Json& payload) {
     summary.message_code = payload.at("message_code").get<std::string>();
     summary.source_ids = payload.at("source_ids").get<std::vector<std::string>>();
     summary.repository_connection_id = optional_string(payload.at("repository_connection_id"));
+    if (!payload.at("requested_backup_type").is_null()) {
+        summary.requested_backup_type =
+            unsigned_value<std::uint8_t>(payload, "requested_backup_type");
+    }
+    if (!payload.at("effective_backup_type").is_null()) {
+        summary.effective_backup_type =
+            unsigned_value<std::uint8_t>(payload, "effective_backup_type");
+    }
+    summary.effective_parent_uuid = optional_string(payload.at("effective_parent_uuid"));
+    if (!payload.at("incremental_downgrade_reason").is_null()) {
+        summary.incremental_downgrade_reason =
+            unsigned_value<std::uint8_t>(payload, "incremental_downgrade_reason");
+    }
     return summary;
 }
 
@@ -865,28 +898,52 @@ template <typename Item, typename Parser>
 }
 
 [[nodiscard]] Json encode_task_result(const contracts::TaskResult& result) {
-    return Json{{"schema_version", result.schema_version},
-                {"job_id", result.job_id},
-                {"trace_id", result.trace_id},
-                {"outcome", static_cast<std::uint8_t>(result.outcome)},
-                {"error_code", static_cast<std::uint32_t>(result.error_code)},
-                {"logical_bytes", result.logical_bytes},
-                {"stored_bytes", result.stored_bytes},
-                {"chunk_count", result.chunk_count},
-                {"entry_count", result.entry_count},
-                {"stream_count", result.stream_count},
-                {"message_code", result.message_code},
-                {"warning_codes", result.warning_codes},
-                {"partial_restore", result.partial_restore
-                                        ? encode_partial_restore(*result.partial_restore)
-                                        : Json(nullptr)}};
+    return Json{
+        {"schema_version", result.schema_version},
+        {"job_id", result.job_id},
+        {"trace_id", result.trace_id},
+        {"outcome", static_cast<std::uint8_t>(result.outcome)},
+        {"error_code", static_cast<std::uint32_t>(result.error_code)},
+        {"logical_bytes", result.logical_bytes},
+        {"stored_bytes", result.stored_bytes},
+        {"chunk_count", result.chunk_count},
+        {"entry_count", result.entry_count},
+        {"stream_count", result.stream_count},
+        {"message_code", result.message_code},
+        {"warning_codes", result.warning_codes},
+        {"partial_restore", result.partial_restore ? encode_partial_restore(*result.partial_restore)
+                                                   : Json(nullptr)},
+        {"requested_backup_type",
+         result.requested_backup_type ? Json(*result.requested_backup_type) : Json(nullptr)},
+        {"effective_backup_type",
+         result.effective_backup_type ? Json(*result.effective_backup_type) : Json(nullptr)},
+        {"effective_parent_uuid",
+         result.effective_parent_uuid ? Json(*result.effective_parent_uuid) : Json(nullptr)},
+        {"incremental_downgrade_reason",
+         result.incremental_downgrade_reason
+             ? Json(static_cast<std::uint8_t>(*result.incremental_downgrade_reason))
+             : Json(nullptr)}};
 }
 
 [[nodiscard]] contracts::TaskResult parse_task_result(const Json& payload) {
-    constexpr std::array<std::string_view, 13> keys{
-        "schema_version", "job_id",       "trace_id",     "outcome",      "error_code",
-        "logical_bytes",  "stored_bytes", "chunk_count",  "entry_count",  "stream_count",
-        "message_code",   "warning_codes", "partial_restore"};
+    constexpr std::array<std::string_view, 17> keys{
+        "schema_version",
+        "job_id",
+        "trace_id",
+        "outcome",
+        "error_code",
+        "logical_bytes",
+        "stored_bytes",
+        "chunk_count",
+        "entry_count",
+        "stream_count",
+        "message_code",
+        "warning_codes",
+        "partial_restore",
+        "requested_backup_type",
+        "effective_backup_type",
+        "effective_parent_uuid",
+        "incremental_downgrade_reason"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("task result fields are invalid");
     }
@@ -907,6 +964,22 @@ template <typename Item, typename Parser>
     result.warning_codes = payload.at("warning_codes").get<std::vector<std::string>>();
     if (!payload.at("partial_restore").is_null()) {
         result.partial_restore = parse_partial_restore(payload.at("partial_restore"));
+    }
+    if (!payload.at("requested_backup_type").is_null()) {
+        result.requested_backup_type =
+            unsigned_value<std::uint8_t>(payload, "requested_backup_type");
+    }
+    if (!payload.at("effective_backup_type").is_null()) {
+        result.effective_backup_type =
+            unsigned_value<std::uint8_t>(payload, "effective_backup_type");
+    }
+    if (!payload.at("effective_parent_uuid").is_null()) {
+        result.effective_parent_uuid = payload.at("effective_parent_uuid").get<std::string>();
+    }
+    if (!payload.at("incremental_downgrade_reason").is_null()) {
+        result.incremental_downgrade_reason =
+            static_cast<contracts::IncrementalDowngradeReason>(
+                unsigned_value<std::uint8_t>(payload, "incremental_downgrade_reason"));
     }
     return result;
 }

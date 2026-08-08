@@ -8,7 +8,6 @@
 #include "aegra/format/file_index.h"
 
 #include <Windows.h>
-#include <winioctl.h>
 
 #include <cstdint>
 #include <cstring>
@@ -124,52 +123,6 @@ class StagedFileWriter final : public ports::IStagedFileWriter {
                 return base::Result<void>::failure(win32_error(GetLastError(), "WriteFile"));
             }
             written_total += written;
-        }
-        return base::Result<void>::success();
-    }
-
-    base::Result<void>
-    set_sparse_ranges(const std::vector<contracts::FileAllocatedRangeDesc>& allocated,
-                      const base::CancellationToken cancellation) override {
-        if (cancellation.stop_requested()) {
-            return base::Result<void>::failure(
-                {base::ErrorCode::kCancelled, "sparse setup cancelled"});
-        }
-        DWORD bytes = 0;
-        if (DeviceIoControl(handle_.get(), FSCTL_SET_SPARSE, nullptr, 0, nullptr, 0, &bytes,
-                            nullptr) == FALSE) {
-            return base::Result<void>::failure(win32_error(GetLastError(), "FSCTL_SET_SPARSE"));
-        }
-        static_cast<void>(allocated);
-        return base::Result<void>::success();
-    }
-
-    base::Result<void> write_alternate_stream(const contracts::EncodedName& name,
-                                              const std::span<const std::byte> payload,
-                                              const base::CancellationToken cancellation) override {
-        if (cancellation.stop_requested()) {
-            return base::Result<void>::failure(
-                {base::ErrorCode::kCancelled, "ADS write cancelled"});
-        }
-        auto validated = detail::validate_component(name);
-        if (!validated) {
-            return validated;
-        }
-        std::wstring ads = staging_path_;
-        ads.push_back(L':');
-        std::wstring piece(name.bytes.size() / 2U, L'\0');
-        std::memcpy(piece.data(), name.bytes.data(), name.bytes.size());
-        ads.append(piece);
-        auto handle = detail::open_path(detail::to_utf16_vector(ads), GENERIC_WRITE, 0, CREATE_ALWAYS,
-                                        FILE_ATTRIBUTE_NORMAL);
-        if (!handle) {
-            return base::Result<void>::failure(handle.error());
-        }
-        DWORD written = 0;
-        if (!payload.empty() &&
-            WriteFile(handle.value().get(), payload.data(), static_cast<DWORD>(payload.size()),
-                      &written, nullptr) == FALSE) {
-            return base::Result<void>::failure(win32_error(GetLastError(), "WriteFile ADS"));
         }
         return base::Result<void>::success();
     }
@@ -321,7 +274,7 @@ WindowsFileTreeSink::open(const WindowsFileTreeSinkOpenRequest& request) {
         return base::Result<std::unique_ptr<WindowsFileTreeSink>>::failure(
             {base::ErrorCode::kInvalidArgument, "target root is required"});
     }
-    auto privileges = detail::enable_file_security_privileges();
+    auto privileges = detail::enable_file_restore_privileges();
     if (!privileges) {
         return base::Result<std::unique_ptr<WindowsFileTreeSink>>::failure(privileges.error());
     }
@@ -349,13 +302,8 @@ WindowsFileTreeSink::capabilities(const base::CancellationToken cancellation) co
             {base::ErrorCode::kCancelled, "capabilities cancelled"});
     }
     ports::FileSinkCapabilities caps;
-    // Advertised for Port/preflight shape. Full restore of reparse / hard link / sparse /
-    // ADS is deferred (this period: not product-complete; see docs/modules/adapters.md).
-    caps.supports_ads = true;
-    caps.supports_sparse = true;
+    // FI0: only security descriptors are product-capable; no reparse/hard-link/sparse/ADS.
     caps.supports_security_descriptor = true;
-    caps.supports_reparse = true;
-    caps.supports_hard_link = true;
     std::wstring root(implementation_->root_utf16.begin(), implementation_->root_utf16.end());
     // Volume GUID roots require a trailing '\\' for GetDiskFreeSpaceExW (ERROR_INVALID_FUNCTION
     // without it). Try as-is, then with/without the trailing separator.
@@ -422,38 +370,6 @@ WindowsFileTreeSink::begin_file(const std::vector<contracts::EncodedName>& relat
     return base::Result<std::unique_ptr<ports::IStagedFileWriter>>::success(
         std::make_unique<StagedFileWriter>(std::move(final_path).value(), std::move(staging),
                                            std::move(handle).value(), logical_size));
-}
-
-base::Result<void>
-WindowsFileTreeSink::create_hard_link(const std::vector<contracts::EncodedName>& existing_components,
-                                      const std::vector<contracts::EncodedName>& new_components,
-                                      const base::CancellationToken cancellation) {
-    if (cancellation.stop_requested()) {
-        return base::Result<void>::failure(
-            {base::ErrorCode::kCancelled, "hard link cancelled"});
-    }
-    auto existing = detail::join_relative_path(implementation_->root_utf16, existing_components);
-    auto neu = detail::join_relative_path(implementation_->root_utf16, new_components);
-    if (!existing || !neu) {
-        return base::Result<void>::failure(!existing ? existing.error() : neu.error());
-    }
-    if (CreateHardLinkW(neu.value().c_str(), existing.value().c_str(), nullptr) == FALSE) {
-        return base::Result<void>::failure(win32_error(GetLastError(), "CreateHardLinkW"));
-    }
-    return base::Result<void>::success();
-}
-
-base::Result<void>
-WindowsFileTreeSink::create_reparse(const std::vector<contracts::EncodedName>&,
-                                    const contracts::FileEntryDesc&,
-                                    const base::CancellationToken cancellation) {
-    if (cancellation.stop_requested()) {
-        return base::Result<void>::failure(
-            {base::ErrorCode::kCancelled, "reparse create cancelled"});
-    }
-    // Full reparse buffer application is completed when platform_metadata section is wired (F8).
-    return base::Result<void>::failure(
-        {base::ErrorCode::kInvalidArgument, "file_restore.reparse_not_implemented"});
 }
 
 base::Result<void> WindowsFileTreeSink::apply_directory_metadata(

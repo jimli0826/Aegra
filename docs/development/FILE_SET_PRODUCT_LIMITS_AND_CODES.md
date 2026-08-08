@@ -20,17 +20,17 @@
 | L01 | 单 Job selection roots | 100 | `file_backup.selection_limit` |
 | L02 | 目录最大深度（自 selection root） | 64 | `file_source.depth_limit` |
 | L03 | 单目录 children（枚举可见） | 1_000_000 | `file_source.directory_fanout_limit` |
-| L04 | 单 Archive 总 entries | 10_000_000 | `file_backup.entry_limit` |
+| L04 | 单 Archive 总 entries | 10_000_000 | `file_backup.entry_limit`（Writer 多层 B+tree，depth≤L14；实际还受 L12 每 leaf 密度约束） |
 | L05 | 名称组件 UTF-16LE 字节 | 2–512（偶数） | `file_source.name_invalid` |
-| L06 | 单 entry ADS 数量 | 16 | `file_source.ads_limit` |
-| L07 | ADS 名 UTF-16LE 字节 | 2–512 | `file_source.name_invalid` |
+| L06 | （FI0 删除）ADS | — | `file_source.unsupported_ads` |
+| L07 | （FI0 删除）ADS 名 | — | `file_source.unsupported_ads` |
 | L08 | platform metadata envelope | 64 KiB | `file_source.metadata_limit` |
 | L09 | 单 stream logical size | 16 TiB | `file_source.stream_size_limit` |
 | L10 | 单 Archive 总 logical bytes | 1 PiB（2^50） | `file_backup.logical_bytes_limit` |
-| L11 | 单 stream sparse allocated ranges | 1_048_576 | `file_source.sparse_range_limit` |
+| L11 | （FI0 删除）sparse ranges | — | `file_source.unsupported_sparse` |
 | L12 | Index page plain size | 1 MiB | `file_backup.index_page_limit` |
 | L13 | Index page count | 4_000_000 | `file_backup.index_page_limit` |
-| L14 | Index 最大深度 | 8 | `file_backup.index_depth_limit` |
+| L14 | Index 最大深度 | 8（root depth=0） | `file_backup.index_depth_limit`（仅 depth>8 或无法在深度内收敛；**不得**因 leaf>257 误报） |
 | L15 | 默认 chunk 目标 | 512 MiB | — |
 | L16 | 单 chunk payload | 512 MiB | `format.chunk_size_limit` |
 | L17 | 分卷数（含首卷） | 1000 | `format.split_part_limit` |
@@ -45,10 +45,31 @@
 | L26 | 相对组件段数 / selection | 64 | `file_source.path_limit` |
 | L27 | Pipeline entry metadata queue | 8192 items | 背压等待；取消→`job.cancelled` |
 | L28 | Pipeline content queue | 256 MiB | 背压等待 |
-| L29 | hard-link group 成员记录 | 1_000_000 / group | `file_source.hardlink_limit` |
+| L29 | （FI0 删除）hard-link group | — | `file_source.unsupported_hard_link` |
 | L30 | Worker Job schema | 4 only | `job.schema_unsupported` |
+| L31 | Reader 常驻 Index 内存（每打开一层 Archive） | 有界 LRU page cache（固定槽位）+ 热路径 leaf 缓存；**禁止** open 时 materialize 全量 `FileEntryDesc` 或 O(N) locator 表 | 设计硬约束（OOM 风险） |
 
 整数累加一律 checked；超过 `INT64_MAX` 的 wire 字段拒绝。
+
+### 1.1 Reader 运行时内存模型（L31）
+
+`PersonalFileArchiveReader::open` 与后续 browse/restore 热路径必须满足（ADR-0019 Phase-2）：
+
+| 结构 | 允许 | 禁止 |
+| --- | --- | --- |
+| entry 定位 | Entry ID B+tree + Namespace leaf `page_offset`/`slot` | `unordered_map` / 全量 `vector<FileEntryDesc>` / O(N) 内存表 |
+| stream 定位 | Stream B+tree → `entry_id` + `stream_slot` | 哈希表或为每个 stream 复制完整 entry |
+| page 定位 | Footer root + internal `ChildPageLocator.offset` 逐层 seek | 全 Archive 扫描建 `page_offsets` |
+| stream chunk 表 | Chunk B+tree locator（`record_offset`/`payload_offset`） | chunk payload 常驻内存 |
+| Index page | 有界 LRU（固定容量）按需解密/解码；单页 ≤ L12 | open 时 materialize 全部 leaf 明文 entry |
+| 父目录图 | **仅 Verify**：Entry ID leaf 紧凑记录 + 三色 DFS | 普通 open/browse 全量父图校验 |
+| `list_children` | Namespace B+tree 按 `parent_entry_id` 有序扫描 | 全表线性扫描 `entries` |
+| `describe_entry` / `describe_stream_owner` | 二级索引 O(log N) 后加载所在 leaf | 依赖常驻全量 entry 表 |
+| Verify | `verify_index_and_parent_graph` + `for_each_entry_in_leaf_order` | `for entry_id = 1..entry_count` 盲扫 |
+| Chain 非 tip 层 | `FileArchiveIndexLoad::kDeferred`：open 只认证 Header/Footer/密钥 | open 时每层立即加载索引 |
+| Writer finalize | spool 紧凑 `IndexKey` 排序 + 流式 leaf（≤1 页 entry 常驻）+ 二级索引 | finalize 时 `vector<FileEntryDesc>` 全表 |
+
+**Phase-2（当前）：** V7 持久化二级索引（Entry ID / Stream / Chunk）+ internal child 物理 offset + Entry ID 记录内 Namespace `page_offset` + 有界 LRU page cache；普通 open 认证 roots 为 O(1) 页 I/O，查询 O(log N)；全量父图/唯一性校验仅在显式 Verify。链 browse 仅 tip 需 root 认证；祖先层在首次 stream 访问时再 `ensure_roots`。
 
 ---
 
@@ -109,19 +130,20 @@ file_source.unsupported_filesystem
 file_source.unsupported_efs
 file_source.unsupported_cloud_placeholder
 file_source.unsupported_reparse
+file_source.unsupported_hard_link
+file_source.unsupported_sparse
+file_source.unsupported_ads
 file_source.security_descriptor_unreadable
 file_source.unreadable
 file_source.depth_limit
 file_source.directory_fanout_limit
 file_source.name_invalid
-file_source.ads_limit
 file_source.metadata_limit
 file_source.stream_size_limit
-file_source.sparse_range_limit
 file_source.path_limit
-file_source.hardlink_limit
 file_source.volume_identity_mismatch
 file_source.reparse_escape
+file_restore.unsupported_archive_semantics
 ```
 
 ### 3.3 浏览 / 控制面
@@ -160,6 +182,10 @@ file_recover.credential_required
 file_recover.credential_failed
 file_recover.corrupt
 file_recover.catalog_only
+file_recover.parent_missing
+file_recover.parent_reference_invalid
+file_recover.chain_depth_limit
+file_recover.token_invalid
 ```
 
 ### 3.5 格式 / Job
@@ -246,10 +272,10 @@ SecretRef、口令。
 | S02 | Unicode / 长组件名（≤256 UTF-16） |
 | S03 | 深度 32 目录 |
 | S04 | DACL+SACL |
-| S05 | ADS |
-| S06 | sparse |
-| S07 | hard link 组 |
-| S08 | reparse no-follow |
+| S05 | ADS：Backup strict fail；Restore 写前拒绝 |
+| S06 | sparse：Backup strict fail；Restore 写前拒绝 |
+| S07 | hard link：Backup strict fail；Restore 写前拒绝 |
+| S08 | reparse：Backup strict fail；Restore 写前拒绝 |
 | S09 | 多 selection / 多 volume 同一 VSS set |
 | S10 | 加密 + 分卷 |
 | S11 | Verify 全 page/chunk |

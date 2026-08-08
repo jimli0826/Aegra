@@ -18,12 +18,12 @@ FileSet Pipeline 与 Personal File Archive Session，不实现文件枚举或格
 - Desktop、Qt、Service 控制面数据库
 - 在 Pipeline 内 include Win32
 - 记录路径、相对组件、SecretRef 或明文凭据到 TaskResult / 普通进度事件
-- file_set Incremental / Differential / raw 无 VSS 回退
+- file_set Differential / raw 无 VSS 回退（Incremental 合同见 FI1；编排见 FI7）
 
 ## 执行顺序
 
 ```text
-validate JobRequest (schema 4, file_set, full)
+validate JobRequest (schema 4, file_set, full|incremental + selection_fingerprint)
   -> resolve SecretRef (DPAPI)
   -> unique volume_identity list
   -> one VSS Snapshot Set for all volumes (strict; no raw fallback)
@@ -74,9 +74,15 @@ file_set 不沿用 volume 的 64 KiB block 作为 stream write 量子。Worker �
 
 ## 当前状态
 
-F5 Full file_set 备份、F7 完整 Verify、F8 选择性恢复、F9 Desktop UX 均已接线。
-F10 发布门禁已通过（Debug/Release 生产构建、静态/架构/兼容搜索、文档收口）。F11 文件级
-Incremental 仍暂缓，需单独 Accepted ADR。
+F5 Full file_set 备份、F7 完整 Verify、F8 选择性恢复、F9 Desktop UX 均已接线；F10 发布门禁已通过。
+**FI0–FI10 已完成**：USN contract/source、change planner、Incremental Archive writer、file chain
+reader/Verify、Catalog 选父/降级/retention、Service/Worker 计划任务编排、Browse/Restore 多链、
+Desktop Incremental UX 与发布门禁。Worker 数据面接受 `effective_type` / `parent_uuid` / parent
+reader / parent checkpoints 并写入 Header+Index。
+
+File Index Writer 自底向上构建多层 B+tree（leaf → internal…→ root，depth≤8），与产品上限 L04
+（10_000_000 entries）/ L14 一致；不再在 leaf>257 时误报 `index_depth_limit`。Reader 递归收集 leaf
+已支持多层；打开时仍会 materialize 全量 entry（大规模内存路径属后续优化）。
 
 已修复：`file index page header fields are invalid`（leaf plain 超 1 MiB）——根因是小 block
 量子产生过多 extent；现用大 stream quantum + 按大小分包 multi-leaf。
@@ -88,12 +94,15 @@ Incremental 仍暂缓，需单独 Accepted ADR。
 Archive Abort。空目录仍通过 `.` / `..` 正常打开，不会走失败路径。禁止把枚举错误静默为
 “无 children”，以免提交不完整 Recovery Point。
 
-## Sink 能力声明（reparse / hard link / sparse / ADS）
+## 不支持对象（ADR-0018）
 
-`WindowsFileTreeSink::capabilities` 对外宣称支持 reparse、hard link、sparse、ADS
-（`supports_*=true`）。**本期不实现**这些能力的完整恢复路径；文档与 preflight 形状预留，
-完整语义（reparse buffer、hard-link 组、sparse ranges、ADS 产品闭环）延后单独工作包。
-本期交付范围以目录/文件主数据流、时间戳与属性、冲突策略、security descriptor（可选）为准。
+本期只支持目录、普通文件和未命名主数据流。reparse、hard link、sparse、ADS 在 Backup 枚举时 strict fail，
+在 Restore 第一次目标 mutation 前拒绝。Sink 不得宣称或预留这些能力，也不得跟随、扁平化、展开为 dense、
+复制为独立文件或忽略 ADS。现有预留字段、分支和虚假 `supports_*` 由 FI0 直接删除；旧开发 Archive 不兼容。
+
+文件 Incremental 的目标边界、USN 资格和 chain reader 见
+[增量设计](../architecture/FILE_SET_INCREMENTAL_BACKUP_RESTORE.md)；实施记录见
+[FI0–FI10](../development/FILE_SET_INCREMENTAL_DEVELOPMENT_PLAN.md)。
 
 ## ACL / Security Descriptor（ADR-0016 / V7 §5.7）
 

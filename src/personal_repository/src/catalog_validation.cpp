@@ -35,11 +35,24 @@ namespace {
 }
 
 [[nodiscard]] bool valid_parent(const CatalogEntry& entry) noexcept {
-    if (is_file_set(entry) || entry.backup_type == format::BackupType::kFull) {
+    if (entry.backup_type == format::BackupType::kFull) {
         return !entry.parent_uuid.has_value();
     }
+    // volume differential/incremental and file_set incremental require a parent.
     return entry.parent_uuid.has_value() && detail::is_canonical_uuid(entry.parent_uuid.value()) &&
            entry.parent_uuid.value() != entry.file_uuid;
+}
+
+[[nodiscard]] bool valid_hex_fingerprint(const std::string& value) noexcept {
+    if (value.empty()) {
+        return true;
+    }
+    if (value.size() != 64) {
+        return false;
+    }
+    return std::ranges::all_of(value, [](const unsigned char character) {
+        return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f');
+    });
 }
 
 [[nodiscard]] bool valid_descriptor_prefixes(const RepositoryDescriptor& descriptor) noexcept {
@@ -129,11 +142,22 @@ base::Result<void> validate_catalog_entry(const CatalogEntry& entry) {
         return invalid("catalog entry chain or location is invalid");
     }
     if (is_file_set(entry)) {
-        if (entry.backup_type != format::BackupType::kFull || entry.has_sidecar ||
-            !entry.source_volume_ids.empty() || entry.source_count == 0) {
+        if ((entry.backup_type != format::BackupType::kFull &&
+             entry.backup_type != format::BackupType::kIncremental) ||
+            entry.has_sidecar || !entry.source_volume_ids.empty() || entry.source_count == 0 ||
+            !valid_hex_fingerprint(entry.file_selection_fingerprint)) {
             return invalid("file_set catalog entry fields are invalid");
         }
+        if (entry.file_baseline_available && entry.file_selection_fingerprint.empty()) {
+            return invalid("file_set baseline available requires selection fingerprint");
+        }
+        if (entry.backup_type == format::BackupType::kIncremental && !entry.parent_uuid) {
+            return invalid("file_set incremental catalog entry requires parent_uuid");
+        }
         return valid();
+    }
+    if (!entry.file_selection_fingerprint.empty() || entry.file_baseline_available) {
+        return invalid("volume_set catalog cannot carry file selection fingerprint fields");
     }
     if (entry.source_volume_ids.size() != entry.source_count || entry.file_entry_count != 0 ||
         entry.file_stream_count != 0) {

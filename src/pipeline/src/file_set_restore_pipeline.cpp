@@ -240,38 +240,24 @@ entry_depth(const contracts::FileEntryDesc& entry,
     return depth;
 }
 
+/// Defense-in-depth: refuse unsupported entry semantics before any Sink mutation (FI0).
 [[nodiscard]] base::Result<void>
-preflight_capabilities(ports::IFileTreeSink& sink, const std::vector<contracts::FileEntryDesc>& entries,
-                       const FileSetRestorePlan& plan, const base::CancellationToken& cancellation) {
+preflight_entries(ports::IFileTreeSink& sink, const std::vector<contracts::FileEntryDesc>& entries,
+                  const FileSetRestorePlan& plan, const base::CancellationToken& cancellation) {
     auto caps = sink.capabilities(cancellation);
     if (!caps) {
         return base::Result<void>::failure(caps.error());
     }
     for (const auto& entry : entries) {
-        if (entry.kind == contracts::FileEntryKind::kReparse && !caps.value().supports_reparse) {
-            return base::Result<void>::failure(err(
-                base::ErrorCode::kInvalidArgument, "file_restore.target_capability_missing"));
-        }
-        if (entry.hard_link_group != 0 && !caps.value().supports_hard_link) {
-            return base::Result<void>::failure(err(
-                base::ErrorCode::kInvalidArgument, "file_restore.target_capability_missing"));
+        auto validated = contracts::validate_file_entry_desc(entry);
+        if (!validated) {
+            return base::Result<void>::failure(
+                err(base::ErrorCode::kCorruptData, "file_restore.unsupported_archive_semantics"));
         }
         if (plan.restore_security && !entry.platform_metadata.empty() &&
             !caps.value().supports_security_descriptor) {
             return base::Result<void>::failure(err(
                 base::ErrorCode::kInvalidArgument, "file_restore.target_capability_missing"));
-        }
-        for (const auto& stream : entry.streams) {
-            if (stream.stream_kind == contracts::FileStreamKind::kAlternate) {
-                if (!plan.restore_ads || !caps.value().supports_ads) {
-                    return base::Result<void>::failure(err(
-                        base::ErrorCode::kInvalidArgument, "file_restore.target_capability_missing"));
-                }
-            }
-            if (!stream.allocated_ranges.empty() && !caps.value().supports_sparse) {
-                return base::Result<void>::failure(err(
-                    base::ErrorCode::kInvalidArgument, "file_restore.target_capability_missing"));
-            }
         }
     }
     return base::Result<void>::success();
@@ -307,61 +293,44 @@ path_for_entry(const contracts::FileEntryDesc& entry,
 restore_file_content(ports::IFileRecoveryPointReader& reader, ports::IStagedFileWriter& writer,
                      const contracts::FileEntryDesc& entry, const FileSetRestorePlan& plan,
                      FileSetRestoreSummary& summary, const base::CancellationToken& cancellation) {
-    for (const auto& stream : entry.streams) {
-        if (stream.stream_kind == contracts::FileStreamKind::kAlternate && !plan.restore_ads) {
-            continue;
+    if (entry.streams.size() != 1) {
+        return base::Result<void>::failure(
+            err(base::ErrorCode::kCorruptData, "file_restore.unsupported_archive_semantics"));
+    }
+    const auto& stream = entry.streams.front();
+    std::vector<std::byte> buffer(plan.read_buffer_bytes);
+    std::uint64_t offset = 0;
+    while (offset < stream.logical_size) {
+        if (cancellation.stop_requested()) {
+            return base::Result<void>::failure(
+                err(base::ErrorCode::kCancelled, "file restore cancelled"));
         }
-        if (stream.stream_kind == contracts::FileStreamKind::kMain &&
-            !stream.allocated_ranges.empty()) {
-            auto sparse = writer.set_sparse_ranges(stream.allocated_ranges, cancellation);
-            if (!sparse) {
-                return sparse;
-            }
+        const auto want = static_cast<std::uint64_t>(
+            (std::min)(static_cast<std::uint64_t>(buffer.size()), stream.logical_size - offset));
+        ports::FileStreamReadRequest request;
+        request.stream_index = stream.stream_index;
+        request.offset = offset;
+        request.size = want;
+        auto read =
+            reader.read_stream(request, std::span(buffer).first(static_cast<std::size_t>(want)),
+                               cancellation);
+        if (!read) {
+            return base::Result<void>::failure(read.error());
         }
-        std::vector<std::byte> buffer(plan.read_buffer_bytes);
-        std::uint64_t offset = 0;
-        while (offset < stream.logical_size) {
-            if (cancellation.stop_requested()) {
-                return base::Result<void>::failure(
-                    err(base::ErrorCode::kCancelled, "file restore cancelled"));
-            }
-            const auto want = static_cast<std::uint64_t>(
-                (std::min)(static_cast<std::uint64_t>(buffer.size()),
-                           stream.logical_size - offset));
-            ports::FileStreamReadRequest request;
-            request.stream_index = stream.stream_index;
-            request.offset = offset;
-            request.size = want;
-            auto read =
-                reader.read_stream(request, std::span(buffer).first(static_cast<std::size_t>(want)),
-                                   cancellation);
-            if (!read) {
-                return base::Result<void>::failure(read.error());
-            }
-            if (read.value() == 0) {
-                break;
-            }
-            if (stream.stream_kind == contracts::FileStreamKind::kMain) {
-                auto written = writer.write(
-                    offset, std::span<const std::byte>(buffer.data(), read.value()), cancellation);
-                if (!written) {
-                    return written;
-                }
-            } else {
-                auto written = writer.write_alternate_stream(
-                    stream.name, std::span<const std::byte>(buffer.data(), read.value()),
-                    cancellation);
-                if (!written) {
-                    return written;
-                }
-            }
-            offset += read.value();
-            auto bytes = checked_add(summary.stats.bytes_restored, read.value());
-            if (!bytes) {
-                return base::Result<void>::failure(bytes.error());
-            }
-            summary.stats.bytes_restored = bytes.value();
+        if (read.value() == 0) {
+            break;
         }
+        auto written = writer.write(
+            offset, std::span<const std::byte>(buffer.data(), read.value()), cancellation);
+        if (!written) {
+            return written;
+        }
+        offset += read.value();
+        auto bytes = checked_add(summary.stats.bytes_restored, read.value());
+        if (!bytes) {
+            return base::Result<void>::failure(bytes.error());
+        }
+        summary.stats.bytes_restored = bytes.value();
     }
     return base::Result<void>::success();
 }
@@ -387,7 +356,7 @@ FileSetRestorePipeline::run(const FileSetRestorePlan& plan,
         return base::Result<FileSetRestoreSummary>::failure(selected.error());
     }
     summary.stats.entries_requested = selected.value().size();
-    auto caps = preflight_capabilities(sink_, selected.value(), plan, cancellation);
+    auto caps = preflight_entries(sink_, selected.value(), plan, cancellation);
     if (!caps) {
         return base::Result<FileSetRestoreSummary>::failure(caps.error());
     }
@@ -398,19 +367,11 @@ FileSetRestorePipeline::run(const FileSetRestorePlan& plan,
     // Directories first (shallow → deep so CreateDirectory parents exist).
     std::vector<contracts::FileEntryDesc> directories;
     std::vector<contracts::FileEntryDesc> files;
-    std::vector<contracts::FileEntryDesc> reparses;
     for (const auto& entry : selected.value()) {
-        switch (entry.kind) {
-        case contracts::FileEntryKind::kDirectory:
+        if (entry.kind == contracts::FileEntryKind::kDirectory) {
             directories.push_back(entry);
-            break;
-        case contracts::FileEntryKind::kReparse:
-            reparses.push_back(entry);
-            break;
-        case contracts::FileEntryKind::kFile:
-        case contracts::FileEntryKind::kOther:
+        } else {
             files.push_back(entry);
-            break;
         }
     }
     std::ranges::sort(directories, [&by_id](const auto& left, const auto& right) {
@@ -491,19 +452,6 @@ FileSetRestorePipeline::run(const FileSetRestorePlan& plan,
             continue;
         }
         ++summary.files_published;
-        ++summary.stats.entries_restored;
-    }
-    for (const auto& entry : reparses) {
-        auto path = path_for_entry(entry, by_id);
-        if (!path) {
-            return base::Result<FileSetRestoreSummary>::failure(path.error());
-        }
-        auto created = sink_.create_reparse(path.value(), entry, cancellation);
-        if (!created) {
-            ++summary.stats.entries_failed;
-            record_stable_error(summary.stats, "file_restore.reparse_failed");
-            continue;
-        }
         ++summary.stats.entries_restored;
     }
     for (const auto& entry : directories) {

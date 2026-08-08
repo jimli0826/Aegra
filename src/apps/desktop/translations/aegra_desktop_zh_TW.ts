@@ -690,8 +690,8 @@ Server: %1</source>
         <translation>選取的檔案過多，請縮小選取範圍後重試。</translation>
     </message>
     <message id="aegra.error.file_restore.target_capability_missing">
-        <source>The target folder does not support required features (for example ACL or alternate streams). Choose an NTFS folder.</source>
-        <translation>目標資料夾不支援所需功能（例如 ACL 或替代資料流）。請選擇 NTFS 資料夾。</translation>
+        <source>The target folder does not support required features (for example ACL). Choose an NTFS folder.</source>
+        <translation>目標資料夾不支援所需功能（例如 ACL）。請選擇 NTFS 資料夾。</translation>
     </message>
     <message id="aegra.error.file_restore.target_not_directory">
         <source>Select a folder as the restore destination.</source>
@@ -753,6 +753,142 @@ Server: %1</source>
         <source>Files</source>
         <translation>檔案</translation>
     </message>
+    <message id="aegra.restore.change_type">
+        <source>Change type</source>
+        <translation>變更類型</translation>
+    </message>
+    <message id="aegra.restore.wizard.step.type">
+        <source>Restore type</source>
+        <translation>還原類型</translation>
+    </message>
+    <message id="aegra.restore.wizard.step.source_dest">
+        <source>Source &amp; destination</source>
+        <translation>來源與目標</translation>
+    </message>
+    <message id="aegra.restore.wizard.step.summary">
+        <source>Summary</source>
+        <translation>摘要</translation>
+    </message>
+    <message id="aegra.restore.summary.title">
+        <source>Restore summary</source>
+        <translation>還原摘要</translation>
+    </message>
+    <message id="aegra.restore.summary.type_label">
+        <source>Type</source>
+        <translation>類型</translation>
+    </message>
+    <message id="aegra.restore.summary.checkpoint_label">
+        <source>Checkpoint</source>
+        <translation>檢查點</translation>
+    </message>
+    <message id="aegra.restore.summary.mappings_label">
+        <source>Mappings</source>
+        <translation>對應數</translation>
+    </message>
+    <message id="aegra.restore.summary.ready">
+        <source>Review the selection, then start restore.</source>
+        <translation>請確認選擇，然後開始還原。</translation>
+    </message>
+    <message id="aegra.restore.summary.checking">
+        <source>Checking...</source>
+        <translation>檢查中...</translation>
+    </message>
+    <message id="aegra.restore.summary.files_selected">
+        <source>Files selected</source>
+        <translation>已選檔案</translation>
+    </message>
+    <message id="aegra.restore.summary.target_folder">
+        <source>Target folder</source>
+        <translation>目標資料夾</translation>
+    </message>
+    <message id="aegra.restore.summary.volume_options_note">
+        <source>Volume restore uses the mapped target volume; partition layout is not rewritten.</source>
+        <translation>磁碟區還原寫入已對應的目標磁碟區，不會改寫分割配置。</translation>
+    </message>
+    <message id="aegra.common.on">
+        <source>On</source>
+        <translation>開</translation>
+    </message>
+    <message id="aegra.common.off">
+        <source>Off</source>
+        <translation>關</translation>
+    </message>
+    <message id="aegra.restore.summary.starting">
+        <source>Starting restore...</source>
+        <translation>正在啟動還原…</translation>
+    </message>
+    <message id="aegra.restore.summary.waiting">
+        <source>Waiting for restore progress...</source>
+        <translation>正在等待還原進度…</translation>
+    </message>
+    <message id="aegra.restore.summary.finished">
+        <source>Restore completed</source>
+        <translation>還原已完成</translation>
+    </message>
+    <message id="aegra.restore.summary.finished_errors">
+        <source>Restore finished with errors</source>
+        <translation>還原已完成（含錯誤）</translation>
+    </message>
+    <message id="aegra.restore.summary.back">
+        <source>Back</source>
+        <translation>返回</translation>
+    </message>
+    <message id="aegra.restore.summary.done">
+        <source>Done</source>
+        <translation>完成</translation>
+    </message>
+    <message id="aegra.restore.file.volume_free_total">
+        <source>%1 free, %2 total</source>
+        <translation>%1 可用, 共 %2</translation>
+    </message>
+    <message id="aegra.restore.type_title">
+        <source>Choose restore type</source>
+        <translation>選擇還原類型</translation>
+    </message>
+    <message id="aegra.restore.type_subtitle">
+        <source>Select whole-disk recovery, volume-to-volume restore, or file and folder restore from a recovery point</source>
+        <translation>選擇整碟還原、磁碟區對磁碟區還原，或從還原點還原檔案與資料夾</translation>
+    </message>
+    <message id="aegra.restore.type.disk_title">
+        <source>Disk restore</source>
+        <translation>磁碟還原</translation>
+    </message>
+    <message id="aegra.restore.type.disk_desc">
+        <source>Restore an entire physical disk from a volume-set recovery point onto a target disk (layout, partitions, and options).</source>
+        <translation>從磁碟區集還原點將整塊實體磁碟還原到目標磁碟（分割區配置與磁碟選項）。</translation>
+    </message>
+    <message id="aegra.restore.type.disk_action">
+        <source>Choose Disk restore →</source>
+        <translation>選擇磁碟還原 →</translation>
+    </message>
+    <message id="aegra.restore.type.volume_title">
+        <source>Volume restore</source>
+        <translation>磁碟區還原</translation>
+    </message>
+    <message id="aegra.restore.type.volume_desc">
+        <source>Map one backup volume onto an existing non-system volume of equal or larger size without rewriting the whole disk.</source>
+        <translation>將備份中的單一磁碟區對應到本機等大或更大的非系統磁碟區，無需整碟覆寫。</translation>
+    </message>
+    <message id="aegra.restore.type.volume_action">
+        <source>Choose Volume restore →</source>
+        <translation>選擇磁碟區還原 →</translation>
+    </message>
+    <message id="aegra.restore.type.files_title">
+        <source>Files / folders</source>
+        <translation>檔案 / 資料夾</translation>
+    </message>
+    <message id="aegra.restore.type.files_desc">
+        <source>Selectively restore files and folders from a file-set recovery point into a chosen target directory.</source>
+        <translation>從檔案集還原點選取檔案與資料夾，還原到指定目標資料夾。</translation>
+    </message>
+    <message id="aegra.restore.type.files_action">
+        <source>Choose Files restore →</source>
+        <translation>選擇檔案還原 →</translation>
+    </message>
+    <message id="aegra.restore.type_mismatch">
+        <source>This checkpoint does not match the selected restore type</source>
+        <translation>此還原點與目前選擇的還原類型不符</translation>
+    </message>
     <message id="aegra.restore.file.capability_missing">
         <source>Service does not support file restore</source>
         <translation>Service 不支援檔案還原</translation>
@@ -808,14 +944,6 @@ Server: %1</source>
     <message id="aegra.restore.file.restore_security_hint">
         <source>Apply Owner, Group, DACL, and SACL from the archive. Uncheck to keep target default permissions (timestamps and attributes are still restored).</source>
         <translation>從封存套用擁有者、群組、DACL 與 SACL。取消勾選則保留目標預設權限（仍會還原時間戳與屬性）。</translation>
-    </message>
-    <message id="aegra.restore.file.restore_ads">
-        <source>Restore alternate data streams</source>
-        <translation>還原替代資料流（ADS）</translation>
-    </message>
-    <message id="aegra.restore.file.restore_ads_hint">
-        <source>Restore NTFS alternate data streams (ADS) when present in the archive.</source>
-        <translation>當封存中存在時，還原 NTFS 替代資料流（ADS）。</translation>
     </message>
     <message id="aegra.restore.file.conflict_policy">
         <source>If a file already exists</source>
@@ -1628,6 +1756,178 @@ Server: %1</source>
     <message id="aegra.settings.service.connection">
         <source>Connection</source>
         <translation>連線</translation>
+    </message>
+    <message id="aegra.backup.column.backup_type">
+        <source>Backup type</source>
+        <translation>備份類型</translation>
+    </message>
+    <message id="aegra.backup.file.incremental_baseline_note">
+        <source>Changing the file selection later creates a new full baseline. Incremental runs only when the selection is unchanged and a valid parent exists.</source>
+        <translation>之後變更檔案選取會建立新的完整基線。僅在選取未變且存在有效父還原點時才會執行遞增。</translation>
+    </message>
+    <message id="aegra.backup.downgrade.no_parent">
+        <source>No eligible parent recovery point; a new full baseline was created.</source>
+        <translation>沒有可用的父還原點，已建立新的完整基線。</translation>
+    </message>
+    <message id="aegra.backup.downgrade.selection_changed">
+        <source>Backup selection changed; a new full baseline was created.</source>
+        <translation>備份選取已變更，已建立新的完整基線。</translation>
+    </message>
+    <message id="aegra.backup.downgrade.chain_incomplete">
+        <source>Parent backup chain is incomplete; a new full baseline was created.</source>
+        <translation>父備份鏈不完整，已建立新的完整基線。</translation>
+    </message>
+    <message id="aegra.backup.downgrade.journal_missing">
+        <source>Change journal was unavailable; a new full baseline was created.</source>
+        <translation>變更日誌不可用，已建立新的完整基線。</translation>
+    </message>
+    <message id="aegra.backup.downgrade.journal_reset">
+        <source>Change journal was reset; a new full baseline was created.</source>
+        <translation>變更日誌已重設，已建立新的完整基線。</translation>
+    </message>
+    <message id="aegra.backup.downgrade.journal_wrapped">
+        <source>Change journal wrapped; a new full baseline was created.</source>
+        <translation>變更日誌已回繞，已建立新的完整基線。</translation>
+    </message>
+    <message id="aegra.backup.downgrade.journal_inaccessible">
+        <source>Change journal was inaccessible; a new full baseline was created.</source>
+        <translation>無法存取變更日誌，已建立新的完整基線。</translation>
+    </message>
+    <message id="aegra.backup.downgrade.volume_identity_changed">
+        <source>Volume identity changed; a new full baseline was created.</source>
+        <translation>磁碟區識別已變更，已建立新的完整基線。</translation>
+    </message>
+    <message id="aegra.backup.downgrade.baseline_invalid">
+        <source>Parent baseline is invalid; a new full baseline was created.</source>
+        <translation>父基線無效，已建立新的完整基線。</translation>
+    </message>
+    <message id="aegra.backup.downgrade.generic">
+        <source>Incremental was not eligible; a full backup was created instead.</source>
+        <translation>遞增備份不符合條件，已改為建立完整備份。</translation>
+    </message>
+    <message id="aegra.repository.parent.baseline">
+        <source>Baseline (no parent)</source>
+        <translation>基線（無父還原點）</translation>
+    </message>
+    <message id="aegra.repository.parent.id_only">
+        <source>Parent %1</source>
+        <translation>父還原點 %1</translation>
+    </message>
+    <message id="aegra.repository.parent.summary">
+        <source>Parent %1 · %2</source>
+        <translation>父還原點 %1 · %2</translation>
+    </message>
+    <message id="aegra.repository.chain.depth">
+        <source>Depth %1</source>
+        <translation>鏈深度 %1</translation>
+    </message>
+    <message id="aegra.repository.delete.title">
+        <source>Delete recovery points</source>
+        <translation>刪除還原點</translation>
+    </message>
+    <message id="aegra.repository.delete.plan_message">
+        <source>The service planned to delete %1 recovery point(s) in this chain. Other recovery points are kept. This cannot be undone.</source>
+        <translation>服務計劃刪除此鏈中的 %1 個還原點。其他還原點將保留。此操作無法復原。</translation>
+    </message>
+    <message id="aegra.repository.delete.retained_hint">
+        <source>Approximately %1 other recovery point(s) currently listed will remain.</source>
+        <translation>目前清單中約有 %1 個其他還原點將保留。</translation>
+    </message>
+    <message id="aegra.repository.delete.confirm">
+        <source>Delete permanently</source>
+        <translation>永久刪除</translation>
+    </message>
+    <message id="aegra.repository.delete.plan_failed">
+        <source>Could not prepare delete plan</source>
+        <translation>無法準備刪除計劃</translation>
+    </message>
+    <message id="aegra.repository.delete.execute_failed">
+        <source>Could not delete recovery points</source>
+        <translation>無法刪除還原點</translation>
+    </message>
+    <message id="aegra.repository.delete.done">
+        <source>Recovery points deleted</source>
+        <translation>還原點已刪除</translation>
+    </message>
+    <message id="aegra.error.file_recover.parent_missing">
+        <source>A required parent recovery point is missing. Restore is not possible for this chain.</source>
+        <translation>缺少必要的父還原點，無法還原此鏈。</translation>
+    </message>
+    <message id="aegra.error.file_recover.parent_reference_invalid">
+        <source>A parent content reference is invalid. The chain is damaged; do not attempt a partial restore.</source>
+        <translation>父內容參照無效，鏈已損毀；請勿嘗試部分還原。</translation>
+    </message>
+    <message id="aegra.error.file_recover.chain_depth_limit">
+        <source>The backup chain is too deep to open. Contact support or create a new full backup.</source>
+        <translation>備份鏈過深，無法開啟。請聯絡支援或建立新的完整備份。</translation>
+    </message>
+    <message id="aegra.error.file_recover.token_invalid">
+        <source>The browse session expired. Reload the recovery point and try again.</source>
+        <translation>瀏覽工作階段已過期。請重新載入還原點後重試。</translation>
+    </message>
+    <message id="aegra.error.file_backup.incremental_downgraded_full">
+        <source>Incremental was not eligible; a full backup was created instead.</source>
+        <translation>遞增備份不符合條件，已改為建立完整備份。</translation>
+    </message>
+    <message id="aegra.error.file_backup.parent_chain_invalid">
+        <source>The parent backup chain is invalid. Run a full backup.</source>
+        <translation>父備份鏈無效。請執行完整備份。</translation>
+    </message>
+    <message id="aegra.error.file_backup.selection_fingerprint_mismatch">
+        <source>Backup selection no longer matches the parent baseline. A full backup is required.</source>
+        <translation>備份選取與父基線不再相符，需要完整備份。</translation>
+    </message>
+    <message id="aegra.error.file_backup.journal_missing">
+        <source>Change journal unavailable; incremental cannot continue.</source>
+        <translation>變更日誌不可用，無法繼續遞增備份。</translation>
+    </message>
+    <message id="aegra.error.file_backup.journal_reset">
+        <source>Change journal was reset; a full backup is required.</source>
+        <translation>變更日誌已重設，需要完整備份。</translation>
+    </message>
+    <message id="aegra.error.file_backup.journal_wrapped">
+        <source>Change journal wrapped; a full backup is required.</source>
+        <translation>變更日誌已回繞，需要完整備份。</translation>
+    </message>
+    <message id="aegra.error.file_backup.journal_inaccessible">
+        <source>Change journal inaccessible; a full backup is required.</source>
+        <translation>無法存取變更日誌，需要完整備份。</translation>
+    </message>
+    <message id="aegra.error.file_backup.unsupported_incremental">
+        <source>Incremental backup is not supported for this selection.</source>
+        <translation>此選取不支援遞增備份。</translation>
+    </message>
+    <message id="aegra.error.file_source.unsupported_reparse">
+        <source>Reparse points are not supported and were not skipped. Backup stopped.</source>
+        <translation>不支援重新解析點，且不會略過。備份已停止。</translation>
+    </message>
+    <message id="aegra.error.file_source.unsupported_hard_link">
+        <source>Hard links are not supported and were not skipped. Backup stopped.</source>
+        <translation>不支援硬連結，且不會略過。備份已停止。</translation>
+    </message>
+    <message id="aegra.error.file_source.unsupported_sparse">
+        <source>Sparse files are not supported and were not skipped. Backup stopped.</source>
+        <translation>不支援疏鬆檔案，且不會略過。備份已停止。</translation>
+    </message>
+    <message id="aegra.error.file_source.unsupported_ads">
+        <source>Alternate data streams are not supported and were not skipped. Backup stopped.</source>
+        <translation>不支援替代資料流，且不會略過。備份已停止。</translation>
+    </message>
+    <message id="aegra.error.file_source.unsupported_unc">
+        <source>Network (UNC) paths are not supported for file backup.</source>
+        <translation>檔案備份不支援網路（UNC）路徑。</translation>
+    </message>
+    <message id="aegra.error.file_source.unsupported_filesystem">
+        <source>This filesystem is not supported for file backup.</source>
+        <translation>此檔案系統不支援檔案備份。</translation>
+    </message>
+    <message id="aegra.error.file_source.unsupported_efs">
+        <source>EFS-encrypted files are not supported for file backup.</source>
+        <translation>檔案備份不支援 EFS 加密檔案。</translation>
+    </message>
+    <message id="aegra.error.file_source.unsupported_cloud_placeholder">
+        <source>Cloud placeholder files are not supported for file backup.</source>
+        <translation>檔案備份不支援雲端佔位檔案。</translation>
     </message>
 </context>
 </TS>

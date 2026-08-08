@@ -1,5 +1,8 @@
 #include "aegra/adapters/personal_archive/personal_archive.h"
 
+#include "personal_file_archive_secondary_index.h"
+
+#include "aegra/adapters/compression_zstd/zstd_codec.h"
 #include "aegra/adapters/crypto_sodium/content_hash.h"
 #include "aegra/adapters/crypto_sodium/metadata_crypto.h"
 #include "aegra/adapters/crypto_sodium/payload_crypto.h"
@@ -10,8 +13,11 @@
 #include "aegra/format/personal_archive.h"
 
 #include <algorithm>
+#include <array>
 #include <fstream>
 #include <limits>
+#include <set>
+#include <span>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -26,6 +32,11 @@ inline constexpr std::uint64_t kMaximumMetadataSize = 64ULL * 1024ULL * 1024ULL;
 
 [[nodiscard]] base::Error error(base::ErrorCode code, std::string message) {
     return {code, std::move(message)};
+}
+
+[[nodiscard]] bool is_zero_uuid(const std::array<std::byte, 16>& value) noexcept {
+    return std::all_of(value.begin(), value.end(),
+                       [](const std::byte item) { return item == std::byte{0}; });
 }
 
 [[nodiscard]] const char* as_chars(const std::byte* value) noexcept {
@@ -87,8 +98,73 @@ make_metadata_aad(const archive::EncodedBackupHeader& header,
         return base::Result<void>::failure(
             error(base::ErrorCode::kInvalidArgument, "file archive requires file_set manifest"));
     }
+    if (is_zero_uuid(request.file_uuid) || is_zero_uuid(request.backup_set_uuid)) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kInvalidArgument, "file archive identity UUIDs are required"));
+    }
+    const auto backup_type = request.manifest.backup_job.backup_type;
+    if (backup_type == format::BackupType::kFull) {
+        if (!is_zero_uuid(request.parent_uuid)) {
+            return base::Result<void>::failure(
+                error(base::ErrorCode::kInvalidArgument, "full file archive must not set parent_uuid"));
+        }
+    } else if (backup_type == format::BackupType::kIncremental) {
+        if (is_zero_uuid(request.parent_uuid) || request.parent_uuid == request.file_uuid) {
+            return base::Result<void>::failure(error(
+                base::ErrorCode::kInvalidArgument,
+                "incremental file archive requires a distinct non-zero parent_uuid"));
+        }
+        if (request.manifest.file_set_baseline.journal_checkpoints.empty()) {
+            return base::Result<void>::failure(error(
+                base::ErrorCode::kInvalidArgument,
+                "incremental file archive requires journal_checkpoints"));
+        }
+    } else {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kInvalidArgument, "file archive backup type is unsupported"));
+    }
     return format::validate_manifest(request.manifest);
 }
+
+struct SpooledIndexValidation final {
+    std::set<std::uint64_t> entry_ids;
+    std::set<std::uint32_t> stream_indices;
+};
+
+/// Finalize-time Index rules for Full vs Incremental (syntax only; parent payload is FI5).
+[[nodiscard]] base::Result<void>
+validate_spooled_entry(const contracts::FileEntryDesc& entry, const format::BackupType backup_type,
+                       SpooledIndexValidation& state) {
+    auto valid = contracts::validate_file_entry_desc(entry);
+    if (!valid) {
+        return valid;
+    }
+    if (!state.entry_ids.insert(entry.entry_id).second) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kInvalidArgument, "file archive entry_id is not unique"));
+    }
+    for (const auto& stream : entry.streams) {
+        if (!state.stream_indices.insert(stream.stream_index).second) {
+            return base::Result<void>::failure(error(base::ErrorCode::kInvalidArgument,
+                                                     "file archive stream_index is not unique"));
+        }
+        if (stream.content_storage == contracts::FileContentStorage::kParent) {
+            if (backup_type != format::BackupType::kIncremental) {
+                return base::Result<void>::failure(
+                    error(base::ErrorCode::kInvalidArgument,
+                          "full file archive cannot contain parent streams"));
+            }
+        }
+    }
+    return base::Result<void>::success();
+}
+
+/// Compact spool locator: sort by IndexKey without retaining full FileEntryDesc (M5 / L31).
+struct SpooledEntryRef final {
+    std::uint64_t body_offset{0};
+    std::uint32_t body_size{0};
+    index::IndexKey key;
+};
 
 [[nodiscard]] base::Result<std::vector<std::byte>>
 make_file_chunk_aad(const archive::EncodedBackupHeader& part_header, const std::uint64_t body_size,
@@ -140,47 +216,80 @@ make_index_page_aad(const archive::EncodedBackupHeader& part_header, const std::
     return base::Result<std::vector<std::byte>>::success(std::move(aad));
 }
 
-[[nodiscard]] base::Result<std::vector<contracts::FileEntryDesc>>
-load_spool_entries(std::ifstream& spool_input, const std::uint64_t entry_count) {
-    std::vector<contracts::FileEntryDesc> entries;
-    entries.reserve(static_cast<std::size_t>(entry_count));
+[[nodiscard]] base::Result<std::uint32_t> read_spool_size_prefix(std::ifstream& spool_input) {
+    std::array<std::byte, 4> size_bytes{};
+    spool_input.read(as_mutable_chars(size_bytes.data()), 4);
+    if (!spool_input) {
+        return base::Result<std::uint32_t>::failure(
+            error(base::ErrorCode::kCorruptData, "index spool is truncated"));
+    }
+    std::uint32_t size = 0;
+    for (std::size_t i = 0; i < 4; ++i) {
+        size |= static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(size_bytes[i])) << (i * 8U);
+    }
+    return base::Result<std::uint32_t>::success(size);
+}
+
+[[nodiscard]] base::Result<contracts::FileEntryDesc>
+read_spool_entry_at(std::ifstream& spool_input, const SpooledEntryRef& ref) {
+    spool_input.clear();
+    spool_input.seekg(static_cast<std::streamoff>(ref.body_offset), std::ios::beg);
+    std::vector<std::byte> encoded(ref.body_size);
+    if (ref.body_size != 0) {
+        spool_input.read(as_mutable_chars(encoded.data()),
+                         static_cast<std::streamsize>(ref.body_size));
+    }
+    if (!spool_input) {
+        return base::Result<contracts::FileEntryDesc>::failure(
+            error(base::ErrorCode::kCorruptData, "index spool entry is truncated"));
+    }
+    return index::decode_leaf_entry_cbor(encoded);
+}
+
+/// First pass: validate each entry, keep only sort key + spool offsets (no full entry table).
+[[nodiscard]] base::Result<std::vector<SpooledEntryRef>>
+scan_spool_entry_refs(std::ifstream& spool_input, const std::uint64_t entry_count,
+                      const format::BackupType backup_type) {
+    std::vector<SpooledEntryRef> refs;
+    refs.reserve(static_cast<std::size_t>(entry_count));
+    SpooledIndexValidation validation;
     for (std::uint64_t index = 0; index < entry_count; ++index) {
-        std::array<std::byte, 4> size_bytes{};
-        spool_input.read(as_mutable_chars(size_bytes.data()), 4);
-        if (!spool_input) {
-            return base::Result<std::vector<contracts::FileEntryDesc>>::failure(
-                error(base::ErrorCode::kCorruptData, "index spool is truncated"));
+        auto size = read_spool_size_prefix(spool_input);
+        if (!size) {
+            return base::Result<std::vector<SpooledEntryRef>>::failure(size.error());
         }
-        std::uint32_t size = 0;
-        for (std::size_t i = 0; i < 4; ++i) {
-            size |= static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(size_bytes[i]))
-                    << (i * 8U);
-        }
-        std::vector<std::byte> encoded(size);
-        if (size != 0) {
+        const auto body_offset = static_cast<std::uint64_t>(spool_input.tellg());
+        std::vector<std::byte> encoded(size.value());
+        if (size.value() != 0) {
             spool_input.read(as_mutable_chars(encoded.data()),
-                             static_cast<std::streamsize>(size));
+                             static_cast<std::streamsize>(size.value()));
         }
         if (!spool_input) {
-            return base::Result<std::vector<contracts::FileEntryDesc>>::failure(
+            return base::Result<std::vector<SpooledEntryRef>>::failure(
                 error(base::ErrorCode::kCorruptData, "index spool entry is truncated"));
         }
         auto entry = index::decode_leaf_entry_cbor(encoded);
         if (!entry) {
-            return base::Result<std::vector<contracts::FileEntryDesc>>::failure(entry.error());
+            return base::Result<std::vector<SpooledEntryRef>>::failure(entry.error());
         }
-        entries.push_back(std::move(entry).value());
+        auto valid = validate_spooled_entry(entry.value(), backup_type, validation);
+        if (!valid) {
+            return base::Result<std::vector<SpooledEntryRef>>::failure(valid.error());
+        }
+        auto key = index::make_index_key(entry.value());
+        if (!key) {
+            return base::Result<std::vector<SpooledEntryRef>>::failure(key.error());
+        }
+        SpooledEntryRef ref;
+        ref.body_offset = body_offset;
+        ref.body_size = size.value();
+        ref.key = std::move(key).value();
+        refs.push_back(std::move(ref));
     }
-    std::ranges::sort(entries, [](const contracts::FileEntryDesc& left,
-                                  const contracts::FileEntryDesc& right) {
-        auto left_key = index::make_index_key(left);
-        auto right_key = index::make_index_key(right);
-        if (!left_key || !right_key) {
-            return left.entry_id < right.entry_id;
-        }
-        return index::compare_index_keys(left_key.value(), right_key.value()) < 0;
+    std::ranges::sort(refs, [](const SpooledEntryRef& left, const SpooledEntryRef& right) {
+        return index::compare_index_keys(left.key, right.key) < 0;
     });
-    return base::Result<std::vector<contracts::FileEntryDesc>>::success(std::move(entries));
+    return base::Result<std::vector<SpooledEntryRef>>::success(std::move(refs));
 }
 
 struct PreparedIndexPage final {
@@ -287,50 +396,344 @@ leaf_page_fits(const std::vector<contracts::FileEntryDesc>& entries) {
                                        archive::kMaximumIndexPagePlainBytes);
 }
 
-[[nodiscard]] base::Result<std::vector<std::vector<contracts::FileEntryDesc>>>
-pack_leaf_pages(const std::vector<contracts::FileEntryDesc>& entries) {
-    std::vector<std::vector<contracts::FileEntryDesc>> pages;
+/// One written Index page used as a child when building the next internal level.
+struct BuiltIndexPage final {
+    std::uint64_t page_id{0};
+    index::IndexKey first_key;
+    std::array<std::byte, 32> content_digest{};
+    std::uint64_t file_offset{0};
+};
+
+struct NamespaceWriteResult final {
+    std::vector<BuiltIndexPage> leaves;
+    std::vector<index::EntryIdIndexRecord> entry_records;
+    std::vector<index::StreamIndexRecord> stream_records;
+};
+
+[[nodiscard]] base::Result<void>
+emit_index_page(std::ofstream& output, const archive::FileIndexPageHeader& header,
+                std::span<const std::byte> ciphertext);
+
+[[nodiscard]] base::Result<BuiltIndexPage>
+write_one_leaf_page(std::ofstream& output, std::uint64_t& next_page_id,
+                    const bool encryption_enabled, crypto_sodium::PayloadCipher* index_cipher,
+                    const archive::EncodedBackupHeader& part_header,
+                    const std::vector<contracts::FileEntryDesc>& group) {
+    auto first_key = index::make_index_key(group.front());
+    if (!first_key) {
+        return base::Result<BuiltIndexPage>::failure(first_key.error());
+    }
+    const auto page_id = next_page_id++;
+    auto prepared =
+        prepare_leaf_index_page(group, page_id, encryption_enabled, index_cipher, part_header);
+    if (!prepared) {
+        return base::Result<BuiltIndexPage>::failure(prepared.error());
+    }
+    const auto page_offset = output.tellp();
+    if (page_offset < 0) {
+        return base::Result<BuiltIndexPage>::failure(
+            error(base::ErrorCode::kIoFailure, "failed to locate file index page offset"));
+    }
+    auto written = emit_index_page(output, prepared.value().header, prepared.value().ciphertext);
+    if (!written) {
+        return base::Result<BuiltIndexPage>::failure(written.error());
+    }
+    BuiltIndexPage built;
+    built.page_id = page_id;
+    built.first_key = std::move(first_key).value();
+    built.content_digest = prepared.value().header.content_digest;
+    built.file_offset = static_cast<std::uint64_t>(page_offset);
+    return base::Result<BuiltIndexPage>::success(std::move(built));
+}
+
+void append_secondary_records_for_leaf(const std::vector<contracts::FileEntryDesc>& group,
+                                       const BuiltIndexPage& leaf, NamespaceWriteResult& out) {
+    for (std::size_t slot = 0; slot < group.size(); ++slot) {
+        const auto& entry = group[slot];
+        index::EntryIdIndexRecord entry_rec;
+        entry_rec.entry_id = entry.entry_id;
+        entry_rec.page_id = leaf.page_id;
+        entry_rec.page_offset = leaf.file_offset;
+        entry_rec.slot = static_cast<std::uint32_t>(slot);
+        entry_rec.parent_entry_id = entry.parent_entry_id;
+        entry_rec.kind = static_cast<std::uint8_t>(entry.kind);
+        out.entry_records.push_back(entry_rec);
+        for (std::size_t stream_i = 0; stream_i < entry.streams.size(); ++stream_i) {
+            index::StreamIndexRecord stream_rec;
+            stream_rec.stream_index = entry.streams[stream_i].stream_index;
+            stream_rec.entry_id = entry.entry_id;
+            stream_rec.stream_slot = static_cast<std::uint32_t>(stream_i);
+            out.stream_records.push_back(stream_rec);
+        }
+    }
+}
+
+/// Stream leaf packing: at most one leaf of FileEntryDesc resident (M5).
+[[nodiscard]] base::Result<NamespaceWriteResult>
+write_leaves_from_sorted_spool(std::ofstream& output, std::ifstream& spool_input,
+                               std::uint64_t& next_page_id, const bool encryption_enabled,
+                               crypto_sodium::PayloadCipher* index_cipher,
+                               const archive::EncodedBackupHeader& part_header,
+                               const std::vector<SpooledEntryRef>& refs) {
+    if (refs.empty()) {
+        return base::Result<NamespaceWriteResult>::failure(
+            error(base::ErrorCode::kInvalidArgument, "file archive requires at least one entry"));
+    }
+    NamespaceWriteResult result;
+    result.entry_records.reserve(refs.size());
     std::vector<contracts::FileEntryDesc> current;
-    current.reserve((std::min)(entries.size(),
-                               static_cast<std::size_t>(index::kMaximumLeafEntriesPerPage)));
-    for (const auto& entry : entries) {
+    current.reserve((std::min)(refs.size(), static_cast<std::size_t>(index::kMaximumLeafEntriesPerPage)));
+    for (const auto& ref : refs) {
+        auto entry = read_spool_entry_at(spool_input, ref);
+        if (!entry) {
+            return base::Result<NamespaceWriteResult>::failure(entry.error());
+        }
         auto trial = current;
-        trial.push_back(entry);
+        trial.push_back(std::move(entry).value());
         auto fits = leaf_page_fits(trial);
         if (!fits) {
-            return base::Result<std::vector<std::vector<contracts::FileEntryDesc>>>::failure(
-                fits.error());
+            return base::Result<NamespaceWriteResult>::failure(fits.error());
         }
         if (fits.value()) {
             current = std::move(trial);
             continue;
         }
         if (current.empty()) {
-            return base::Result<std::vector<std::vector<contracts::FileEntryDesc>>>::failure(
+            return base::Result<NamespaceWriteResult>::failure(
                 error(base::ErrorCode::kInvalidArgument, "file_backup.index_page_limit"));
         }
-        pages.push_back(std::move(current));
+        auto written = write_one_leaf_page(output, next_page_id, encryption_enabled, index_cipher,
+                                           part_header, current);
+        if (!written) {
+            return base::Result<NamespaceWriteResult>::failure(written.error());
+        }
+        append_secondary_records_for_leaf(current, written.value(), result);
+        result.leaves.push_back(std::move(written).value());
         current.clear();
-        current.push_back(entry);
+        current.push_back(std::move(trial.back()));
         auto single = leaf_page_fits(current);
         if (!single) {
-            return base::Result<std::vector<std::vector<contracts::FileEntryDesc>>>::failure(
-                single.error());
+            return base::Result<NamespaceWriteResult>::failure(single.error());
         }
         if (!single.value()) {
-            return base::Result<std::vector<std::vector<contracts::FileEntryDesc>>>::failure(
+            return base::Result<NamespaceWriteResult>::failure(
                 error(base::ErrorCode::kInvalidArgument, "file_backup.index_page_limit"));
         }
     }
     if (!current.empty()) {
-        pages.push_back(std::move(current));
+        auto written = write_one_leaf_page(output, next_page_id, encryption_enabled, index_cipher,
+                                           part_header, current);
+        if (!written) {
+            return base::Result<NamespaceWriteResult>::failure(written.error());
+        }
+        append_secondary_records_for_leaf(current, written.value(), result);
+        result.leaves.push_back(std::move(written).value());
     }
-    if (pages.empty()) {
-        return base::Result<std::vector<std::vector<contracts::FileEntryDesc>>>::failure(
+    return base::Result<NamespaceWriteResult>::success(std::move(result));
+}
+
+struct IndexTreeRoot final {
+    std::uint64_t root_page_id{0};
+    std::uint64_t root_offset{0};
+    std::array<std::byte, 32> root_content_digest{};
+    std::uint64_t page_count{0};
+};
+
+[[nodiscard]] base::Result<void>
+emit_index_page(std::ofstream& output, const archive::FileIndexPageHeader& header,
+                const std::span<const std::byte> ciphertext) {
+    const auto body_size = ciphertext.size();
+    auto prefix = archive::encode_archive_record_prefix(
+        archive::make_file_index_page_record_prefix(body_size));
+    auto encoded_header = archive::encode_file_index_page_header(header);
+    if (!prefix || !encoded_header) {
+        return base::Result<void>::failure(!prefix ? prefix.error() : encoded_header.error());
+    }
+    auto written = write_bytes(output, prefix.value());
+    if (!written) {
+        return written;
+    }
+    written = write_bytes(output, encoded_header.value());
+    if (!written) {
+        return written;
+    }
+    return write_bytes(output, ciphertext);
+}
+
+[[nodiscard]] base::Result<index::InternalPageBody>
+make_internal_body(const std::span<const BuiltIndexPage> children) {
+    if (children.size() < 2 ||
+        children.size() > static_cast<std::size_t>(index::kMaximumInternalKeysPerPage) + 1U) {
+        return base::Result<index::InternalPageBody>::failure(
+            error(base::ErrorCode::kInvalidArgument, "file_backup.index_page_limit"));
+    }
+    index::InternalPageBody body;
+    body.children.reserve(children.size());
+    body.keys.reserve(children.size() - 1);
+    for (const auto& child : children) {
+        if (child.page_id == 0 || child.file_offset == 0) {
+            return base::Result<index::InternalPageBody>::failure(
+                error(base::ErrorCode::kInternal, "index child locator is incomplete"));
+        }
+        body.children.push_back(
+            index::ChildPageLocator{child.page_id, child.file_offset});
+    }
+    for (std::size_t i = 1; i < children.size(); ++i) {
+        body.keys.push_back(children[i].first_key);
+    }
+    return base::Result<index::InternalPageBody>::success(std::move(body));
+}
+
+[[nodiscard]] base::Result<bool>
+internal_page_fits(const std::span<const BuiltIndexPage> children) {
+    auto body = make_internal_body(children);
+    if (!body) {
+        if (body.error().code == base::ErrorCode::kInvalidArgument) {
+            return base::Result<bool>::success(false);
+        }
+        return base::Result<bool>::failure(body.error());
+    }
+    auto plain = index::encode_internal_page_cbor(body.value());
+    if (!plain) {
+        return base::Result<bool>::failure(plain.error());
+    }
+    return base::Result<bool>::success(plain.value().size() <=
+                                       archive::kMaximumIndexPagePlainBytes);
+}
+
+/// Largest fanout in [2, remaining] that fits plain-size limits; never leaves a single orphan child.
+[[nodiscard]] base::Result<std::size_t>
+choose_internal_fanout(const std::span<const BuiltIndexPage> level, const std::size_t start) {
+    if (start >= level.size()) {
+        return base::Result<std::size_t>::failure(
+            error(base::ErrorCode::kInternal, "internal index pack start is invalid"));
+    }
+    const auto remaining = level.size() - start;
+    if (remaining < 2) {
+        return base::Result<std::size_t>::failure(
+            error(base::ErrorCode::kInvalidArgument, "file_backup.index_page_limit"));
+    }
+    const auto max_take =
+        (std::min)(remaining,
+                   static_cast<std::size_t>(index::kMaximumInternalKeysPerPage) + 1U);
+    for (auto take = max_take; take >= 2; --take) {
+        // Internal pages need ≥2 children; skip sizes that would leave exactly one child behind.
+        if (remaining > take && remaining - take == 1) {
+            continue;
+        }
+        auto fits = internal_page_fits(level.subspan(start, take));
+        if (!fits) {
+            return base::Result<std::size_t>::failure(fits.error());
+        }
+        if (fits.value()) {
+            return base::Result<std::size_t>::success(take);
+        }
+    }
+    return base::Result<std::size_t>::failure(
+        error(base::ErrorCode::kInvalidArgument, "file_backup.index_page_limit"));
+}
+
+[[nodiscard]] base::Result<BuiltIndexPage>
+write_internal_group(std::ofstream& output, std::uint64_t& next_page_id,
+                     const bool encryption_enabled, crypto_sodium::PayloadCipher* index_cipher,
+                     const archive::EncodedBackupHeader& part_header,
+                     const std::span<const BuiltIndexPage> children) {
+    auto body = make_internal_body(children);
+    if (!body) {
+        return base::Result<BuiltIndexPage>::failure(body.error());
+    }
+    const auto page_id = next_page_id++;
+    auto prepared =
+        prepare_internal_index_page(body.value(), page_id, encryption_enabled, index_cipher,
+                                    part_header);
+    if (!prepared) {
+        return base::Result<BuiltIndexPage>::failure(prepared.error());
+    }
+    const auto page_offset = output.tellp();
+    if (page_offset < 0) {
+        return base::Result<BuiltIndexPage>::failure(
+            error(base::ErrorCode::kIoFailure, "failed to locate file index page offset"));
+    }
+    auto written =
+        emit_index_page(output, prepared.value().header, prepared.value().ciphertext);
+    if (!written) {
+        return base::Result<BuiltIndexPage>::failure(written.error());
+    }
+    BuiltIndexPage built;
+    built.page_id = page_id;
+    built.first_key = children.front().first_key;
+    built.content_digest = prepared.value().header.content_digest;
+    built.file_offset = static_cast<std::uint64_t>(page_offset);
+    return base::Result<BuiltIndexPage>::success(std::move(built));
+}
+
+[[nodiscard]] base::Result<std::vector<BuiltIndexPage>>
+write_internal_level(std::ofstream& output, std::uint64_t& next_page_id,
+                     const bool encryption_enabled, crypto_sodium::PayloadCipher* index_cipher,
+                     const archive::EncodedBackupHeader& part_header,
+                     const std::vector<BuiltIndexPage>& children) {
+    if (children.size() < 2) {
+        return base::Result<std::vector<BuiltIndexPage>>::failure(
+            error(base::ErrorCode::kInternal, "internal index level requires multiple children"));
+    }
+    std::vector<BuiltIndexPage> parents;
+    std::size_t start = 0;
+    while (start < children.size()) {
+        auto take = choose_internal_fanout(children, start);
+        if (!take) {
+            return base::Result<std::vector<BuiltIndexPage>>::failure(take.error());
+        }
+        auto written =
+            write_internal_group(output, next_page_id, encryption_enabled, index_cipher, part_header,
+                                 std::span<const BuiltIndexPage>(children.data() + start, take.value()));
+        if (!written) {
+            return base::Result<std::vector<BuiltIndexPage>>::failure(written.error());
+        }
+        parents.push_back(std::move(written).value());
+        start += take.value();
+    }
+    if (parents.empty() || parents.size() >= children.size()) {
+        return base::Result<std::vector<BuiltIndexPage>>::failure(
+            error(base::ErrorCode::kInvalidArgument, "file_backup.index_depth_limit"));
+    }
+    return base::Result<std::vector<BuiltIndexPage>>::success(std::move(parents));
+}
+
+/// Bottom-up B+tree: given written leaves, raise internal levels until a single root (depth ≤ 8).
+[[nodiscard]] base::Result<IndexTreeRoot>
+raise_index_tree_to_root(std::ofstream& output, std::uint64_t& next_page_id,
+                         const bool encryption_enabled,
+                         crypto_sodium::PayloadCipher* index_cipher,
+                         const archive::EncodedBackupHeader& part_header,
+                         std::vector<BuiltIndexPage> level) {
+    if (level.empty()) {
+        return base::Result<IndexTreeRoot>::failure(
             error(base::ErrorCode::kInvalidArgument, "file archive requires at least one entry"));
     }
-    return base::Result<std::vector<std::vector<contracts::FileEntryDesc>>>::success(
-        std::move(pages));
+    std::uint64_t page_count = level.size();
+    // levels_above_leaves becomes the depth of every leaf (root depth = 0).
+    std::uint32_t levels_above_leaves = 0;
+    while (level.size() > 1) {
+        ++levels_above_leaves;
+        if (levels_above_leaves > index::kMaximumIndexDepth) {
+            return base::Result<IndexTreeRoot>::failure(
+                error(base::ErrorCode::kInvalidArgument, "file_backup.index_depth_limit"));
+        }
+        auto parents = write_internal_level(output, next_page_id, encryption_enabled, index_cipher,
+                                            part_header, level);
+        if (!parents) {
+            return base::Result<IndexTreeRoot>::failure(parents.error());
+        }
+        page_count += parents.value().size();
+        level = std::move(parents).value();
+    }
+    const auto& root = level.front();
+    IndexTreeRoot result;
+    result.root_page_id = root.page_id;
+    result.root_offset = root.file_offset;
+    result.root_content_digest = root.content_digest;
+    result.page_count = page_count;
+    return base::Result<IndexTreeRoot>::success(result);
 }
 
 } // namespace
@@ -348,38 +751,25 @@ struct PersonalFileArchiveSession::Impl final {
     std::unique_ptr<crypto_sodium::PayloadCipher> payload_cipher;
     std::unique_ptr<crypto_sodium::PayloadCipher> index_cipher;
     bool encryption_enabled{true};
+    format::BackupType backup_type{format::BackupType::kFull};
     archive::EncodedBackupHeader part_header{};
     std::array<std::byte, 16> file_uuid{};
+    std::array<std::byte, 16> parent_uuid{};
     std::uint32_t block_size{0};
     std::uint64_t next_chunk_index{0};
     std::uint64_t total_block_entries{0};
     std::uint64_t total_payload_size{0};
+    /// Local payload logical bytes written this layer (parent streams excluded).
     std::uint64_t logical_bytes{0};
     std::uint64_t entry_count{0};
     std::uint64_t stream_count{0};
+    std::uint64_t local_stream_count{0};
+    std::uint64_t parent_stream_count{0};
     std::uint64_t next_page_id{1};
+    /// Chunk locators for secondary Chunk Index (ADR-0019); filled by write_stream_chunk.
+    std::vector<index::ChunkIndexRecord> chunk_records;
     bool finalized{false};
     bool complete{false};
-
-    [[nodiscard]] base::Result<void> write_index_page(const archive::FileIndexPageHeader& header,
-                                                      const std::span<const std::byte> ciphertext) {
-        const auto body_size = ciphertext.size();
-        auto prefix = archive::encode_archive_record_prefix(
-            archive::make_file_index_page_record_prefix(body_size));
-        auto encoded_header = archive::encode_file_index_page_header(header);
-        if (!prefix || !encoded_header) {
-            return base::Result<void>::failure(!prefix ? prefix.error() : encoded_header.error());
-        }
-        auto written = write_bytes(output, prefix.value());
-        if (!written) {
-            return written;
-        }
-        written = write_bytes(output, encoded_header.value());
-        if (!written) {
-            return written;
-        }
-        return write_bytes(output, ciphertext);
-    }
 };
 
 PersonalFileArchiveSession::PersonalFileArchiveSession(
@@ -417,12 +807,19 @@ PersonalFileArchiveSession::create(const FileArchiveCreateRequest& request) {
     archive::BackupHeader logical_header;
     logical_header.file_uuid = request.file_uuid;
     logical_header.backup_set_uuid = request.backup_set_uuid;
+    logical_header.parent_uuid = request.parent_uuid;
     logical_header.block_size = request.block_size;
-    logical_header.flags = archive::kBackupFlagFull;
     logical_header.content_kind = archive::kContentKindFileSet;
     logical_header.capability_flags = archive::kCapabilityHasFileIndex;
     logical_header.default_chunk_size = request.chunk_size;
-    logical_header.compression_method = archive::CompressionMethod::kNone;
+    // Default method for file stream blocks (opportunistic zstd; RAW when no gain).
+    logical_header.compression_method = archive::CompressionMethod::kZstandard;
+    if (request.manifest.backup_job.backup_type == format::BackupType::kIncremental) {
+        logical_header.flags = archive::kBackupFlagIncremental;
+        logical_header.capability_flags |= archive::kCapabilityFileUsnBaseline;
+    } else {
+        logical_header.flags = archive::kBackupFlagFull;
+    }
     if (request.encryption_enabled) {
         logical_header.flags |= archive::kBackupFlagEncrypted;
         logical_header.encryption_method = archive::PayloadEncryptionMethod::kXChaCha20Poly1305;
@@ -434,6 +831,8 @@ PersonalFileArchiveSession::create(const FileArchiveCreateRequest& request) {
     implementation->partial = partial;
     implementation->spool_path = request.index_spool_directory / "index.spool";
     implementation->file_uuid = request.file_uuid;
+    implementation->parent_uuid = request.parent_uuid;
+    implementation->backup_type = request.manifest.backup_job.backup_type;
     implementation->block_size = request.block_size;
 
     archive::EncodedMetadataEnvelopeHeader encoded_envelope{};
@@ -554,6 +953,24 @@ PersonalFileArchiveSession::write_entry(const contracts::FileEntryDesc& entry,
         return base::Result<void>::failure(
             error(base::ErrorCode::kInvalidArgument, "file archive entry limit exceeded"));
     }
+    auto valid = contracts::validate_file_entry_desc(entry);
+    if (!valid) {
+        return valid;
+    }
+    std::uint64_t entry_parent_streams = 0;
+    std::uint64_t entry_local_streams = 0;
+    for (const auto& stream : entry.streams) {
+        if (stream.content_storage == contracts::FileContentStorage::kParent) {
+            if (implementation_->backup_type != format::BackupType::kIncremental) {
+                return base::Result<void>::failure(error(
+                    base::ErrorCode::kInvalidArgument,
+                    "full file archive cannot contain parent streams"));
+            }
+            ++entry_parent_streams;
+        } else {
+            ++entry_local_streams;
+        }
+    }
     auto encoded = index::encode_leaf_entry_cbor(entry);
     if (!encoded) {
         return base::Result<void>::failure(encoded.error());
@@ -577,55 +994,90 @@ PersonalFileArchiveSession::write_entry(const contracts::FileEntryDesc& entry,
     }
     ++implementation_->entry_count;
     implementation_->stream_count += entry.streams.size();
+    implementation_->parent_stream_count += entry_parent_streams;
+    implementation_->local_stream_count += entry_local_streams;
     return base::Result<void>::success();
 }
 
-base::Result<void>
+[[nodiscard]] base::Result<std::vector<std::byte>>
+store_file_block_payload(const std::span<const std::byte> logical, std::uint8_t& flags,
+                         std::uint32_t& stored_size) {
+    auto compressed = compression_zstd::compress(logical);
+    if (!compressed) {
+        return base::Result<std::vector<std::byte>>::failure(compressed.error());
+    }
+    if (compressed.value().size() < logical.size() &&
+        compressed.value().size() <= (std::numeric_limits<std::uint32_t>::max)()) {
+        flags = archive::kBlockFlagCompressed;
+        stored_size = static_cast<std::uint32_t>(compressed.value().size());
+        return base::Result<std::vector<std::byte>>::success(std::move(compressed).value());
+    }
+    if (logical.size() > (std::numeric_limits<std::uint32_t>::max)()) {
+        return base::Result<std::vector<std::byte>>::failure(
+            error(base::ErrorCode::kInvalidArgument, "file stream chunk exceeds format limit"));
+    }
+    flags = archive::kBlockFlagRaw;
+    stored_size = static_cast<std::uint32_t>(logical.size());
+    return base::Result<std::vector<std::byte>>::success(
+        std::vector<std::byte>(logical.begin(), logical.end()));
+}
+
+base::Result<std::uint64_t>
 PersonalFileArchiveSession::write_stream_chunk(const ports::FileChunkWriteRequest& request,
                                                const base::CancellationToken cancellation) {
     if (cancellation.stop_requested()) {
-        return base::Result<void>::failure(error(base::ErrorCode::kCancelled, "backup cancelled"));
+        return base::Result<std::uint64_t>::failure(
+            error(base::ErrorCode::kCancelled, "backup cancelled"));
     }
     if (!implementation_ || implementation_->complete || implementation_->finalized) {
-        return base::Result<void>::failure(
+        return base::Result<std::uint64_t>::failure(
             error(base::ErrorCode::kInvalidArgument, "file archive session is not writable"));
     }
     if (request.chunk_index != implementation_->next_chunk_index || request.stream_index == 0 ||
         request.logical_size == 0 || request.logical_size > implementation_->block_size ||
         request.payload.size() != request.logical_size) {
-        return base::Result<void>::failure(
+        return base::Result<std::uint64_t>::failure(
             error(base::ErrorCode::kInvalidArgument, "file stream chunk descriptor is invalid"));
     }
+    // Payload is always logical; opportunistic zstd (V7 §8). block_flags from caller ignored.
+    (void)request.block_flags;
+    std::uint8_t flags = archive::kBlockFlagRaw;
+    std::uint32_t stored_size = 0;
+    auto stored = store_file_block_payload(request.payload, flags, stored_size);
+    if (!stored) {
+        return base::Result<std::uint64_t>::failure(stored.error());
+    }
+
     archive::BlockEntry entry;
     entry.logical_block_index = request.logical_block_index;
     entry.data_offset_or_reference = 0;
-    entry.stored_size = request.logical_size;
+    entry.stored_size = stored_size;
     entry.logical_size = request.logical_size;
-    entry.flags = request.block_flags == 0 ? archive::kBlockFlagRaw : request.block_flags;
+    entry.flags = flags;
 
     archive::FileStreamChunkHeader header;
     header.chunk_index = request.chunk_index;
     header.source_type = archive::kSourceTypeFileStream;
     header.source_index = request.stream_index;
     header.block_entry_count = 1;
-    header.payload_size = request.payload.size();
+    header.payload_size = stored.value().size();
 
-    std::vector<std::byte> payload(request.payload.begin(), request.payload.end());
+    std::vector<std::byte> payload = std::move(stored).value();
     if (implementation_->encryption_enabled) {
         auto nonce = crypto_sodium::create_payload_nonce();
         if (!nonce) {
-            return base::Result<void>::failure(nonce.error());
+            return base::Result<std::uint64_t>::failure(nonce.error());
         }
         header.payload_nonce = nonce.value();
         const auto body_size = archive::kBlockEntrySize + payload.size();
         auto aad = make_file_chunk_aad(implementation_->part_header, body_size, header, {&entry, 1});
         if (!aad) {
-            return base::Result<void>::failure(aad.error());
+            return base::Result<std::uint64_t>::failure(aad.error());
         }
         auto protected_payload =
             implementation_->payload_cipher->protect(payload, aad.value(), nonce.value());
         if (!protected_payload) {
-            return base::Result<void>::failure(protected_payload.error());
+            return base::Result<std::uint64_t>::failure(protected_payload.error());
         }
         payload = std::move(protected_payload.value().ciphertext);
         header.payload_authentication_tag = protected_payload.value().tag;
@@ -633,7 +1085,7 @@ PersonalFileArchiveSession::write_stream_chunk(const ports::FileChunkWriteReques
     } else {
         auto nonce = crypto_sodium::create_payload_nonce();
         if (!nonce) {
-            return base::Result<void>::failure(nonce.error());
+            return base::Result<std::uint64_t>::failure(nonce.error());
         }
         header.payload_nonce = nonce.value();
     }
@@ -644,9 +1096,14 @@ PersonalFileArchiveSession::write_stream_chunk(const ports::FileChunkWriteReques
     auto encoded_header = archive::encode_file_stream_chunk_header(header);
     auto encoded_entry = archive::encode_block_entry(entry);
     if (!prefix || !encoded_header || !encoded_entry) {
-        return base::Result<void>::failure(!prefix           ? prefix.error()
-                                           : !encoded_header ? encoded_header.error()
-                                                             : encoded_entry.error());
+        return base::Result<std::uint64_t>::failure(!prefix           ? prefix.error()
+                                                    : !encoded_header ? encoded_header.error()
+                                                                      : encoded_entry.error());
+    }
+    const auto record_offset = implementation_->output.tellp();
+    if (record_offset < 0) {
+        return base::Result<std::uint64_t>::failure(
+            error(base::ErrorCode::kIoFailure, "failed to locate file stream chunk offset"));
     }
     for (const auto bytes : {std::span<const std::byte>(prefix.value()),
                              std::span<const std::byte>(encoded_header.value()),
@@ -654,14 +1111,23 @@ PersonalFileArchiveSession::write_stream_chunk(const ports::FileChunkWriteReques
                              std::span<const std::byte>(payload)}) {
         auto written = write_bytes(implementation_->output, bytes);
         if (!written) {
-            return written;
+            return base::Result<std::uint64_t>::failure(written.error());
         }
     }
+    index::ChunkIndexRecord chunk_rec;
+    chunk_rec.chunk_index = header.chunk_index;
+    chunk_rec.record_offset = static_cast<std::uint64_t>(record_offset);
+    chunk_rec.payload_offset = static_cast<std::uint64_t>(record_offset) +
+                               archive::kArchiveRecordPrefixSize +
+                               archive::kFileStreamChunkHeaderSize + archive::kBlockEntrySize;
+    chunk_rec.payload_size = payload.size();
+    chunk_rec.block_entry_count = 1;
+    implementation_->chunk_records.push_back(chunk_rec);
     ++implementation_->next_chunk_index;
     ++implementation_->total_block_entries;
     implementation_->total_payload_size += payload.size();
     implementation_->logical_bytes += request.logical_size;
-    return base::Result<void>::success();
+    return base::Result<std::uint64_t>::success(stored_size);
 }
 
 base::Result<void>
@@ -684,96 +1150,82 @@ PersonalFileArchiveSession::finalize(const base::CancellationToken cancellation)
         return base::Result<void>::failure(
             error(base::ErrorCode::kIoFailure, "failed to open index spool"));
     }
-    auto entries = load_spool_entries(spool_input, implementation_->entry_count);
-    if (!entries) {
-        return base::Result<void>::failure(entries.error());
+    // M5: compact sort keys + stream leaf write (no full FileEntryDesc table).
+    auto refs = scan_spool_entry_refs(spool_input, implementation_->entry_count,
+                                      implementation_->backup_type);
+    if (!refs) {
+        return base::Result<void>::failure(refs.error());
     }
-    auto leaf_groups = pack_leaf_pages(entries.value());
-    if (!leaf_groups) {
-        return base::Result<void>::failure(leaf_groups.error());
-    }
-    if (leaf_groups.value().size() > index::kMaximumInternalKeysPerPage + 1U) {
+    if (refs.value().size() != implementation_->entry_count) {
         return base::Result<void>::failure(
-            error(base::ErrorCode::kInvalidArgument, "file_backup.index_depth_limit"));
+            error(base::ErrorCode::kCorruptData, "index spool entry count mismatch"));
     }
-
-    std::vector<std::uint64_t> leaf_page_ids;
-    std::vector<index::IndexKey> leaf_first_keys;
-    std::array<std::byte, 32> first_leaf_digest{};
-    std::uint64_t first_leaf_offset = 0;
-    leaf_page_ids.reserve(leaf_groups.value().size());
-    leaf_first_keys.reserve(leaf_groups.value().size());
-    for (std::size_t leaf_index = 0; leaf_index < leaf_groups.value().size(); ++leaf_index) {
-        const auto& group = leaf_groups.value()[leaf_index];
-        auto first_key = index::make_index_key(group.front());
-        if (!first_key) {
-            return base::Result<void>::failure(first_key.error());
-        }
-        const auto page_id = implementation_->next_page_id++;
-        auto prepared = prepare_leaf_index_page(
-            group, page_id, implementation_->encryption_enabled,
-            implementation_->index_cipher.get(), implementation_->part_header);
-        if (!prepared) {
-            return base::Result<void>::failure(prepared.error());
-        }
-        const auto page_offset = implementation_->output.tellp();
-        if (page_offset < 0) {
-            return base::Result<void>::failure(
-                error(base::ErrorCode::kIoFailure, "failed to locate file index page offset"));
-        }
-        auto written =
-            implementation_->write_index_page(prepared.value().header, prepared.value().ciphertext);
-        if (!written) {
-            return written;
-        }
-        if (leaf_index == 0) {
-            first_leaf_offset = static_cast<std::uint64_t>(page_offset);
-            first_leaf_digest = prepared.value().header.content_digest;
-        }
-        leaf_page_ids.push_back(page_id);
-        leaf_first_keys.push_back(std::move(first_key).value());
+    auto namespace_write = write_leaves_from_sorted_spool(
+        implementation_->output, spool_input, implementation_->next_page_id,
+        implementation_->encryption_enabled, implementation_->index_cipher.get(),
+        implementation_->part_header, refs.value());
+    if (!namespace_write) {
+        return base::Result<void>::failure(namespace_write.error());
     }
-
-    std::uint64_t root_page_id = leaf_page_ids.front();
-    std::uint64_t root_offset = first_leaf_offset;
-    std::array<std::byte, 32> root_content_digest = first_leaf_digest;
-    std::uint64_t page_count = leaf_page_ids.size();
-    if (leaf_page_ids.size() > 1) {
-        index::InternalPageBody internal;
-        internal.children = leaf_page_ids;
-        internal.keys.reserve(leaf_first_keys.size() - 1);
-        for (std::size_t key_index = 1; key_index < leaf_first_keys.size(); ++key_index) {
-            internal.keys.push_back(leaf_first_keys[key_index]);
-        }
-        root_page_id = implementation_->next_page_id++;
-        auto prepared = prepare_internal_index_page(
-            internal, root_page_id, implementation_->encryption_enabled,
-            implementation_->index_cipher.get(), implementation_->part_header);
-        if (!prepared) {
-            return base::Result<void>::failure(prepared.error());
-        }
-        const auto page_offset = implementation_->output.tellp();
-        if (page_offset < 0) {
-            return base::Result<void>::failure(
-                error(base::ErrorCode::kIoFailure, "failed to locate file index root offset"));
-        }
-        auto written =
-            implementation_->write_index_page(prepared.value().header, prepared.value().ciphertext);
-        if (!written) {
-            return written;
-        }
-        root_offset = static_cast<std::uint64_t>(page_offset);
-        root_content_digest = prepared.value().header.content_digest;
-        ++page_count;
+    auto namespace_pages = std::move(namespace_write).value();
+    // Namespace B+tree (V7 §5.6 / L14).
+    auto tree = raise_index_tree_to_root(
+        implementation_->output, implementation_->next_page_id, implementation_->encryption_enabled,
+        implementation_->index_cipher.get(), implementation_->part_header,
+        std::move(namespace_pages.leaves));
+    if (!tree) {
+        return base::Result<void>::failure(tree.error());
     }
+    const auto root_page_id = tree.value().root_page_id;
+    const auto root_offset = tree.value().root_offset;
+    const auto root_content_digest = tree.value().root_content_digest;
+    std::uint64_t page_count = tree.value().page_count;
 
+    // page_count in digest preimage is 0: Footer only stores total index_page_count (all trees).
     auto preimage = index::make_index_root_digest_preimage(
-        root_page_id, page_count, implementation_->entry_count, implementation_->stream_count,
+        root_page_id, 0, implementation_->entry_count, implementation_->stream_count,
         root_content_digest);
     auto index_root_digest = crypto_sodium::sha256(preimage);
     if (!index_root_digest) {
         return base::Result<void>::failure(index_root_digest.error());
     }
+
+    // ADR-0019 secondary indexes: Entry ID → Stream → Chunk.
+    auto entry_tree = secondary_index::write_entry_id_index(
+        implementation_->output, implementation_->next_page_id, implementation_->encryption_enabled,
+        implementation_->index_cipher.get(), implementation_->part_header,
+        std::move(namespace_pages.entry_records));
+    if (!entry_tree) {
+        return base::Result<void>::failure(entry_tree.error());
+    }
+    page_count += entry_tree.value().page_count;
+
+    archive::IndexRootLocator stream_root{};
+    if (!namespace_pages.stream_records.empty()) {
+        auto stream_tree = secondary_index::write_stream_index(
+            implementation_->output, implementation_->next_page_id,
+            implementation_->encryption_enabled, implementation_->index_cipher.get(),
+            implementation_->part_header, std::move(namespace_pages.stream_records));
+        if (!stream_tree) {
+            return base::Result<void>::failure(stream_tree.error());
+        }
+        stream_root = stream_tree.value().locator;
+        page_count += stream_tree.value().page_count;
+    }
+
+    archive::IndexRootLocator chunk_root{};
+    if (!implementation_->chunk_records.empty()) {
+        auto chunk_tree = secondary_index::write_chunk_index(
+            implementation_->output, implementation_->next_page_id,
+            implementation_->encryption_enabled, implementation_->index_cipher.get(),
+            implementation_->part_header, std::move(implementation_->chunk_records));
+        if (!chunk_tree) {
+            return base::Result<void>::failure(chunk_tree.error());
+        }
+        chunk_root = chunk_tree.value().locator;
+        page_count += chunk_tree.value().page_count;
+    }
+
     const auto footer_offset = implementation_->output.tellp();
     if (footer_offset < 0) {
         return base::Result<void>::failure(
@@ -790,6 +1242,9 @@ PersonalFileArchiveSession::finalize(const base::CancellationToken cancellation)
     footer.index_root_offset = root_offset;
     footer.index_root_page_id = root_page_id;
     footer.index_root_digest = index_root_digest.value();
+    footer.entry_id_root = entry_tree.value().locator;
+    footer.stream_root = stream_root;
+    footer.chunk_root = chunk_root;
     footer.part_file_size =
         static_cast<std::uint64_t>(footer_offset) + archive::kBackupFooterSize;
     footer.stored_bytes = footer.part_file_size;

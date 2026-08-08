@@ -511,7 +511,8 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
         !object.value(QStringLiteral("repository_connection_id")).isString() ||
         !stable_code(object.value(QStringLiteral("repository_connection_id")).toString(), 128) ||
         !integer_in_range(object.value(QStringLiteral("backup_type")), 1, 3, backup_type) ||
-        (content_kind == 2 && backup_type != 1) ||
+        // file_set schedules: Full (1) or Incremental (2) only — never Differential.
+        (content_kind == 2 && backup_type != 1 && backup_type != 2) ||
         !object.value(QStringLiteral("trigger")).isObject() ||
         !object.value(QStringLiteral("exclude_page_and_hibernation_files")).isBool() ||
         !object.value(QStringLiteral("encryption_enabled")).isBool()) {
@@ -618,8 +619,10 @@ bool parse_schedule_list_response(const QJsonObject& root, SchedulePage& result)
     if (!has_exact_keys(payload, {"items", "continuation_token"})) {
         return false;
     }
+    // Service lists schedules by created_utc_ms DESC (then schedule_id ASC within a
+    // timestamp), not by schedule_id globally — only reject duplicates.
     return parse_paged_items(payload.value(QStringLiteral("items")), kSchedulePageSize,
-                             parse_schedule_item, "scheduleId", true, result.items) &&
+                             parse_schedule_item, "scheduleId", false, result.items) &&
            parse_token(payload.value(QStringLiteral("continuation_token")),
                        result.continuation_token);
 }
@@ -823,6 +826,40 @@ bool is_command_failure_response(const QJsonObject& root, const int expected_req
                             expected_request_kind, request_kind) &&
            integer_in_range(root.value(QStringLiteral("boundary_error_code")), 1, 11, error) &&
            root.value(QStringLiteral("payload")).isNull();
+}
+
+QByteArray encode_plan_delete_recovery_points_request(const QString& request_id,
+                                                      const QString& connection_id,
+                                                      const QString& recovery_point_id,
+                                                      const QString& archive_password) {
+    const QJsonObject payload{{QStringLiteral("repository_connection_id"), connection_id},
+                              {QStringLiteral("recovery_point_id"), recovery_point_id},
+                              {QStringLiteral("archive_password"), archive_password}};
+    return QJsonDocument(
+               QJsonObject{
+                   {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
+                   {QStringLiteral("message_type"), 1},
+                   {QStringLiteral("request_id"), request_id},
+                   {QStringLiteral("kind"), kPlanDeleteRecoveryPointsRequestKind},
+                   {QStringLiteral("idempotency_key"), QJsonValue(QJsonValue::Null)},
+                   {QStringLiteral("payload"), payload}})
+        .toJson(QJsonDocument::Compact);
+}
+
+QByteArray encode_execute_delete_plan_request(const QString& request_id,
+                                              const QString& idempotency_key,
+                                              const QString& plan_token, const bool confirmed) {
+    const QJsonObject payload{{QStringLiteral("plan_token"), plan_token},
+                              {QStringLiteral("confirmed"), confirmed}};
+    return QJsonDocument(
+               QJsonObject{
+                   {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
+                   {QStringLiteral("message_type"), 1},
+                   {QStringLiteral("request_id"), request_id},
+                   {QStringLiteral("kind"), kExecuteDeletePlanRequestKind},
+                   {QStringLiteral("idempotency_key"), idempotency_key},
+                   {QStringLiteral("payload"), payload}})
+        .toJson(QJsonDocument::Compact);
 }
 
 } // namespace aegra::desktop

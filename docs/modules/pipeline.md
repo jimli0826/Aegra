@@ -69,10 +69,17 @@ IFileSnapshotView -> FileSetBackupPipeline -> IFileBackupSession (finalize/commi
 IFileRecoveryPointReader -> FileSetRestorePipeline -> IFileTreeSink
 ```
 
-- 备份：分页枚举 → 计划 stream/hard-link → 按 block 读内容写 chunk → 写 entry spool → finalize/commit。
-  Adapter 在 entry 上填充 `platform_metadata`（含 security）；Pipeline 原样写入 index。
-- 恢复：选择闭包（目录 seed 展开全部可达后代 + 路径祖先）→ capability 预检 → 按深度建目录骨架 →
-  文件 staging/publish → reparse → 目录 metadata。`entry_ids` 是 seed，不是最终写出集合。
+- 备份：分页枚举 → change planner（FI3）→ 仅 local stream 按 block 读内容写 chunk → 写完整 tip
+  entry Index → finalize/commit。Adapter 在 entry 上填充 `platform_metadata`（含 security）；
+  Pipeline 原样写入 index。
+  - **Full**：全部主数据流 `content_storage=local`。
+  - **Incremental**（`effective_type=incremental` + parent reader + parent checkpoints）：从 snapshot
+    读取 USN hints，构建有界 parent identity 索引（紧凑排序向量，非全量 `FileEntryDesc` map），
+    按分类表决定 local 整文件或 direct-parent stream；歧义永远 local；tip Index 仍是完整当前树。
+- 恢复：只依赖 `IFileRecoveryPointReader`（composition 注入 chain reader）；选择闭包（目录 seed
+  展开全部可达后代 + 路径祖先）→ capability 预检 → 按深度建目录骨架 → 文件 staging/publish →
+  目录 metadata。`entry_ids` 是 seed，不是最终写出集合。parent stream 由 reader 解析，Pipeline
+  不感知链层。
   文件/目录始终应用时间戳与属性；仅当 `FileSetRestorePlan.restore_security=true` 时向 Sink
   传递 `platform_metadata` 中的 security descriptor。
   祖先遍历与 `path_for_entry` 带 visited/depth 上限，环或超深返回 `format.corrupt_index`。
@@ -89,6 +96,9 @@ IFileRecoveryPointReader -> FileSetRestorePipeline -> IFileTreeSink
 阶段 6 的个人增量实现仍复用同一 Backup Pipeline 读取完整源，由 Archive Session 在 Adapter 内形成稀疏变化层；恢复侧由 Chain Reader 先合并为连续视图，再交给原 Restore Pipeline。Pipeline 不知道父 UUID、Sidecar 或个人备份链。
 
 F3 已实现 `FileSetBackupPipeline` / `FileSetRestorePipeline`。背压队列的 producer/consumer 线程模型与
+file_set Backup Pipeline 向 Session 提交**逻辑** stream block；压缩（zstd）在
+`IFileBackupSession` 适配器内完成，Pipeline 用返回的 stored 字节累计进度，不依赖具体压缩库。
+
 百万级 multi-leaf 优化在 F5 纵向切片继续加强；当前实现为可取消的顺序数据面。F10 将 file_set 首版
 Pipeline 路径纳入发布门禁（与 volume Pipeline 并存；无兼容分支）。
 

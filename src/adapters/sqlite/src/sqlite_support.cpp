@@ -451,6 +451,8 @@ base::Result<void> validate_job_record(const ports::JobRecord& record) {
          !valid_stable_value(*record.idempotency_key, kMaximumIdentifierBytes)) ||
         (record.result_message_code &&
          !valid_stable_value(*record.result_message_code, kMaximumMessageCodeBytes)) ||
+        (record.result_effective_parent_uuid &&
+         !valid_stable_value(*record.result_effective_parent_uuid, kMaximumIdentifierBytes)) ||
         record.request_fingerprint.size() > kMaximumCommandFingerprintBytes) {
         return invalid("job record is invalid");
     }
@@ -493,7 +495,8 @@ base::Result<void> validate_schedule_record(const ports::ScheduleRecord& record)
     } else {
         if (!record.source_ids.empty() || record.file_selections.empty() ||
             record.file_selections.size() > contracts::kMaximumFileSelections ||
-            record.backup_type != contracts::BackupType::kFull) {
+            (record.backup_type != contracts::BackupType::kFull &&
+             record.backup_type != contracts::BackupType::kIncremental)) {
             return invalid("file schedule sources are invalid");
         }
         auto refs = contracts::validate_file_source_refs(record.file_selections);
@@ -711,6 +714,19 @@ base::Result<ports::JobRecord> read_job(sqlite3_stmt* const stmt) {
         record.exclude_page_and_hibernation_files = sqlite3_column_int(stmt, 19) != 0;
     }
     record.request_fingerprint = column_text_required(stmt, 20);
+    if (sqlite3_column_type(stmt, 21) != SQLITE_NULL) {
+        record.result_requested_backup_type =
+            static_cast<std::uint8_t>(sqlite3_column_int64(stmt, 21));
+    }
+    if (sqlite3_column_type(stmt, 22) != SQLITE_NULL) {
+        record.result_effective_backup_type =
+            static_cast<std::uint8_t>(sqlite3_column_int64(stmt, 22));
+    }
+    record.result_effective_parent_uuid = column_text_optional(stmt, 23);
+    if (sqlite3_column_type(stmt, 24) != SQLITE_NULL) {
+        record.result_incremental_downgrade_reason =
+            static_cast<std::uint8_t>(sqlite3_column_int64(stmt, 24));
+    }
     auto valid = validate_job_record(record);
     if (!valid) {
         return base::Result<ports::JobRecord>::failure(valid.error());
@@ -851,6 +867,14 @@ contracts::JobSummary to_job_summary(const ports::JobRecord& record) {
     summary.message_code = record.message_code;
     summary.source_ids = record.source_ids;
     summary.repository_connection_id = record.repository_connection_id;
+    if (record.backup_type) {
+        summary.requested_backup_type = static_cast<std::uint8_t>(*record.backup_type);
+    } else if (record.result_requested_backup_type) {
+        summary.requested_backup_type = *record.result_requested_backup_type;
+    }
+    summary.effective_backup_type = record.result_effective_backup_type;
+    summary.effective_parent_uuid = record.result_effective_parent_uuid;
+    summary.incremental_downgrade_reason = record.result_incremental_downgrade_reason;
     return summary;
 }
 
@@ -990,8 +1014,8 @@ replace_schedule_file_selections(sqlite3* const db, const std::string_view sched
     auto insert = SqliteStatement::prepare(
         db,
         "INSERT INTO schedule_file_selections(schedule_id, ordinal, selection_id, volume_identity, "
-        "relative_path_blob, entry_kind, recursion, reparse_policy, unreadable_policy, "
-        "display_label) VALUES(?,?,?,?,?,?,?,?,?,?)");
+        "relative_path_blob, entry_kind, recursion, unreadable_policy, display_label) "
+        "VALUES(?,?,?,?,?,?,?,?,?)");
     if (!insert) {
         return base::Result<void>::failure(insert.error());
     }
@@ -1025,17 +1049,12 @@ replace_schedule_file_selections(sqlite3* const db, const std::string_view sched
             !bound) {
             return bound;
         }
-        if (auto bound =
-                insert.value().bind_int64(8, static_cast<std::int64_t>(selection.reparse_policy));
-            !bound) {
-            return bound;
-        }
         if (auto bound = insert.value().bind_int64(
-                9, static_cast<std::int64_t>(selection.unreadable_policy));
+                8, static_cast<std::int64_t>(selection.unreadable_policy));
             !bound) {
             return bound;
         }
-        if (auto bound = insert.value().bind_text(10, selection.display_label); !bound) {
+        if (auto bound = insert.value().bind_text(9, selection.display_label); !bound) {
             return bound;
         }
         if (auto stepped = insert.value().step(); !stepped) {
@@ -1050,7 +1069,7 @@ load_schedule_file_selections(sqlite3* const db, const std::string_view schedule
     auto statement = SqliteStatement::prepare(
         db,
         "SELECT selection_id, volume_identity, relative_path_blob, entry_kind, recursion, "
-        "reparse_policy, unreadable_policy, display_label FROM schedule_file_selections "
+        "unreadable_policy, display_label FROM schedule_file_selections "
         "WHERE schedule_id = ? ORDER BY ordinal ASC");
     if (!statement) {
         return base::Result<std::vector<contracts::FileSourceRef>>::failure(statement.error());
@@ -1079,11 +1098,9 @@ load_schedule_file_selections(sqlite3* const db, const std::string_view schedule
             static_cast<contracts::FileEntryKind>(sqlite3_column_int(statement.value().get(), 3));
         ref.recursion =
             static_cast<contracts::FileRecursion>(sqlite3_column_int(statement.value().get(), 4));
-        ref.reparse_policy =
-            static_cast<contracts::FileReparsePolicy>(sqlite3_column_int(statement.value().get(), 5));
         ref.unreadable_policy = static_cast<contracts::FileUnreadablePolicy>(
-            sqlite3_column_int(statement.value().get(), 6));
-        ref.display_label = column_text_required(statement.value().get(), 7);
+            sqlite3_column_int(statement.value().get(), 5));
+        ref.display_label = column_text_required(statement.value().get(), 6);
         selections.push_back(std::move(ref));
     }
     return base::Result<std::vector<contracts::FileSourceRef>>::success(std::move(selections));

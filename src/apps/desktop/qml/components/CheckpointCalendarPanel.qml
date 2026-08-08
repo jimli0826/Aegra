@@ -125,6 +125,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
+        radius: Theme.radiusWindow
         color: Theme.colorScrim
         opacity: root.open ? 1 : 0
         visible: opacity > 0.01
@@ -138,10 +139,15 @@ Item {
     Rectangle {
         id: panel
         width: Math.max(320, parent.width * 0.5)
-        height: parent.height
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.topMargin: 60
+        anchors.bottomMargin: 0
         property real slideProgress: root.open ? 0 : 1
         x: parent.width - width + slideProgress * width
         color: Theme.colorBg
+        radius: 16
+        clip: true
         border.width: 1
         border.color: Theme.colorBorder
         Behavior on slideProgress {
@@ -157,20 +163,6 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 28
                 spacing: 8
-                Rectangle {
-                    width: 3
-                    height: 18
-                    color: Theme.colorAccentBlue
-                    Layout.alignment: Qt.AlignVCenter
-                }
-                Text {
-                    //% "Select checkpoint"
-                    text: qsTrId("aegra.restore.select_checkpoint_title")
-                    color: Theme.colorTextWhite
-                    font.pixelSize: 16
-                    font.bold: true
-                    font.family: Theme.fontFamily
-                }
                 Item { Layout.fillWidth: true }
                 Button {
                     Layout.preferredWidth: 32
@@ -198,8 +190,6 @@ Item {
                 Layout.minimumHeight: 260
                 color: Theme.colorCard
                 radius: 4
-                border.width: 1
-                border.color: Theme.colorBorder
 
                 ColumnLayout {
                     anchors.fill: parent
@@ -370,8 +360,6 @@ Item {
                 Layout.minimumHeight: 120
                 color: Theme.colorCard
                 radius: 4
-                border.width: 1
-                border.color: Theme.colorBorder
 
                 ColumnLayout {
                     anchors.fill: parent

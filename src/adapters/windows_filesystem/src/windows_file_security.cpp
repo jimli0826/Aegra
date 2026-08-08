@@ -1,6 +1,7 @@
 #include "windows_file_security.h"
 
 #include "windows_file_handle.h"
+#include "windows_file_names.h"
 
 #include "aegra/base/error.h"
 
@@ -19,7 +20,12 @@ constexpr SECURITY_INFORMATION kFullSecurityInformation =
     SACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION |
     PROTECTED_SACL_SECURITY_INFORMATION;
 
-[[nodiscard]] base::Result<void> enable_one_privilege(const wchar_t* privilege_name) {
+constexpr SECURITY_INFORMATION kReadSecurityInformation =
+    OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION |
+    SACL_SECURITY_INFORMATION;
+
+[[nodiscard]] base::Result<void> enable_one_privilege(const wchar_t* privilege_name,
+                                                      const std::string& operation) {
     HANDLE token = nullptr;
     if (OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &token) ==
         FALSE) {
@@ -28,7 +34,8 @@ constexpr SECURITY_INFORMATION kFullSecurityInformation =
     UniqueHandle token_owner(token);
     LUID luid{};
     if (LookupPrivilegeValueW(nullptr, privilege_name, &luid) == FALSE) {
-        return base::Result<void>::failure(win32_error(GetLastError(), "LookupPrivilegeValueW"));
+        return base::Result<void>::failure(
+            win32_error(GetLastError(), "LookupPrivilegeValueW(" + operation + ")"));
     }
     TOKEN_PRIVILEGES privileges{};
     privileges.PrivilegeCount = 1;
@@ -37,20 +44,30 @@ constexpr SECURITY_INFORMATION kFullSecurityInformation =
     SetLastError(ERROR_SUCCESS);
     if (AdjustTokenPrivileges(token_owner.get(), FALSE, &privileges, sizeof(privileges), nullptr,
                               nullptr) == FALSE) {
-        return base::Result<void>::failure(win32_error(GetLastError(), "AdjustTokenPrivileges"));
+        return base::Result<void>::failure(
+            win32_error(GetLastError(), "AdjustTokenPrivileges(" + operation + ")"));
     }
     // AdjustTokenPrivileges can return TRUE with ERROR_NOT_ALL_ASSIGNED when the privilege
-    // is missing from the token; treat that as soft failure (caller fails on SD read).
+    // is missing from the token.
     const auto status = GetLastError();
-    if (status != ERROR_SUCCESS && status != ERROR_NOT_ALL_ASSIGNED) {
-        return base::Result<void>::failure(win32_error(status, "AdjustTokenPrivileges"));
+    if (status != ERROR_SUCCESS) {
+        return base::Result<void>::failure(
+            win32_error(status, "AdjustTokenPrivileges(" + operation + ")"));
     }
     return base::Result<void>::success();
 }
 
 [[nodiscard]] base::Error security_unreadable(const DWORD error, std::string operation) {
     auto err = win32_error(error, std::move(operation));
-    err.message = "file_source.security_descriptor_unreadable";
+    err.message.insert(0, "file_source.security_descriptor_unreadable: ");
+    if (err.code != base::ErrorCode::kCancelled) {
+        err.code = base::ErrorCode::kUnauthorized;
+    }
+    return err;
+}
+
+[[nodiscard]] base::Error security_unreadable(base::Error err) {
+    err.message.insert(0, "file_source.security_descriptor_unreadable: ");
     if (err.code != base::ErrorCode::kCancelled) {
         err.code = base::ErrorCode::kUnauthorized;
     }
@@ -59,13 +76,24 @@ constexpr SECURITY_INFORMATION kFullSecurityInformation =
 
 } // namespace
 
-base::Result<void> enable_file_security_privileges() {
-    // Best-effort: enable all three; do not fail the job if one is missing from the token.
-    // Use wide literals (project builds without UNICODE macro for TCHAR macros).
-    (void)enable_one_privilege(L"SeBackupPrivilege");
-    (void)enable_one_privilege(L"SeRestorePrivilege");
-    (void)enable_one_privilege(L"SeSecurityPrivilege");
+base::Result<void> enable_file_backup_privileges() {
+    auto backup = enable_one_privilege(L"SeBackupPrivilege", "SeBackupPrivilege");
+    if (!backup) {
+        return base::Result<void>::failure(security_unreadable(backup.error()));
+    }
+    auto security = enable_one_privilege(L"SeSecurityPrivilege", "SeSecurityPrivilege");
+    if (!security) {
+        return base::Result<void>::failure(security_unreadable(security.error()));
+    }
     return base::Result<void>::success();
+}
+
+base::Result<void> enable_file_restore_privileges() {
+    auto restore = enable_one_privilege(L"SeRestorePrivilege", "SeRestorePrivilege");
+    if (!restore) {
+        return restore;
+    }
+    return enable_one_privilege(L"SeSecurityPrivilege", "SeSecurityPrivilege");
 }
 
 base::Result<std::vector<std::byte>>
@@ -74,12 +102,19 @@ read_self_relative_security_descriptor(const std::wstring& absolute_path) {
         return base::Result<std::vector<std::byte>>::failure(
             {base::ErrorCode::kInvalidArgument, "file_source.security_descriptor_unreadable"});
     }
+    auto handle = open_path(to_utf16_vector(absolute_path), READ_CONTROL | ACCESS_SYSTEM_SECURITY,
+                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, OPEN_EXISTING,
+                            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
+    if (!handle) {
+        return base::Result<std::vector<std::byte>>::failure(
+            security_unreadable(handle.error()));
+    }
     DWORD needed = 0;
-    if (GetFileSecurityW(absolute_path.c_str(), kFullSecurityInformation, nullptr, 0, &needed) !=
-            FALSE ||
+    if (GetKernelObjectSecurity(handle.value().get(), kReadSecurityInformation, nullptr, 0,
+                                &needed) != FALSE ||
         GetLastError() != ERROR_INSUFFICIENT_BUFFER || needed == 0) {
         return base::Result<std::vector<std::byte>>::failure(
-            security_unreadable(GetLastError(), "GetFileSecurityW(size)"));
+            security_unreadable(GetLastError(), "GetKernelObjectSecurity(size)"));
     }
     if (needed > 64U * 1024U) {
         return base::Result<std::vector<std::byte>>::failure(
@@ -87,12 +122,11 @@ read_self_relative_security_descriptor(const std::wstring& absolute_path) {
     }
     std::vector<std::byte> buffer(needed);
     DWORD written = 0;
-    if (GetFileSecurityW(absolute_path.c_str(), kFullSecurityInformation,
-                         reinterpret_cast<PSECURITY_DESCRIPTOR>(buffer.data()), needed,
-                         &written) == FALSE ||
-        written == 0 || written > needed) {
+    if (GetKernelObjectSecurity(handle.value().get(), kReadSecurityInformation,
+                                reinterpret_cast<PSECURITY_DESCRIPTOR>(buffer.data()), needed,
+                                &written) == FALSE || written == 0 || written > needed) {
         return base::Result<std::vector<std::byte>>::failure(
-            security_unreadable(GetLastError(), "GetFileSecurityW"));
+            security_unreadable(GetLastError(), "GetKernelObjectSecurity"));
     }
     buffer.resize(written);
     auto* sd = reinterpret_cast<PSECURITY_DESCRIPTOR>(buffer.data());

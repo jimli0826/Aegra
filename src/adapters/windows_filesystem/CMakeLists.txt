@@ -5,6 +5,7 @@ add_library(aegra_adapter_windows_filesystem STATIC
     src/windows_file_snapshot_view.cpp
     src/windows_file_tree_sink.cpp
     src/windows_file_source_browser.cpp
+    src/windows_usn_journal.cpp
 )
 
 add_library(Aegra::AdapterWindowsFilesystem ALIAS aegra_adapter_windows_filesystem)

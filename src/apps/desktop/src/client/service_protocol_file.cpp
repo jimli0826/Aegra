@@ -182,8 +182,7 @@ QByteArray encode_prepare_file_restore_request(const QString& request_id,
                                                const QString& target_node_token,
                                                const int conflict_policy,
                                                const QString& archive_secret_ref,
-                                               const bool restore_security,
-                                               const bool restore_ads) {
+                                               const bool restore_security) {
     QJsonArray entries;
     for (const auto& entry_id : entry_ids) {
         entries.push_back(entry_id);
@@ -199,8 +198,7 @@ QByteArray encode_prepare_file_restore_request(const QString& request_id,
         {QStringLiteral("archive_secret_ref"),
          archive_secret_ref.isEmpty() ? QJsonValue(QJsonValue::Null)
                                       : QJsonValue(archive_secret_ref)},
-        {QStringLiteral("restore_security"), restore_security},
-        {QStringLiteral("restore_ads"), restore_ads}};
+        {QStringLiteral("restore_security"), restore_security}};
     return QJsonDocument(
                QJsonObject{
                    {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
@@ -250,9 +248,7 @@ QByteArray encode_upsert_file_set_schedule_request(
     }
     const QJsonObject file_set{
         {QStringLiteral("selections"), selections},
-        {QStringLiteral("options"),
-         QJsonObject{{QStringLiteral("reparse_policy"), 1},
-                     {QStringLiteral("unreadable_policy"), 1}}}};
+        {QStringLiteral("options"), QJsonObject{{QStringLiteral("unreadable_policy"), 1}}}};
     const QJsonObject protection{{QStringLiteral("content_kind"), 2},
                                  {QStringLiteral("volume_set"), QJsonValue(QJsonValue::Null)},
                                  {QStringLiteral("file_set"), file_set}};

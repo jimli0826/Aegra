@@ -1,5 +1,6 @@
 #pragma once
 
+#include "aegra/base/cancellation.h"
 #include "aegra/base/result.h"
 #include "aegra/contracts/file_set.h"
 #include "aegra/ports/file_browser.h"
@@ -28,6 +29,13 @@ struct WindowsFileSnapshotOpenRequest final {
     std::vector<SnapshotVolumeBinding> volumes;
 };
 
+/// Ensures an NTFS change journal exists before VSS snapshot creation.
+/// Returns true when this call created it, false when it was already active.
+/// This operation never supplies baseline state; queries and reads remain snapshot-bound.
+[[nodiscard]] base::Result<bool>
+ensure_file_change_journal_active(const std::vector<std::uint16_t>& live_volume_root_utf16,
+                  base::CancellationToken cancellation);
+
 /// Snapshot-bound file tree source implementing IFileSnapshotView.
 class WindowsFileSnapshotView final : public ports::IFileSnapshotView {
   public:
@@ -48,6 +56,15 @@ class WindowsFileSnapshotView final : public ports::IFileSnapshotView {
     open_stream_reader(std::uint64_t entry_id, std::uint32_t stream_index,
                        base::CancellationToken cancellation) override;
 
+    [[nodiscard]] base::Result<contracts::FileJournalState>
+    query_journal_state(const std::string& volume_identity,
+                        base::CancellationToken cancellation) override;
+
+    [[nodiscard]] base::Result<contracts::FileChangeBatch>
+    read_change_batch(const std::string& volume_identity, std::int64_t start_usn,
+                      std::int64_t end_usn, std::uint32_t maximum_hints,
+                      base::CancellationToken cancellation) override;
+
   private:
     struct Impl;
     explicit WindowsFileSnapshotView(std::unique_ptr<Impl> implementation) noexcept;
@@ -60,8 +77,7 @@ struct WindowsFileTreeSinkOpenRequest final {
 };
 
 /// Restore sink for a Windows NTFS/ReFS target root.
-/// capabilities() advertises reparse/hard_link/sparse/ADS as true for Port shape;
-/// full restore of those four is deferred this period (security descriptor is in scope).
+/// FI0 capabilities: security descriptors + free space only (no reparse/hard-link/sparse/ADS).
 class WindowsFileTreeSink final : public ports::IFileTreeSink {
   public:
     ~WindowsFileTreeSink() override;
@@ -83,16 +99,6 @@ class WindowsFileTreeSink final : public ports::IFileTreeSink {
     [[nodiscard]] base::Result<std::unique_ptr<ports::IStagedFileWriter>>
     begin_file(const std::vector<contracts::EncodedName>& relative_components,
                std::uint64_t logical_size, base::CancellationToken cancellation) override;
-
-    [[nodiscard]] base::Result<void>
-    create_hard_link(const std::vector<contracts::EncodedName>& existing_components,
-                     const std::vector<contracts::EncodedName>& new_components,
-                     base::CancellationToken cancellation) override;
-
-    [[nodiscard]] base::Result<void>
-    create_reparse(const std::vector<contracts::EncodedName>& relative_components,
-                   const contracts::FileEntryDesc& entry,
-                   base::CancellationToken cancellation) override;
 
     [[nodiscard]] base::Result<void>
     apply_directory_metadata(const std::vector<contracts::EncodedName>& relative_components,

@@ -3,6 +3,7 @@
 #include "windows_file_set_backup.h"
 #include "worker_task_log.h"
 
+#include "aegra/adapters/personal_archive/personal_archive.h"
 #include "aegra/base/error.h"
 #include "aegra/base/uuid.h"
 #include "aegra/contracts/file_set.h"
@@ -57,8 +58,9 @@ base::Result<void> validate_task(const contracts::JobRequest& job,
         job.operation != contracts::JobOperation::kBackup) {
         return invalid("file_set backup task requires content_kind=file_set and backup operation");
     }
-    if (!job.backup || job.backup->type != contracts::BackupType::kFull) {
-        return invalid("file_set backup task supports only full backup type");
+    if (!job.backup || (job.backup->type != contracts::BackupType::kFull &&
+                        job.backup->type != contracts::BackupType::kIncremental)) {
+        return invalid("file_set backup task requires full or incremental type");
     }
     if (options.block_size_bytes == 0 || options.chunk_size_bytes < options.block_size_bytes ||
         options.memory_budget_bytes < options.chunk_size_bytes) {
@@ -106,7 +108,12 @@ contracts::TaskResult failed_result(const contracts::JobRequest& job, const base
     result.outcome = code == base::ErrorCode::kCancelled ? contracts::TaskOutcome::kCancelled
                                                          : contracts::TaskOutcome::kFailed;
     result.error_code = code;
-    if (detail != nullptr && is_product_message_code(detail->message)) {
+    if (detail != nullptr && detail->message.starts_with("file_source.unreadable:")) {
+        result.message_code = "file_source.unreadable";
+    } else if (detail != nullptr &&
+               detail->message.starts_with("file_source.security_descriptor_unreadable:")) {
+        result.message_code = "file_source.security_descriptor_unreadable";
+    } else if (detail != nullptr && is_product_message_code(detail->message)) {
         result.message_code = detail->message;
     } else {
         result.message_code = message_code_for(code);
@@ -131,6 +138,15 @@ contracts::TaskResult completed_result(const contracts::JobRequest& job,
     result.message_code = has_warning ? "backup.completed_with_warning" : "backup.completed";
     if (has_warning) {
         result.warning_codes.emplace_back("backup.snapshot_cleanup_failed");
+    }
+    result.requested_backup_type = static_cast<std::uint8_t>(job.backup->type);
+    result.effective_backup_type = static_cast<std::uint8_t>(backup.effective_type);
+    if (backup.effective_type == contracts::BackupType::kIncremental &&
+        !backup.effective_parent_uuid.empty()) {
+        result.effective_parent_uuid = backup.effective_parent_uuid;
+    }
+    if (backup.incremental_downgrade_reason) {
+        result.incremental_downgrade_reason = backup.incremental_downgrade_reason;
     }
     return result;
 }
@@ -276,6 +292,16 @@ WindowsFileSetBackupRequest make_backup_request(const contracts::JobRequest& job
     request.encryption_enabled = secrets.encryption_enabled;
     request.file_uuid = ids.first;
     request.backup_set_uuid = ids.second;
+    request.requested_type = job.backup->type;
+    // Service demotion keeps type=Incremental with service_full_reason; Worker writes Full.
+    if (job.backup->service_full_reason) {
+        request.effective_type = contracts::BackupType::kFull;
+        request.service_full_reason = job.backup->service_full_reason;
+    } else if (job.backup->type == contracts::BackupType::kIncremental) {
+        request.effective_type = contracts::BackupType::kIncremental;
+    } else {
+        request.effective_type = contracts::BackupType::kFull;
+    }
     // File index leaf pages are capped at 1 MiB plain. Each stream extent maps to one
     // block-sized write; a 64 KiB volume-style quantum inflates leaf CBOR past the budget
     // after only a few hundred MiB of payload. Use the Worker chunk size (clamped to the
@@ -305,8 +331,50 @@ WindowsFileSetBackupRequest make_backup_request(const contracts::JobRequest& job
     return request;
 }
 
+[[nodiscard]] base::Result<std::unique_ptr<adapters::personal_archive::PersonalFileArchiveReader>>
+open_parent_archive(const contracts::BackupOptions& options, const std::string_view password,
+                    const std::size_t memory_budget_bytes) {
+    adapters::personal_archive::ArchiveOpenRequest open_request;
+    open_request.source = path_from_utf8(options.parent_source_ref);
+    open_request.password = password;
+    open_request.maximum_chunk_payload_size = memory_budget_bytes;
+    open_request.maximum_chunk_logical_size = memory_budget_bytes;
+    auto reader = adapters::personal_archive::PersonalFileArchiveReader::open(open_request);
+    if (!reader) {
+        // Parent credential/open failures are hard failures — never silent Full.
+        return base::Result<std::unique_ptr<adapters::personal_archive::PersonalFileArchiveReader>>::
+            failure(reader.error().code == base::ErrorCode::kUnauthorized
+                        ? base::Error{base::ErrorCode::kUnauthorized, "parent archive credential failed"}
+                        : reader.error());
+    }
+    auto expected = base::parse_uuid(options.candidate_parent_uuid);
+    if (!expected) {
+        return base::Result<std::unique_ptr<adapters::personal_archive::PersonalFileArchiveReader>>::
+            failure(expected.error());
+    }
+    if (reader.value()->identity().file_uuid != expected.value()) {
+        return base::Result<std::unique_ptr<adapters::personal_archive::PersonalFileArchiveReader>>::
+            failure(base::Error{base::ErrorCode::kConflict,
+                                "parent archive identity does not match candidate_parent_uuid"});
+    }
+    auto set = base::parse_uuid(options.backup_set_uuid);
+    if (!set) {
+        return base::Result<std::unique_ptr<adapters::personal_archive::PersonalFileArchiveReader>>::
+            failure(set.error());
+    }
+    if (reader.value()->identity().backup_set_uuid != set.value()) {
+        return base::Result<std::unique_ptr<adapters::personal_archive::PersonalFileArchiveReader>>::
+            failure(base::Error{base::ErrorCode::kConflict,
+                                "parent archive backup set does not match schedule"});
+    }
+    return reader;
+}
+
 [[nodiscard]] std::string_view backup_hint_for(const base::ErrorCode code,
                                                const std::string_view message) noexcept {
+    if (message.starts_with("file_source.")) {
+        return "Check source access permissions and retry the backup";
+    }
     if (message.find("VSS") != std::string_view::npos) {
         return "Check VSS service health and that volumes support snapshots";
     }
@@ -336,7 +404,15 @@ void log_backup_request(WorkerTaskLog* log, const contracts::JobRequest& job) {
     log->field("job_id", job.job_id);
     log->field("trace_id", job.trace_id);
     log->field("content_kind", "file_set");
-    log->field("backup_type", "full");
+    log->field("requested_backup_type",
+               job.backup->type == contracts::BackupType::kIncremental ? "incremental" : "full");
+    if (job.backup->service_full_reason) {
+        log->field_u64("service_full_reason",
+                       static_cast<std::uint64_t>(*job.backup->service_full_reason));
+    }
+    if (!job.backup->candidate_parent_uuid.empty()) {
+        log->field("candidate_parent_uuid", job.backup->candidate_parent_uuid);
+    }
     log->field_u64("selection_count", job.file_source_refs.size());
     log->section("Request");
     log->field("destination", job.target_ref);
@@ -441,10 +517,31 @@ run_accepted_task(const contracts::JobRequest& job, const WindowsPersonalBackupT
         secrets = std::move(resolved).value();
     }
 
-    const auto request =
+    auto request =
         make_backup_request(job, options, secrets, ids.value(), std::move(created_utc).value(),
                             std::move(spool).value());
     log_backup_request(log, job);
+
+    std::unique_ptr<adapters::personal_archive::PersonalFileArchiveReader> parent_reader;
+    if (request.effective_type == contracts::BackupType::kIncremental) {
+        ScopedStage stage(log, "open_parent_archive");
+        auto opened =
+            open_parent_archive(*job.backup, secrets.archive->view(), options.memory_budget_bytes);
+        if (!opened) {
+            const auto code = credential_error_code(opened.error().code);
+            const base::Error error{code, opened.error().message};
+            stage.fail(error, "open_parent", backup_hint_for(code, error.message));
+            return fail(code, &error);
+        }
+        parent_reader = std::move(opened).value();
+        request.parent_uuid = parent_reader->identity().file_uuid;
+        request.parent_checkpoints =
+            parent_reader->manifest().file_set_baseline.journal_checkpoints;
+        request.parent_reader = parent_reader.get();
+        stage.note("parent_uuid", job.backup->candidate_parent_uuid);
+        stage.note_u64("parent_checkpoint_count", request.parent_checkpoints.size());
+    }
+
     auto backup = detail::backup_windows_file_set(request, cancellation, context.progress);
     if (!backup) {
         return fail(backup.error().code, &backup.error());

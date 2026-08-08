@@ -32,6 +32,12 @@ struct JobRow final {
     QString source_name;
     QString destination_name;
     QString destination_path;
+    /// file_set backup: Service-projected requested vs effective type (1 full, 2 inc).
+    std::optional<std::int64_t> requested_backup_type;
+    std::optional<std::int64_t> effective_backup_type;
+    QString effective_parent_uuid;
+    /// contracts::IncrementalDowngradeReason when Incremental demoted to Full (1..9).
+    std::optional<std::int64_t> incremental_downgrade_reason;
 };
 
 class JobModel final : public QAbstractListModel {
@@ -63,6 +69,10 @@ class JobModel final : public QAbstractListModel {
         DestinationPathRole,
         SourceIdsRole,
         ConnectionIdRole,
+        RequestedBackupTypeTextRole,
+        EffectiveBackupTypeTextRole,
+        DowngradeReasonTextRole,
+        HasDowngradeRole,
     };
 
     explicit JobModel(QObject* parent = nullptr);
@@ -87,6 +97,11 @@ class JobModel final : public QAbstractListModel {
     Q_INVOKABLE [[nodiscard]] QVariantMap latestBackupStatus(const QVariantList& source_ids,
                                                              const QString& connection_id) const;
 
+    /// Aggregate restore jobs (operation=2) created at/after sinceUtcMs (0 = all restore jobs).
+    /// Keys: jobCount, activeCount, progressPercent, stateText, messageText, sourceName,
+    /// statusKey (none|running|success|failed), allTerminal, anyFailed.
+    Q_INVOKABLE [[nodiscard]] QVariantMap restoreSessionStatus(qint64 since_utc_ms = 0) const;
+
     [[nodiscard]] int rowCount(const QModelIndex& parent = QModelIndex()) const override;
     [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
     [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
@@ -99,6 +114,8 @@ class JobModel final : public QAbstractListModel {
   private:
     [[nodiscard]] QString operation_text(std::int64_t operation) const;
     [[nodiscard]] QString state_text(std::int64_t state) const;
+    [[nodiscard]] QString backup_type_text(std::int64_t backup_type) const;
+    [[nodiscard]] QString downgrade_reason_text(std::int64_t reason) const;
     [[nodiscard]] static QString state_color(std::int64_t state) noexcept;
     [[nodiscard]] static bool is_terminal_state(std::int64_t state) noexcept;
     [[nodiscard]] static bool is_active_state(std::int64_t state) noexcept;

@@ -12,9 +12,10 @@ void FileRecoverModel::set_context(const QString& recovery_point_id, const QStri
     if (recovery_point_id_ == recovery_point_id && connection_id_ == connection_id) {
         return;
     }
+    // clear() also drops context fields — re-apply after so expand can use recoveryPointId.
+    clear();
     recovery_point_id_ = recovery_point_id;
     connection_id_ = connection_id;
-    clear();
     emit contextChanged();
 }
 
@@ -39,6 +40,8 @@ void FileRecoverModel::clear() {
     rows_.clear();
     entry_index_.clear();
     index_generation_.clear();
+    recovery_point_id_.clear();
+    connection_id_.clear();
     endResetModel();
     loading_ = false;
     error_text_.clear();

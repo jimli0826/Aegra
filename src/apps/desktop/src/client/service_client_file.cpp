@@ -91,6 +91,17 @@ void ServiceClient::loadFileBrowseRoots() {
     }
 }
 
+void ServiceClient::clearFileRestoreState() {
+    reset_file_models();
+    restore_preflight_token_.clear();
+    restore_prepare_only_ = false;
+    restore_recovery_point_id_.clear();
+    restore_archive_password_.clear();
+    restore_start_idempotency_key_.clear();
+    restore_prepare_request_id_.clear();
+    restore_start_request_id_.clear();
+}
+
 void ServiceClient::loadFileRestoreTargetRoots() {
     if (state_ != State::kReady || !file_browse_available_) {
         return;
@@ -161,6 +172,8 @@ void ServiceClient::loadFileRecoverRoots(const QString& recovery_point_id,
     const auto connection_id = selected_repository_connection_id_.isEmpty()
                                    ? defaultConnectionId()
                                    : selected_repository_connection_id_;
+    // Always drop prior selection/tree so re-opening the same checkpoint starts clean.
+    file_recover_entries_.clear();
     file_recover_entries_.set_context(recovery_point_id, connection_id);
     file_recover_entries_.set_loading(true);
     file_recover_archive_password_ = archive_password;
@@ -207,9 +220,14 @@ bool ServiceClient::createFileSetSchedule(const QString& connection_id, const QS
                                           const bool exclude_page_and_hibernation_files,
                                           const bool encryption_enabled,
                                           const QString& archive_password,
-                                          const bool start_full_backup_after_create) {
+                                          const bool start_full_backup_after_create,
+                                          const int backup_type) {
     if (state_ != State::kReady || !schedules_available_ || !file_browse_available_ ||
         schedule_command_busy_ || connection_id.isEmpty()) {
+        return false;
+    }
+    // file_set: Full or Incremental only (never Differential).
+    if (backup_type != kBackupTypeFull && backup_type != kBackupTypeIncremental) {
         return false;
     }
     const auto selections = file_browse_sources_.selected_file_selections();
@@ -254,7 +272,7 @@ bool ServiceClient::createFileSetSchedule(const QString& connection_id, const QS
     start_full_backup_after_schedule_create_ = start_full_backup_after_create;
     const auto body = encode_upsert_file_set_schedule_request(
         request_id, idempotency_key, {}, display_name, true, selections, connection_id,
-        kBackupTypeFull, trigger_kind, local_minute, 0, QStringLiteral("UTC"),
+        backup_type, trigger_kind, local_minute, 0, QStringLiteral("UTC"),
         exclude_page_and_hibernation_files, encryption_enabled, archive_password);
     const auto started =
         coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
@@ -268,9 +286,9 @@ bool ServiceClient::createFileSetSchedule(const QString& connection_id, const QS
     return true;
 }
 
-bool ServiceClient::startFileRestore(const QString& recovery_point_id, const int conflict_policy,
-                                     const QString& archive_password, const bool restore_security,
-                                     const bool restore_ads) {
+bool ServiceClient::prepareFileRestore(const QString& recovery_point_id, const int conflict_policy,
+                                       const QString& archive_password,
+                                       const bool restore_security) {
     if (state_ != State::kReady || !file_restore_available_ || restore_command_busy_ ||
         recovery_point_id.isEmpty()) {
         return false;
@@ -279,13 +297,14 @@ bool ServiceClient::startFileRestore(const QString& recovery_point_id, const int
     const auto target_token = file_restore_targets_.selected_directory_token();
     if (entry_ids.isEmpty() || target_token.isEmpty()) {
         //% "Select files to restore and a target folder"
-        show_toast(qtTrId("aegra.restore.file.selection_required"));
+        show_toast(qtTrId("aegra.restore.file.selection_required"), true);
         return false;
     }
     const auto connection_id = selected_repository_connection_id_.isEmpty()
                                    ? defaultConnectionId()
                                    : selected_repository_connection_id_;
     restore_command_busy_ = true;
+    restore_prepare_only_ = true;
     restore_recovery_point_id_ = recovery_point_id;
     restore_archive_password_ = archive_password;
     restore_preflight_token_.clear();
@@ -294,14 +313,97 @@ bool ServiceClient::startFileRestore(const QString& recovery_point_id, const int
     file_restore_target_token_ = target_token;
     file_restore_conflict_policy_ = conflict_policy;
     file_restore_security_ = restore_security;
-    file_restore_ads_ = restore_ads;
     emit restoreCommandChanged();
 
     const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     restore_prepare_request_id_ = request_id;
     const auto body = encode_prepare_file_restore_request(
         request_id, connection_id, recovery_point_id, entry_ids, target_token, conflict_policy,
-        archive_password, restore_security, restore_ads);
+        archive_password, restore_security);
+    const auto started =
+        coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
+            return handle_prepare_file_restore_frame(frame_body);
+        });
+    if (!started) {
+        finish_restore_preflight_failure(QStringLiteral("file_restore.preflight_failed"));
+        return false;
+    }
+    return true;
+}
+
+bool ServiceClient::startPreparedFileRestore() {
+    if (state_ != State::kReady || !file_restore_available_ || restore_command_busy_ ||
+        restore_preflight_token_.isEmpty()) {
+        return false;
+    }
+    restore_command_busy_ = true;
+    restore_prepare_only_ = false;
+    if (restore_start_idempotency_key_.isEmpty()) {
+        restore_start_idempotency_key_ = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    }
+    emit restoreCommandChanged();
+
+    const auto start_request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    restore_start_request_id_ = start_request_id;
+    const auto start_body = encode_start_file_restore_request(
+        start_request_id, restore_start_idempotency_key_, restore_preflight_token_,
+        restore_archive_password_);
+    const auto started = coordinator_->begin_request(
+        start_request_id, start_body, [this](const QByteArray& frame_body) {
+            return handle_start_file_restore_frame(frame_body);
+        });
+    if (!started) {
+        finish_restore_command_failure(QStringLiteral("file_restore.command_failed"));
+        return false;
+    }
+    return true;
+}
+
+bool ServiceClient::startFileRestore(const QString& recovery_point_id, const int conflict_policy,
+                                     const QString& archive_password,
+                                     const bool restore_security) {
+    if (state_ != State::kReady || !file_restore_available_ || restore_command_busy_ ||
+        recovery_point_id.isEmpty()) {
+        return false;
+    }
+    // Reuse a successful prepare when selection/options match.
+    if (!restore_preflight_token_.isEmpty() && restore_recovery_point_id_ == recovery_point_id &&
+        file_restore_conflict_policy_ == conflict_policy &&
+        file_restore_security_ == restore_security &&
+        restore_archive_password_ == archive_password) {
+        const auto entry_ids = file_recover_entries_.selected_entry_ids();
+        const auto target_token = file_restore_targets_.selected_directory_token();
+        if (entry_ids == file_restore_entry_ids_ && target_token == file_restore_target_token_) {
+            return startPreparedFileRestore();
+        }
+    }
+    const auto entry_ids = file_recover_entries_.selected_entry_ids();
+    const auto target_token = file_restore_targets_.selected_directory_token();
+    if (entry_ids.isEmpty() || target_token.isEmpty()) {
+        //% "Select files to restore and a target folder"
+        show_toast(qtTrId("aegra.restore.file.selection_required"), true);
+        return false;
+    }
+    const auto connection_id = selected_repository_connection_id_.isEmpty()
+                                   ? defaultConnectionId()
+                                   : selected_repository_connection_id_;
+    restore_command_busy_ = true;
+    restore_prepare_only_ = false;
+    restore_recovery_point_id_ = recovery_point_id;
+    restore_archive_password_ = archive_password;
+    restore_preflight_token_.clear();
+    restore_start_idempotency_key_ = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    file_restore_entry_ids_ = entry_ids;
+    file_restore_target_token_ = target_token;
+    file_restore_conflict_policy_ = conflict_policy;
+    file_restore_security_ = restore_security;
+    emit restoreCommandChanged();
+
+    const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    restore_prepare_request_id_ = request_id;
+    const auto body = encode_prepare_file_restore_request(
+        request_id, connection_id, recovery_point_id, entry_ids, target_token, conflict_policy,
+        archive_password, restore_security);
     const auto started =
         coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
             return handle_prepare_file_restore_frame(frame_body);
@@ -403,18 +505,35 @@ RequestDisposition ServiceClient::handle_prepare_file_restore_frame(const QByteA
     if (!parse_response_root(body, request_id, root)) {
         return RequestDisposition::kProtocolError;
     }
+    const bool prepare_only = restore_prepare_only_;
     if (is_prepare_file_restore_failure_response(root)) {
-        finish_restore_command_failure(parse_failure_message_code(body));
+        if (prepare_only) {
+            finish_restore_preflight_failure(parse_failure_message_code(body));
+        } else {
+            finish_restore_command_failure(parse_failure_message_code(body));
+        }
         return RequestDisposition::kFinished;
     }
     FileRestorePreflightPage preflight;
     if (!parse_prepare_file_restore_response(root, preflight) || !preflight.restore_eligible) {
-        finish_restore_command_failure(preflight.message_code.isEmpty()
-                                           ? QStringLiteral("file_restore.preflight_failed")
-                                           : preflight.message_code);
+        const auto code = preflight.message_code.isEmpty()
+                              ? QStringLiteral("file_restore.preflight_failed")
+                              : preflight.message_code;
+        if (prepare_only) {
+            finish_restore_preflight_failure(code);
+        } else {
+            finish_restore_command_failure(code);
+        }
         return RequestDisposition::kFinished;
     }
     restore_preflight_token_ = preflight.preflight_token;
+    if (prepare_only) {
+        restore_prepare_only_ = false;
+        restore_command_busy_ = false;
+        emit restoreCommandChanged();
+        emit restorePreflightSucceeded();
+        return RequestDisposition::kFinished;
+    }
     const auto start_request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     restore_start_request_id_ = start_request_id;
     const auto start_body = encode_start_file_restore_request(

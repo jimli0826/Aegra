@@ -12,9 +12,9 @@ Aegra Image 为 Windows 物理机和主流虚拟化平台提供映像级备份�
 ## 个人版范围
 
 - 卷、磁盘和系统备份。
-- 本机 NTFS/ReFS 文件/目录集（`file_set`）全量备份与选择性恢复（见
-  [ADR-0016](../adr/0016-file-set-backup-and-restore-boundary.md)）。
-- 全量、差异和增量备份链（**volume_set**；file_set 首版仅 Full）。
+- 本机 NTFS/ReFS 文件/目录集（`file_set`）全量备份、文件 Incremental 与选择性恢复（FI0–FI10 已完成；
+  见 [ADR-0018](../adr/0018-file-set-incremental-usn-and-chain.md)）。
+- 全量、差异和增量备份链（volume_set）；file_set 支持 Full/Incremental，不支持 Differential。
 - 本地、SMB、S3 和 Azure 等存储目标，通过统一 Storage Port 接入。
 - 卷恢复、整盘恢复、系统盘 WinPE 离线恢复；文件恢复到用户选择的新目标目录。
 - 恢复点检查、文件级挂载和虚拟磁盘呈现（挂载仍以 volume 能力为主）。
@@ -26,6 +26,9 @@ Aegra Image 为 Windows 物理机和主流虚拟化平台提供映像级备份�
 个人版可以使用受管理 Archive Store：`.bkf` Archive Group 是恢复权威，Storage Root 中的 Catalog 和
 本机 SQLite 都是可重建投影。具体见
 [个人版 Repository ADR](../adr/0010-personal-repository-authority-and-catalog.md)。
+
+file_set 本期只保护目录、普通文件和未命名主数据流。reparse point、hard link、sparse file 和 ADS 在备份时
+strict fail，在还原第一次目标写入前拒绝；不提供跟随、扁平化、dense 展开、独立复制或忽略 stream 的有损模式。
 
 ## 企业版范围
 

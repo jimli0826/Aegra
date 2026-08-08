@@ -66,6 +66,8 @@ QVariant RecoveryPointModel::data(const QModelIndex& index, const int role) cons
         return row.backup_set_uuid;
     case ParentUuidRole:
         return row.parent_uuid;
+    case ParentSummaryTextRole:
+        return parent_summary_text(row);
     case BackupTypeTextRole:
         return backup_type_text(row.backup_type);
     case ContentKindRole:
@@ -74,6 +76,8 @@ QVariant RecoveryPointModel::data(const QModelIndex& index, const int role) cons
         return row.chain_state == 1;
     case ChainStateTextRole:
         return chain_state_text(row.chain_state);
+    case ChainDepthRole:
+        return chain_depth_for(row);
     case CreatedUtcMsRole:
         return static_cast<qint64>(row.created_utc_ms);
     case CreatedTextRole:
@@ -91,6 +95,8 @@ QVariant RecoveryPointModel::data(const QModelIndex& index, const int role) cons
         return static_cast<qint64>(row.source_count);
     case HasSidecarRole:
         return row.has_sidecar;
+    case IsBaselineRole:
+        return row.backup_type == 1;
     default:
         return {};
     }
@@ -101,10 +107,12 @@ QHash<int, QByteArray> RecoveryPointModel::roleNames() const {
         {FileUuidRole, "fileUuid"},
         {BackupSetUuidRole, "backupSetUuid"},
         {ParentUuidRole, "parentUuid"},
+        {ParentSummaryTextRole, "parentSummaryText"},
         {BackupTypeTextRole, "backupTypeText"},
         {ContentKindRole, "contentKind"},
         {ChainCompleteRole, "chainComplete"},
         {ChainStateTextRole, "chainStateText"},
+        {ChainDepthRole, "chainDepth"},
         {CreatedUtcMsRole, "createdUtcMs"},
         {CreatedTextRole, "createdText"},
         {LogicalSizeBytesRole, "logicalSizeBytes"},
@@ -113,6 +121,7 @@ QHash<int, QByteArray> RecoveryPointModel::roleNames() const {
         {StoredSizeTextRole, "storedSizeText"},
         {SourceCountRole, "sourceCount"},
         {HasSidecarRole, "hasSidecar"},
+        {IsBaselineRole, "isBaseline"},
     };
 }
 
@@ -140,6 +149,84 @@ QString RecoveryPointModel::chain_state_text(const std::int64_t chain_state) con
     }
     //% "Incomplete"
     return qtTrId("aegra.repository.chain.incomplete");
+}
+
+QString RecoveryPointModel::short_uuid(const QString& uuid) {
+    if (uuid.size() < 8) {
+        return uuid;
+    }
+    return uuid.left(8);
+}
+
+const RecoveryPointRow* RecoveryPointModel::find_row(const QString& file_uuid) const {
+    if (file_uuid.isEmpty()) {
+        return nullptr;
+    }
+    for (const auto& row : rows_) {
+        if (row.file_uuid == file_uuid) {
+            return &row;
+        }
+    }
+    return nullptr;
+}
+
+QString RecoveryPointModel::parent_summary_text(const RecoveryPointRow& row) const {
+    if (row.parent_uuid.isEmpty()) {
+        //% "Baseline (no parent)"
+        return qtTrId("aegra.repository.parent.baseline");
+    }
+    const auto* parent = find_row(row.parent_uuid);
+    const auto short_id = short_uuid(row.parent_uuid);
+    if (parent == nullptr) {
+        //% "Parent %1"
+        return qtTrId("aegra.repository.parent.id_only").arg(short_id);
+    }
+    const auto time_text =
+        format_ != nullptr ? format_->format_date_time_utc_ms(parent->created_utc_ms)
+                           : local_time_hm(parent->created_utc_ms);
+    //% "Parent %1 · %2"
+    return qtTrId("aegra.repository.parent.summary").arg(short_id, time_text);
+}
+
+int RecoveryPointModel::chain_depth_for(const RecoveryPointRow& row) const {
+    // Display-only walk of loaded list (tip inclusive). Not authority for delete/restore.
+    int depth = 1;
+    QString cursor = row.parent_uuid;
+    QSet<QString> seen;
+    seen.insert(row.file_uuid);
+    while (!cursor.isEmpty() && !seen.contains(cursor) && depth < 128) {
+        seen.insert(cursor);
+        ++depth;
+        const auto* parent = find_row(cursor);
+        if (parent == nullptr) {
+            break;
+        }
+        cursor = parent->parent_uuid;
+    }
+    return depth;
+}
+
+QVariantMap RecoveryPointModel::recoveryPointDetails(const QString& file_uuid) const {
+    const auto* row = find_row(file_uuid);
+    if (row == nullptr) {
+        return {};
+    }
+    return {{QStringLiteral("fileUuid"), row->file_uuid},
+            {QStringLiteral("backupSetUuid"), row->backup_set_uuid},
+            {QStringLiteral("backupTypeText"), backup_type_text(row->backup_type)},
+            {QStringLiteral("contentKind"), static_cast<qint64>(row->content_kind)},
+            {QStringLiteral("createdText"),
+             format_ != nullptr ? format_->format_date_time_utc_ms(row->created_utc_ms) : QString{}},
+            {QStringLiteral("logicalSizeText"),
+             format_ != nullptr ? format_->format_bytes(row->logical_size_bytes) : QString{}},
+            {QStringLiteral("storedSizeText"),
+             format_ != nullptr ? format_->format_bytes(row->stored_size_bytes) : QString{}},
+            {QStringLiteral("chainComplete"), row->chain_state == 1},
+            {QStringLiteral("chainStateText"), chain_state_text(row->chain_state)},
+            {QStringLiteral("chainDepth"), chain_depth_for(*row)},
+            {QStringLiteral("parentSummaryText"), parent_summary_text(*row)},
+            {QStringLiteral("isBaseline"), row->backup_type == 1},
+            {QStringLiteral("sourceCount"), static_cast<qint64>(row->source_count)}};
 }
 
 QString RecoveryPointModel::local_date_ymd(const std::int64_t created_utc_ms) {
@@ -202,6 +289,9 @@ QVariantList RecoveryPointModel::checkpointsForDate(const QString& date_ymd) con
                    format_ != nullptr ? format_->format_date_time_utc_ms(row->created_utc_ms)
                                       : QString{});
         map.insert(QStringLiteral("chainComplete"), row->chain_state == 1);
+        map.insert(QStringLiteral("parentSummary"), parent_summary_text(*row));
+        map.insert(QStringLiteral("chainDepth"), chain_depth_for(*row));
+        map.insert(QStringLiteral("isBaseline"), row->backup_type == 1);
         out.push_back(std::move(map));
     }
     return out;

@@ -358,28 +358,44 @@ BackupCatalogRegistrar::publish(const WorkerJobRequest& request,
         return base::Result<void>::failure(descriptor.error());
     }
     const auto& backup = *request.worker_request.backup;
+    const bool is_file_set =
+        request.worker_request.content_kind == contracts::ContentKind::kFileSet;
+    // file_set may demote Incremental→Full; Catalog must publish the *effective* type/parent.
+    contracts::BackupType effective_type = backup.type;
+    std::optional<std::string> effective_parent;
+    if (is_file_set && response.task_result->effective_backup_type) {
+        effective_type =
+            static_cast<contracts::BackupType>(*response.task_result->effective_backup_type);
+        if (response.task_result->effective_parent_uuid &&
+            !response.task_result->effective_parent_uuid->empty()) {
+            effective_parent = *response.task_result->effective_parent_uuid;
+        }
+    } else if (!is_file_set && backup.type == contracts::BackupType::kIncremental) {
+        effective_parent = request.parent_recovery_point_id;
+    }
     std::string set_uuid = backup.backup_set_uuid;
-    std::optional<std::string> parent_uuid;
-    if (backup.type == contracts::BackupType::kIncremental) {
-        if (!request.parent_recovery_point_id) {
+    if (effective_type == contracts::BackupType::kIncremental) {
+        if (!effective_parent) {
             return base::Result<void>::failure(registration_error(
                 base::ErrorCode::kInternal, "incremental backup is missing parent identity"));
         }
-        parent_uuid = request.parent_recovery_point_id;
-        // Job leaves backup_set_uuid empty; inherit the set from the parent catalog entry.
-        auto parent = read_catalog_entry(
-            storage.value()->reader(),
-            descriptor.value().catalog_prefix + "/" + *parent_uuid + ".entry", cancellation);
-        if (!parent || !parent.value()) {
-            return base::Result<void>::failure(
-                !parent ? parent.error()
-                        : registration_error(base::ErrorCode::kNotFound,
-                                             "parent catalog entry was not found"));
+        // volume_set Job leaves backup_set_uuid empty; inherit from the parent catalog entry.
+        if (set_uuid.empty()) {
+            auto parent = read_catalog_entry(
+                storage.value()->reader(),
+                descriptor.value().catalog_prefix + "/" + *effective_parent + ".entry",
+                cancellation);
+            if (!parent || !parent.value()) {
+                return base::Result<void>::failure(
+                    !parent ? parent.error()
+                            : registration_error(base::ErrorCode::kNotFound,
+                                                 "parent catalog entry was not found"));
+            }
+            set_uuid = parent.value()->backup_set_uuid;
         }
-        set_uuid = parent.value()->backup_set_uuid;
     }
     auto archive = inspect_archive(storage.value()->reader(), *request.backup_archive_key,
-                                   backup.file_uuid, set_uuid, backup.type, cancellation);
+                                   backup.file_uuid, set_uuid, effective_type, cancellation);
     if (!archive) {
         return base::Result<void>::failure(archive.error());
     }
@@ -387,10 +403,8 @@ BackupCatalogRegistrar::publish(const WorkerJobRequest& request,
     entry.repository_uuid = descriptor.value().repository_uuid;
     entry.file_uuid = backup.file_uuid;
     entry.backup_set_uuid = std::move(set_uuid);
-    entry.parent_uuid = std::move(parent_uuid);
-    entry.backup_type = catalog_backup_type(backup.type);
-    const bool is_file_set =
-        request.worker_request.content_kind == contracts::ContentKind::kFileSet;
+    entry.parent_uuid = std::move(effective_parent);
+    entry.backup_type = catalog_backup_type(effective_type);
     entry.content_kind =
         std::string(is_file_set ? personal_repository::kCatalogContentKindFileSet
                                 : personal_repository::kCatalogContentKindVolumeSet);
@@ -407,6 +421,19 @@ BackupCatalogRegistrar::publish(const WorkerJobRequest& request,
         entry.source_volume_ids.clear();
         entry.file_entry_count = response.task_result->entry_count;
         entry.file_stream_count = response.task_result->stream_count;
+        // Hex fingerprint for parent match; USN checkpoints live in authenticated Manifest.
+        if (request.worker_request.backup && request.worker_request.backup->selection_fingerprint) {
+            const auto& digest = request.worker_request.backup->selection_fingerprint->digest;
+            entry.file_selection_fingerprint.resize(digest.size() * 2);
+            static constexpr char kHex[] = "0123456789abcdef";
+            for (std::size_t index = 0; index < digest.size(); ++index) {
+                const auto value = static_cast<unsigned char>(digest[index]);
+                entry.file_selection_fingerprint[index * 2] = kHex[value >> 4U];
+                entry.file_selection_fingerprint[index * 2 + 1] = kHex[value & 0x0FU];
+            }
+        }
+        // Successful Worker publish carries authenticated selection fingerprint + USN baseline.
+        entry.file_baseline_available = !entry.file_selection_fingerprint.empty();
     } else {
         entry.source_count =
             static_cast<std::uint32_t>(request.worker_request.source_refs.size());
@@ -414,6 +441,8 @@ BackupCatalogRegistrar::publish(const WorkerJobRequest& request,
         entry.source_volume_ids = request.worker_request.source_refs;
         entry.file_entry_count = 0;
         entry.file_stream_count = 0;
+        entry.file_selection_fingerprint.clear();
+        entry.file_baseline_available = false;
     }
     auto published = publish_entry(*storage.value(), descriptor.value(), entry,
                                    request.worker_request.job_id, cancellation);

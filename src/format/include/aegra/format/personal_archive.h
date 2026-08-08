@@ -45,6 +45,8 @@ inline constexpr std::uint32_t kCborMetadataFlagEncrypted = 0x00000001;
 
 inline constexpr std::uint32_t kCapabilityHasFileIndex = 0x00000001;
 inline constexpr std::uint32_t kCapabilityVolumeSidecarOk = 0x00000002;
+/// file_set Incremental requires this critical capability (FI1 USN baseline metadata present).
+inline constexpr std::uint32_t kCapabilityFileUsnBaseline = 0x00000004;
 
 inline constexpr std::uint8_t kContentKindVolumeSet = 1;
 inline constexpr std::uint8_t kContentKindFileSet = 2;
@@ -57,8 +59,16 @@ inline constexpr std::uint16_t kRecordKindFooter = 4;
 inline constexpr std::uint8_t kSourceTypeVolume = 1;
 inline constexpr std::uint8_t kSourceTypeFileStream = 2;
 
+// Namespace page kinds (also file_index::kPageKindNamespace*).
 inline constexpr std::uint16_t kIndexPageLeaf = 1;
 inline constexpr std::uint16_t kIndexPageInternal = 2;
+// Secondary index page kinds (ADR-0019); values match file_index kPageKind*.
+inline constexpr std::uint16_t kIndexPageEntryIdLeaf = 3;
+inline constexpr std::uint16_t kIndexPageEntryIdInternal = 4;
+inline constexpr std::uint16_t kIndexPageStreamLeaf = 5;
+inline constexpr std::uint16_t kIndexPageStreamInternal = 6;
+inline constexpr std::uint16_t kIndexPageChunkLeaf = 7;
+inline constexpr std::uint16_t kIndexPageChunkInternal = 8;
 inline constexpr std::uint8_t kIndexProtectAead = 1;
 
 inline constexpr std::uint8_t kBlockFlagRaw = 0x01;
@@ -188,6 +198,13 @@ struct BlockEntry final {
     std::uint8_t flags{kBlockFlagRaw};
 };
 
+/// Footer root pointer for one File Index tree (ADR-0019). Zero page_id means absent.
+struct IndexRootLocator final {
+    std::uint64_t page_id{0};
+    std::uint64_t offset{0};
+    std::array<std::byte, 32> digest{};
+};
+
 struct BackupFooter final {
     std::uint64_t volume_chunk_count{0};
     std::uint64_t file_stream_chunk_count{0};
@@ -199,11 +216,16 @@ struct BackupFooter final {
     std::uint64_t entry_count{0};
     std::uint64_t stream_count{0};
     std::uint32_t index_root_part_index{0};
+    /// Namespace B+tree root (list_children).
     std::uint64_t index_root_offset{0};
     std::uint64_t index_root_page_id{0};
     std::array<std::byte, 32> index_root_digest{};
     std::uint64_t part_file_size{0};
     std::array<std::byte, 16> file_uuid{};
+    /// Secondary index roots (ADR-0019); zero when the corresponding count is zero.
+    IndexRootLocator entry_id_root{};
+    IndexRootLocator stream_root{};
+    IndexRootLocator chunk_root{};
 };
 
 using EncodedBackupHeader = std::array<std::byte, kBackupHeaderSize>;

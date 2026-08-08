@@ -29,7 +29,8 @@ QString LocaleFormat::format_bytes(const std::int64_t bytes) const {
         amount /= 1024.0;
         ++unit;
     }
-    const auto precision = unit == 0U ? 0 : 1;
+    // B: integer; KB/MB: 1 decimal; GB/TB: 2 decimals (e.g. "7.03 GB").
+    const auto precision = unit == 0U ? 0 : (unit >= 3U ? 2 : 1);
     return locale_.toString(amount, 'f', precision) + QLatin1Char(' ') +
            QLatin1String(kByteUnits[unit]);
 }

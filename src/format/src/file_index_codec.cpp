@@ -68,37 +68,29 @@ void write_le64(std::vector<std::byte>& out, const std::uint64_t value) {
     return extent;
 }
 
-[[nodiscard]] Json encode_range(const contracts::FileAllocatedRangeDesc& range) {
-    return Json::object({{"offset", range.offset}, {"length", range.length}});
-}
-
-[[nodiscard]] contracts::FileAllocatedRangeDesc decode_range(const Json& value) {
-    contracts::FileAllocatedRangeDesc range;
-    range.offset = value.at("offset").get<std::uint64_t>();
-    range.length = value.at("length").get<std::uint64_t>();
-    return range;
-}
-
 [[nodiscard]] Json encode_stream(const contracts::FileStreamDesc& stream) {
     Json extents = Json::array();
     for (const auto& extent : stream.extents) {
         extents.push_back(encode_extent(extent));
     }
-    Json ranges = Json::array();
-    for (const auto& range : stream.allocated_ranges) {
-        ranges.push_back(encode_range(range));
-    }
-    return Json::object({{"stream_index", stream.stream_index},
-                         {"stream_kind", static_cast<std::uint8_t>(stream.stream_kind)},
-                         {"name_encoding", static_cast<std::uint8_t>(stream.name.encoding)},
-                         {"name", encode_binary(stream.name.bytes)},
-                         {"logical_size", stream.logical_size},
-                         {"extent_count", static_cast<std::uint32_t>(stream.extents.size())},
-                         {"extents", std::move(extents)},
-                         {"allocated_ranges", std::move(ranges)}});
+    // FI0/FI1 exact stream schema: main + content_storage local|parent; no ADS/sparse fields.
+    return Json::object(
+        {{"stream_index", stream.stream_index},
+         {"stream_kind", static_cast<std::uint8_t>(stream.stream_kind)},
+         {"name_encoding", static_cast<std::uint8_t>(stream.name.encoding)},
+         {"name", encode_binary(stream.name.bytes)},
+         {"logical_size", stream.logical_size},
+         {"content_storage", static_cast<std::uint8_t>(stream.content_storage)},
+         {"parent_stream_index", stream.parent_stream_index},
+         {"extent_count", static_cast<std::uint32_t>(stream.extents.size())},
+         {"extents", std::move(extents)}});
 }
 
-[[nodiscard]] contracts::FileStreamDesc decode_stream(const Json& value) {
+[[nodiscard]] base::Result<contracts::FileStreamDesc> decode_stream(const Json& value) {
+    if (!value.is_object() || value.contains("allocated_ranges")) {
+        return base::Result<contracts::FileStreamDesc>::failure(
+            corrupt("file stream uses unsupported sparse/ADS fields"));
+    }
     contracts::FileStreamDesc stream;
     stream.stream_index = value.at("stream_index").get<std::uint32_t>();
     stream.stream_kind =
@@ -107,15 +99,44 @@ void write_le64(std::vector<std::byte>& out, const std::uint64_t value) {
         static_cast<contracts::NameEncoding>(value.at("name_encoding").get<std::uint8_t>());
     stream.name.bytes = decode_binary(value.at("name"));
     stream.logical_size = value.at("logical_size").get<std::uint64_t>();
+    stream.content_storage =
+        static_cast<contracts::FileContentStorage>(value.at("content_storage").get<std::uint8_t>());
+    stream.parent_stream_index = value.at("parent_stream_index").get<std::uint32_t>();
     for (const auto& extent : value.at("extents")) {
         stream.extents.push_back(decode_extent(extent));
     }
-    if (value.contains("allocated_ranges")) {
-        for (const auto& range : value.at("allocated_ranges")) {
-            stream.allocated_ranges.push_back(decode_range(range));
-        }
+    if (value.at("extent_count").get<std::uint32_t>() != stream.extents.size()) {
+        return base::Result<contracts::FileStreamDesc>::failure(
+            corrupt("file stream extent_count mismatch"));
     }
-    return stream;
+    return base::Result<contracts::FileStreamDesc>::success(std::move(stream));
+}
+
+[[nodiscard]] Json encode_identity(const contracts::StableFileIdentity& identity) {
+    return Json::object({{"volume_identity",
+                          encode_binary(std::vector<std::byte>(
+                              reinterpret_cast<const std::byte*>(identity.volume_identity.data()),
+                              reinterpret_cast<const std::byte*>(identity.volume_identity.data()) +
+                                  identity.volume_identity.size()))},
+                         {"file_id", encode_binary(std::vector<std::byte>(identity.file_id.begin(),
+                                                                          identity.file_id.end()))}});
+}
+
+[[nodiscard]] base::Result<contracts::StableFileIdentity> decode_identity(const Json& value) {
+    if (!value.is_object()) {
+        return base::Result<contracts::StableFileIdentity>::failure(
+            corrupt("stable_file_identity is invalid"));
+    }
+    contracts::StableFileIdentity identity;
+    const auto volume = decode_binary(value.at("volume_identity"));
+    identity.volume_identity.assign(reinterpret_cast<const char*>(volume.data()), volume.size());
+    const auto file_id = decode_binary(value.at("file_id"));
+    if (file_id.size() != identity.file_id.size()) {
+        return base::Result<contracts::StableFileIdentity>::failure(
+            corrupt("stable_file_identity file_id length is invalid"));
+    }
+    std::copy(file_id.begin(), file_id.end(), identity.file_id.begin());
+    return base::Result<contracts::StableFileIdentity>::success(std::move(identity));
 }
 
 [[nodiscard]] Json encode_key(const IndexKey& key) {
@@ -194,6 +215,10 @@ base::Result<IndexKey> make_index_key(const contracts::FileEntryDesc& entry) {
 }
 
 base::Result<std::vector<std::byte>> encode_leaf_entry_cbor(const contracts::FileEntryDesc& entry) {
+    auto validated = contracts::validate_file_entry_desc(entry);
+    if (!validated) {
+        return base::Result<std::vector<std::byte>>::failure(validated.error());
+    }
     auto key = make_index_key(entry);
     if (!key) {
         return base::Result<std::vector<std::byte>>::failure(key.error());
@@ -202,6 +227,7 @@ base::Result<std::vector<std::byte>> encode_leaf_entry_cbor(const contracts::Fil
     for (const auto& stream : entry.streams) {
         streams.push_back(encode_stream(stream));
     }
+    // FI0/FI1 exact entry schema: dir/file + stable identity + main stream (no hard_link_group).
     const Json root = {
         {"entry_id", entry.entry_id},
         {"parent_entry_id", entry.parent_entry_id},
@@ -213,6 +239,7 @@ base::Result<std::vector<std::byte>> encode_leaf_entry_cbor(const contracts::Fil
              reinterpret_cast<const std::byte*>(entry.selection_id.data()),
              reinterpret_cast<const std::byte*>(entry.selection_id.data()) +
                  entry.selection_id.size()))},
+        {"stable_file_identity", encode_identity(entry.stable_identity)},
         {"attributes", entry.attributes},
         {"flags", entry.flags},
         {"creation_time", entry.creation_time},
@@ -220,7 +247,6 @@ base::Result<std::vector<std::byte>> encode_leaf_entry_cbor(const contracts::Fil
         {"write_time", entry.write_time},
         {"change_time", entry.change_time},
         {"logical_size", entry.logical_size},
-        {"hard_link_group", entry.hard_link_group},
         {"stream_count", static_cast<std::uint32_t>(entry.streams.size())},
         {"streams", std::move(streams)},
         {"platform", encode_binary(entry.platform_metadata)},
@@ -235,6 +261,10 @@ decode_leaf_entry_cbor(const std::span<const std::byte> encoded) {
         return base::Result<contracts::FileEntryDesc>::failure(root.error());
     }
     try {
+        if (!root.value().is_object() || root.value().contains("hard_link_group")) {
+            return base::Result<contracts::FileEntryDesc>::failure(
+                corrupt("file index leaf uses unsupported hard-link fields"));
+        }
         contracts::FileEntryDesc entry;
         entry.entry_id = root.value().at("entry_id").get<std::uint64_t>();
         entry.parent_entry_id = root.value().at("parent_entry_id").get<std::uint64_t>();
@@ -248,6 +278,13 @@ decode_leaf_entry_cbor(const std::span<const std::byte> encoded) {
             entry.selection_id.assign(reinterpret_cast<const char*>(selection.data()),
                                       selection.size());
         }
+        {
+            auto identity = decode_identity(root.value().at("stable_file_identity"));
+            if (!identity) {
+                return base::Result<contracts::FileEntryDesc>::failure(identity.error());
+            }
+            entry.stable_identity = std::move(identity).value();
+        }
         entry.attributes = root.value().at("attributes").get<std::uint32_t>();
         entry.flags = root.value().at("flags").get<std::uint32_t>();
         entry.creation_time = root.value().at("creation_time").get<std::uint64_t>();
@@ -255,19 +292,57 @@ decode_leaf_entry_cbor(const std::span<const std::byte> encoded) {
         entry.write_time = root.value().at("write_time").get<std::uint64_t>();
         entry.change_time = root.value().at("change_time").get<std::uint64_t>();
         entry.logical_size = root.value().at("logical_size").get<std::uint64_t>();
-        entry.hard_link_group = root.value().at("hard_link_group").get<std::uint64_t>();
         for (const auto& stream : root.value().at("streams")) {
-            entry.streams.push_back(decode_stream(stream));
+            auto decoded = decode_stream(stream);
+            if (!decoded) {
+                return base::Result<contracts::FileEntryDesc>::failure(decoded.error());
+            }
+            entry.streams.push_back(std::move(decoded).value());
+        }
+        if (root.value().at("stream_count").get<std::uint32_t>() != entry.streams.size()) {
+            return base::Result<contracts::FileEntryDesc>::failure(
+                corrupt("file index stream_count mismatch"));
         }
         entry.platform_metadata = decode_binary(root.value().at("platform"));
         auto key = make_index_key(entry);
         if (!key) {
             return base::Result<contracts::FileEntryDesc>::failure(key.error());
         }
+        auto validated = contracts::validate_file_entry_desc(entry);
+        if (!validated) {
+            return base::Result<contracts::FileEntryDesc>::failure(
+                corrupt("file index leaf entry schema is unsupported"));
+        }
+        // Reject reparse platform sections (removed in FI0).
+        auto security =
+            extract_platform_security_descriptor(entry.platform_metadata);
+        if (!security) {
+            return base::Result<contracts::FileEntryDesc>::failure(security.error());
+        }
         return base::Result<contracts::FileEntryDesc>::success(std::move(entry));
     } catch (const Json::exception&) {
         return base::Result<contracts::FileEntryDesc>::failure(
             corrupt("file index leaf entry fields are invalid"));
+    }
+}
+
+[[nodiscard]] Json encode_child_locator(const ChildPageLocator& child) {
+    return Json::object({{"page_id", child.page_id}, {"offset", child.offset}});
+}
+
+[[nodiscard]] base::Result<ChildPageLocator> decode_child_locator(const Json& value) {
+    try {
+        ChildPageLocator child;
+        child.page_id = value.at("page_id").get<std::uint64_t>();
+        child.offset = value.at("offset").get<std::uint64_t>();
+        if (child.page_id == 0 || child.offset == 0) {
+            return base::Result<ChildPageLocator>::failure(
+                invalid("internal index page child locator is invalid"));
+        }
+        return base::Result<ChildPageLocator>::success(child);
+    } catch (const Json::exception&) {
+        return base::Result<ChildPageLocator>::failure(
+            corrupt("internal index page child locator is invalid"));
     }
 }
 
@@ -288,12 +363,12 @@ base::Result<std::vector<std::byte>> encode_internal_page_cbor(const InternalPag
         keys.push_back(encode_key(key));
     }
     Json children = Json::array();
-    for (const auto child : body.children) {
-        if (child == 0) {
+    for (const auto& child : body.children) {
+        if (child.page_id == 0 || child.offset == 0) {
             return base::Result<std::vector<std::byte>>::failure(
-                invalid("internal index page child id is invalid"));
+                invalid("internal index page child locator is invalid"));
         }
-        children.push_back(child);
+        children.push_back(encode_child_locator(child));
     }
     return dump_cbor(Json::object(
         {{"page_kind", 2}, {"keys", std::move(keys)}, {"children", std::move(children)}}));
@@ -314,7 +389,11 @@ base::Result<InternalPageBody> decode_internal_page_cbor(const std::span<const s
             body.keys.push_back(decode_key(key));
         }
         for (const auto& child : root.value().at("children")) {
-            body.children.push_back(child.get<std::uint64_t>());
+            auto locator = decode_child_locator(child);
+            if (!locator) {
+                return base::Result<InternalPageBody>::failure(locator.error());
+            }
+            body.children.push_back(locator.value());
         }
         if (body.children.size() != body.keys.size() + 1 || body.keys.empty()) {
             return base::Result<InternalPageBody>::failure(
@@ -402,20 +481,307 @@ base::Result<void> validate_leaf_page_sorted(const LeafPageBody& body) {
 }
 
 std::vector<std::byte>
-make_index_root_digest_preimage(const std::uint64_t root_page_id, const std::uint64_t page_count,
-                                const std::uint64_t entry_count, const std::uint64_t stream_count,
+make_index_root_digest_preimage(const std::string_view label, const std::uint64_t root_page_id,
+                                const std::uint64_t page_count, const std::uint64_t primary_count,
+                                const std::uint64_t secondary_count,
                                 const std::span<const std::byte, 32> root_page_content_digest) {
     std::vector<std::byte> preimage;
-    const auto* label = reinterpret_cast<const std::byte*>(kIndexRootDigestLabel);
-    const auto label_size = std::strlen(kIndexRootDigestLabel);
-    preimage.insert(preimage.end(), label, label + label_size);
+    const auto* label_bytes = reinterpret_cast<const std::byte*>(label.data());
+    preimage.insert(preimage.end(), label_bytes, label_bytes + label.size());
     write_le64(preimage, root_page_id);
     write_le64(preimage, page_count);
-    write_le64(preimage, entry_count);
-    write_le64(preimage, stream_count);
+    write_le64(preimage, primary_count);
+    write_le64(preimage, secondary_count);
     preimage.insert(preimage.end(), root_page_content_digest.begin(),
                     root_page_content_digest.end());
     return preimage;
+}
+
+std::vector<std::byte>
+make_index_root_digest_preimage(const std::uint64_t root_page_id, const std::uint64_t page_count,
+                                const std::uint64_t entry_count, const std::uint64_t stream_count,
+                                const std::span<const std::byte, 32> root_page_content_digest) {
+    return make_index_root_digest_preimage(kIndexRootDigestLabel, root_page_id, page_count,
+                                           entry_count, stream_count, root_page_content_digest);
+}
+
+base::Result<std::vector<std::byte>>
+encode_integer_internal_page_cbor(const IntegerInternalPageBody& body) {
+    if (body.page_kind != kPageKindEntryIdInternal && body.page_kind != kPageKindStreamInternal &&
+        body.page_kind != kPageKindChunkInternal) {
+        return base::Result<std::vector<std::byte>>::failure(
+            invalid("integer internal page kind is invalid"));
+    }
+    if (body.children.size() != body.keys.size() + 1 || body.keys.empty() ||
+        body.keys.size() > kMaximumInternalKeysPerPage) {
+        return base::Result<std::vector<std::byte>>::failure(
+            invalid("integer internal page structure is invalid"));
+    }
+    for (std::size_t index = 1; index < body.keys.size(); ++index) {
+        if (body.keys[index] <= body.keys[index - 1]) {
+            return base::Result<std::vector<std::byte>>::failure(
+                invalid("integer internal page keys are not sorted"));
+        }
+    }
+    Json keys = Json::array();
+    for (const auto key : body.keys) {
+        keys.push_back(key);
+    }
+    Json children = Json::array();
+    for (const auto& child : body.children) {
+        if (child.page_id == 0 || child.offset == 0) {
+            return base::Result<std::vector<std::byte>>::failure(
+                invalid("integer internal page child locator is invalid"));
+        }
+        children.push_back(encode_child_locator(child));
+    }
+    return dump_cbor(Json::object({{"page_kind", body.page_kind},
+                                   {"keys", std::move(keys)},
+                                   {"children", std::move(children)}}));
+}
+
+base::Result<IntegerInternalPageBody>
+decode_integer_internal_page_cbor(const std::span<const std::byte> encoded) {
+    auto root = load_cbor(encoded);
+    if (!root) {
+        return base::Result<IntegerInternalPageBody>::failure(root.error());
+    }
+    try {
+        IntegerInternalPageBody body;
+        body.page_kind = root.value().at("page_kind").get<std::uint16_t>();
+        if (body.page_kind != kPageKindEntryIdInternal &&
+            body.page_kind != kPageKindStreamInternal &&
+            body.page_kind != kPageKindChunkInternal) {
+            return base::Result<IntegerInternalPageBody>::failure(
+                corrupt("integer internal page kind is invalid"));
+        }
+        for (const auto& key : root.value().at("keys")) {
+            body.keys.push_back(key.get<std::uint64_t>());
+        }
+        for (const auto& child : root.value().at("children")) {
+            auto locator = decode_child_locator(child);
+            if (!locator) {
+                return base::Result<IntegerInternalPageBody>::failure(locator.error());
+            }
+            body.children.push_back(locator.value());
+        }
+        if (body.children.size() != body.keys.size() + 1 || body.keys.empty()) {
+            return base::Result<IntegerInternalPageBody>::failure(
+                corrupt("integer internal page structure is invalid"));
+        }
+        for (std::size_t index = 1; index < body.keys.size(); ++index) {
+            if (body.keys[index] <= body.keys[index - 1]) {
+                return base::Result<IntegerInternalPageBody>::failure(
+                    corrupt("integer internal page keys are not sorted"));
+            }
+        }
+        return base::Result<IntegerInternalPageBody>::success(std::move(body));
+    } catch (const Json::exception&) {
+        return base::Result<IntegerInternalPageBody>::failure(
+            corrupt("integer internal page fields are invalid"));
+    }
+}
+
+base::Result<std::vector<std::byte>>
+encode_entry_id_leaf_page_cbor(const EntryIdLeafPageBody& body) {
+    if (body.records.empty() || body.records.size() > kMaximumLeafEntriesPerPage) {
+        return base::Result<std::vector<std::byte>>::failure(
+            invalid("entry id leaf page record count is invalid"));
+    }
+    Json records = Json::array();
+    for (std::size_t index = 0; index < body.records.size(); ++index) {
+        const auto& rec = body.records[index];
+        if (rec.entry_id == 0 || rec.page_id == 0 || rec.page_offset == 0 ||
+            (rec.kind != 1 && rec.kind != 2)) {
+            return base::Result<std::vector<std::byte>>::failure(
+                invalid("entry id leaf record is invalid"));
+        }
+        if (index > 0 && rec.entry_id <= body.records[index - 1].entry_id) {
+            return base::Result<std::vector<std::byte>>::failure(
+                invalid("entry id leaf records are not sorted"));
+        }
+        records.push_back(Json::object({{"entry_id", rec.entry_id},
+                                        {"page_id", rec.page_id},
+                                        {"page_offset", rec.page_offset},
+                                        {"slot", rec.slot},
+                                        {"parent_entry_id", rec.parent_entry_id},
+                                        {"kind", rec.kind}}));
+    }
+    return dump_cbor(Json::object({{"page_kind", kPageKindEntryIdLeaf},
+                                   {"records", std::move(records)}}));
+}
+
+base::Result<EntryIdLeafPageBody>
+decode_entry_id_leaf_page_cbor(const std::span<const std::byte> encoded) {
+    auto root = load_cbor(encoded);
+    if (!root) {
+        return base::Result<EntryIdLeafPageBody>::failure(root.error());
+    }
+    try {
+        if (root.value().at("page_kind").get<std::uint16_t>() != kPageKindEntryIdLeaf) {
+            return base::Result<EntryIdLeafPageBody>::failure(
+                corrupt("entry id leaf page kind is invalid"));
+        }
+        EntryIdLeafPageBody body;
+        for (const auto& item : root.value().at("records")) {
+            EntryIdIndexRecord rec;
+            rec.entry_id = item.at("entry_id").get<std::uint64_t>();
+            rec.page_id = item.at("page_id").get<std::uint64_t>();
+            rec.page_offset = item.at("page_offset").get<std::uint64_t>();
+            rec.slot = item.at("slot").get<std::uint32_t>();
+            rec.parent_entry_id = item.at("parent_entry_id").get<std::uint64_t>();
+            rec.kind = item.at("kind").get<std::uint8_t>();
+            if (rec.entry_id == 0 || rec.page_id == 0 || rec.page_offset == 0 ||
+                (rec.kind != 1 && rec.kind != 2)) {
+                return base::Result<EntryIdLeafPageBody>::failure(
+                    corrupt("entry id leaf record is invalid"));
+            }
+            if (!body.records.empty() && rec.entry_id <= body.records.back().entry_id) {
+                return base::Result<EntryIdLeafPageBody>::failure(
+                    corrupt("entry id leaf records are not sorted"));
+            }
+            body.records.push_back(rec);
+        }
+        if (body.records.empty() || body.records.size() > kMaximumLeafEntriesPerPage) {
+            return base::Result<EntryIdLeafPageBody>::failure(
+                corrupt("entry id leaf page record count is invalid"));
+        }
+        return base::Result<EntryIdLeafPageBody>::success(std::move(body));
+    } catch (const Json::exception&) {
+        return base::Result<EntryIdLeafPageBody>::failure(
+            corrupt("entry id leaf page fields are invalid"));
+    }
+}
+
+base::Result<std::vector<std::byte>>
+encode_stream_leaf_page_cbor(const StreamLeafPageBody& body) {
+    if (body.records.empty() || body.records.size() > kMaximumLeafEntriesPerPage) {
+        return base::Result<std::vector<std::byte>>::failure(
+            invalid("stream leaf page record count is invalid"));
+    }
+    Json records = Json::array();
+    for (std::size_t index = 0; index < body.records.size(); ++index) {
+        const auto& rec = body.records[index];
+        if (rec.stream_index == 0 || rec.entry_id == 0) {
+            return base::Result<std::vector<std::byte>>::failure(
+                invalid("stream leaf record is invalid"));
+        }
+        if (index > 0 && rec.stream_index <= body.records[index - 1].stream_index) {
+            return base::Result<std::vector<std::byte>>::failure(
+                invalid("stream leaf records are not sorted"));
+        }
+        records.push_back(Json::object({{"stream_index", rec.stream_index},
+                                        {"entry_id", rec.entry_id},
+                                        {"stream_slot", rec.stream_slot}}));
+    }
+    return dump_cbor(Json::object(
+        {{"page_kind", kPageKindStreamLeaf}, {"records", std::move(records)}}));
+}
+
+base::Result<StreamLeafPageBody>
+decode_stream_leaf_page_cbor(const std::span<const std::byte> encoded) {
+    auto root = load_cbor(encoded);
+    if (!root) {
+        return base::Result<StreamLeafPageBody>::failure(root.error());
+    }
+    try {
+        if (root.value().at("page_kind").get<std::uint16_t>() != kPageKindStreamLeaf) {
+            return base::Result<StreamLeafPageBody>::failure(
+                corrupt("stream leaf page kind is invalid"));
+        }
+        StreamLeafPageBody body;
+        for (const auto& item : root.value().at("records")) {
+            StreamIndexRecord rec;
+            rec.stream_index = item.at("stream_index").get<std::uint32_t>();
+            rec.entry_id = item.at("entry_id").get<std::uint64_t>();
+            rec.stream_slot = item.at("stream_slot").get<std::uint32_t>();
+            if (rec.stream_index == 0 || rec.entry_id == 0) {
+                return base::Result<StreamLeafPageBody>::failure(
+                    corrupt("stream leaf record is invalid"));
+            }
+            if (!body.records.empty() && rec.stream_index <= body.records.back().stream_index) {
+                return base::Result<StreamLeafPageBody>::failure(
+                    corrupt("stream leaf records are not sorted"));
+            }
+            body.records.push_back(rec);
+        }
+        if (body.records.empty() || body.records.size() > kMaximumLeafEntriesPerPage) {
+            return base::Result<StreamLeafPageBody>::failure(
+                corrupt("stream leaf page record count is invalid"));
+        }
+        return base::Result<StreamLeafPageBody>::success(std::move(body));
+    } catch (const Json::exception&) {
+        return base::Result<StreamLeafPageBody>::failure(
+            corrupt("stream leaf page fields are invalid"));
+    }
+}
+
+base::Result<std::vector<std::byte>>
+encode_chunk_leaf_page_cbor(const ChunkLeafPageBody& body) {
+    if (body.records.empty() || body.records.size() > kMaximumLeafEntriesPerPage) {
+        return base::Result<std::vector<std::byte>>::failure(
+            invalid("chunk leaf page record count is invalid"));
+    }
+    Json records = Json::array();
+    for (std::size_t index = 0; index < body.records.size(); ++index) {
+        const auto& rec = body.records[index];
+        // chunk_index may be 0 (Writer assigns dense ids from 0).
+        if (rec.record_offset == 0 || rec.payload_offset == 0) {
+            return base::Result<std::vector<std::byte>>::failure(
+                invalid("chunk leaf record is invalid"));
+        }
+        if (index > 0 && rec.chunk_index <= body.records[index - 1].chunk_index) {
+            return base::Result<std::vector<std::byte>>::failure(
+                invalid("chunk leaf records are not sorted"));
+        }
+        records.push_back(Json::object({{"chunk_index", rec.chunk_index},
+                                        {"record_offset", rec.record_offset},
+                                        {"payload_offset", rec.payload_offset},
+                                        {"payload_size", rec.payload_size},
+                                        {"block_entry_count", rec.block_entry_count}}));
+    }
+    return dump_cbor(
+        Json::object({{"page_kind", kPageKindChunkLeaf}, {"records", std::move(records)}}));
+}
+
+base::Result<ChunkLeafPageBody>
+decode_chunk_leaf_page_cbor(const std::span<const std::byte> encoded) {
+    auto root = load_cbor(encoded);
+    if (!root) {
+        return base::Result<ChunkLeafPageBody>::failure(root.error());
+    }
+    try {
+        if (root.value().at("page_kind").get<std::uint16_t>() != kPageKindChunkLeaf) {
+            return base::Result<ChunkLeafPageBody>::failure(
+                corrupt("chunk leaf page kind is invalid"));
+        }
+        ChunkLeafPageBody body;
+        for (const auto& item : root.value().at("records")) {
+            ChunkIndexRecord rec;
+            rec.chunk_index = item.at("chunk_index").get<std::uint64_t>();
+            rec.record_offset = item.at("record_offset").get<std::uint64_t>();
+            rec.payload_offset = item.at("payload_offset").get<std::uint64_t>();
+            rec.payload_size = item.at("payload_size").get<std::uint64_t>();
+            rec.block_entry_count = item.at("block_entry_count").get<std::uint32_t>();
+            if (rec.record_offset == 0 || rec.payload_offset == 0) {
+                return base::Result<ChunkLeafPageBody>::failure(
+                    corrupt("chunk leaf record is invalid"));
+            }
+            if (!body.records.empty() && rec.chunk_index <= body.records.back().chunk_index) {
+                return base::Result<ChunkLeafPageBody>::failure(
+                    corrupt("chunk leaf records are not sorted"));
+            }
+            body.records.push_back(rec);
+        }
+        if (body.records.empty() || body.records.size() > kMaximumLeafEntriesPerPage) {
+            return base::Result<ChunkLeafPageBody>::failure(
+                corrupt("chunk leaf page record count is invalid"));
+        }
+        return base::Result<ChunkLeafPageBody>::success(std::move(body));
+    } catch (const Json::exception&) {
+        return base::Result<ChunkLeafPageBody>::failure(
+            corrupt("chunk leaf page fields are invalid"));
+    }
 }
 
 namespace {
@@ -536,9 +902,10 @@ extract_platform_security_descriptor(const std::span<const std::byte> platform_m
             security.assign(body.begin(), body.end());
             continue;
         }
-        if (critical) {
+        // FI0: reparse section (historical tag 2) and any other section are unsupported.
+        if (tag_id == 2 || critical) {
             return base::Result<std::vector<std::byte>>::failure(
-                corrupt("platform metadata has unknown critical section"));
+                corrupt("platform metadata has unsupported section"));
         }
     }
     return base::Result<std::vector<std::byte>>::success(std::move(security));

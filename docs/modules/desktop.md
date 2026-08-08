@@ -79,6 +79,11 @@ ServiceClient (QML 门面)
   `volume_set` 用 `source_ids`；`file_set` 用 `selection_summaries[].selection_id`（与 Job
   上 Service 写入的 `source_ids=selection_id[]` 对齐）。不得因 file_set 的 `source_ids` 为空
   而永远显示 N/A。
+- file_set Schedule 可配置 Full|Incremental（不提供 Differential）。向导说明选择范围变化会建立新 Full
+  基线。Job 列表与 schedule 状态展示 Service 投影的 requested/effective type 与
+  `incremental_downgrade_reason` 本地化文案；Desktop 不自行推断降级原因。
+- Recovery Point 列表可展示 parent 安全摘要与链深度（展示用）；删除必须先 `PlanDeleteRecoveryPoints`
+  再 `ExecuteDeletePlan`，只展示 server 返回的 target 数量，不在 UI 重算依赖。
 - `post_to_object` 提供单线程 Qt 投递边界，供后续 task event 在对象销毁后安全丢弃更新。
 - V4 字段以 Contracts 与 ADR-0017 / SERVICE_CONTROL_PROTOCOL_V4 为准；Desktop 私有 codec 不独立扩展 wire schema。
 
@@ -177,15 +182,21 @@ Password 在 Service 没有对应能力时不显示。布局必须在 900x600、
   `disk_number` 渲染一行 Source Disk，分区条由 `partitions[]` 顺序 + `volumes[].extents[]` 绑定盘符/卷标，
   并过滤 MSR/EFI/Recovery（对齐旧 `RestoreBackend::volumesForSourceDisk`）。无 `disks[]` 的旧 Archive
   返回 layout 失败（需重新备份），不合成假 Disk 0。
-- Restore 整盘映射与启动（对齐旧 `RestoreBackend` + RestorePage）：
-  - Source 行提供 **Restore to** ComboBox，也可把 Source 行拖到 Target 行完成映射；目标来自
-    inventory `disksTree`；过小 / 已占用 / 系统盘拒绝（toast + 拖放红高亮）。
-  - 默认同号映射（目标存在且容量足够、非系统盘时）。
-  - **Restore** 按钮在 checkpoint + 至少一条有效映射 + `restore.preflight`/`restore.start` capability 时启用。
-  - 点击后对每个已映射的 source→target 依次 `ServiceClient::startDiskRestore`：kind 9
-    PrepareRestore（`disk.N` + `source_disk_number` + 可选 `archive_password`）→ kind 40
-    StartRestore；多盘为多条整盘 Job（串行提交；tip 可为 Full 或 Incremental；Service 解析
-    base-first 链；非系统盘目标）。全部 accepted 后切到 Home。
+- Restore 三步向导 UI（对齐 Backup 步骤条与入场滑动）：
+  - 顶栏为 1–2–3 步骤条（恢复类型 / 源与目标 / 摘要）；无页面标题、无 Change type / 模式徽章。
+  - 步骤切换使用与 Backup 相同的 opacity + Translate 滑动动画；返回键每次回退一步。
+  - **Step 0**：三张卡片选择还原类型——**Disk restore**、**Volume restore**、**Files / folders**
+    （`file.restore` 不可用时 Files 卡禁用）。
+  - **Step 1**：对应工作区（Source/Target + Options）；页脚 **Next**（非 Restore）进入 Summary。
+    文件目标卷根显示 **可用 / 总大小**（inventory `free` + `size`）。
+  - **Step 2（Summary）**：确认后点 **Restore** 启动任务并显示进度
+    （`JobModel.restoreSessionStatus`）；任务结束后显示 **Back** 返回 Step 0。
+  - Checkpoint 面板按类型过滤：`contentKind=1`（volume_set）仅 Disk/Volume；`contentKind=2`
+    仅 Files；类型不匹配拒绝应用。
+- Restore 整盘 / 卷映射与启动：
+  - Disk：Source 磁盘 **Restore to** / 拖放到 Target；签名与自动扩容选项。
+  - Volume：Source 卷映射到本机非系统卷；无整盘选项。
+  - 多映射串行 `startDiskRestore` / `startVolumeRestore`；全部 accepted 后留在 Summary 显示进度。
 - F9 文件备份/恢复（Service V4，`content_kind=2`）：
   - Desktop codec schema 4；kinds 13 BrowseFileSources、14 ListRecoveryPointEntries、
     15 PrepareFileRestore、48 StartFileRestore；UpsertSchedule `file_set` 选择。
@@ -193,10 +204,8 @@ Password 在 Service 没有对应能力时不显示。布局必须在 900x600、
     不向 Service 发送绝对路径。
   - Backup 向导 step 0 选 Files 后绑定 `file.browse` lazy 树与 tri-state 勾选；创建
     `createFileSetSchedule`；Schedule 列表展示 `selection_summaries` 安全 label。
-  - Restore 按 Recovery Point `contentKind` 切换 Files 模式：归档文件树 + 单目录目标浏览 +
-    `startFileRestore`（prepare→start）；capability `file.restore` 门控。
-  - Files 模式 Options 面板显示：`restore_security`（ACL，默认开）、`restore_ads`（默认开）、
-    conflict policy（fail/replace/rename）；磁盘签名/扩容选项仅整盘模式可见。
-  - 可见文案经 `qsTrId`/`message_code_map` 五语言；`aegra_desktop` 构建验证。
+  - Restore Files 类型：归档文件树 + 目标目录 + `startFileRestore`；Options 含
+    `restore_security` / conflict policy（FI0：无 ADS 选项）。
+  - 可见文案经 `qsTrId`/`message_code_map` 五语言。
 - F10：file_set 首版发布门禁已通过（Debug/Release 全量生产构建 + 静态边界审查）。Desktop 仍不得
   用 `QDir`/`QFileInfo` 枚举 protect 源或 Archive；现场 UI 矩阵在 elevated Service 上人工执行。

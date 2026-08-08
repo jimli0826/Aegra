@@ -33,7 +33,7 @@ composition root 由该包 integration owner 修改。并行包不得同时编�
 | F8 | 已完成 | P1 | 文件选择性恢复纵向切片 | F3、F4、F7 | 无 |
 | F9 | 已完成 | P2 | Desktop 文件备份/恢复体验 | F6、F7、F8 | 无 |
 | F10 | 已完成 | Gate | 全量回归、文档收口和发布门禁 | F2-F9 | 无 |
-| F11 | 暂缓 | P3 | 文件级 Incremental | F10、单独决策 | 无 |
+| F11 | 已完成 | P3 | 文件级 Incremental 决策移交 | F10、ADR-0018 | 由 FI0–FI10 替代 |
 
 状态只允许：`可开始`、`进行中`、`等待前置`、`阻塞`、`已完成`、`暂缓`。integration owner 维护本表，
 不能以文件存在代替完成标准。
@@ -46,7 +46,9 @@ composition root 由该包 integration owner 修改。并行包不得同时编�
   upgrade、data migration、fallback、兼容 feature flag 和先新后旧的 retry 路径。
 - Parser 对 `version != current` 执行统一拒绝即可，不得为了给旧开发数据更友好的错误而解析旧 Header、payload、
   Catalog 或数据库。现有开发 Archive、Repository、SQLite 和 IPC 样本直接删除并重新生成。
-- 首版只允许 `file_set + full + local NTFS/ReFS + VSS + strict failure`。
+- 当前已完成实现只允许 `file_set + full + local NTFS/ReFS + VSS + strict failure`。Incremental 实施使用
+  [FI0–FI10 计划](FILE_SET_INCREMENTAL_DEVELOPMENT_PLAN.md)，不得继续扩展本计划。
+- 本期不支持 reparse、hard link、sparse、ADS；FI0 先删除相关预留合同/分支并建立 strict reject。
 - V7 Volume 行为必须与现有 V6 功能等价，不能为了文件功能搁置 Volume Backup/Verify/Restore。
 - 文件树和 Index 处理必须有界；禁止 `vector<all files>`、单个巨型 CBOR 和无界 producer queue。
 - Desktop 不使用 `QDir`/`QFileInfo` 读取保护源，不向 Service 发送绝对路径。
@@ -346,7 +348,7 @@ cmd.exe /d /c scripts\build.cmd Release
 
 - Volume：Full、Incremental、分卷、加密/不加密、Verify、Volume/Disk Restore、Catalog rebuild；
 - File：single file、recursive directory、multi-root/multi-volume、encryption、split、Verify、browse、restore；
-- Metadata：empty、Unicode、deep tree、ACL、ADS、sparse、hard link、reparse no-follow；
+- Metadata：empty、Unicode、deep tree、ACL；reparse、hard link、sparse、ADS 改由 FI0 验证 strict reject；
 - Failure：VSS fail、unreadable、source removed、disk full、cancel、deadline、Worker crash、Service restart、
   Catalog publish fail、missing part、corrupt index/chunk/footer、target collision/reparse swap；
 - UI：五语言、900x600/1080x720/150% DPI、disconnect/reconnect、expired token、partial restore。
@@ -356,18 +358,12 @@ cmd.exe /d /c scripts\build.cmd Release
 **文档收口：** 更新模块当前状态、产品范围、格式入口、协议入口、Desktop/Service 完成计划和发布说明。只有全部
 门禁通过后把 F2-F9 标为完成。
 
-## 15. F11：文件级 Incremental（暂缓）
+## 15. F11：文件级 Incremental 决策移交（已完成）
 
-F11 不得与首版混合。启动前需要单独设计审查，至少解决：
-
-- 每个 Volume 的 USN Journal ID、起止 USN 和 wrap/reset 判定；
-- rename、hard-link、directory move、security-only change、ADS 和 sparse change；
-- 每层保存完整 namespace view 还是 delta view；
-- stream content ancestor reference、链深上限、Verify 和删除可达性；
-- Journal 不可靠时如何产生明确 Full，而不是伪造 Incremental；
-- 文件基线 sidecar/index 与 Volume `.bhx` 的隔离。
-
-没有新的 Accepted ADR 和格式规范，不得加入 file incremental enum 分支、空接口或 TODO stub。
+ADR-0018 已冻结 USN baseline、完整 current namespace Index、direct-parent stream、chain reader 与安全 Full 语义。
+实际开发不再扩展 F11，统一按
+[文件集增量开发计划 FI0–FI10](FILE_SET_INCREMENTAL_DEVELOPMENT_PLAN.md) 执行。FI0 首先移除并严格拒绝
+reparse、hard link、sparse、ADS；旧开发格式与接口不保留兼容路径。
 
 ## 16. Agent 交付模板
 
@@ -635,7 +631,7 @@ Security/path cases reviewed:
   Unreleased product: reject wrong format/protocol/schema versions (no dual-read)
 Format/protocol docs updated: status pointers only; V7/V2/V4 remain authoritative
 Known remaining work (outside this package):
-  F11 file-level Incremental (deferred; needs separate Accepted ADR)
+  FI0-FI10 file-level Incremental implementation (ADR-0018 accepted)
   Live Volume + File artificial validation matrix on isolated hosts
   Live five-locale UI matrix at 900x600 / 1080x720 / 150% DPI
 ```

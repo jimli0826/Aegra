@@ -36,16 +36,23 @@ source/target、`SecretRef`、trace 和 deadline。`content_kind` 为 `volume_se
 - **file_set restore**：`source_refs`（archive 路径）+ `file_restore_target`；`target_ref` 为空。
 
 Backup Job 还必须拥有 `BackupOptions`：显式 `type`、`file_uuid`、`created_utc_ms`，全量必须拥有不同于
-`file_uuid` 的 `backup_set_uuid`，增量时同时拥有 `parent_source_ref` 与 `parent_credential_ref`。
-file_set 首版仅 Full。Service 在提交 Worker 前分配持久化身份和创建时间，Worker 不得重新生成 Archive 身份。
-`SecretRef` 只保存凭据定位符，禁止保存明文 Secret。
+`file_uuid` 的 `backup_set_uuid`。volume 增量同时拥有 `parent_source_ref`（`parent_credential_ref` 可选）。
+file_set 允许 Full/Incremental：`selection_fingerprint` 必填；Incremental 可携带 `candidate_parent_uuid`，
+禁止 volume 风格 `parent_source_ref`。Service 在提交 Worker 前分配持久化身份、创建时间与 selection
+fingerprint；Worker 不得重新生成 Archive 身份。`SecretRef` 只保存凭据定位符，禁止保存明文 Secret。
 
 `TaskProgress` schema 4 同时携带 `job_id` 与 `trace_id`；`logical_bytes` 可为 null（文件枚举阶段未知总量），
 并增加 `discovered_entries` / `processed_entries`。`TaskResult` schema 4 增加 `entry_count`、
-`stream_count` 与可选 `partial_restore`。不得复制 Adapter 的原始错误文本。
+`stream_count`、可选 `partial_restore`，以及 file_set backup 的 `requested_backup_type` /
+`effective_backup_type` / `effective_parent_uuid` / `incremental_downgrade_reason`。不得复制 Adapter
+的原始错误文本。
 
-`file_set.h` 定义 `ContentKind`、名称编码、`FileSourceRef`、`FileEntryDesc`、`FileRestoreTarget`、
-`PartialRestoreStats` 与产品上限常量；Contracts/Ports 禁止路径类型、HANDLE、Qt、JSON。
+`file_set.h` 定义 `ContentKind`、名称编码、`FileSourceRef`、`FileEntryDesc`、`StableFileIdentity`、
+`FileJournalCheckpoint`/`FileJournalState`、`FileChangeBatch`、`FileSelectionFingerprint`、
+`FileContentStorage`、`IncrementalDowngradeReason`、`FileRestoreTarget`、`PartialRestoreStats` 与
+产品上限常量；Contracts/Ports 禁止路径类型、HANDLE、Qt、JSON。
+`FileJournalState` 的 unavailable reason/native error 仅用于同进程 Worker 诊断，不进入 Archive、Catalog
+或 IPC 编码。
 
 `WorkerResponse` / `WorkerCommand` / `WorkerEvent` 语义不变；具体 framing 见
 [ADR-0008](../adr/0008-worker-session-named-pipe-protocol.md)。

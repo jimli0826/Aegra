@@ -26,6 +26,12 @@ Windows Service SCM 边界、显式 Named Pipe ACL 与调用方身份校验见
 本地 Service 控制面 V4（替代 ADR-0013 wire schema）见
 [ADR-0017](0017-service-control-protocol-v4.md)。
 
+文件集 Incremental 的 USN 基线、完整 tip Index、链式读取，以及 reparse/hard link/sparse/ADS 的范围收缩见
+[ADR-0018](0018-file-set-incremental-usn-and-chain.md)。
+
+File Index 持久化二级索引（Entry ID / Stream / Chunk）、internal child 物理 offset、惰性 Reader 与
+普通打开/完整 Verify 分离见 [ADR-0019](0019-file-set-secondary-indexes-and-lazy-reader.md)。
+
 ## 状态
 
 - `Proposed`：讨论中，不构成实现依据。

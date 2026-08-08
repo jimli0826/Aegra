@@ -30,10 +30,32 @@ staging key。发布支持 create-only rename 与 generation 条件替换，删�
 
 V7 `file_set` 由 `PersonalFileArchiveSession`（`IFileBackupSession`）与 `PersonalFileArchiveReader`
 （`IFileRecoveryPointReader`）实现：entry 先写入 index spool，finalize 时写出 leaf index page 与 Footer；
-Index page 使用独立 HKDF info `MYBACKUP-V7-FILE-INDEX-PAGE`。当前 Writer/Reader 支持单 leaf root
-（entry 数 ≤ leaf 页上限）；多 leaf B+tree 内部页与跨分卷 Index 在后续工作包完成。
-Reader 装载 Index 后校验父图（entry_id 唯一、parent 存在且为 directory、无环、深度 ≤ 64）；
-失败返回 `format.corrupt_index`（C07），避免损坏 Archive 在 Restore 父链遍历中永久循环。
+Index page 使用独立 HKDF info `MYBACKUP-V7-FILE-INDEX-PAGE`。File stream chunk 默认
+`COMPRESSION_ZSTD`：写入时对逻辑 block 做机会性 zstd（压得更小才标 `COMPRESSED`，否则 `RAW`）；
+读取时按 BlockEntry flags 解压。Writer 支持 Full 与 Incremental（FI4）：
+- Full：`parent_uuid=0`，全部 stream 必须 `content_storage=local`；
+- Incremental：`parent_uuid` 非 0、`CAP_FILE_USN_BASELINE` 置位、Manifest 含 fingerprint 与
+  `journal_checkpoints`；tip Index 完整，未变/metadata stream 仅写 `parent_stream_index`（无 payload）；
+- Footer：`entry_count`/`stream_count` 为 tip 全集；`file_stream_chunk_count`/`logical_bytes` 仅本层 local payload。
+Abort/析构删除 partial 与 spool，不发布可见 RP。Writer finalize 对 spool 做紧凑 key 排序并流式写
+leaf（M5）。Writer finalize 写出 Namespace 树及 Entry ID / Stream / Chunk 二级索引（ADR-0019），
+internal child 含物理 `offset`；Entry ID leaf 记录含 Namespace leaf `page_offset` 以便
+`describe_entry` 直接 seek。Reader open 认证 Header/Footer 与各非零 root（O(1) 页），
+有界 LRU page cache（L31 Phase-2），**不**建 O(N) locator 表。`list_children` 沿
+Namespace B+tree；`describe_entry` / `describe_stream_owner` / `read_stream` 经二级索引
+O(log N) 定位后按需加载 leaf/chunk。Chain 非 tip `kDeferred`（M6）；全量父图与 Entry ID
+唯一性仅在 `verify_index_and_parent_graph`（Verify 路径）。
+
+**FI5/FI8 file chain reader：** `PersonalFileArchiveChainReader` 接受 base-first 层列表（Full root…tip），
+在 open 时认证每层 Header/Footer（密码在 open 期间消费）并校验 parent_uuid、backup_set、
+selection fingerprint、无环与深度 ≤ 128。tip 立即认证 Index roots；祖先层延迟到首次 stream 访问。
+browse/`describe_entry` 只暴露 tip Index；`read_stream` 迭代解析 `content_storage=parent` 到最终
+local 层，逐跳校验 stable identity / stream kind / logical size，并维护 visited 防环。
+`chain_generation_digest()` 为 base-first 各层 Index root digest 的 `+` 拼接（digest 来自 Footer，
+不依赖 deferred root 认证）；`resolve_stream_reference` 仅解析 parent 引用不读 payload。
+单层 `PersonalFileArchiveReader::read_stream` 拒绝 parent storage。
+`verify_recoverability` 对每层跑父图校验、按 leaf 顺序认证 local payload，并解析 tip 全部 stream。
+Service browse/restore/verify 与 Worker file_set Verify/Restore 均经 chain reader（单 Full 为一层链）。
 
 增量 Session 接受一或多个 Volume：创建时验证显式父 Archive 及父 Sidecar，要求父层与本次 Manifest 的有序 `volume_index` / `volume_id` / `total_size` 及 Sidecar 每卷块记录数一致，继承备份集 UUID，并把各 Volume 的完整源转换为连续变化区间组成的稀疏层；新 Sidecar 仍为每个 Volume 保存完整状态。`PersonalArchiveReader` 可以 inspect 稀疏层，`PersonalArchiveChainReader` 接受显式 base-first 层列表、校验多 Volume 几何与链关系，并按 `source_index` 叠层，对通用 Restore Pipeline 提供连续覆盖视图。多 Volume **同时写多个独立目标**的显式映射尚未完成：Restore Pipeline 在未提供映射时对 `source_index != 0` 的 chunk 拒绝。链恢复不读取 Sidecar；链发现和逐层凭据选择属于 Application，不由 Adapter 扫描目录猜测。
 
@@ -70,12 +92,21 @@ Target：`aegra_adapter_windows_filesystem` / `Aegra::AdapterWindowsFilesystem`�
   - `kReplace`：清除目标只读后 `MOVEFILE_REPLACE_EXISTING`，失败则 Delete+rename。
   - `kRename`：目标已存在时发布为 `name (N).ext`（N=1..9999），耗尽 →
     `file_restore.rename_exhausted`。
-  - **能力声明（本期）**：`capabilities()` 对外宣称 `supports_reparse` /
-    `supports_hard_link` / `supports_sparse` / `supports_ads` 为 true（与 Port 形状一致，
-    供 preflight 与后续工作包接线）。**本期不实现**完整恢复语义：reparse buffer 应用、
-    hard-link 组编排、sparse allocated ranges 精确打洞、ADS 端到端产品验收均不在本期内；
-    现有 API 仅为占位或局部骨架，不得当作已交付能力。完整实现需单独工作包。
-- `WindowsFileSourceBrowser`：Service 浏览用 opaque node token；不向调用方返回路径。
+  - **能力声明（FI0）**：`capabilities()` 仅诚实声明 `supports_security_descriptor` 与
+    `free_bytes`。不支持 reparse / hard link / sparse / ADS，Port 上无对应方法或 capability 位。
+  - **Source 严格检测（FI0/FI2）**：完整枚举期间检测 reparse、`NumberOfLinks>1` 的文件、sparse 属性、
+    命名 ADS，分别返回 `file_source.unsupported_reparse|hard_link|sparse|ads`，整 Job fail 且无 RP。
+  - **USN Journal（FI2）**：`query_journal_state` / `read_change_batch` 仅对同一 snapshot volume handle
+    调用 `FSCTL_QUERY_USN_JOURNAL` / `FSCTL_READ_USN_JOURNAL`（V2/V3 record）。禁止 live volume 回退。
+    Worker 在 VSS 创建前可调用幂等 `ensure_file_change_journal_active`：仅当 live NTFS volume 返回
+    `ERROR_JOURNAL_NOT_ACTIVE` 时创建 128 MiB journal（16 MiB allocation delta）；不读取 live baseline/records，
+    已有 journal 不修改。
+    snapshot 上 journal 不可用时 `available=false`（供 Full 降级）；读取半开区间
+    `[start_usn,end_usn)`，并返回仅用于 Worker 诊断的稳定 unavailable reason 与 native error code；
+    有界 batch，未知 reason bit 映射为 `kAmbiguous`。实现见
+    `windows_usn_journal.cpp`。
+- `WindowsFileSourceBrowser`：Service 浏览用 opaque node token；不向调用方返回路径；reparse/sparse
+  节点标记 `kUnsupported` 且不可选。
 
 ## 通用规则
 

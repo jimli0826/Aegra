@@ -12,16 +12,14 @@
 
 namespace aegra::ports {
 
+/// FI0: only security descriptors and free space are product capabilities.
+/// Reparse / hard link / sparse / ADS are unsupported and have no capability bits.
 struct FileSinkCapabilities final {
-    bool supports_ads{false};
-    bool supports_sparse{false};
     bool supports_security_descriptor{false};
-    bool supports_reparse{false};
-    bool supports_hard_link{false};
     std::uint64_t free_bytes{0};
 };
 
-/// Staged writer for one ordinary file (main stream and optional ADS).
+/// Staged writer for one ordinary file (unnamed main stream only).
 /// write() consumes or copies payload before return; short writes are errors.
 /// publish() atomically renames staging into place after metadata application policy.
 /// Destructor aborts unpublished staging; never reports cancel after successful publish.
@@ -38,14 +36,6 @@ class IStagedFileWriter {
     [[nodiscard]] virtual base::Result<void>
     write(std::uint64_t offset, std::span<const std::byte> payload,
           base::CancellationToken cancellation) = 0;
-
-    [[nodiscard]] virtual base::Result<void>
-    set_sparse_ranges(const std::vector<contracts::FileAllocatedRangeDesc>& allocated,
-                      base::CancellationToken cancellation) = 0;
-
-    [[nodiscard]] virtual base::Result<void>
-    write_alternate_stream(const contracts::EncodedName& name, std::span<const std::byte> payload,
-                           base::CancellationToken cancellation) = 0;
 
     [[nodiscard]] virtual base::Result<void>
     apply_metadata(const contracts::FileEntryDesc& entry,
@@ -80,16 +70,6 @@ class IFileTreeSink {
     [[nodiscard]] virtual base::Result<std::unique_ptr<IStagedFileWriter>>
     begin_file(const std::vector<contracts::EncodedName>& relative_components,
                std::uint64_t logical_size, base::CancellationToken cancellation) = 0;
-
-    [[nodiscard]] virtual base::Result<void>
-    create_hard_link(const std::vector<contracts::EncodedName>& existing_components,
-                     const std::vector<contracts::EncodedName>& new_components,
-                     base::CancellationToken cancellation) = 0;
-
-    [[nodiscard]] virtual base::Result<void>
-    create_reparse(const std::vector<contracts::EncodedName>& relative_components,
-                   const contracts::FileEntryDesc& entry,
-                   base::CancellationToken cancellation) = 0;
 
     [[nodiscard]] virtual base::Result<void>
     apply_directory_metadata(const std::vector<contracts::EncodedName>& relative_components,

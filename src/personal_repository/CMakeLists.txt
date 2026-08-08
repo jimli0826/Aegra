@@ -8,6 +8,8 @@ add_library(aegra_personal_repository STATIC
     src/delete_plan.cpp
     src/deletion_codec.cpp
     src/json_codec.cpp
+    src/parent_selector.cpp
+    src/retention.cpp
 )
 
 add_library(Aegra::PersonalRepository ALIAS aegra_personal_repository)
@@ -19,7 +21,7 @@ target_include_directories(
 
 target_link_libraries(
     aegra_personal_repository
-    PUBLIC Aegra::Base Aegra::Format Aegra::Ports
+    PUBLIC Aegra::Base Aegra::Contracts Aegra::Format Aegra::Ports
     PRIVATE nlohmann_json::nlohmann_json
 )
 

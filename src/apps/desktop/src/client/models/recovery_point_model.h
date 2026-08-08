@@ -37,10 +37,12 @@ class RecoveryPointModel final : public QAbstractListModel {
         FileUuidRole = Qt::UserRole + 1,
         BackupSetUuidRole,
         ParentUuidRole,
+        ParentSummaryTextRole,
         BackupTypeTextRole,
         ContentKindRole,
         ChainCompleteRole,
         ChainStateTextRole,
+        ChainDepthRole,
         CreatedUtcMsRole,
         CreatedTextRole,
         LogicalSizeBytesRole,
@@ -49,6 +51,7 @@ class RecoveryPointModel final : public QAbstractListModel {
         StoredSizeTextRole,
         SourceCountRole,
         HasSidecarRole,
+        IsBaselineRole,
     };
 
     explicit RecoveryPointModel(QObject* parent = nullptr);
@@ -66,8 +69,10 @@ class RecoveryPointModel final : public QAbstractListModel {
     Q_INVOKABLE [[nodiscard]] QStringList backupDateYmds() const;
     /// Checkpoints for a local date, newest first. Each map: fileUuid, timeText, backupType,
     /// contentKind, sizeText, logicalSizeBytes, sourceCount, createdUtcMs, createdText,
-    /// chainComplete.
+    /// chainComplete, parentSummary, chainDepth, isBaseline.
     Q_INVOKABLE [[nodiscard]] QVariantList checkpointsForDate(const QString& date_ymd) const;
+    /// Safe parent summary for details panel: parent time + short id (no file IDs / USN).
+    Q_INVOKABLE [[nodiscard]] QVariantMap recoveryPointDetails(const QString& file_uuid) const;
 
   signals:
     void countChanged();
@@ -75,6 +80,10 @@ class RecoveryPointModel final : public QAbstractListModel {
   private:
     [[nodiscard]] QString backup_type_text(std::int64_t backup_type) const;
     [[nodiscard]] QString chain_state_text(std::int64_t chain_state) const;
+    [[nodiscard]] QString parent_summary_text(const RecoveryPointRow& row) const;
+    [[nodiscard]] int chain_depth_for(const RecoveryPointRow& row) const;
+    [[nodiscard]] const RecoveryPointRow* find_row(const QString& file_uuid) const;
+    [[nodiscard]] static QString short_uuid(const QString& uuid);
     [[nodiscard]] static QString local_date_ymd(std::int64_t created_utc_ms);
     [[nodiscard]] static QString local_time_hm(std::int64_t created_utc_ms);
 

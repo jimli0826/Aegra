@@ -17,7 +17,7 @@ constexpr std::array<std::string_view, 9> kDescriptorKeys = {
     "schema_version",  "kind",           "repository_uuid",
     "created_utc_ms",  "archive_prefix", "catalog_prefix",
     "deletion_prefix", "staging_prefix", "layout_version"};
-constexpr std::array<std::string_view, 21> kCatalogKeys = {
+constexpr std::array<std::string_view, 23> kCatalogKeys = {
     "schema_version",     "kind",
     "repository_uuid",    "file_uuid",
     "backup_set_uuid",    "parent_uuid",
@@ -28,7 +28,8 @@ constexpr std::array<std::string_view, 21> kCatalogKeys = {
     "stored_size_bytes",  "source_count",
     "source_volume_ids",  "file_entry_count",
     "file_stream_count",  "structural_state",
-    "catalog_generation",
+    "catalog_generation", "file_selection_fingerprint",
+    "file_baseline_available",
 };
 
 [[nodiscard]] base::Result<std::optional<std::string>> parse_parent_uuid(const Json& value) {
@@ -120,6 +121,8 @@ constexpr std::array<std::string_view, 21> kCatalogKeys = {
         result.file_stream_count = file_stream_count.value();
         result.structural_state = root.at("structural_state").get<std::string>();
         result.catalog_generation = generation.value();
+        result.file_selection_fingerprint = root.at("file_selection_fingerprint").get<std::string>();
+        result.file_baseline_available = root.at("file_baseline_available").get<bool>();
         return base::Result<CatalogEntry>::success(std::move(result));
     } catch (const Json::exception&) {
         return base::Result<CatalogEntry>::failure(
@@ -191,6 +194,8 @@ base::Result<std::string> encode_catalog_entry_json(const CatalogEntry& entry) {
         {"file_stream_count", entry.file_stream_count},
         {"structural_state", entry.structural_state},
         {"catalog_generation", entry.catalog_generation},
+        {"file_selection_fingerprint", entry.file_selection_fingerprint},
+        {"file_baseline_available", entry.file_baseline_available},
     };
     return base::Result<std::string>::success(root.dump());
 }

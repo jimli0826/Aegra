@@ -2,6 +2,7 @@
 
 #include "aegra/base/error.h"
 
+#include <algorithm>
 #include <set>
 #include <string>
 #include <utility>
@@ -127,10 +128,34 @@ base::Result<void> validate_manifest(const Manifest& manifest) {
         if (!manifest.disks.empty() || !manifest.volumes.empty()) {
             return invalid("file_set manifest must not include disks or volumes");
         }
-        if (manifest.backup_job.backup_type != BackupType::kFull) {
-            return invalid("file_set manifest requires full backup type");
+        if (manifest.backup_job.backup_type != BackupType::kFull &&
+            manifest.backup_job.backup_type != BackupType::kIncremental) {
+            return invalid("file_set manifest backup_type must be full or incremental");
+        }
+        contracts::FileSelectionFingerprint fingerprint;
+        fingerprint.algorithm_id = manifest.file_set_baseline.fingerprint_algorithm;
+        fingerprint.digest = manifest.file_set_baseline.selection_fingerprint;
+        auto fp = contracts::validate_file_selection_fingerprint(fingerprint);
+        if (!fp) {
+            return invalid("file_set manifest selection_fingerprint is invalid");
+        }
+        auto checkpoints =
+            contracts::validate_file_journal_checkpoints(manifest.file_set_baseline.journal_checkpoints);
+        if (!checkpoints) {
+            return invalid("file_set manifest journal_checkpoints are invalid");
+        }
+        if (manifest.backup_job.backup_type == BackupType::kIncremental &&
+            manifest.file_set_baseline.journal_checkpoints.empty()) {
+            return invalid("file_set incremental requires journal_checkpoints");
         }
         return validate_extensions(manifest);
+    }
+    if (manifest.file_set_baseline.fingerprint_algorithm != 0 ||
+        !std::all_of(manifest.file_set_baseline.selection_fingerprint.begin(),
+                     manifest.file_set_baseline.selection_fingerprint.end(),
+                     [](const std::byte item) { return item == std::byte{0}; }) ||
+        !manifest.file_set_baseline.journal_checkpoints.empty()) {
+        return invalid("volume_set manifest cannot carry file_set_baseline");
     }
     if (manifest.volumes.empty()) {
         return invalid("volume_set manifest requires at least one volume");

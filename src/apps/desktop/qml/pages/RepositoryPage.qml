@@ -9,6 +9,8 @@ Item {
     property bool recoveryPointDrawerOpen: false
     readonly property string selectedId: serviceClient.selectedRepositoryConnectionId
     readonly property bool repositorySelected: selectedId.length > 0
+    property string selectedRecoveryPointId: ""
+    property string selectedRecoveryPointSummary: ""
 
     function openConnectionDialog(importExisting) {
         connectionDialog.importExisting = importExisting
@@ -16,6 +18,41 @@ Item {
         connectionLocator.text = ""
         connectionDialog.open()
         connectionName.forceActiveFocus()
+    }
+
+    function selectRecoveryPoint(fileUuid, summaryText) {
+        root.selectedRecoveryPointId = fileUuid || ""
+        root.selectedRecoveryPointSummary = summaryText || ""
+    }
+
+    function requestDeletePlan() {
+        if (!root.selectedRecoveryPointId || root.selectedRecoveryPointId.length === 0)
+            return
+        if (!serviceClient.planDeleteRecoveryPoint(root.selectedRecoveryPointId)) {
+            serviceClient.showToast(qsTrId("aegra.repository.delete.plan_failed"), true)
+        }
+    }
+
+    function confirmExecuteDelete() {
+        if (!serviceClient.executeDeletePlan()) {
+            serviceClient.showToast(qsTrId("aegra.repository.delete.execute_failed"), true)
+        }
+    }
+
+    Connections {
+        target: serviceClient
+        function onDeletePlanReady() {
+            deletePlanDialog.open()
+        }
+        function onDeletePlanFailed(message) {
+            serviceClient.showToast(message, true)
+        }
+        function onDeleteExecuted() {
+            root.selectedRecoveryPointId = ""
+            root.selectedRecoveryPointSummary = ""
+            //% "Recovery points deleted"
+            serviceClient.showToast(qsTrId("aegra.repository.delete.done"), false)
+        }
     }
 
     ColumnLayout {
@@ -420,9 +457,22 @@ Item {
                         //% "Delete"
                         text: qsTrId("aegra.common.delete")
                         danger: true
-                        enabled: false
+                        enabled: serviceClient.connected
+                                 && root.selectedRecoveryPointId.length > 0
+                                 && !serviceClient.deletePlanBusy
+                                 && !serviceClient.repositoryLoading
+                        onClicked: root.requestDeletePlan()
                     }
                     Item { Layout.fillWidth: true }
+                    Text {
+                        visible: root.selectedRecoveryPointId.length > 0
+                        text: root.selectedRecoveryPointSummary
+                        color: Theme.colorTextGrey
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 11
+                        elide: Text.ElideMiddle
+                        Layout.maximumWidth: 220
+                    }
                     Text {
                         //% "%1 recovery points"
                         text: qsTrId("aegra.repository.recovery_points_count")
@@ -507,11 +557,17 @@ Item {
                         required property string storedSizeText
                         required property string chainStateText
                         required property bool chainComplete
+                        required property string parentSummaryText
+                        required property int chainDepth
+                        required property bool isBaseline
                         required property int index
+                        readonly property bool selected: root.selectedRecoveryPointId === fileUuid
                         width: recoveryPointList.width
-                        height: 58
-                        color: index % 2 === 0
-                               ? Theme.colorTableRow : Theme.colorTableAlt
+                        height: 64
+                        color: selected
+                               ? Qt.rgba(Theme.colorAccentBlue.r, Theme.colorAccentBlue.g,
+                                         Theme.colorAccentBlue.b, 0.18)
+                               : (index % 2 === 0 ? Theme.colorTableRow : Theme.colorTableAlt)
 
                         RowLayout {
                             anchors.fill: parent
@@ -523,10 +579,18 @@ Item {
                                 Layout.preferredWidth: 16
                                 Layout.preferredHeight: 16
                                 Layout.leftMargin: 6
-                                color: Theme.colorInput
-                                border.width: 1
+                                radius: 3
+                                color: selected ? Theme.colorAccentBlue : "transparent"
+                                border.width: selected ? 0 : 1
                                 border.color: Theme.colorBorder
-                                opacity: 0.5
+                                Text {
+                                    anchors.centerIn: parent
+                                    visible: selected
+                                    text: "\u2713"
+                                    color: "white"
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                }
                             }
 
                             Column {
@@ -543,11 +607,15 @@ Item {
                                 }
                                 Text {
                                     width: parent.width
-                                    text: backupSetUuid
+                                    text: parentSummaryText
+                                          + (chainDepth > 1
+                                             ? (" · " + qsTrId("aegra.repository.chain.depth")
+                                                .arg(chainDepth))
+                                             : "")
                                     color: Theme.colorTextDim
-                                    font.family: "Consolas"
-                                    font.pixelSize: 9
-                                    elide: Text.ElideMiddle
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: 10
+                                    elide: Text.ElideRight
                                 }
                             }
 
@@ -561,9 +629,10 @@ Item {
                             Text {
                                 Layout.preferredWidth: 60
                                 text: backupTypeText
-                                color: Theme.colorTextGrey
+                                color: isBaseline ? Theme.colorTextWhite : Theme.colorTextGrey
                                 font.family: Theme.fontFamily
                                 font.pixelSize: 11
+                                font.bold: isBaseline
                             }
                             Text {
                                 Layout.preferredWidth: 80
@@ -591,6 +660,14 @@ Item {
                             }
                         }
 
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.selectRecoveryPoint(
+                                           fileUuid,
+                                           backupTypeText + " · " + createdText)
+                        }
+
                         Rectangle {
                             anchors.left: parent.left
                             anchors.right: parent.right
@@ -609,6 +686,74 @@ Item {
                         color: Theme.colorTextGrey
                         font.family: Theme.fontFamily
                         font.pixelSize: 13
+                    }
+                }
+            }
+        }
+    }
+
+    // Server-authored delete plan confirmation (target count only; no local dependency calc).
+    Dialog {
+        id: deletePlanDialog
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(440, parent.width - 40)
+        //% "Delete recovery points"
+        title: qsTrId("aegra.repository.delete.title")
+        standardButtons: Dialog.NoButton
+        background: Rectangle {
+            color: Theme.colorPopup
+            border.color: Theme.colorBorder
+            radius: 8
+        }
+        contentItem: ColumnLayout {
+            spacing: 14
+            width: deletePlanDialog.availableWidth
+            Text {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                //% "The service planned to delete %1 recovery point(s) in this chain. Other recovery points are kept. This cannot be undone."
+                text: qsTrId("aegra.repository.delete.plan_message")
+                      .arg((serviceClient.deletePlan && serviceClient.deletePlan.targetCount)
+                           ? serviceClient.deletePlan.targetCount : 0)
+                color: Theme.colorTextWhite
+                font.family: Theme.fontFamily
+                font.pixelSize: 13
+            }
+            Text {
+                Layout.fillWidth: true
+                visible: serviceClient.deletePlan
+                         && serviceClient.deletePlan.retainedCount !== undefined
+                wrapMode: Text.WordWrap
+                //% "Approximately %1 other recovery point(s) currently listed will remain."
+                text: qsTrId("aegra.repository.delete.retained_hint")
+                      .arg((serviceClient.deletePlan
+                            && serviceClient.deletePlan.retainedCount !== undefined)
+                           ? serviceClient.deletePlan.retainedCount : 0)
+                color: Theme.colorTextGrey
+                font.family: Theme.fontFamily
+                font.pixelSize: 12
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 10
+                Item { Layout.fillWidth: true }
+                AppButton {
+                    //% "Cancel"
+                    text: qsTrId("aegra.common.cancel")
+                    onClicked: {
+                        serviceClient.clearDeletePlan()
+                        deletePlanDialog.close()
+                    }
+                }
+                AppButton {
+                    //% "Delete permanently"
+                    text: qsTrId("aegra.repository.delete.confirm")
+                    danger: true
+                    enabled: !serviceClient.deletePlanBusy
+                    onClicked: {
+                        deletePlanDialog.close()
+                        root.confirmExecuteDelete()
                     }
                 }
             }

@@ -53,10 +53,11 @@ F2（Personal Archive V7 + Catalog V2）已实现：
 - AEAD HKDF info 升级为 `MYBACKUP-V7-*`；
 - Catalog Entry schema 2：`content_kind`、`file_entry_count`、`file_stream_count`、`format_version=7`。
 
-Adapter 侧 volume session/reader 已按 V7 record 边界写读；`PersonalFileArchiveSession` /
-`PersonalFileArchiveReader` 支持单 leaf root 的 file_set 写入、Footer/`index_root_digest` 校验、
-分页 `list_children` 与 stream 范围读取。多 leaf 内部页与完整 Verify 编排在 F5/F7 继续。
-DEDUP 写入、差异备份和多目标 Restore 仍是后续工作。
+Adapter 侧 volume session/reader 已按 V7 record 边界写读；`PersonalFileArchiveSession` 支持
+多层 B+tree Index 写入（Namespace + Entry ID / Stream / Chunk 二级索引，ADR-0019）；
+`PersonalFileArchiveReader` 按 L31/ADR-0019 以 Footer root 认证 + 有界 LRU page cache 打开
+（O(1) 页 I/O），二级 B+tree 分页 `list_children` / `describe_entry` / stream 范围读取。
+DEDUP 写入与多目标 Restore 仍是后续工作。
 
 ## 完成标准
 

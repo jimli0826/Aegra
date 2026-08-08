@@ -14,8 +14,11 @@ struct FileChunkWriteRequest final {
     std::uint64_t chunk_index{0};
     std::uint32_t stream_index{0};
     std::uint64_t logical_block_index{0};
+    /// Uncompressed size of this block; must equal payload.size().
     std::uint32_t logical_size{0};
+    /// Reserved; session chooses RAW vs COMPRESSED from logical payload (V7 zstd).
     std::uint8_t block_flags{0};
+    /// Logical (uncompressed) block bytes for the lifetime of the call.
     std::span<const std::byte> payload;
 };
 
@@ -39,7 +42,9 @@ class IFileBackupSession {
     [[nodiscard]] virtual base::Result<void>
     write_entry(const contracts::FileEntryDesc& entry, base::CancellationToken cancellation) = 0;
 
-    [[nodiscard]] virtual base::Result<void>
+    /// Writes one stream chunk. Payload is always logical/uncompressed; the session may
+    /// compress (zstd) before store. On success returns stored payload bytes (pre-AEAD body).
+    [[nodiscard]] virtual base::Result<std::uint64_t>
     write_stream_chunk(const FileChunkWriteRequest& request,
                        base::CancellationToken cancellation) = 0;
 

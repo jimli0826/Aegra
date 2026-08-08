@@ -3,6 +3,7 @@
 #include "windows_file_handle.h"
 #include "windows_file_names.h"
 #include "windows_file_security.h"
+#include "windows_usn_journal.h"
 
 #include "aegra/base/error.h"
 #include "aegra/format/file_index.h"
@@ -10,12 +11,15 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstring>
 #include <deque>
 #include <limits>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -26,6 +30,12 @@ namespace {
 using detail::UniqueHandle;
 using detail::win32_error;
 
+[[nodiscard]] base::Error unreadable_source_error(const DWORD error, std::string operation) {
+    auto result = win32_error(error, std::move(operation));
+    result.message.insert(0, "file_source.unreadable: ");
+    return result;
+}
+
 struct RegisteredEntry final {
     contracts::FileEntryDesc desc;
     std::wstring absolute_path;
@@ -34,16 +44,130 @@ struct RegisteredEntry final {
 struct VolumeRoot final {
     std::string volume_identity;
     std::vector<std::uint16_t> root_utf16;
+    /// Snapshot volume handle for USN FSCTLs (opened lazily; never live volume).
+    detail::UniqueHandle journal_handle;
+    std::uint64_t journal_id{0};
+    bool journal_probed{false};
+    bool journal_available{false};
+    contracts::FileJournalUnavailableReason journal_unavailable_reason{
+        contracts::FileJournalUnavailableReason::kNone};
+    std::uint32_t journal_native_error_code{0};
 };
 
 [[nodiscard]] contracts::FileEntryKind classify(const DWORD attributes) noexcept {
-    if ((attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
-        return contracts::FileEntryKind::kReparse;
-    }
     if ((attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
         return contracts::FileEntryKind::kDirectory;
     }
     return contracts::FileEntryKind::kFile;
+}
+
+[[nodiscard]] bool is_named_data_stream(const std::wstring_view name) noexcept {
+    constexpr std::wstring_view kUnnamedDataStream = L"::$DATA";
+    constexpr std::wstring_view kDataSuffix = L":$DATA";
+    return name != kUnnamedDataStream && name.ends_with(kDataSuffix);
+}
+
+[[nodiscard]] base::Result<bool> has_named_data_stream(const HANDLE handle) {
+    constexpr std::size_t kInitialBufferBytes = 64U * 1024U;
+    constexpr std::size_t kMaximumBufferBytes = 1024U * 1024U;
+    std::vector<std::byte> buffer(kInitialBufferBytes);
+    for (;;) {
+        if (GetFileInformationByHandleEx(handle, FileStreamInfo, buffer.data(),
+                                         static_cast<DWORD>(buffer.size())) != FALSE) {
+            break;
+        }
+        const auto error = GetLastError();
+        if (error == ERROR_HANDLE_EOF) {
+            return base::Result<bool>::success(false);
+        }
+        if ((error != ERROR_MORE_DATA && error != ERROR_INSUFFICIENT_BUFFER) ||
+            buffer.size() >= kMaximumBufferBytes) {
+            return base::Result<bool>::failure(unreadable_source_error(error, "FileStreamInfo"));
+        }
+        buffer.resize((std::min)(buffer.size() * 2U, kMaximumBufferBytes));
+    }
+    std::size_t offset = 0;
+    for (;;) {
+        if (offset > buffer.size() - offsetof(FILE_STREAM_INFO, StreamName)) {
+            return base::Result<bool>::failure(
+                {base::ErrorCode::kIoFailure, "file_source.unreadable: invalid stream offset"});
+        }
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        const auto* info = reinterpret_cast<const FILE_STREAM_INFO*>(buffer.data() + offset);
+        if (info->StreamNameLength % sizeof(wchar_t) != 0 ||
+            info->StreamNameLength > buffer.size() - offset - offsetof(FILE_STREAM_INFO, StreamName)) {
+            return base::Result<bool>::failure(
+                {base::ErrorCode::kIoFailure, "file_source.unreadable: invalid stream name"});
+        }
+        const std::wstring_view name(info->StreamName, info->StreamNameLength / sizeof(wchar_t));
+        if (is_named_data_stream(name)) {
+            return base::Result<bool>::success(true);
+        }
+        if (info->NextEntryOffset == 0) {
+            return base::Result<bool>::success(false);
+        }
+        if (info->NextEntryOffset < offsetof(FILE_STREAM_INFO, StreamName) ||
+            info->NextEntryOffset > buffer.size() - offset) {
+            return base::Result<bool>::failure(
+                {base::ErrorCode::kIoFailure, "file_source.unreadable: invalid next stream offset"});
+        }
+        offset += info->NextEntryOffset;
+    }
+}
+
+/// FI0: strict fail on reparse / hard-linked file / sparse / named ADS.
+/// Also captures FILE_ID_128 for FI1 stable identity (no USN).
+/// Paths must not appear in the stable message code.
+[[nodiscard]] base::Result<std::array<std::byte, contracts::kStableFileIdBytes>>
+reject_unsupported_and_read_file_id(const std::wstring& absolute_path, const DWORD attributes) {
+    if ((attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+        return base::Result<std::array<std::byte, contracts::kStableFileIdBytes>>::failure(
+            {base::ErrorCode::kInvalidArgument, "file_source.unsupported_reparse"});
+    }
+    if ((attributes & FILE_ATTRIBUTE_SPARSE_FILE) != 0) {
+        return base::Result<std::array<std::byte, contracts::kStableFileIdBytes>>::failure(
+            {base::ErrorCode::kInvalidArgument, "file_source.unsupported_sparse"});
+    }
+    const bool is_directory = (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    auto handle = detail::open_path(
+        detail::to_utf16_vector(absolute_path), FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
+    if (!handle) {
+        return base::Result<std::array<std::byte, contracts::kStableFileIdBytes>>::failure(
+            {handle.error().code, "file_source.unreadable"});
+    }
+    if (!is_directory) {
+        BY_HANDLE_FILE_INFORMATION info{};
+        if (GetFileInformationByHandle(handle.value().get(), &info) == FALSE) {
+            return base::Result<std::array<std::byte, contracts::kStableFileIdBytes>>::failure(
+                unreadable_source_error(GetLastError(), "GetFileInformationByHandle"));
+        }
+        if (info.nNumberOfLinks > 1) {
+            return base::Result<std::array<std::byte, contracts::kStableFileIdBytes>>::failure(
+                {base::ErrorCode::kInvalidArgument, "file_source.unsupported_hard_link"});
+        }
+    }
+    FILE_ID_INFO id_info{};
+    if (GetFileInformationByHandleEx(handle.value().get(), FileIdInfo, &id_info,
+                                     sizeof(id_info)) == FALSE) {
+        return base::Result<std::array<std::byte, contracts::kStableFileIdBytes>>::failure(
+            unreadable_source_error(GetLastError(), "FileIdInfo"));
+    }
+    std::array<std::byte, contracts::kStableFileIdBytes> file_id{};
+    static_assert(sizeof(id_info.FileId.Identifier) >= contracts::kStableFileIdBytes);
+    std::memcpy(file_id.data(), id_info.FileId.Identifier, contracts::kStableFileIdBytes);
+
+    auto named_data_stream = has_named_data_stream(handle.value().get());
+    if (!named_data_stream) {
+        return base::Result<std::array<std::byte, contracts::kStableFileIdBytes>>::failure(
+            named_data_stream.error());
+    }
+    if (named_data_stream.value()) {
+        return base::Result<std::array<std::byte, contracts::kStableFileIdBytes>>::failure(
+            {base::ErrorCode::kInvalidArgument, "file_source.unsupported_ads"});
+    }
+    return base::Result<std::array<std::byte, contracts::kStableFileIdBytes>>::success(file_id);
 }
 
 class SnapshotEnumerator final : public ports::IFileTreeEnumerator {
@@ -211,6 +335,10 @@ class SnapshotEnumerator final : public ports::IFileTreeEnumerator {
             return base::Result<contracts::FileEntryDesc>::failure(
                 {base::ErrorCode::kInvalidArgument, "file_source.unsupported_efs"});
         }
+        auto unsupported = reject_unsupported_and_read_file_id(absolute_path, attributes);
+        if (!unsupported) {
+            return base::Result<contracts::FileEntryDesc>::failure(unsupported.error());
+        }
         WIN32_FILE_ATTRIBUTE_DATA info{};
         if (GetFileAttributesExW(absolute_path.c_str(), GetFileExInfoStandard, &info) == FALSE) {
             return base::Result<contracts::FileEntryDesc>::failure(
@@ -220,7 +348,11 @@ class SnapshotEnumerator final : public ports::IFileTreeEnumerator {
         entry.entry_id = next_entry_id_++;
         entry.parent_entry_id = parent_entry_id;
         entry.kind = classify(attributes);
-        entry.attributes = attributes;
+        entry.stable_identity.volume_identity = selection_.volume_identity;
+        entry.stable_identity.file_id = unsupported.value();
+        // Strip bits that must never appear on supported objects (defense in depth).
+        entry.attributes =
+            attributes & ~(FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_SPARSE_FILE);
         entry.creation_time = (static_cast<std::uint64_t>(info.ftCreationTime.dwHighDateTime) << 32U) |
                               info.ftCreationTime.dwLowDateTime;
         entry.access_time = (static_cast<std::uint64_t>(info.ftLastAccessTime.dwHighDateTime) << 32U) |
@@ -230,7 +362,13 @@ class SnapshotEnumerator final : public ports::IFileTreeEnumerator {
         entry.change_time = entry.write_time;
         const auto slash = absolute_path.find_last_of(L'\\');
         const auto leaf = slash == std::wstring::npos ? absolute_path : absolute_path.substr(slash + 1);
-        entry.name = detail::make_utf16_name(leaf);
+        if (parent_entry_id == 0 && selection_.relative_components.empty()) {
+            const std::wstring selection_root_name(selection_.selection_id.begin(),
+                                                   selection_.selection_id.end());
+            entry.name = detail::make_utf16_name(selection_root_name);
+        } else {
+            entry.name = detail::make_utf16_name(leaf);
+        }
         if (entry.kind == contracts::FileEntryKind::kFile) {
             entry.logical_size =
                 (static_cast<std::uint64_t>(info.nFileSizeHigh) << 32U) | info.nFileSizeLow;
@@ -328,7 +466,7 @@ WindowsFileSnapshotView::open(const WindowsFileSnapshotOpenRequest& request) {
         return base::Result<std::unique_ptr<WindowsFileSnapshotView>>::failure(
             {base::ErrorCode::kInvalidArgument, "snapshot volume bindings are required"});
     }
-    auto privileges = detail::enable_file_security_privileges();
+    auto privileges = detail::enable_file_backup_privileges();
     if (!privileges) {
         return base::Result<std::unique_ptr<WindowsFileSnapshotView>>::failure(privileges.error());
     }
@@ -435,6 +573,103 @@ WindowsFileSnapshotView::open_stream_reader(const std::uint64_t entry_id,
     }
     return base::Result<std::unique_ptr<ports::IFileContentReader>>::success(
         std::make_unique<SnapshotContentReader>(std::move(handle).value(), stream->logical_size));
+}
+
+namespace {
+
+[[nodiscard]] base::Result<void>
+ensure_journal_handle(VolumeRoot& volume, const base::CancellationToken cancellation) {
+    if (volume.journal_probed) {
+        return base::Result<void>::success();
+    }
+    auto handle = detail::open_snapshot_volume_for_journal(volume.root_utf16);
+    if (!handle) {
+        // Cannot open snapshot volume for journal → unavailable (Full downgrade), not hard fail.
+        volume.journal_probed = true;
+        volume.journal_available = false;
+        volume.journal_unavailable_reason =
+            contracts::FileJournalUnavailableReason::kOpenFailed;
+        return base::Result<void>::success();
+    }
+    auto state =
+        detail::query_usn_journal_state(handle.value(), volume.volume_identity, cancellation);
+    if (!state) {
+        // Leave unprobed on cancel so a later call can retry; other errors surface to caller.
+        return base::Result<void>::failure(state.error());
+    }
+    volume.journal_handle = std::move(handle).value();
+    volume.journal_available = state.value().available;
+    volume.journal_id = state.value().journal_id;
+    volume.journal_unavailable_reason = state.value().unavailable_reason;
+    volume.journal_native_error_code = state.value().native_error_code;
+    volume.journal_probed = true;
+    return base::Result<void>::success();
+}
+
+} // namespace
+
+base::Result<contracts::FileJournalState>
+WindowsFileSnapshotView::query_journal_state(const std::string& volume_identity,
+                                             const base::CancellationToken cancellation) {
+    if (cancellation.stop_requested()) {
+        return base::Result<contracts::FileJournalState>::failure(
+            {base::ErrorCode::kCancelled, "query journal cancelled"});
+    }
+    const auto volume = std::find_if(
+        implementation_->volumes.begin(), implementation_->volumes.end(),
+        [&](const VolumeRoot& candidate) { return candidate.volume_identity == volume_identity; });
+    if (volume == implementation_->volumes.end()) {
+        return base::Result<contracts::FileJournalState>::failure(
+            {base::ErrorCode::kNotFound, "journal volume is not in snapshot set"});
+    }
+    auto ensured = ensure_journal_handle(*volume, cancellation);
+    if (!ensured) {
+        return base::Result<contracts::FileJournalState>::failure(ensured.error());
+    }
+    if (!volume->journal_available || !volume->journal_handle.valid()) {
+        contracts::FileJournalState state;
+        state.volume_identity = volume_identity;
+        state.available = false;
+        state.unavailable_reason = volume->journal_unavailable_reason;
+        state.native_error_code = volume->journal_native_error_code;
+        return base::Result<contracts::FileJournalState>::success(std::move(state));
+    }
+    // Re-query on the same snapshot handle so NextUsn reflects the frozen view.
+    return detail::query_usn_journal_state(volume->journal_handle, volume_identity, cancellation);
+}
+
+base::Result<contracts::FileChangeBatch>
+WindowsFileSnapshotView::read_change_batch(const std::string& volume_identity,
+                                           const std::int64_t start_usn, const std::int64_t end_usn,
+                                           const std::uint32_t maximum_hints,
+                                           const base::CancellationToken cancellation) {
+    if (cancellation.stop_requested()) {
+        return base::Result<contracts::FileChangeBatch>::failure(
+            {base::ErrorCode::kCancelled, "read change batch cancelled"});
+    }
+    if (maximum_hints == 0 || maximum_hints > contracts::kMaximumChangeHintsPerBatch ||
+        start_usn < 0 || end_usn < 0 || start_usn > end_usn) {
+        return base::Result<contracts::FileChangeBatch>::failure(
+            {base::ErrorCode::kInvalidArgument, "change batch range is invalid"});
+    }
+    const auto volume = std::find_if(
+        implementation_->volumes.begin(), implementation_->volumes.end(),
+        [&](const VolumeRoot& candidate) { return candidate.volume_identity == volume_identity; });
+    if (volume == implementation_->volumes.end()) {
+        return base::Result<contracts::FileChangeBatch>::failure(
+            {base::ErrorCode::kNotFound, "journal volume is not in snapshot set"});
+    }
+    auto ensured = ensure_journal_handle(*volume, cancellation);
+    if (!ensured) {
+        return base::Result<contracts::FileChangeBatch>::failure(ensured.error());
+    }
+    if (!volume->journal_available || !volume->journal_handle.valid() || volume->journal_id == 0) {
+        return base::Result<contracts::FileChangeBatch>::failure(
+            {base::ErrorCode::kConflict, "file_backup.journal_inaccessible"});
+    }
+    return detail::read_usn_change_batch(volume->journal_handle, volume_identity,
+                                         volume->journal_id, start_usn, end_usn, maximum_hints,
+                                         cancellation);
 }
 
 } // namespace aegra::adapters::windows_filesystem

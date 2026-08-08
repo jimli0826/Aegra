@@ -7,6 +7,7 @@
 - 替代范围：ADR-0013 中的 Service wire schema 与 API version；传输、ACL 与 Repository 权威决策仍分别见
   ADR-0011、ADR-0014、ADR-0010
 - 关联文档：[SERVICE_CONTROL_PROTOCOL_V4.md](../protocol/SERVICE_CONTROL_PROTOCOL_V4.md)、[ADR-0016](0016-file-set-backup-and-restore-boundary.md)
+- 后续决策：file_set Incremental 的 StartBackup/Schedule 语义由 [ADR-0018](0018-file-set-incremental-usn-and-chain.md) 扩展；协议仍为 current V4，不做版本兼容
 
 ## 背景
 

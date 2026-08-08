@@ -8,17 +8,13 @@
 #include "aegra/contracts/progress.h"
 #include "aegra/ports/file_recovery_point.h"
 
-#include <algorithm>
 #include <chrono>
-#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <limits>
 #include <memory>
-#include <span>
 #include <string>
 #include <string_view>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -37,10 +33,11 @@ base::Result<void> validate_task(const contracts::JobRequest& job,
         return valid_job;
     }
     if (job.content_kind != contracts::ContentKind::kFileSet ||
-        job.operation != contracts::JobOperation::kVerify || job.source_refs.size() != 1 ||
-        !job.target_ref.empty() || job.credential_refs.size() != 1) {
-        return invalid(
-            "file_set verify requires content_kind=file_set, one source, no target, one credential");
+        job.operation != contracts::JobOperation::kVerify || job.source_refs.empty() ||
+        job.source_refs.size() > contracts::kMaximumFileChainDepth || !job.target_ref.empty() ||
+        job.credential_refs.size() != job.source_refs.size()) {
+        return invalid("file_set verify requires content_kind=file_set, base-first source chain, "
+                       "matching credentials, no target");
     }
     if (options.memory_budget_bytes == 0) {
         return invalid("file_set verify memory budget is invalid");
@@ -106,17 +103,16 @@ contracts::TaskResult failed_result(const contracts::JobRequest& job, const base
 }
 
 contracts::TaskResult completed_result(const contracts::JobRequest& job,
-                                       const std::uint64_t logical_bytes,
-                                       const std::uint64_t verified_bytes,
-                                       const std::uint64_t stream_count) {
+                                       const adapters::personal_archive::FileChainVerifyResult& totals) {
     contracts::TaskResult result;
     result.job_id = job.job_id;
     result.trace_id = job.trace_id;
     result.outcome = contracts::TaskOutcome::kSucceeded;
     result.error_code = base::ErrorCode::kNone;
-    result.logical_bytes = logical_bytes;
-    result.stored_bytes = verified_bytes;
-    result.chunk_count = stream_count;
+    result.logical_bytes = totals.tip_resolved_bytes;
+    result.stored_bytes = totals.local_payload_bytes;
+    result.chunk_count = totals.tip_stream_count;
+    result.entry_count = totals.tip_entry_count;
     result.message_code = "verify.completed";
     return result;
 }
@@ -147,13 +143,13 @@ class EmptyPasswordSecret final : public ports::IResolvedSecret {
 };
 
 [[nodiscard]] base::Result<std::unique_ptr<ports::IResolvedSecret>>
-resolve_verify_secret(const contracts::JobRequest& job, ports::ICredentialResolver& credentials,
-                      const base::CancellationToken& cancellation) {
-    if (job.credential_refs.front().value.empty()) {
+resolve_one_secret(const contracts::SecretRef& credential, ports::ICredentialResolver& credentials,
+                   const base::CancellationToken& cancellation) {
+    if (credential.value.empty()) {
         return base::Result<std::unique_ptr<ports::IResolvedSecret>>::success(
             std::make_unique<EmptyPasswordSecret>());
     }
-    auto resolved = credentials.resolve(job.credential_refs.front(), cancellation);
+    auto resolved = credentials.resolve(credential, cancellation);
     if (!resolved || resolved.value() == nullptr || resolved.value()->view().empty()) {
         const auto code = !resolved && resolved.error().code == base::ErrorCode::kCancelled
                               ? base::ErrorCode::kCancelled
@@ -164,43 +160,21 @@ resolve_verify_secret(const contracts::JobRequest& job, ports::ICredentialResolv
     return resolved;
 }
 
-[[nodiscard]] base::Result<std::uint64_t>
-verify_stream(ports::IFileRecoveryPointReader& reader, const contracts::FileStreamDesc& stream,
-              const std::size_t budget, const base::CancellationToken& cancellation) {
-    if (stream.logical_size == 0) {
-        return base::Result<std::uint64_t>::success(0);
+[[nodiscard]] base::Result<std::vector<std::unique_ptr<ports::IResolvedSecret>>>
+resolve_verify_secrets(const contracts::JobRequest& job, ports::ICredentialResolver& credentials,
+                       const base::CancellationToken& cancellation) {
+    std::vector<std::unique_ptr<ports::IResolvedSecret>> secrets;
+    secrets.reserve(job.credential_refs.size());
+    for (const auto& credential : job.credential_refs) {
+        auto resolved = resolve_one_secret(credential, credentials, cancellation);
+        if (!resolved) {
+            return base::Result<std::vector<std::unique_ptr<ports::IResolvedSecret>>>::failure(
+                resolved.error());
+        }
+        secrets.push_back(std::move(resolved).value());
     }
-    std::uint64_t verified = 0;
-    std::vector<std::byte> buffer(budget);
-    while (verified < stream.logical_size) {
-        if (cancellation.stop_requested()) {
-            return base::Result<std::uint64_t>::failure(
-                {base::ErrorCode::kCancelled, "file_set verify cancelled"});
-        }
-        const auto remaining = stream.logical_size - verified;
-        const auto request_size =
-            static_cast<std::uint64_t>((std::min)(static_cast<std::uint64_t>(buffer.size()), remaining));
-        ports::FileStreamReadRequest request;
-        request.stream_index = stream.stream_index;
-        request.offset = verified;
-        request.size = request_size;
-        auto read = reader.read_stream(request, std::span<std::byte>(buffer.data(),
-                                                                     static_cast<std::size_t>(request_size)),
-                                       cancellation);
-        if (!read) {
-            return base::Result<std::uint64_t>::failure(read.error());
-        }
-        if (read.value() == 0) {
-            return base::Result<std::uint64_t>::failure(
-                {base::ErrorCode::kCorruptData, "file stream ended before logical size"});
-        }
-        if (static_cast<std::uint64_t>(read.value()) > remaining) {
-            return base::Result<std::uint64_t>::failure(
-                {base::ErrorCode::kCorruptData, "file stream read exceeded logical size"});
-        }
-        verified += static_cast<std::uint64_t>(read.value());
-    }
-    return base::Result<std::uint64_t>::success(verified);
+    return base::Result<std::vector<std::unique_ptr<ports::IResolvedSecret>>>::success(
+        std::move(secrets));
 }
 
 void log_verify_request(WorkerTaskLog* log, const contracts::JobRequest& job,
@@ -214,11 +188,13 @@ void log_verify_request(WorkerTaskLog* log, const contracts::JobRequest& job,
     log->field("operation", "verify");
     log->section("Request");
     log->field("content_kind", "file_set");
+    log->field_u64("layers", job.source_refs.size());
     log->field_bytes("memory_budget", options.memory_budget_bytes);
     log->field("password", job.credential_refs.front().value.empty() ? "empty" : "present");
 }
 
 void log_verify_success(WorkerTaskLog* log, const contracts::TaskResult& result,
+                        const adapters::personal_archive::FileChainVerifyResult& totals,
                         const std::chrono::steady_clock::time_point started) {
     if (log == nullptr) {
         return;
@@ -227,74 +203,12 @@ void log_verify_success(WorkerTaskLog* log, const contracts::TaskResult& result,
         std::chrono::steady_clock::now() - started);
     log->section("Result");
     log->field("outcome", "succeeded");
+    log->field_u64("layers", totals.layer_count);
+    log->field_u64("tip_entries", totals.tip_entry_count);
+    log->field_u64("tip_streams", totals.tip_stream_count);
     log->field_bytes("logical_bytes", result.logical_bytes);
-    log->field_bytes("verified_bytes", result.stored_bytes);
-    log->field_u64("streams", result.chunk_count);
+    log->field_bytes("local_payload_bytes", totals.local_payload_bytes);
     log->field("elapsed", format_duration_ms(elapsed));
-}
-
-struct StreamVerifyTotals final {
-    std::uint64_t logical_bytes{0};
-    std::uint64_t verified_bytes{0};
-    std::uint64_t streams_verified{0};
-};
-
-[[nodiscard]] base::Result<StreamVerifyTotals>
-verify_all_streams(ports::IFileRecoveryPointReader& reader, const contracts::JobRequest& job,
-                   const std::size_t budget, ports::IProgressSink* progress, WorkerTaskLog* log,
-                   const base::CancellationToken& cancellation) {
-    ScopedStage stage(log, "verify_streams");
-    StreamVerifyTotals totals;
-    std::unordered_set<std::uint32_t> seen_streams;
-    for (std::uint64_t entry_id = 1; entry_id <= reader.entry_count(); ++entry_id) {
-        if (cancellation.stop_requested()) {
-            const base::Error error{base::ErrorCode::kCancelled, "file_set verify cancelled"};
-            stage.fail(error, "describe_entry", verify_hint_for(error.code, error.message));
-            return base::Result<StreamVerifyTotals>::failure(error);
-        }
-        auto entry = reader.describe_entry(entry_id, cancellation);
-        if (!entry) {
-            if (entry.error().code == base::ErrorCode::kNotFound) {
-                continue;
-            }
-            stage.fail(entry.error(), "describe_entry",
-                       verify_hint_for(entry.error().code, entry.error().message));
-            return base::Result<StreamVerifyTotals>::failure(entry.error());
-        }
-        for (const auto& stream : entry.value().streams) {
-            if (!seen_streams.insert(stream.stream_index).second) {
-                continue;
-            }
-            if (totals.logical_bytes >
-                (std::numeric_limits<std::uint64_t>::max)() - stream.logical_size) {
-                const base::Error error{base::ErrorCode::kCorruptData,
-                                        "file_set verify logical size overflow"};
-                stage.fail(error, "stream_size", verify_hint_for(error.code, error.message));
-                return base::Result<StreamVerifyTotals>::failure(error);
-            }
-            totals.logical_bytes += stream.logical_size;
-            auto verified = verify_stream(reader, stream, budget, cancellation);
-            if (!verified) {
-                stage.fail(verified.error(), "read_stream",
-                           verify_hint_for(verified.error().code, verified.error().message));
-                return base::Result<StreamVerifyTotals>::failure(verified.error());
-            }
-            totals.verified_bytes += verified.value();
-            ++totals.streams_verified;
-            publish_progress(job, progress, contracts::TaskPhase::kReading, totals.verified_bytes,
-                             totals.logical_bytes, "verify.reading");
-        }
-    }
-    if (totals.streams_verified != reader.stream_count()) {
-        const base::Error error{base::ErrorCode::kCorruptData,
-                                "file_set verify stream count mismatch"};
-        stage.fail(error, "stream_count", verify_hint_for(error.code, error.message));
-        return base::Result<StreamVerifyTotals>::failure(error);
-    }
-    stage.note_bytes("verified_bytes", totals.verified_bytes);
-    stage.note_bytes("logical_bytes", totals.logical_bytes);
-    stage.note_u64("streams", totals.streams_verified);
-    return base::Result<StreamVerifyTotals>::success(totals);
 }
 
 [[nodiscard]] base::Result<contracts::TaskResult>
@@ -311,55 +225,71 @@ run_file_set_verify(const contracts::JobRequest& job, const WindowsPersonalBacku
     publish_progress(job, context.progress, contracts::TaskPhase::kPreparing, 0, 0,
                      "verify.preparing");
 
-    std::unique_ptr<ports::IResolvedSecret> secret;
+    std::vector<std::unique_ptr<ports::IResolvedSecret>> secrets;
     {
         ScopedStage stage(task_log.get(), "resolve_credentials");
-        auto resolved = resolve_verify_secret(job, context.credentials, cancellation);
+        auto resolved = resolve_verify_secrets(job, context.credentials, cancellation);
         if (!resolved) {
             stage.fail(resolved.error(), "resolve_secret",
                        verify_hint_for(resolved.error().code, resolved.error().message));
             return validated_result(failed_result(job, resolved.error().code));
         }
-        stage.note("password", resolved.value()->view().empty() ? "empty" : "present");
-        secret = std::move(resolved).value();
+        stage.note_u64("layers", resolved.value().size());
+        secrets = std::move(resolved).value();
     }
 
-    std::unique_ptr<adapters::personal_archive::PersonalFileArchiveReader> reader;
+    std::unique_ptr<adapters::personal_archive::PersonalFileArchiveChainReader> chain;
     {
-        ScopedStage stage(task_log.get(), "open_archive");
-        adapters::personal_archive::ArchiveOpenRequest request;
-        request.source = path_from_utf8(job.source_refs.front());
-        request.password = secret->view();
-        request.maximum_chunk_payload_size = options.memory_budget_bytes;
-        request.maximum_chunk_logical_size = options.memory_budget_bytes;
-        auto opened = adapters::personal_archive::PersonalFileArchiveReader::open(request);
+        ScopedStage stage(task_log.get(), "open_chain");
+        adapters::personal_archive::ArchiveChainOpenRequest open_request;
+        open_request.maximum_chain_depth = contracts::kMaximumFileChainDepth;
+        open_request.layers.reserve(job.source_refs.size());
+        for (std::size_t index = 0; index < job.source_refs.size(); ++index) {
+            adapters::personal_archive::ArchiveOpenRequest layer;
+            layer.source = path_from_utf8(job.source_refs[index]);
+            layer.password = secrets[index]->view();
+            layer.maximum_chunk_payload_size = options.memory_budget_bytes;
+            layer.maximum_chunk_logical_size = options.memory_budget_bytes;
+            open_request.layers.push_back(std::move(layer));
+        }
+        auto opened =
+            adapters::personal_archive::PersonalFileArchiveChainReader::open(open_request);
         if (!opened) {
-            stage.fail(opened.error(), "PersonalFileArchiveReader::open",
+            stage.fail(opened.error(), "PersonalFileArchiveChainReader::open",
                        verify_hint_for(opened.error().code, opened.error().message));
             return validated_result(failed_result(job, opened.error().code));
         }
-        reader = std::move(opened).value();
-        stage.note_u64("entry_count", reader->entry_count());
-        stage.note_u64("stream_count", reader->stream_count());
-        stage.note("index_generation", reader->index_root_digest());
+        chain = std::move(opened).value();
+        stage.note_u64("layers", chain->layer_count());
+        stage.note_u64("entry_count", chain->entry_count());
+        stage.note_u64("stream_count", chain->stream_count());
+        stage.note("index_generation", chain->index_root_digest());
     }
 
     const auto budget = static_cast<std::size_t>(
         (std::min)(options.memory_budget_bytes,
                    static_cast<std::uint64_t>((std::numeric_limits<std::size_t>::max)())));
-    auto totals = verify_all_streams(*reader, job, budget == 0 ? 1 : budget, context.progress,
-                                     task_log.get(), cancellation);
-    if (!totals) {
-        return validated_result(failed_result(job, totals.error().code));
+    adapters::personal_archive::FileChainVerifyResult totals;
+    {
+        ScopedStage stage(task_log.get(), "verify_recoverability");
+        publish_progress(job, context.progress, contracts::TaskPhase::kReading, 0, 0,
+                         "verify.reading");
+        auto verified = chain->verify_recoverability(budget == 0 ? 1 : budget, cancellation);
+        if (!verified) {
+            stage.fail(verified.error(), "verify_recoverability",
+                       verify_hint_for(verified.error().code, verified.error().message));
+            return validated_result(failed_result(job, verified.error().code));
+        }
+        totals = std::move(verified).value();
+        stage.note_u64("layers", totals.layer_count);
+        stage.note_bytes("local_payload_bytes", totals.local_payload_bytes);
+        stage.note_bytes("tip_resolved_bytes", totals.tip_resolved_bytes);
     }
     publish_progress(job, context.progress, contracts::TaskPhase::kCompleted,
-                     totals.value().verified_bytes, totals.value().logical_bytes,
-                     "verify.completed");
-    auto result = validated_result(completed_result(job, totals.value().logical_bytes,
-                                                    totals.value().verified_bytes,
-                                                    totals.value().streams_verified));
+                     totals.tip_resolved_bytes, totals.tip_resolved_bytes, "verify.completed");
+    auto result = validated_result(completed_result(job, totals));
     if (result) {
-        log_verify_success(task_log.get(), result.value(), started);
+        log_verify_success(task_log.get(), result.value(), totals, started);
     }
     return result;
 }

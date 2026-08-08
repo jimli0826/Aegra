@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string_view>
 #include <vector>
@@ -41,6 +42,15 @@ struct ArchiveCreateRequest final {
     std::string_view parent_password;
 };
 
+/// When to authenticate Index roots after Header/Footer (L31 / ADR-0019 / M6).
+enum class FileArchiveIndexLoad : std::uint8_t {
+    /// Open authenticates Footer roots immediately (single-layer open default; O(1) pages).
+    kEager = 1,
+    /// Open keeps only preamble/footer/ciphers; root auth on first Index/stream access.
+    /// Chain open uses this for non-tip layers so browse does not pay per-ancestor root I/O.
+    kDeferred = 2,
+};
+
 struct ArchiveOpenRequest final {
     std::filesystem::path source;
     std::string_view password;
@@ -48,6 +58,7 @@ struct ArchiveOpenRequest final {
     std::uint64_t maximum_chunk_payload_size{1024ULL * 1024ULL * 1024ULL};
     std::uint64_t maximum_chunk_logical_size{1024ULL * 1024ULL * 1024ULL};
     std::uint32_t maximum_split_parts{10'000};
+    FileArchiveIndexLoad index_load{FileArchiveIndexLoad::kEager};
 };
 
 struct ArchiveSidecar final {
@@ -105,15 +116,21 @@ struct FileArchiveCreateRequest final {
     bool encryption_enabled{true};
     std::array<std::byte, 16> file_uuid{};
     std::array<std::byte, 16> backup_set_uuid{};
+    /// Direct parent Recovery Point file_uuid. Must be zero for Full; non-zero for Incremental.
+    std::array<std::byte, 16> parent_uuid{};
     std::uint32_t block_size{4096};
     std::uint32_t chunk_size{4U * 1024U * 1024U};
     std::uint64_t split_size_bytes{0};
     ArchiveKdfParameters kdf_parameters;
 };
 
-/// V7 file_set Archive writer. Index entries are staged to a spool file under
-/// index_spool_directory; the full entry set is not retained as a single in-memory tree
-/// beyond finalize page assembly (bounded leaf pages).
+/// V7 file_set Archive writer (Full and Incremental). Index entries are staged to a spool file
+/// under index_spool_directory. Finalize sorts compact spool locators and streams leaf pages
+/// (at most one leaf of FileEntryDesc resident); internal levels use BuiltIndexPage only.
+///
+/// FI4: Incremental layers write complete tip Index with content_storage=local|parent.
+/// Parent streams carry only direct parent_stream_index (no local payload). Full layers reject
+/// parent storage. Abort/destructor delete partial + spool; Catalog publish is composition root.
 class PersonalFileArchiveSession final : public ports::IFileBackupSession {
   public:
     ~PersonalFileArchiveSession() override;
@@ -128,7 +145,7 @@ class PersonalFileArchiveSession final : public ports::IFileBackupSession {
     [[nodiscard]] base::Result<void>
     write_entry(const contracts::FileEntryDesc& entry,
                 base::CancellationToken cancellation) override;
-    [[nodiscard]] base::Result<void>
+    [[nodiscard]] base::Result<std::uint64_t>
     write_stream_chunk(const ports::FileChunkWriteRequest& request,
                        base::CancellationToken cancellation) override;
     [[nodiscard]] base::Result<void> finalize(base::CancellationToken cancellation) override;
@@ -142,8 +159,19 @@ class PersonalFileArchiveSession final : public ports::IFileBackupSession {
     std::unique_ptr<Impl> implementation_;
 };
 
-/// V7 file_set Recovery Point reader (IFileRecoveryPointReader).
-/// Loads single-leaf roots and one-level multi-leaf trees (leaves + internal root).
+/// Stream lookup within one authenticated file_set Archive layer (FI5).
+struct FileStreamOwnerView final {
+    contracts::StableFileIdentity identity;
+    contracts::FileEntryKind entry_kind{contracts::FileEntryKind::kFile};
+    contracts::FileStreamDesc stream;
+};
+
+/// V7 file_set Recovery Point reader (IFileRecoveryPointReader) for one Archive layer.
+/// O(1) open via Footer roots + bounded LRU page cache (ADR-0019 / L31). Secondary B+trees
+/// (Entry ID / Stream / Chunk) and Namespace child offsets support log-time lookup without
+/// O(N) locator tables. kDeferred defers root authentication until first Index access.
+/// Parent content_storage streams are rejected on read_stream; use
+/// PersonalFileArchiveChainReader to resolve them.
 class PersonalFileArchiveReader final : public ports::IFileRecoveryPointReader {
   public:
     ~PersonalFileArchiveReader() override;
@@ -170,13 +198,95 @@ class PersonalFileArchiveReader final : public ports::IFileRecoveryPointReader {
     [[nodiscard]] base::Result<contracts::FileEntryDesc>
     describe_entry(std::uint64_t entry_id, base::CancellationToken cancellation) override;
 
+    /// Locates stream_index within this layer's Index (local or parent descriptor).
+    [[nodiscard]] base::Result<FileStreamOwnerView>
+    describe_stream_owner(std::uint32_t stream_index, base::CancellationToken cancellation) const;
+
+    /// Local payload only; parent storage returns kInvalidArgument / conflict.
     [[nodiscard]] base::Result<std::size_t>
     read_stream(const ports::FileStreamReadRequest& request, std::span<std::byte> destination,
                 base::CancellationToken cancellation) override;
 
+    /// Visits every Index entry in left-to-right leaf order (one leaf page resident).
+    /// Used by Verify so it does not probe entry_id in 1..entry_count.
+    [[nodiscard]] base::Result<void> for_each_entry_in_leaf_order(
+        base::CancellationToken cancellation,
+        const std::function<base::Result<void>(const contracts::FileEntryDesc&)>& visitor) const;
+
+    /// Full Entry ID uniqueness + parent-graph validation (explicit Verify only; ADR-0019).
+    [[nodiscard]] base::Result<void>
+    verify_index_and_parent_graph(base::CancellationToken cancellation) const;
+
   private:
     struct Impl;
     explicit PersonalFileArchiveReader(std::unique_ptr<Impl> implementation) noexcept;
+
+    [[nodiscard]] base::Result<void> ensure_index_loaded() const;
+
+    std::unique_ptr<Impl> implementation_;
+};
+
+/// Totals from a recoverability Verify over a complete file_set chain (FI5).
+struct FileChainVerifyResult final {
+    std::uint64_t layer_count{0};
+    std::uint64_t tip_entry_count{0};
+    std::uint64_t tip_stream_count{0};
+    /// Sum of logical bytes of every local stream on every layer (payload authenticated).
+    std::uint64_t local_payload_bytes{0};
+    /// Sum of logical bytes of every tip stream after full chain resolution.
+    std::uint64_t tip_resolved_bytes{0};
+};
+
+/// V7 file_set chain reader: base-first layers, tip Index browse, recursive parent stream
+/// resolution. Open fails closed on incomplete chain, fingerprint mismatch, cycles, or depth.
+class PersonalFileArchiveChainReader final : public ports::IFileRecoveryPointReader {
+  public:
+    ~PersonalFileArchiveChainReader() override;
+    PersonalFileArchiveChainReader(const PersonalFileArchiveChainReader&) = delete;
+    PersonalFileArchiveChainReader& operator=(const PersonalFileArchiveChainReader&) = delete;
+    PersonalFileArchiveChainReader(PersonalFileArchiveChainReader&&) = delete;
+    PersonalFileArchiveChainReader& operator=(PersonalFileArchiveChainReader&&) = delete;
+
+    /// Layers are base-first (Full root … tip). Passwords need only remain valid during open().
+    [[nodiscard]] static base::Result<std::unique_ptr<PersonalFileArchiveChainReader>>
+    open(const ArchiveChainOpenRequest& request);
+
+    [[nodiscard]] std::size_t layer_count() const noexcept;
+    [[nodiscard]] const PersonalFileArchiveReader& layer_at(std::size_t index) const;
+    [[nodiscard]] const format::Manifest& tip_manifest() const noexcept;
+    [[nodiscard]] const ArchiveIdentity& tip_identity() const noexcept;
+
+    /// Tip Index root digest (hex). Browse tokens bind this together with chain_generation_digest().
+    [[nodiscard]] std::string index_root_digest() const override;
+    /// Base-first join of every layer Index root digest with '+'. Changes if any layer regenerates.
+    [[nodiscard]] std::string chain_generation_digest() const;
+    [[nodiscard]] std::uint64_t entry_count() const noexcept override;
+    [[nodiscard]] std::uint64_t stream_count() const noexcept override;
+
+    [[nodiscard]] base::Result<ports::FileEntryPage>
+    list_children(std::uint64_t parent_entry_id, std::uint32_t maximum_results,
+                  const std::optional<std::string>& continuation_token,
+                  base::CancellationToken cancellation) override;
+
+    [[nodiscard]] base::Result<contracts::FileEntryDesc>
+    describe_entry(std::uint64_t entry_id, base::CancellationToken cancellation) override;
+
+    /// Resolves a tip stream through parent hops to its local owner without reading payload.
+    /// Used by Service restore preflight so missing parents fail before target mutation.
+    [[nodiscard]] base::Result<void>
+    resolve_stream_reference(std::uint32_t stream_index, base::CancellationToken cancellation) const;
+
+    [[nodiscard]] base::Result<std::size_t>
+    read_stream(const ports::FileStreamReadRequest& request, std::span<std::byte> destination,
+                base::CancellationToken cancellation) override;
+
+    /// Authenticates every layer local payload and resolves every tip stream through the chain.
+    [[nodiscard]] base::Result<FileChainVerifyResult>
+    verify_recoverability(std::size_t memory_budget_bytes, base::CancellationToken cancellation);
+
+  private:
+    struct Impl;
+    explicit PersonalFileArchiveChainReader(std::unique_ptr<Impl> implementation) noexcept;
 
     std::unique_ptr<Impl> implementation_;
 };

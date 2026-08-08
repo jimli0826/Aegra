@@ -336,33 +336,34 @@ Item {
             var tree = serviceClient.fileBrowseSources
             if (!tree || tree.selectedCount <= 0) {
                 //% "Select at least one backup source"
-                serviceClient.showToast(qsTrId("aegra.backup.schedule.missing_source"))
+                serviceClient.showToast(qsTrId("aegra.backup.schedule.missing_source"), true)
                 return
             }
         } else if (sources.length === 0) {
             //% "Select at least one backup source"
-            serviceClient.showToast(qsTrId("aegra.backup.schedule.missing_source"))
+            serviceClient.showToast(qsTrId("aegra.backup.schedule.missing_source"), true)
             return
         }
         if (!connId || connId.length === 0) {
             //% "Select a repository destination (Locations)"
-            serviceClient.showToast(qsTrId("aegra.backup.schedule.missing_target"))
+            serviceClient.showToast(qsTrId("aegra.backup.schedule.missing_target"), true)
             return
         }
         var s2 = (typeof wizardStep2 !== "undefined") ? wizardStep2 : null
         var frequency = s2 ? s2.frequency : "daily"
         var timeOfDay = s2 ? s2.timeOfDay : "02:00"
+        var backupType = s2 ? (s2.backupType === 2 ? 2 : 1) : 1
         var excludePage = s2 ? s2.excludePageHibernation : true
         var encryption = s2 ? s2.encryption : false
         var password = s2 ? (s2.password || "") : ""
         var passwordConfirm = s2 ? (s2.passwordConfirm || "") : ""
         if (encryption) {
             if (password.length === 0 || password.length > 32) {
-                serviceClient.showToast(qsTrId("aegra.backup.opt.password_required"))
+                serviceClient.showToast(qsTrId("aegra.backup.opt.password_required"), true)
                 return
             }
             if (password !== passwordConfirm) {
-                serviceClient.showToast(qsTrId("aegra.backup.opt.password_mismatch"))
+                serviceClient.showToast(qsTrId("aegra.backup.opt.password_mismatch"), true)
                 return
             }
         }
@@ -373,6 +374,7 @@ Item {
             connId: connId,
             frequency: frequency,
             timeOfDay: timeOfDay,
+            backupType: backupType,
             excludePage: excludePage,
             encryption: encryption,
             password: encryption ? password : ""
@@ -389,15 +391,17 @@ Item {
         if (p.filesMode) {
             ok = serviceClient.createFileSetSchedule(p.connId, p.frequency, p.timeOfDay,
                                                      p.excludePage, p.encryption, p.password,
-                                                     !!startFirstBackup)
+                                                     !!startFirstBackup,
+                                                     (p.backupType === 2) ? 2 : 1)
         } else {
             ok = serviceClient.createSchedule(p.sources, p.connId, p.frequency, p.timeOfDay,
                                               p.excludePage, p.encryption, p.password,
-                                              !!startFirstBackup)
+                                              !!startFirstBackup,
+                                              (p.backupType === 2) ? 2 : 1)
         }
         if (!ok) {
             //% "Could not save schedule"
-            serviceClient.showToast(qsTrId("aegra.backup.schedule.save_failed"))
+            serviceClient.showToast(qsTrId("aegra.backup.schedule.save_failed"), true)
             return
         }
         // Stay on Backup / Schedules page after create (do not jump to Home).
@@ -531,7 +535,7 @@ Item {
     function runSchedule(item, backupType) {
         if (!item || !item.enabled) {
             //% "Enable the schedule before running it"
-            serviceClient.showToast(qsTrId("aegra.backup.run.disabled"))
+            serviceClient.showToast(qsTrId("aegra.backup.run.disabled"), true)
             return
         }
         var type = (backupType === 2) ? 2 : 1
@@ -545,11 +549,11 @@ Item {
                 return
             }
             //% "No selectable source or repository connection for backup"
-            serviceClient.showToast(qsTrId("aegra.backup.run.missing_target"))
+            serviceClient.showToast(qsTrId("aegra.backup.run.missing_target"), true)
             return
         }
         //% "Service not connected"
-        serviceClient.showToast(qsTrId("aegra.backup.run.not_connected"))
+        serviceClient.showToast(qsTrId("aegra.backup.run.not_connected"), true)
     }
 
     function toggleScheduleEnabled(id) {
@@ -565,7 +569,7 @@ Item {
         }
         if (!serviceClient.setScheduleEnabled(sid, enabled)) {
             //% "Could not update schedule"
-            serviceClient.showToast(qsTrId("aegra.backup.schedule.update_failed"))
+            serviceClient.showToast(qsTrId("aegra.backup.schedule.update_failed"), true)
         }
     }
 
@@ -575,7 +579,7 @@ Item {
             return
         if (!serviceClient.deleteSchedule(sid)) {
             //% "Could not delete schedule"
-            serviceClient.showToast(qsTrId("aegra.backup.schedule.delete_failed"))
+            serviceClient.showToast(qsTrId("aegra.backup.schedule.delete_failed"), true)
         }
     }
 
@@ -963,10 +967,22 @@ Item {
 
                     Text {
                         anchors.centerIn: parent
+                        width: parent.width - 48
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.WordWrap
                         visible: root.schedules.length === 0
-                        //% "No schedules"
-                        text: qsTrId("aegra.backup.schedules.empty")
-                        color: Theme.colorTextGrey
+                        text: {
+                            if (serviceClient.schedulesLoading)
+                                return qsTrId("aegra.common.loading")
+                            if (serviceClient.schedulesErrorText
+                                    && serviceClient.schedulesErrorText.length > 0)
+                                return serviceClient.schedulesErrorText
+                            //% "No schedules"
+                            return qsTrId("aegra.backup.schedules.empty")
+                        }
+                        color: (serviceClient.schedulesErrorText
+                                && serviceClient.schedulesErrorText.length > 0)
+                               ? Theme.colorAccentRed : Theme.colorTextGrey
                         font.pixelSize: 13
                         font.family: Theme.fontFamily
                     }
@@ -1102,17 +1118,35 @@ Item {
                                     elide: Text.ElideMiddle
                                 }
 
-                                // Frequency
-                                Text {
-                                    Layout.preferredWidth: 100
-                                    text: root.freqLabel(modelData.frequency)
-                                          + " · " + (modelData.timeOfDay || "02:00")
-                                    color: Theme.colorTextGrey
-                                    font.pixelSize: 13
-                                    font.bold: true
-                                    font.family: Theme.fontFamily
-                                    horizontalAlignment: Text.AlignHCenter
-                                    elide: Text.ElideRight
+                                // Frequency + scheduled backup type
+                                Column {
+                                    Layout.preferredWidth: 110
+                                    spacing: 2
+                                    Text {
+                                        width: parent.width
+                                        text: root.freqLabel(modelData.frequency)
+                                              + " · " + (modelData.timeOfDay || "02:00")
+                                        color: Theme.colorTextGrey
+                                        font.pixelSize: 13
+                                        font.bold: true
+                                        font.family: Theme.fontFamily
+                                        horizontalAlignment: Text.AlignHCenter
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        width: parent.width
+                                        text: {
+                                            var t = modelData.backupType
+                                            if (t === 2)
+                                                return qsTrId("aegra.backup.type.incremental")
+                                            return qsTrId("aegra.backup.type.full")
+                                        }
+                                        color: Theme.colorTextDim
+                                        font.pixelSize: 11
+                                        font.family: Theme.fontFamily
+                                        horizontalAlignment: Text.AlignHCenter
+                                        elide: Text.ElideRight
+                                    }
                                 }
 
                                 // Status: success / failed / running+progress%
@@ -1261,6 +1295,27 @@ Item {
                                             color: Theme.colorTextDim
                                             font.pixelSize: 12
                                             font.bold: true
+                                            font.family: Theme.fontFamily
+                                        }
+
+                                        // Effective type + downgrade (Service-projected only)
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            visible: statusCell.statusKey !== "none"
+                                                     && statusCell.backupStatus.effectiveBackupTypeText
+                                                     && statusCell.backupStatus.effectiveBackupTypeText.length > 0
+                                            text: {
+                                                var eff = statusCell.backupStatus.effectiveBackupTypeText || ""
+                                                var req = statusCell.backupStatus.requestedBackupTypeText || ""
+                                                if (statusCell.backupStatus.hasDowngrade && req.length > 0
+                                                        && req !== eff)
+                                                    return req + " → " + eff
+                                                return eff
+                                            }
+                                            color: statusCell.backupStatus.hasDowngrade
+                                                   ? Theme.colorAccentRed
+                                                   : Theme.colorTextDim
+                                            font.pixelSize: 11
                                             font.family: Theme.fontFamily
                                         }
                                     }
@@ -1473,7 +1528,7 @@ Item {
             id: wizardPanel
             // Vertical inset only: clear main caption above, gap at bottom.
             // Flush to the right edge (no right margin).
-            readonly property int bottomInset: 16
+            readonly property int bottomInset: 0
             readonly property int topInset: 48
             width: Math.max(520, Math.min(parent.width * 0.92, parent.width))
             height: parent.height - topInset - bottomInset
@@ -1943,7 +1998,7 @@ Item {
                                 //% "SOURCE"
                                 title: qsTrId("aegra.backup.section.source_upper")
 
-                                // File-set selection summary (Service-backed tokens only).
+                                // File-set selection summary — hidden per UI request.
                                 Text {
                                     anchors.left: parent.left
                                     anchors.right: parent.right
@@ -1951,9 +2006,7 @@ Item {
                                     anchors.topMargin: 50
                                     anchors.leftMargin: 16
                                     anchors.rightMargin: 16
-                                    visible: root.backupMode === "files"
-                                             && serviceClient.fileBrowseSources
-                                             && serviceClient.fileBrowseSources.selectedCount > 0
+                                    visible: false
                                     //% "Selected: %1"
                                     text: qsTrId("aegra.file.browse.selected_label").arg(
                                               serviceClient.fileBrowseSources
@@ -2627,6 +2680,7 @@ Item {
                         BackupWizardStep2 {
                             id: wizardStep2
                             anchors.fill: parent
+                            filesMode: root.backupMode === "files"
                             onBackRequested: root.wizardStep = 1
                             onCreateRequested: root.createScheduleFromWizard()
                         }

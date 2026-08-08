@@ -1,6 +1,7 @@
 #pragma once
 
 #include "aegra/base/result.h"
+#include "aegra/contracts/file_set.h"
 
 #include <array>
 #include <cstddef>
@@ -111,6 +112,14 @@ struct BackupJob final {
     std::string description;
 };
 
+/// Encrypted metadata baseline for file_set Full and Incremental (FI1).
+struct FileSetBaseline final {
+    std::uint8_t fingerprint_algorithm{contracts::kSelectionFingerprintAlgorithmSha256V1};
+    std::array<std::byte, contracts::kSelectionFingerprintBytes> selection_fingerprint{};
+    /// Sorted unique by volume_identity; required on Full/Incremental after successful backup.
+    std::vector<contracts::FileJournalCheckpoint> journal_checkpoints;
+};
+
 struct ProviderExtension final {
     std::string key;
     std::vector<std::byte> payload;
@@ -123,6 +132,8 @@ struct Manifest final {
     SystemInfo system;
     BackupJob backup_job;
     std::vector<Volume> volumes;
+    /// Present when content_kind=file_set; empty/default invalid for file_set validation.
+    FileSetBaseline file_set_baseline;
     std::vector<ProviderExtension> extensions;
 };
 

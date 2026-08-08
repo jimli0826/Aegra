@@ -231,9 +231,11 @@ WindowsFileSourceBrowser::list_children(const ports::FileBrowseCaller& caller,
         node.volume_identity = volume_identity;
         node.relative_components = parent_components;
         node.relative_components.push_back(detail::make_utf16_name(name));
-        node.kind = (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0
-                        ? contracts::FileEntryKind::kDirectory
-                        : contracts::FileEntryKind::kFile;
+        const bool is_directory = (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        const bool is_reparse = (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+        const bool is_sparse = (data.dwFileAttributes & FILE_ATTRIBUTE_SPARSE_FILE) != 0;
+        node.kind = is_directory ? contracts::FileEntryKind::kDirectory
+                                 : contracts::FileEntryKind::kFile;
         node.absolute_path = parent_path + L'\\' + data.cFileName;
         node.display_name = utf16_display_name(name);
         const auto id = implementation_->insert(std::move(node));
@@ -241,8 +243,16 @@ WindowsFileSourceBrowser::list_children(const ports::FileBrowseCaller& caller,
         summary.node_token = make_token(id);
         summary.display_name = implementation_->nodes[id].display_name;
         summary.entry_kind = implementation_->nodes[id].kind;
-        summary.selectability = contracts::FileNodeSelectability::kSelectable;
-        summary.has_children = summary.entry_kind == contracts::FileEntryKind::kDirectory;
+        // FI0 browse: reparse/sparse are not selectable; hard-link/ADS caught at backup enum.
+        if (is_reparse || is_sparse) {
+            summary.selectability = contracts::FileNodeSelectability::kUnsupported;
+            summary.message_code = is_reparse ? "file_source.unsupported_reparse"
+                                              : "file_source.unsupported_sparse";
+        } else {
+            summary.selectability = contracts::FileNodeSelectability::kSelectable;
+        }
+        summary.has_children =
+            summary.entry_kind == contracts::FileEntryKind::kDirectory && !is_reparse;
         summary.is_directory = summary.entry_kind == contracts::FileEntryKind::kDirectory;
         summary.availability = contracts::SourceAvailability::kAvailable;
         result.items.push_back(std::move(summary));

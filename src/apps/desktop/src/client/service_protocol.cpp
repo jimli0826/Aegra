@@ -152,14 +152,16 @@ constexpr qsizetype kMaximumStableCodeCharacters = 128;
         !object.value(QStringLiteral("has_sidecar")).isBool()) {
         return false;
     }
+    // Full has no parent; Incremental/Differential require a distinct parent UUID.
     if ((backup_type == 1) != !has_parent || (has_parent && parent_uuid == file_uuid)) {
         return false;
     }
     if (backup_type == 1 && chain_state != 1) {
         return false;
     }
+    // file_set: Full or Incremental only; never Differential, never volume sidecar.
     if (content_kind == 2 &&
-        (has_parent || object.value(QStringLiteral("has_sidecar")).toBool() || backup_type != 1)) {
+        (backup_type == 3 || object.value(QStringLiteral("has_sidecar")).toBool())) {
         return false;
     }
     result = {{QStringLiteral("fileUuid"), file_uuid},
@@ -499,6 +501,77 @@ namespace {
 
 } // namespace
 
+bool parse_delete_plan_response(const QJsonObject& root, QVariantMap& result) {
+    qint64 kind = 0;
+    qint64 request_kind = 0;
+    qint64 error = 0;
+    if (!integer_in_range(root.value(QStringLiteral("kind")), 1, 1, kind) ||
+        !integer_in_range(root.value(QStringLiteral("request_kind")),
+                          kPlanDeleteRecoveryPointsRequestKind,
+                          kPlanDeleteRecoveryPointsRequestKind, request_kind) ||
+        !integer_in_range(root.value(QStringLiteral("boundary_error_code")), 0, 0, error) ||
+        !root.value(QStringLiteral("payload")).isObject()) {
+        return false;
+    }
+    const auto payload = root.value(QStringLiteral("payload")).toObject();
+    if (!has_exact_keys(payload, {"plan_token", "operation_id", "repository_connection_id",
+                                  "root_recovery_point_id", "targets", "expires_utc_ms"})) {
+        return false;
+    }
+    const auto plan_token = payload.value(QStringLiteral("plan_token")).toString();
+    const auto operation_id = payload.value(QStringLiteral("operation_id")).toString();
+    const auto connection_id =
+        payload.value(QStringLiteral("repository_connection_id")).toString();
+    const auto root_rp = payload.value(QStringLiteral("root_recovery_point_id")).toString();
+    qint64 expires_utc_ms = 0;
+    if (!payload.value(QStringLiteral("plan_token")).isString() || !stable_code(plan_token, 128) ||
+        !payload.value(QStringLiteral("operation_id")).isString() ||
+        !stable_code(operation_id, 128) ||
+        !payload.value(QStringLiteral("repository_connection_id")).isString() ||
+        !stable_code(connection_id, 128) ||
+        !payload.value(QStringLiteral("root_recovery_point_id")).isString() ||
+        !canonical_uuid(root_rp) || !payload.value(QStringLiteral("targets")).isArray() ||
+        !integer_in_range(payload.value(QStringLiteral("expires_utc_ms")), 0,
+                          (std::numeric_limits<qint64>::max)(), expires_utc_ms)) {
+        return false;
+    }
+    QVariantList targets;
+    QSet<QString> seen_ids;
+    for (const auto& value : payload.value(QStringLiteral("targets")).toArray()) {
+        if (!value.isObject()) {
+            return false;
+        }
+        const auto target = value.toObject();
+        if (!has_exact_keys(target,
+                            {"recovery_point_id", "catalog_generation", "member_count"})) {
+            return false;
+        }
+        const auto rp_id = target.value(QStringLiteral("recovery_point_id")).toString();
+        qint64 generation = 0;
+        qint64 member_count = 0;
+        if (!target.value(QStringLiteral("recovery_point_id")).isString() ||
+            !canonical_uuid(rp_id) || seen_ids.contains(rp_id) ||
+            !integer_in_range(target.value(QStringLiteral("catalog_generation")), 0,
+                              (std::numeric_limits<qint64>::max)(), generation) ||
+            !integer_in_range(target.value(QStringLiteral("member_count")), 0,
+                              (std::numeric_limits<quint32>::max)(), member_count)) {
+            return false;
+        }
+        seen_ids.insert(rp_id);
+        targets.push_back(QVariantMap{{QStringLiteral("recoveryPointId"), rp_id},
+                                      {QStringLiteral("catalogGeneration"), generation},
+                                      {QStringLiteral("memberCount"), member_count}});
+    }
+    result = {{QStringLiteral("planToken"), plan_token},
+              {QStringLiteral("operationId"), operation_id},
+              {QStringLiteral("repositoryConnectionId"), connection_id},
+              {QStringLiteral("rootRecoveryPointId"), root_rp},
+              {QStringLiteral("targetCount"), static_cast<qint64>(targets.size())},
+              {QStringLiteral("targets"), targets},
+              {QStringLiteral("expiresUtcMs"), expires_utc_ms}};
+    return true;
+}
+
 bool parse_recovery_point_layout_response(const QJsonObject& root, QVariantMap& result) {
     qint64 kind = 0;
     qint64 request_kind = 0;
@@ -647,7 +720,9 @@ namespace {
     if (!has_exact_keys(object,
                         {"job_id", "trace_id", "operation", "state", "content_kind", "created_utc_ms",
                          "started_utc_ms", "completed_utc_ms", "progress", "message_code",
-                         "source_ids", "repository_connection_id"})) {
+                         "source_ids", "repository_connection_id", "requested_backup_type",
+                         "effective_backup_type", "effective_parent_uuid",
+                         "incremental_downgrade_reason"})) {
         return false;
     }
     qint64 operation = 0;
@@ -695,6 +770,27 @@ namespace {
         }
         connection_id = connection_value.toString();
     }
+    std::optional<qint64> requested_backup_type;
+    std::optional<qint64> effective_backup_type;
+    std::optional<qint64> incremental_downgrade_reason;
+    QString effective_parent_uuid;
+    bool has_effective_parent = false;
+    if (!parse_optional_int64(object.value(QStringLiteral("requested_backup_type")),
+                              requested_backup_type) ||
+        (requested_backup_type &&
+         (*requested_backup_type < 1 || *requested_backup_type > 3)) ||
+        !parse_optional_int64(object.value(QStringLiteral("effective_backup_type")),
+                              effective_backup_type) ||
+        (effective_backup_type &&
+         (*effective_backup_type < 1 || *effective_backup_type > 3)) ||
+        !optional_uuid(object.value(QStringLiteral("effective_parent_uuid")), effective_parent_uuid,
+                       has_effective_parent) ||
+        !parse_optional_int64(object.value(QStringLiteral("incremental_downgrade_reason")),
+                              incremental_downgrade_reason) ||
+        (incremental_downgrade_reason &&
+         (*incremental_downgrade_reason < 1 || *incremental_downgrade_reason > 9))) {
+        return false;
+    }
     QVariantMap map{
         {QStringLiteral("jobId"), object.value(QStringLiteral("job_id")).toString()},
         {QStringLiteral("traceId"), object.value(QStringLiteral("trace_id")).toString()},
@@ -712,6 +808,18 @@ namespace {
     }
     if (completed_utc_ms) {
         map.insert(QStringLiteral("completedUtcMs"), *completed_utc_ms);
+    }
+    if (requested_backup_type) {
+        map.insert(QStringLiteral("requestedBackupType"), *requested_backup_type);
+    }
+    if (effective_backup_type) {
+        map.insert(QStringLiteral("effectiveBackupType"), *effective_backup_type);
+    }
+    if (has_effective_parent) {
+        map.insert(QStringLiteral("effectiveParentUuid"), effective_parent_uuid);
+    }
+    if (incremental_downgrade_reason) {
+        map.insert(QStringLiteral("incrementalDowngradeReason"), *incremental_downgrade_reason);
     }
     const auto progress_value = object.value(QStringLiteral("progress"));
     if (!progress_value.isNull()) {

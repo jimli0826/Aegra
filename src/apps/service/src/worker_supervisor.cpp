@@ -99,12 +99,20 @@ generate_pipe_name(ports::IRandomSource& random, const base::CancellationToken c
     return base::Result<std::string>::success(std::move(result));
 }
 
+struct TerminalResultFields final {
+    std::optional<std::uint32_t> result_error;
+    std::optional<std::uint32_t> result_outcome;
+    std::optional<std::string> result_message;
+    std::optional<std::uint8_t> result_requested_backup_type;
+    std::optional<std::uint8_t> result_effective_backup_type;
+    std::optional<std::string> result_effective_parent_uuid;
+    std::optional<std::uint8_t> result_incremental_downgrade_reason;
+};
+
 [[nodiscard]] base::Result<contracts::ServiceJobState>
 persist_transition(ports::IControlPlaneDatabase& database, ports::IClock& clock,
                    const std::string_view job_id, const contracts::ServiceJobState next_state,
-                   std::string message_code, const std::optional<std::uint32_t> result_error,
-                   const std::optional<std::uint32_t> result_outcome,
-                   std::optional<std::string> result_message) {
+                   std::string message_code, TerminalResultFields result_fields) {
     auto current = database.get_job(job_id, {});
     if (!current)
         return base::Result<contracts::ServiceJobState>::failure(current.error());
@@ -124,9 +132,14 @@ persist_transition(ports::IControlPlaneDatabase& database, ports::IClock& clock,
     transition.next_state = next_state;
     transition.transition_utc_ms = utc_now_ms(clock);
     transition.message_code = std::move(message_code);
-    transition.result_error_code = result_error;
-    transition.result_outcome = result_outcome;
-    transition.result_message_code = std::move(result_message);
+    transition.result_error_code = result_fields.result_error;
+    transition.result_outcome = result_fields.result_outcome;
+    transition.result_message_code = std::move(result_fields.result_message);
+    transition.result_requested_backup_type = result_fields.result_requested_backup_type;
+    transition.result_effective_backup_type = result_fields.result_effective_backup_type;
+    transition.result_effective_parent_uuid = std::move(result_fields.result_effective_parent_uuid);
+    transition.result_incremental_downgrade_reason =
+        result_fields.result_incremental_downgrade_reason;
     auto changed = unit.value()->jobs().transition(transition, {});
     if (!changed) {
         unit.value()->rollback();
@@ -158,18 +171,28 @@ persist_worker_result(const SessionDependencies& dependencies, const std::string
     const auto message = state == contracts::ServiceJobState::kSucceeded   ? "job.succeeded"
                          : state == contracts::ServiceJobState::kCancelled ? "job.cancelled"
                                                                            : "job.failed";
-    const auto error = response.task_result
-                           ? static_cast<std::uint32_t>(response.task_result->error_code)
-                           : static_cast<std::uint32_t>(response.boundary_error_code);
-    const auto outcome = response.task_result
-                             ? std::optional<std::uint32_t>(
-                                   static_cast<std::uint32_t>(response.task_result->outcome))
-                             : std::nullopt;
-    const auto result_message = response.task_result
-                                    ? std::optional<std::string>(response.task_result->message_code)
-                                    : std::optional<std::string>(response.message_code);
+    TerminalResultFields fields;
+    fields.result_error =
+        response.task_result ? static_cast<std::uint32_t>(response.task_result->error_code)
+                             : static_cast<std::uint32_t>(response.boundary_error_code);
+    fields.result_outcome =
+        response.task_result
+            ? std::optional<std::uint32_t>(static_cast<std::uint32_t>(response.task_result->outcome))
+            : std::nullopt;
+    fields.result_message =
+        response.task_result ? std::optional<std::string>(response.task_result->message_code)
+                             : std::optional<std::string>(response.message_code);
+    if (response.task_result) {
+        fields.result_requested_backup_type = response.task_result->requested_backup_type;
+        fields.result_effective_backup_type = response.task_result->effective_backup_type;
+        fields.result_effective_parent_uuid = response.task_result->effective_parent_uuid;
+        if (response.task_result->incremental_downgrade_reason) {
+            fields.result_incremental_downgrade_reason = static_cast<std::uint8_t>(
+                *response.task_result->incremental_downgrade_reason);
+        }
+    }
     return persist_transition(*dependencies.control_plane, *dependencies.clock, job_id, state,
-                              message, error, outcome, result_message);
+                              message, std::move(fields));
 }
 
 [[nodiscard]] base::Result<contracts::ServiceJobState>
@@ -195,9 +218,11 @@ persist_missing_result(const SessionDependencies& dependencies,
     case SessionStopReason::kTransportFailure:
         break;
     }
+    TerminalResultFields fields;
+    fields.result_error = static_cast<std::uint32_t>(error);
+    fields.result_message = message;
     return persist_transition(*dependencies.control_plane, *dependencies.clock, session->job_id,
-                              state, message, static_cast<std::uint32_t>(error), std::nullopt,
-                              message);
+                              state, message, std::move(fields));
 }
 
 void publish_completion(const WorkerJobRequest& request,
@@ -476,25 +501,28 @@ base::Result<void> WorkerSupervisor::Impl::launch_worker(
     auto launched =
         launcher.launch({config.worker_executable_path, {"--pipe", std::string(pipe_name)}});
     if (!launched) {
-        auto failed = persist_transition(
-            control_plane, clock, state->job_id, contracts::ServiceJobState::kFailed,
-            "service.worker_launch_failed", static_cast<std::uint32_t>(launched.error().code),
-            std::nullopt, "service.worker_launch_failed");
+        TerminalResultFields failed_fields;
+        failed_fields.result_error = static_cast<std::uint32_t>(launched.error().code);
+        failed_fields.result_message = "service.worker_launch_failed";
+        auto failed = persist_transition(control_plane, clock, state->job_id,
+                                         contracts::ServiceJobState::kFailed,
+                                         "service.worker_launch_failed", std::move(failed_fields));
         return failed ? base::Result<void>::failure(launched.error())
                       : base::Result<void>::failure(failed.error());
     }
     state->worker_pid = launched.value().pid;
-    auto running = persist_transition(control_plane, clock, state->job_id,
-                                      contracts::ServiceJobState::kRunning, "job.running",
-                                      std::nullopt, std::nullopt, std::nullopt);
+    auto running =
+        persist_transition(control_plane, clock, state->job_id, contracts::ServiceJobState::kRunning,
+                           "job.running", TerminalResultFields{});
     if (running)
         return base::Result<void>::success();
 
     terminate_and_wait(state, *dependencies);
-    (void)persist_transition(
-        control_plane, clock, state->job_id, contracts::ServiceJobState::kFailed,
-        "service.job_start_persistence_failed", static_cast<std::uint32_t>(running.error().code),
-        std::nullopt, "service.job_start_persistence_failed");
+    TerminalResultFields start_failed;
+    start_failed.result_error = static_cast<std::uint32_t>(running.error().code);
+    start_failed.result_message = "service.job_start_persistence_failed";
+    (void)persist_transition(control_plane, clock, state->job_id, contracts::ServiceJobState::kFailed,
+                             "service.job_start_persistence_failed", std::move(start_failed));
     return base::Result<void>::failure(running.error());
 }
 

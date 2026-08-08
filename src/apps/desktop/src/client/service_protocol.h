@@ -22,7 +22,9 @@ inline constexpr int kListSourceInventoryRequestKind = 4;
 inline constexpr int kListJobsRequestKind = 5;
 inline constexpr int kListSchedulesRequestKind = 6;
 inline constexpr int kListMountSessionsRequestKind = 8;
+inline constexpr int kPlanDeleteRecoveryPointsRequestKind = 11;
 inline constexpr int kGetRecoveryPointLayoutRequestKind = 12;
+inline constexpr int kExecuteDeletePlanRequestKind = 47;
 inline constexpr int kBrowseFileSourcesRequestKind = 13;
 inline constexpr int kListRecoveryPointEntriesRequestKind = 14;
 inline constexpr int kPrepareFileRestoreRequestKind = 15;
@@ -212,8 +214,7 @@ encode_browse_file_sources_request(const QString& request_id,
     const QString& request_id, const QString& repository_connection_id,
     const QString& recovery_point_id, const QStringList& entry_ids,
     const QString& target_node_token, int conflict_policy = kFileConflictPolicyFail,
-    const QString& archive_secret_ref = {}, bool restore_security = true,
-    bool restore_ads = true);
+    const QString& archive_secret_ref = {}, bool restore_security = true);
 [[nodiscard]] QByteArray encode_start_file_restore_request(const QString& request_id,
                                                            const QString& idempotency_key,
                                                            const QString& preflight_token,
@@ -225,6 +226,13 @@ encode_browse_file_sources_request(const QString& request_id,
     int local_minute_of_day, int weekday_mask, const QString& timezone_id,
     bool exclude_page_and_hibernation_files = true, bool encryption_enabled = false,
     const QString& archive_password = {});
+[[nodiscard]] QByteArray encode_plan_delete_recovery_points_request(
+    const QString& request_id, const QString& connection_id, const QString& recovery_point_id,
+    const QString& archive_password = {});
+[[nodiscard]] QByteArray encode_execute_delete_plan_request(const QString& request_id,
+                                                            const QString& idempotency_key,
+                                                            const QString& plan_token,
+                                                            bool confirmed = true);
 
 [[nodiscard]] bool parse_response_root(const QByteArray& body, const QString& request_id,
                                        QJsonObject& root);
@@ -234,6 +242,10 @@ encode_browse_file_sources_request(const QString& request_id,
 /// On success, result is { repositoryConnectionId, recoveryPointId, volumes: [...] }.
 [[nodiscard]] bool parse_recovery_point_layout_response(const QJsonObject& root,
                                                         QVariantMap& result);
+/// On success: planToken, operationId, repositoryConnectionId, rootRecoveryPointId,
+/// targetCount, retainedHint (display-only count of RPs not in plan when known), targets[],
+/// expiresUtcMs.
+[[nodiscard]] bool parse_delete_plan_response(const QJsonObject& root, QVariantMap& result);
 [[nodiscard]] bool parse_job_list_response(const QJsonObject& root, JobPage& result);
 [[nodiscard]] bool parse_source_inventory_response(const QJsonObject& root,
                                                    SourceInventoryPage& result);

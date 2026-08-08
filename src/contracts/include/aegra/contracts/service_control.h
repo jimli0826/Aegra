@@ -130,6 +130,12 @@ struct JobSummary final {
     // Volume: inventory source ids. File: opaque selection ids (never paths).
     std::vector<std::string> source_ids;
     std::optional<std::string> repository_connection_id;
+    /// Requested backup type for backup jobs (control-plane insert); null otherwise.
+    std::optional<std::uint8_t> requested_backup_type;
+    /// file_set terminal result fields (from TaskResult); null until completed or non-file.
+    std::optional<std::uint8_t> effective_backup_type;
+    std::optional<std::string> effective_parent_uuid;
+    std::optional<std::uint8_t> incremental_downgrade_reason;
 };
 
 struct JobListRequest final {
@@ -435,7 +441,6 @@ struct FileSelectionInput final {
 };
 
 struct FileSetOptionsInput final {
-    FileReparsePolicy reparse_policy{FileReparsePolicy::kCaptureNoFollow};
     FileUnreadablePolicy unreadable_policy{FileUnreadablePolicy::kFailJob};
 };
 
@@ -520,7 +525,6 @@ struct PrepareFileRestoreRequest final {
     FileConflictPolicy conflict_policy{FileConflictPolicy::kFail};
     std::optional<std::string> archive_secret_ref;
     bool restore_security{true};
-    bool restore_ads{true};
 };
 
 struct FileRestorePreflight final {

@@ -32,6 +32,7 @@ target_link_libraries(
     aegra_app_worker_personal
     PUBLIC Aegra::Base Aegra::Pipeline Aegra::Ports
     PRIVATE
+        Aegra::AdapterCryptoSodium
         Aegra::AdapterPersonalArchive
         Aegra::AdapterWindowsDisk
         Aegra::AdapterWindowsFilesystem

@@ -94,6 +94,37 @@ template <std::size_t Size>
                        [](const std::byte item) { return item == std::byte{0}; });
 }
 
+[[nodiscard]] bool root_is_absent(const IndexRootLocator& root) noexcept {
+    return root.page_id == 0 && root.offset == 0 && is_zero_bytes(root.digest);
+}
+
+[[nodiscard]] bool root_is_present(const IndexRootLocator& root) noexcept {
+    return root.page_id != 0 && root.offset != 0 && !is_zero_bytes(root.digest);
+}
+
+[[nodiscard]] base::Result<void> validate_footer_index_roots(const BackupFooter& footer) {
+    IndexRootLocator namespace_root;
+    namespace_root.page_id = footer.index_root_page_id;
+    namespace_root.offset = footer.index_root_offset;
+    namespace_root.digest = footer.index_root_digest;
+    if (footer.entry_count == 0) {
+        if (footer.stream_count != 0 || footer.file_stream_chunk_count != 0 ||
+            footer.index_page_count != 0 || !root_is_absent(namespace_root) ||
+            !root_is_absent(footer.entry_id_root) || !root_is_absent(footer.stream_root) ||
+            !root_is_absent(footer.chunk_root)) {
+            return base::Result<void>::failure(corrupt("volume footer index fields are invalid"));
+        }
+        return base::Result<void>::success();
+    }
+    if (footer.volume_chunk_count != 0 || footer.index_page_count < 2 ||
+        !root_is_present(namespace_root) || !root_is_present(footer.entry_id_root) ||
+        (root_is_present(footer.stream_root) != (footer.stream_count > 0)) ||
+        (root_is_present(footer.chunk_root) != (footer.file_stream_chunk_count > 0))) {
+        return base::Result<void>::failure(corrupt("file footer index fields are invalid"));
+    }
+    return base::Result<void>::success();
+}
+
 [[nodiscard]] base::Result<void> validate_parent_uuid(const BackupHeader& header,
                                                       const std::uint32_t backup_type) {
     const bool parent_is_zero = is_zero_uuid(header.parent_uuid);
@@ -125,17 +156,31 @@ template <std::size_t Size>
         header.content_kind != kContentKindFileSet) {
         return base::Result<void>::failure(corrupt("backup content kind is invalid"));
     }
-    const auto known_caps = kCapabilityHasFileIndex | kCapabilityVolumeSidecarOk;
+    const auto known_caps =
+        kCapabilityHasFileIndex | kCapabilityVolumeSidecarOk | kCapabilityFileUsnBaseline;
     if ((header.capability_flags & ~known_caps) != 0) {
         return base::Result<void>::failure(corrupt("backup capability flags are unknown"));
     }
     if (header.content_kind == kContentKindFileSet) {
         const auto backup_type =
             header.flags & (kBackupFlagFull | kBackupFlagIncremental | kBackupFlagDifferential);
-        if (backup_type != kBackupFlagFull || !is_zero_uuid(header.parent_uuid) ||
-            (header.capability_flags & kCapabilityHasFileIndex) == 0 ||
-            (header.capability_flags & kCapabilityVolumeSidecarOk) != 0) {
+        if ((header.capability_flags & kCapabilityHasFileIndex) == 0 ||
+            (header.capability_flags & kCapabilityVolumeSidecarOk) != 0 ||
+            backup_type == kBackupFlagDifferential) {
             return base::Result<void>::failure(corrupt("file_set header flags are invalid"));
+        }
+        if (backup_type == kBackupFlagFull) {
+            if (!is_zero_uuid(header.parent_uuid)) {
+                return base::Result<void>::failure(corrupt("file_set full parent UUID is invalid"));
+            }
+        } else if (backup_type == kBackupFlagIncremental) {
+            if (is_zero_uuid(header.parent_uuid) ||
+                (header.capability_flags & kCapabilityFileUsnBaseline) == 0) {
+                return base::Result<void>::failure(
+                    corrupt("file_set incremental requires parent and USN baseline capability"));
+            }
+        } else {
+            return base::Result<void>::failure(corrupt("file_set backup type flags are invalid"));
         }
     }
     return base::Result<void>::success();
@@ -612,14 +657,20 @@ decode_file_stream_chunk_header(std::span<const std::byte> bytes) {
     return base::Result<FileStreamChunkHeader>::success(result);
 }
 
+[[nodiscard]] bool is_valid_index_page_kind(const std::uint16_t page_kind) noexcept {
+    return page_kind == kIndexPageLeaf || page_kind == kIndexPageInternal ||
+           page_kind == kIndexPageEntryIdLeaf || page_kind == kIndexPageEntryIdInternal ||
+           page_kind == kIndexPageStreamLeaf || page_kind == kIndexPageStreamInternal ||
+           page_kind == kIndexPageChunkLeaf || page_kind == kIndexPageChunkInternal;
+}
+
 base::Result<EncodedFileIndexPageHeader>
 encode_file_index_page_header(const FileIndexPageHeader& header) {
     if (header.page_format_version != kFileIndexPageFormatVersion || header.page_id == 0 ||
         header.plain_size == 0 || header.plain_size > kMaximumIndexPagePlainBytes ||
         header.encoded_size != header.plain_size ||
         header.protection_mode != kIndexProtectAead ||
-        (header.page_kind != kIndexPageLeaf && header.page_kind != kIndexPageInternal) ||
-        is_zero_bytes(header.nonce)) {
+        !is_valid_index_page_kind(header.page_kind) || is_zero_bytes(header.nonce)) {
         return base::Result<EncodedFileIndexPageHeader>::failure(
             corrupt("file index page header fields are invalid"));
     }
@@ -663,8 +714,7 @@ base::Result<FileIndexPageHeader> decode_file_index_page_header(std::span<const 
         result.page_id == 0 || result.plain_size == 0 ||
         result.plain_size > kMaximumIndexPagePlainBytes ||
         result.encoded_size != result.plain_size || result.protection_mode != kIndexProtectAead ||
-        (result.page_kind != kIndexPageLeaf && result.page_kind != kIndexPageInternal) ||
-        is_zero_bytes(result.nonce)) {
+        !is_valid_index_page_kind(result.page_kind) || is_zero_bytes(result.nonce)) {
         return base::Result<FileIndexPageHeader>::failure(
             corrupt("file index page header fields are invalid"));
     }
@@ -704,6 +754,10 @@ base::Result<EncodedBackupFooter> encode_backup_footer(const BackupFooter& foote
     if (footer.part_file_size < kBackupFooterSize) {
         return base::Result<EncodedBackupFooter>::failure(corrupt("footer file size is invalid"));
     }
+    auto roots = validate_footer_index_roots(footer);
+    if (!roots) {
+        return base::Result<EncodedBackupFooter>::failure(roots.error());
+    }
     const auto prefix = make_footer_record_prefix();
     auto encoded_prefix = encode_archive_record_prefix(prefix);
     if (!encoded_prefix) {
@@ -731,7 +785,17 @@ base::Result<EncodedBackupFooter> encode_backup_footer(const BackupFooter& foote
     write_bytes(output, 144, footer.index_root_digest);
     write_integer(output, 176, footer.part_file_size);
     write_bytes(output, 184, footer.file_uuid);
-    // reserved body tail zero-initialized
+    // body offset 168 (absolute 200): secondary roots ADR-0019
+    write_integer(output, 200, footer.entry_id_root.page_id);
+    write_integer(output, 208, footer.entry_id_root.offset);
+    write_bytes(output, 216, footer.entry_id_root.digest);
+    write_integer(output, 248, footer.stream_root.page_id);
+    write_integer(output, 256, footer.stream_root.offset);
+    write_bytes(output, 264, footer.stream_root.digest);
+    write_integer(output, 296, footer.chunk_root.page_id);
+    write_integer(output, 304, footer.chunk_root.offset);
+    write_bytes(output, 312, footer.chunk_root.digest);
+    // reserved body tail (absolute 344..) remains zero-initialized
     return base::Result<EncodedBackupFooter>::success(output);
 }
 
@@ -755,7 +819,8 @@ base::Result<BackupFooter> decode_backup_footer(std::span<const std::byte> bytes
     if (read_integer<std::uint32_t>(body, 12) != kBackupFooterSize) {
         return base::Result<BackupFooter>::failure(corrupt("footer size is invalid"));
     }
-    if (read_integer<std::uint32_t>(body, 92) != 0 || !is_zero_span(body.subspan(168, 312))) {
+    // body 168..311: secondary roots; body 312..479 (168 B) must remain zero.
+    if (read_integer<std::uint32_t>(body, 92) != 0 || !is_zero_span(body.subspan(312, 168))) {
         return base::Result<BackupFooter>::failure(corrupt("footer reserved fields are set"));
     }
     BackupFooter result;
@@ -774,8 +839,21 @@ base::Result<BackupFooter> decode_backup_footer(std::span<const std::byte> bytes
     result.index_root_digest = read_bytes<32>(body, 112);
     result.part_file_size = read_integer<std::uint64_t>(body, 144);
     result.file_uuid = read_bytes<16>(body, 152);
+    result.entry_id_root.page_id = read_integer<std::uint64_t>(body, 168);
+    result.entry_id_root.offset = read_integer<std::uint64_t>(body, 176);
+    result.entry_id_root.digest = read_bytes<32>(body, 184);
+    result.stream_root.page_id = read_integer<std::uint64_t>(body, 216);
+    result.stream_root.offset = read_integer<std::uint64_t>(body, 224);
+    result.stream_root.digest = read_bytes<32>(body, 232);
+    result.chunk_root.page_id = read_integer<std::uint64_t>(body, 264);
+    result.chunk_root.offset = read_integer<std::uint64_t>(body, 272);
+    result.chunk_root.digest = read_bytes<32>(body, 280);
     if (result.part_file_size < kBackupFooterSize) {
         return base::Result<BackupFooter>::failure(corrupt("footer file size is invalid"));
+    }
+    auto roots = validate_footer_index_roots(result);
+    if (!roots) {
+        return base::Result<BackupFooter>::failure(roots.error());
     }
     return base::Result<BackupFooter>::success(result);
 }

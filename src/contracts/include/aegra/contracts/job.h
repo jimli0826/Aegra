@@ -33,6 +33,7 @@ enum class BackupType : std::uint8_t {
 };
 
 struct BackupOptions final {
+    /// Requested backup type (file_set may downgrade Incremental → Full).
     BackupType type{BackupType::kFull};
     std::string parent_source_ref;
     SecretRef parent_credential_ref;
@@ -45,6 +46,16 @@ struct BackupOptions final {
     /// When true, archive metadata/payload use AEAD with credential_refs password.
     /// When false, archive is written unencrypted and password must be empty.
     bool encryption_enabled{false};
+    /// file_set only: Catalog tip UUID when Service selected an Incremental parent (empty = none).
+    std::string candidate_parent_uuid;
+    /// file_set only: absolute path to the parent .bkf for Worker open (empty when Full / demoted).
+    /// volume_set: absolute path to parent archive (existing Incremental/Differential path).
+    /// file_set reuses this field for parent Archive location (not volume geometry).
+    /// file_set only: authenticated selection fingerprint for baseline / parent match.
+    std::optional<FileSelectionFingerprint> selection_fingerprint;
+    /// file_set only: Service already decided Full while `type` remains the *requested* type
+    /// (must be Incremental). Worker writes Full and copies this reason into TaskResult.
+    std::optional<IncrementalDowngradeReason> service_full_reason;
 };
 
 /// Volume/disk restore options (content_kind = volume_set).

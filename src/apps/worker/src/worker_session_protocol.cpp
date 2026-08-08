@@ -66,6 +66,10 @@ Json encode_task_result(const contracts::TaskResult& result) {
         {"message_code", result.message_code},
         {"warning_codes", result.warning_codes},
         {"partial_restore", nullptr},
+        {"requested_backup_type", nullptr},
+        {"effective_backup_type", nullptr},
+        {"effective_parent_uuid", nullptr},
+        {"incremental_downgrade_reason", nullptr},
     };
     if (result.partial_restore) {
         encoded["partial_restore"] =
@@ -74,6 +78,19 @@ Json encode_task_result(const contracts::TaskResult& result) {
                  {"entries_failed", result.partial_restore->entries_failed},
                  {"bytes_restored", result.partial_restore->bytes_restored},
                  {"stable_error_codes", result.partial_restore->stable_error_codes}};
+    }
+    if (result.requested_backup_type) {
+        encoded["requested_backup_type"] = *result.requested_backup_type;
+    }
+    if (result.effective_backup_type) {
+        encoded["effective_backup_type"] = *result.effective_backup_type;
+    }
+    if (result.effective_parent_uuid) {
+        encoded["effective_parent_uuid"] = *result.effective_parent_uuid;
+    }
+    if (result.incremental_downgrade_reason) {
+        encoded["incremental_downgrade_reason"] =
+            static_cast<std::uint8_t>(*result.incremental_downgrade_reason);
     }
     return encoded;
 }

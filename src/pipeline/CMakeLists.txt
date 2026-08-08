@@ -3,6 +3,7 @@ add_library(aegra_pipeline STATIC
     src/bounded_chunk_queue.cpp
     src/fixed_size_chunker.cpp
     src/file_set_backup_pipeline.cpp
+    src/file_set_change_planner.cpp
     src/file_set_restore_pipeline.cpp
     src/restore_pipeline.cpp
     src/verify_pipeline.cpp

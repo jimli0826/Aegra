@@ -628,4 +628,162 @@ void ServiceClient::reset_repository_command() {
     emit repositoryCommandChanged();
 }
 
+bool ServiceClient::deletePlanBusy() const noexcept { return delete_plan_busy_; }
+
+QVariantMap ServiceClient::deletePlan() const { return delete_plan_; }
+
+QString ServiceClient::deletePlanErrorText() const {
+    return delete_plan_error_code_.isEmpty() ? QString{}
+                                             : localize_message_code(delete_plan_error_code_);
+}
+
+void ServiceClient::clearDeletePlan() {
+    if (!delete_plan_busy_ && delete_plan_.isEmpty() && delete_plan_error_code_.isEmpty()) {
+        return;
+    }
+    delete_plan_busy_ = false;
+    delete_plan_request_id_.clear();
+    execute_delete_request_id_.clear();
+    execute_delete_idempotency_key_.clear();
+    delete_plan_error_code_.clear();
+    delete_plan_.clear();
+    emit deletePlanChanged();
+}
+
+bool ServiceClient::planDeleteRecoveryPoint(const QString& recovery_point_id,
+                                            const QString& archive_password) {
+    if (state_ != State::kReady || delete_plan_busy_ || recovery_point_id.isEmpty() ||
+        selected_repository_connection_id_.isEmpty()) {
+        return false;
+    }
+    delete_plan_.clear();
+    delete_plan_error_code_.clear();
+    delete_plan_busy_ = true;
+    delete_plan_request_id_ = new_request_id();
+    emit deletePlanChanged();
+    const auto body = encode_plan_delete_recovery_points_request(
+        delete_plan_request_id_, selected_repository_connection_id_, recovery_point_id,
+        archive_password);
+    const auto started = coordinator_->begin_request(
+        delete_plan_request_id_, body,
+        [this](const QByteArray& frame_body) { return handle_plan_delete_frame(frame_body); });
+    if (!started) {
+        finish_plan_delete_failure(QStringLiteral("repository.query_failed"));
+        return false;
+    }
+    return true;
+}
+
+bool ServiceClient::executeDeletePlan() {
+    if (state_ != State::kReady || delete_plan_busy_ ||
+        delete_plan_.value(QStringLiteral("planToken")).toString().isEmpty()) {
+        return false;
+    }
+    const auto plan_token = delete_plan_.value(QStringLiteral("planToken")).toString();
+    delete_plan_busy_ = true;
+    delete_plan_error_code_.clear();
+    execute_delete_request_id_ = new_request_id();
+    execute_delete_idempotency_key_ = new_idempotency_key();
+    emit deletePlanChanged();
+    const auto body = encode_execute_delete_plan_request(
+        execute_delete_request_id_, execute_delete_idempotency_key_, plan_token, true);
+    const auto started =
+        coordinator_->begin_request(execute_delete_request_id_, body,
+                                    [this](const QByteArray& frame_body) {
+                                        return handle_execute_delete_plan_frame(frame_body);
+                                    });
+    if (!started) {
+        finish_execute_delete_failure(QStringLiteral("service.request_failed"));
+        return false;
+    }
+    return true;
+}
+
+RequestDisposition ServiceClient::handle_plan_delete_frame(const QByteArray& body) {
+    const auto request_id = extract_response_request_id(body);
+    if (request_id.isEmpty() || request_id != delete_plan_request_id_) {
+        return RequestDisposition::kFinished;
+    }
+    QJsonObject root;
+    if (!parse_response_root(body, request_id, root)) {
+        return RequestDisposition::kProtocolError;
+    }
+    if (is_command_failure_response(root, kPlanDeleteRecoveryPointsRequestKind)) {
+        const auto code = root.value(QStringLiteral("message_code")).toString();
+        finish_plan_delete_failure(code.isEmpty() ? QStringLiteral("repository.query_failed")
+                                                  : code);
+        return RequestDisposition::kFinished;
+    }
+    QVariantMap plan;
+    if (!parse_delete_plan_response(root, plan)) {
+        return RequestDisposition::kProtocolError;
+    }
+    if (plan.value(QStringLiteral("repositoryConnectionId")).toString() !=
+        selected_repository_connection_id_) {
+        finish_plan_delete_failure(QStringLiteral("repository.query_failed"));
+        return RequestDisposition::kFinished;
+    }
+    // Display-only retained estimate from currently loaded RP list (not authority).
+    const auto target_count = plan.value(QStringLiteral("targetCount")).toLongLong();
+    const auto loaded = recovery_points_.rowCount();
+    if (loaded >= target_count) {
+        plan.insert(QStringLiteral("retainedCount"), static_cast<qint64>(loaded - target_count));
+    }
+    delete_plan_ = std::move(plan);
+    delete_plan_busy_ = false;
+    delete_plan_request_id_.clear();
+    delete_plan_error_code_.clear();
+    emit deletePlanChanged();
+    emit deletePlanReady();
+    return RequestDisposition::kFinished;
+}
+
+RequestDisposition ServiceClient::handle_execute_delete_plan_frame(const QByteArray& body) {
+    const auto request_id = extract_response_request_id(body);
+    if (request_id.isEmpty() || request_id != execute_delete_request_id_) {
+        return RequestDisposition::kFinished;
+    }
+    QJsonObject root;
+    if (!parse_response_root(body, request_id, root)) {
+        return RequestDisposition::kProtocolError;
+    }
+    if (is_command_failure_response(root, kExecuteDeletePlanRequestKind)) {
+        const auto code = root.value(QStringLiteral("message_code")).toString();
+        finish_execute_delete_failure(code.isEmpty() ? QStringLiteral("service.request_failed")
+                                                     : code);
+        return RequestDisposition::kFinished;
+    }
+    CommandAck acknowledgement;
+    if (!parse_command_ack_response(root, kExecuteDeletePlanRequestKind, acknowledgement)) {
+        return RequestDisposition::kProtocolError;
+    }
+    delete_plan_busy_ = false;
+    execute_delete_request_id_.clear();
+    execute_delete_idempotency_key_.clear();
+    delete_plan_.clear();
+    delete_plan_error_code_.clear();
+    emit deletePlanChanged();
+    emit deleteExecuted();
+    refreshRepository();
+    return RequestDisposition::kFinished;
+}
+
+void ServiceClient::finish_plan_delete_failure(const QString& message_code) {
+    delete_plan_busy_ = false;
+    delete_plan_request_id_.clear();
+    delete_plan_.clear();
+    delete_plan_error_code_ = message_code;
+    emit deletePlanChanged();
+    emit deletePlanFailed(localize_message_code(message_code));
+}
+
+void ServiceClient::finish_execute_delete_failure(const QString& message_code) {
+    delete_plan_busy_ = false;
+    execute_delete_request_id_.clear();
+    execute_delete_idempotency_key_.clear();
+    delete_plan_error_code_ = message_code;
+    emit deletePlanChanged();
+    emit deletePlanFailed(localize_message_code(message_code));
+}
+
 } // namespace aegra::desktop

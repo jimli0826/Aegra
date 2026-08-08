@@ -61,6 +61,10 @@ struct CatalogEntry final {
     std::uint64_t file_stream_count{0};
     std::string structural_state{"complete"};
     std::uint64_t catalog_generation{1};
+    /// file_set only: lowercase hex of 32-byte selection fingerprint; empty when unknown.
+    std::string file_selection_fingerprint;
+    /// file_set only: true when authenticated baseline (fingerprint + checkpoints) is available.
+    bool file_baseline_available{false};
 
     bool operator==(const CatalogEntry&) const = default;
 };

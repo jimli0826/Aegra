@@ -2,10 +2,10 @@
 
 | 属性 | 内容 |
 | --- | --- |
-| 状态 | Accepted（ADR-0016）；F0–F10 已完成；F11 文件级 Incremental 暂缓 |
+| 状态 | Full 基线已完成；Incremental 由 ADR-0018 接受，FI0–FI10 已完成 |
 | 版本 | 1.0 |
 | 日期 | 2026-08-07 |
-| 范围 | Windows 个人版、本地 NTFS/ReFS、Full 文件集备份与选择性恢复 |
+| 范围 | Windows 个人版、本地 NTFS/ReFS、当前 Full 文件集备份与选择性恢复 |
 | 权威格式/协议 | [V7](../format/PERSONAL_BACKUP_FORMAT_V7.md)、[Catalog V2](../format/PERSONAL_REPOSITORY_FORMAT_V2.md)、[Service V4](../protocol/SERVICE_CONTROL_PROTOCOL_V4.md)、[上限与码](../development/FILE_SET_PRODUCT_LIMITS_AND_CODES.md) |
 
 ## 1. 目标与非目标
@@ -27,6 +27,13 @@
 文件级 Incremental/Differential/去重、跨平台恢复、原位置系统文件覆盖、WinPE 文件恢复、Shell Extension 和
 Archive 虚拟挂载。这些能力不能以隐藏开关或 best-effort 分支进入首版。
 
+### 1.2 ADR-0018 范围更新
+
+[ADR-0018](../adr/0018-file-set-incremental-usn-and-chain.md) 已接受文件 Incremental 的目标设计，实施状态与
+工作包见[增量开发计划](../development/FILE_SET_INCREMENTAL_DEVELOPMENT_PLAN.md)。本期文件 Backup/Restore
+只支持目录、普通文件和未命名主数据流；reparse point、hard link、sparse file、ADS 均 strict reject。
+本文后续关于保存或还原这四类对象的描述属于 ADR-0016 的旧范围，已被 ADR-0018 替代，不得作为实现依据。
+
 ### 1.1 未发布产品的版本策略
 
 Aegra 尚未发布，设计不承担开发期数据兼容责任。V7 落地时直接替换 V6；Service V4、Worker schema 4、
@@ -41,8 +48,8 @@ unsupported/corrupt 边界错误，不识别旧版本的具体结构，也不提
 | `volume_set` | 现有一个或多个 Volume 的块级保护对象 |
 | `file_set` | 一个 Job 中有序、去重的文件/目录选择集合 |
 | selection root | 用户明确选择的一个文件或目录根 |
-| entry | 文件、目录、symbolic link、junction 或其它 reparse object |
-| stream | 文件主数据流或 ADS；每个 stream 有独立逻辑 offset 空间 |
+| entry | 当前支持 root、目录或普通文件；其它 kind 拒绝 |
+| stream | 当前仅支持普通文件的未命名主数据流 |
 | file index | Archive 中分页、认证、可随机访问的文件树和 stream 映射 |
 | node token | Service 文件浏览接口返回的短期 opaque 选择句柄 |
 | durable selection | Service 创建 Schedule 时解析并保存的稳定选择描述 |
@@ -117,11 +124,12 @@ volume_identity              trusted stable volume identity
 relative_components[]        normalized path components, never an absolute path
 entry_kind                   file | directory
 recursion                    self_only | recursive
-reparse_policy               capture_no_follow (V1 fixed)
 unreadable_policy            fail_job (V1 fixed)
 exclusion_rules[]            explicit normalized rules
 display_label                non-authoritative UI label
 ```
+
+FI0：删除 `reparse_policy`；枚举到 reparse/hard-link/sparse/ADS 时 Backup strict fail。
 
 选择集合按 `(volume_identity, relative_components)` 规范排序并去重。若一个递归目录包含另一个选择，Service 删除
 冗余子选择；同路径使用冲突规则则拒绝，不能依赖输入顺序决定行为。
@@ -133,8 +141,8 @@ SQLite 保存 Schedule、owner identity 和 durable selection，但不是文件�
 
 ```text
 schedule_id, ordinal, selection_id, volume_identity,
-relative_path_blob, entry_kind, recursion, reparse_policy,
-unreadable_policy, exclusion_blob, display_label
+relative_path_blob, entry_kind, recursion,
+unreadable_policy, display_label
 ```
 
 `relative_path_blob` 保存版本化组件编码，不保存 VSS path。表与 Schedule 在同一事务创建；Schedule 更新继续
@@ -192,7 +200,8 @@ restore.target = BlockRestoreTarget | FileRestoreTarget
 File Source Ref 只在受限 Service-to-Worker Pipe 中存在，包含 canonical Volume GUID path、版本化相对组件、
 规则和 selection ID。校验要求：
 
-- `operation=backup`、`content_kind=file_set` 时只允许 Full；
+- 当前已完成 Worker 实现中，`operation=backup`、`content_kind=file_set` 时只允许 Full；FI7 将按 ADR-0018
+  同步扩展 current schema 4 consumer，不新增兼容版本；
 - File Source Ref 为 1..100 个，selection ID 与规范路径唯一；
 - relative component 非空且不能包含分隔符、NUL、`.` 或 `..`；
 - credential 仍只用 `SecretRef`；
@@ -227,8 +236,9 @@ class IStagedFileWriter;
 ```
 
 Sink 构造时绑定已验证目标根目录句柄。所有操作使用相对 component，不接受拼接后的绝对字符串。能力包括目录
-创建、普通文件 staging、main/alternate stream、sparse range、冲突策略发布、hard link、reparse object、
-metadata 应用、flush 和析构清理。Sink 不决定恢复顺序；Pipeline 不决定 Win32 flags 和 rename 实现。
+创建、普通文件 staging（unnamed main stream only）、冲突策略发布、metadata/security 应用、flush 和析构清理。
+FI0：无 alternate stream / sparse range / hard link / reparse 写入 API 或 capability 位。
+Sink 不决定恢复顺序；Pipeline 不决定 Win32 flags 和 rename 实现。
 
 ## 9. FileSet Backup Pipeline
 
@@ -236,8 +246,8 @@ Pipeline 分五阶段：
 
 1. **Enumerating**：从 snapshot view 逐批枚举，验证父子关系、名称、唯一性和上限，计算 logical byte/item
    totals，并把有界 entry records 写入 session spool。
-2. **Planning**：分配确定的 entry ID、stream index 和 hard-link group；目录先于子项；同一 file identity 的
-   数据只计划一次。
+2. **Planning**：分配确定的 entry ID 与 stream index；目录先于子项；每 regular file 仅一个 unnamed main
+   stream（FI0：无 hard-link group）。
 3. **Reading**：按稳定次序打开 stream，按 chunk 大小读取，通过有界队列交给 Archive Session；sparse hole 不读。
 4. **Indexing**：Session 把 entry、stream、extent 和 chunk reference 编成分页 File Index。
 5. **Finalizing**：写索引根和 Footer，验证内部计数，Commit Archive Group；最后发布 Catalog。
@@ -268,7 +278,7 @@ File Index 使用按 `(parent_entry_id, encoded_name, entry_id)` 排序的分页
 ```text
 entry_id, parent_entry_id, kind, encoded_name,
 logical_size, stream descriptors, timestamps, portable attributes,
-hard_link_group, sparse ranges, bounded platform metadata,
+bounded platform metadata (security only; FI0 removed hard_link_group/sparse/ADS/reparse),
 content extents(chunk_index, block_entry, file_offset, logical_size)
 ```
 

@@ -236,6 +236,7 @@ QString ServiceClient::splashErrorText() const { return splash_error_ ? errorTex
 
 bool ServiceClient::toastVisible() const noexcept { return toast_visible_; }
 QString ServiceClient::toastText() const { return toast_text_; }
+bool ServiceClient::toastIsError() const noexcept { return toast_is_error_; }
 bool ServiceClient::globalLoading() const noexcept {
     // After splash: full-window overlay while page catalog queries run (menu switch reload),
     // matching old AegraImage Main.qml appLoading.
@@ -308,6 +309,7 @@ void ServiceClient::dismissToast() {
     }
     toast_visible_ = false;
     toast_text_.clear();
+    toast_is_error_ = false;
     emit toastChanged();
 }
 
@@ -658,7 +660,7 @@ void ServiceClient::reset_file_models() {
     file_restore_target_token_.clear();
     file_restore_conflict_policy_ = kFileConflictPolicyFail;
     file_restore_security_ = true;
-    file_restore_ads_ = true;
+
 }
 
 void ServiceClient::set_state(const State state, QString error_code) {
@@ -765,6 +767,7 @@ void ServiceClient::seed_terminal_toast_baseline(const QVector<JobRow>& rows) {
 
 void ServiceClient::publish_terminal_toasts(const QVector<JobRow>& rows) {
     QString latest_toast;
+    bool latest_is_error = false;
     for (const auto& row : rows) {
         if (row.state != 4 && row.state != 5 && row.state != 6 && row.state != 7) {
             continue;
@@ -791,26 +794,28 @@ void ServiceClient::publish_terminal_toasts(const QVector<JobRow>& rows) {
             }
         }();
         latest_toast = state_text + QLatin1String(" (") + row.job_id + QLatin1Char(')');
+        latest_is_error = row.state != 4;
     }
     if (!latest_toast.isEmpty()) {
-        show_toast(latest_toast);
+        show_toast(latest_toast, latest_is_error);
     }
 }
 
-void ServiceClient::show_toast(const QString& text) {
+void ServiceClient::show_toast(const QString& text, const bool is_error) {
     ++toast_generation_;
     toast_text_ = text;
+    toast_is_error_ = is_error;
     toast_visible_ = true;
     emit toastChanged();
     // Single restartable timer: consecutive toasts reset the full 4s visibility window.
     toast_timer_->start();
 }
 
-void ServiceClient::showToast(const QString& text) {
+void ServiceClient::showToast(const QString& text, const bool isError) {
     if (text.trimmed().isEmpty()) {
         return;
     }
-    show_toast(text);
+    show_toast(text, isError);
 }
 
 QString ServiceClient::firstSelectableSourceId() const {

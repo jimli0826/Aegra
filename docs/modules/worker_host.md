@@ -55,7 +55,7 @@ task log 与 Service 分级日志（`logs/trace.log` 等）同树。
 | `file_restore_target` | object \| null | file_set restore 必填（F8）；其它操作为 null/省略 |
 | `target_ref` | string | Backup/Restore/Export 必填；Verify 为空；file_set restore 为空 |
 | `credential_refs` | string array | 只允许 `SecretRef` 定位符 |
-| `backup` | object | Backup 必填；含 `type`，增量还含两个父引用；file_set 仅 `type=1`（full） |
+| `backup` | object | Backup 必填；含 `type`；volume 增量含父引用；file_set 含 `selection_fingerprint`，Incremental 可含 `candidate_parent_uuid` |
 | `restore` | object | volume_set Restore 选项：`disk_restore`、`source_disk_number`、`source_volume_index`、`bring_target_online`、`preserve_disk_signature`、`auto_expand_last_partition` |
 | `trace_id` | string | 必填、非空 |
 | `deadline_utc_ms` | signed integer | 可选；`0` 表示无 deadline |
@@ -67,9 +67,8 @@ task log 与 Service 分级日志（`logs/trace.log` 等）同树。
 | `selection_id` | string | 规范 UUID |
 | `volume_identity` | string | 受信任 Volume 身份（典型为 canonical Volume GUID Path UTF-8） |
 | `relative_components` | array | 每项 `{encoding:1, bytes:[u8…]}`，UTF-16LE 原始字节 |
-| `entry_kind` | unsigned | `FileEntryKind` |
+| `entry_kind` | unsigned | `1=directory`，`2=file` |
 | `recursion` | unsigned | `1=self_only`，`2=recursive` |
-| `reparse_policy` | unsigned | 首版固定 `1`（capture_no_follow） |
 | `unreadable_policy` | unsigned | 首版固定 `1`（fail_job） |
 | `display_label` | string | 非权威 UI 标签；不得当作路径解析 |
 

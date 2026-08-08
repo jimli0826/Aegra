@@ -188,6 +188,8 @@ QVariantList SourceInventoryModel::disksTree() const {
         disk.used_bytes += volume_used;
         const QString size_text =
             format_ != nullptr ? format_->format_bytes(row.capacity_bytes) : QString{};
+        const QString free_text =
+            format_ != nullptr ? format_->format_bytes(row.free_bytes) : QString{};
         const QString label =
             !row.volume_label.isEmpty()
                 ? row.volume_label
@@ -199,6 +201,7 @@ QVariantList SourceInventoryModel::disksTree() const {
             {QStringLiteral("capacityBytes"), static_cast<qint64>(row.capacity_bytes)},
             {QStringLiteral("freeBytes"), static_cast<qint64>(row.free_bytes)},
             {QStringLiteral("size"), size_text},
+            {QStringLiteral("free"), free_text},
             {QStringLiteral("status"),
              row.health_status.isEmpty() ? QStringLiteral("Healthy") : row.health_status},
             {QStringLiteral("selectable"), row.is_selectable},

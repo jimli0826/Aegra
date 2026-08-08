@@ -48,6 +48,16 @@ CREATE TABLE IF NOT EXISTS jobs (
         CHECK (exclude_page_and_hibernation_files IS NULL
                OR exclude_page_and_hibernation_files IN (0, 1)),
     request_fingerprint TEXT NOT NULL DEFAULT '',
+    result_requested_backup_type INTEGER
+        CHECK (result_requested_backup_type IS NULL
+               OR result_requested_backup_type BETWEEN 1 AND 3),
+    result_effective_backup_type INTEGER
+        CHECK (result_effective_backup_type IS NULL
+               OR result_effective_backup_type BETWEEN 1 AND 3),
+    result_effective_parent_uuid TEXT,
+    result_incremental_downgrade_reason INTEGER
+        CHECK (result_incremental_downgrade_reason IS NULL
+               OR result_incremental_downgrade_reason BETWEEN 0 AND 9),
     FOREIGN KEY (repository_connection_id)
         REFERENCES repository_connections(connection_id) ON DELETE SET NULL
 );
@@ -91,9 +101,8 @@ CREATE TABLE IF NOT EXISTS schedule_file_selections (
     selection_id TEXT NOT NULL,
     volume_identity TEXT NOT NULL,
     relative_path_blob TEXT NOT NULL,
-    entry_kind INTEGER NOT NULL CHECK (entry_kind BETWEEN 1 AND 4),
+    entry_kind INTEGER NOT NULL CHECK (entry_kind IN (1, 2)),
     recursion INTEGER NOT NULL CHECK (recursion IN (1, 2)),
-    reparse_policy INTEGER NOT NULL CHECK (reparse_policy = 1),
     unreadable_policy INTEGER NOT NULL CHECK (unreadable_policy = 1),
     display_label TEXT NOT NULL,
     PRIMARY KEY (schedule_id, ordinal),

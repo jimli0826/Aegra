@@ -16,6 +16,8 @@ struct RecoveryPointRow final {
     QString backup_set_uuid;
     QString parent_uuid;
     std::int64_t backup_type{0};
+    /// 1 volume_set, 2 file_set (Service content_kind).
+    std::int64_t content_kind{1};
     std::int64_t chain_state{0};
     std::int64_t created_utc_ms{0};
     std::int64_t logical_size_bytes{0};
@@ -36,6 +38,7 @@ class RecoveryPointModel final : public QAbstractListModel {
         BackupSetUuidRole,
         ParentUuidRole,
         BackupTypeTextRole,
+        ContentKindRole,
         ChainCompleteRole,
         ChainStateTextRole,
         CreatedUtcMsRole,
@@ -62,7 +65,8 @@ class RecoveryPointModel final : public QAbstractListModel {
     /// Local calendar dates (YYYY-MM-DD) that have at least one recovery point.
     Q_INVOKABLE [[nodiscard]] QStringList backupDateYmds() const;
     /// Checkpoints for a local date, newest first. Each map: fileUuid, timeText, backupType,
-    /// sizeText, logicalSizeBytes, sourceCount, createdUtcMs, createdText, chainComplete.
+    /// contentKind, sizeText, logicalSizeBytes, sourceCount, createdUtcMs, createdText,
+    /// chainComplete.
     Q_INVOKABLE [[nodiscard]] QVariantList checkpointsForDate(const QString& date_ymd) const;
 
   signals:

@@ -3,10 +3,12 @@
 #include "aegra/base/cancellation.h"
 #include "aegra/base/result.h"
 #include "aegra/contracts/service_control.h"
+#include "aegra/ports/file_browser.h"
 
 #include <string_view>
 
 namespace aegra::application {
+class FileBrowseService;
 class ISourceInventoryQuery;
 }
 
@@ -41,6 +43,14 @@ class IWorkerJobService {
     [[nodiscard]] virtual base::Result<contracts::CommandAcknowledgement>
     start_restore(const contracts::StartRestoreCommand& command, std::string_view idempotency_key,
                   base::CancellationToken cancellation) = 0;
+    [[nodiscard]] virtual base::Result<contracts::FileRestorePreflight>
+    prepare_file_restore(const contracts::PrepareFileRestoreRequest& request,
+                         const ports::FileBrowseCaller& caller,
+                         base::CancellationToken cancellation) = 0;
+    [[nodiscard]] virtual base::Result<contracts::CommandAcknowledgement>
+    start_file_restore(const contracts::StartFileRestoreCommand& command,
+                       std::string_view idempotency_key,
+                       base::CancellationToken cancellation) = 0;
     [[nodiscard]] virtual base::Result<contracts::CommandAcknowledgement>
     cancel_job(const contracts::ResourceRef& job, std::string_view idempotency_key,
                base::CancellationToken cancellation) = 0;
@@ -52,7 +62,8 @@ class WorkerJobService final : public IWorkerJobService {
                      ports::IControlPlaneDatabase& control_plane,
                      ports::IRepositoryStorageFactory& storage_factory,
                      WorkerSupervisor& supervisor, ports::IClock& clock,
-                     ports::IRandomSource& random) noexcept;
+                     ports::IRandomSource& random,
+                     application::FileBrowseService* file_browse = nullptr) noexcept;
 
     [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
     start_backup(const contracts::StartBackupCommand& command, std::string_view idempotency_key,
@@ -66,6 +77,14 @@ class WorkerJobService final : public IWorkerJobService {
     [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
     start_restore(const contracts::StartRestoreCommand& command, std::string_view idempotency_key,
                   base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<contracts::FileRestorePreflight>
+    prepare_file_restore(const contracts::PrepareFileRestoreRequest& request,
+                         const ports::FileBrowseCaller& caller,
+                         base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
+    start_file_restore(const contracts::StartFileRestoreCommand& command,
+                       std::string_view idempotency_key,
+                       base::CancellationToken cancellation) override;
     [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
     cancel_job(const contracts::ResourceRef& job, std::string_view idempotency_key,
                base::CancellationToken cancellation) override;
@@ -77,6 +96,7 @@ class WorkerJobService final : public IWorkerJobService {
     WorkerSupervisor& supervisor_;
     ports::IClock& clock_;
     ports::IRandomSource& random_;
+    application::FileBrowseService* file_browse_;
 };
 
 } // namespace aegra::apps::service

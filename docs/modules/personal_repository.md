@@ -9,7 +9,8 @@
 保留策略，也不包含企业 CAS Pack、Chunk Index、Gateway、GC 或 Compaction。
 
 权威决策见 [ADR-0010](../adr/0010-personal-repository-authority-and-catalog.md)，持久化 schema 见
-[个人版 Repository V1](../format/PERSONAL_REPOSITORY_FORMAT_V1.md)。
+[个人版 Repository V2](../format/PERSONAL_REPOSITORY_FORMAT_V2.md)（Catalog Entry `schema_version=2`，
+含 `content_kind` / `file_entry_count` / `file_stream_count`）。
 
 ## 依赖与 Target
 
@@ -246,6 +247,9 @@ Tombstone，隐藏删除中的 Recovery Point，验证 Repository/UUID/链图不
 S5 已增加 `delete_plan`：descendant-first 计划、带 Storage generation 的 `members`
 （sidecar → 续卷 → 主卷）、strict revalidation、Tombstone 发布与条件/幂等成员及 Catalog 删除执行。
 Catalog Reconcile（从 Archive 结构补建 Entry）仍属后续工作。
+
+F2 已将 Catalog Entry 升至 schema 2：`content_kind`（`volume_set`|`file_set`）、文件统计字段与
+`format_version=7` 校验；`file_set` 禁止 sidecar/source_volume_ids，且 `backup_type` 必须为 Full。
 
 S4 Add 业务闭环已实现创建路径：仅缺失或空目标可初始化；Application 生成 Descriptor、通过 staging +
 create-only publish 写入 `aegra.repository`，并在持久化 Available 连接前读回验证。Import 仍只打开并验证已有

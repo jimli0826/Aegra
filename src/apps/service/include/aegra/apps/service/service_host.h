@@ -3,6 +3,7 @@
 #include "aegra/base/cancellation.h"
 #include "aegra/base/result.h"
 #include "aegra/contracts/service.h"
+#include "aegra/ports/file_browser.h"
 #include "aegra/ports/message_channel.h"
 
 #include <cstddef>
@@ -11,6 +12,7 @@
 #include <vector>
 
 namespace aegra::application {
+class FileBrowseService;
 class IConnectedRepositoryQuery;
 class IPersonalRepositoryQuery;
 class IRecoveryPointOperations;
@@ -51,6 +53,11 @@ class IServiceLog {
                        std::string_view detail) noexcept = 0;
 };
 
+/// Per-pipe-session identity for browse token binding and schedule ownership.
+struct ServiceSessionContext final {
+    ports::FileBrowseCaller caller;
+};
+
 struct ServiceRuntimeInfo final {
     std::string service_version;
     std::vector<std::string> capabilities;
@@ -60,6 +67,7 @@ struct ServiceRuntimeInfo final {
     application::IRepositoryConnectionService* repository_connections{nullptr};
     application::ISourceInventoryQuery* source_inventory{nullptr};
     application::IRecoveryPointOperations* recovery_point_operations{nullptr};
+    application::FileBrowseService* file_browse{nullptr};
     IWorkerJobService* worker_jobs{nullptr};
     ScheduleService* schedules{nullptr};
     WorkerSupervisor* worker_supervisor{nullptr};
@@ -71,14 +79,17 @@ struct ServiceRuntimeInfo final {
 [[nodiscard]] base::Result<contracts::ServiceResponse>
 dispatch_service_request(const contracts::ServiceRequest& request,
                          const ServiceRuntimeInfo& runtime,
+                         const ServiceSessionContext& session,
                          base::CancellationToken cancellation = {});
 
 [[nodiscard]] base::Result<std::string>
 handle_service_message(std::string_view encoded_request, const ServiceRuntimeInfo& runtime,
+                       const ServiceSessionContext& session,
                        base::CancellationToken cancellation = {});
 
 [[nodiscard]] base::Result<void> run_service_session(ports::IMessageChannel& channel,
                                                      const ServiceRuntimeInfo& runtime,
+                                                     const ServiceSessionContext& session,
                                                      const base::CancellationToken& cancellation,
                                                      std::size_t maximum_requests = 0);
 

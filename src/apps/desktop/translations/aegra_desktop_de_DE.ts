@@ -621,6 +621,222 @@ Server: %1</translation>
         <source>Choose Files backup →</source>
         <translation>Dateisicherung wählen →</translation>
     </message>
+    <message id="aegra.backup.wizard.files_unavailable">
+        <source>File browse is not available on this Service</source>
+        <translation>Dateibrowser ist auf diesem Service nicht verfügbar</translation>
+    </message>
+    <message id="aegra.file.browse.loading">
+        <source>Loading folders...</source>
+        <translation>Ordner werden geladen…</translation>
+    </message>
+    <message id="aegra.file.browse.empty">
+        <source>Expand a drive or folder to select files</source>
+        <translation>Laufwerk oder Ordner erweitern, um Dateien auszuwählen</translation>
+    </message>
+    <message id="aegra.file.browse.selected_label">
+        <source>Selected: %1</source>
+        <translation>Ausgewählt: %1</translation>
+    </message>
+    <message id="aegra.file.browse.selection_more">
+        <source>%1 (+%2 more)</source>
+        <translation>%1 (+%2 weitere)</translation>
+    </message>
+    <message id="aegra.file.browse.unsupported">
+        <source>Unsupported</source>
+        <translation>Nicht unterstützt</translation>
+    </message>
+    <message id="aegra.file.browse.unavailable">
+        <source>Unavailable</source>
+        <translation>Nicht verfügbar</translation>
+    </message>
+    <message id="aegra.file.browse.not_selectable">
+        <source>Not selectable</source>
+        <translation>Nicht auswählbar</translation>
+    </message>
+    <message id="aegra.error.file_browse.query_failed">
+        <source>Unable to browse local files</source>
+        <translation>Lokale Dateien können nicht durchsucht werden</translation>
+    </message>
+    <message id="aegra.error.file_recover.query_failed">
+        <source>Unable to list files in this recovery point</source>
+        <translation>Dateien in diesem Wiederherstellungspunkt können nicht aufgelistet werden</translation>
+    </message>
+    <message id="aegra.error.file_restore.preflight_failed">
+        <source>Could not verify this restore. Check the target folder and try again.</source>
+        <translation>Wiederherstellung konnte nicht geprüft werden. Zielordner prüfen und erneut versuchen.</translation>
+    </message>
+    <message id="aegra.error.file_restore.command_failed">
+        <source>Unable to start file restore</source>
+        <translation>Dateiwiederherstellung konnte nicht gestartet werden</translation>
+    </message>
+    <message id="aegra.error.file_restore.content_kind_mismatch">
+        <source>This recovery point is not a file backup</source>
+        <translation>Dieser Wiederherstellungspunkt ist keine Dateisicherung</translation>
+    </message>
+    <message id="aegra.error.file_restore.preflight_ok">
+        <source>Restore check completed</source>
+        <translation>Wiederherstellungsprüfung abgeschlossen</translation>
+    </message>
+    <message id="aegra.error.file_restore.preflight_expired">
+        <source>The restore check expired. Start restore again.</source>
+        <translation>Die Wiederherstellungsprüfung ist abgelaufen. Bitte erneut starten.</translation>
+    </message>
+    <message id="aegra.error.file_restore.preflight_consumed">
+        <source>This restore was already started. Start a new restore if needed.</source>
+        <translation>Diese Wiederherstellung wurde bereits gestartet. Bei Bedarf neu starten.</translation>
+    </message>
+    <message id="aegra.error.file_restore.selection_limit">
+        <source>Too many files selected. Narrow the selection and try again.</source>
+        <translation>Zu viele Dateien ausgewählt. Auswahl verkleinern und erneut versuchen.</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_capability_missing">
+        <source>The target folder does not support required features (for example ACL or alternate streams). Choose an NTFS folder.</source>
+        <translation>Der Zielordner unterstützt erforderliche Funktionen nicht (z. B. ACL oder ADS). Bitte einen NTFS-Ordner wählen.</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_not_directory">
+        <source>Select a folder as the restore destination.</source>
+        <translation>Wählen Sie einen Ordner als Wiederherstellungsziel.</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_reparse_escape">
+        <source>The target path is not allowed (reparse or link escape).</source>
+        <translation>Der Zielpfad ist nicht erlaubt (Reparse-/Link-Escape).</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_collision">
+        <source>A file with the same name already exists. In Options, choose Replace or Rename, then try again.</source>
+        <translation>Eine Datei gleichen Namens existiert bereits. Unter Optionen „Ersetzen“ oder „Umbenennen“ wählen und erneut versuchen.</translation>
+    </message>
+    <message id="aegra.error.file_restore.rename_exhausted">
+        <source>Could not find a free name for renamed files. Clear old copies or choose Replace.</source>
+        <translation>Kein freier Name für umbenannte Dateien. Alte Kopien entfernen oder Ersetzen wählen.</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_full">
+        <source>Not enough free space on the target volume. Free up space or choose another folder.</source>
+        <translation>Nicht genügend freier Speicher auf dem Zielvolume. Speicher freigeben oder anderen Ordner wählen.</translation>
+    </message>
+    <message id="aegra.error.file_restore.partial">
+        <source>Restore finished, but some items were skipped or failed.</source>
+        <translation>Wiederherstellung abgeschlossen, aber einige Elemente wurden übersprungen oder sind fehlgeschlagen.</translation>
+    </message>
+    <message id="aegra.error.file_restore.failed_before_write">
+        <source>Restore failed before any files were written.</source>
+        <translation>Wiederherstellung ist vor dem Schreiben von Dateien fehlgeschlagen.</translation>
+    </message>
+    <message id="aegra.error.file_restore.original_location_unsupported">
+        <source>Restoring to the original location is not supported for this item.</source>
+        <translation>Wiederherstellung am ursprünglichen Speicherort wird für dieses Element nicht unterstützt.</translation>
+    </message>
+    <message id="aegra.error.file_restore.system_directory_unsupported">
+        <source>Cannot restore into a protected system folder. Choose another destination.</source>
+        <translation>Wiederherstellung in einen geschützten Systemordner ist nicht möglich. Anderes Ziel wählen.</translation>
+    </message>
+    <message id="aegra.error.file_restore.completed">
+        <source>File restore completed</source>
+        <translation>Dateiwiederherstellung abgeschlossen</translation>
+    </message>
+    <message id="aegra.error.file_recover.credential_required">
+        <source>Enter the archive password to list or restore files.</source>
+        <translation>Geben Sie das Archivkennwort ein, um Dateien aufzulisten oder wiederherzustellen.</translation>
+    </message>
+    <message id="aegra.error.file_recover.credential_failed">
+        <source>Incorrect archive password. Check the password and try again.</source>
+        <translation>Falsches Archivkennwort. Prüfen und erneut versuchen.</translation>
+    </message>
+    <message id="aegra.error.file_recover.corrupt">
+        <source>The archive is damaged or unreadable.</source>
+        <translation>Das Archiv ist beschädigt oder nicht lesbar.</translation>
+    </message>
+    <message id="aegra.error.file_recover.catalog_only">
+        <source>Only catalog information is available. Open the archive to browse files.</source>
+        <translation>Nur Kataloginformationen verfügbar. Archiv öffnen, um Dateien zu durchsuchen.</translation>
+    </message>
+    <message id="aegra.restore.mode_files">
+        <source>Files</source>
+        <translation>Dateien</translation>
+    </message>
+    <message id="aegra.restore.file.capability_missing">
+        <source>Service does not support file restore</source>
+        <translation>Service unterstützt keine Dateiwiederherstellung</translation>
+    </message>
+    <message id="aegra.restore.file.loading_entries">
+        <source>Loading archive files...</source>
+        <translation>Archivdateien werden geladen…</translation>
+    </message>
+    <message id="aegra.restore.file.select_entries">
+        <source>Select files or folders to restore</source>
+        <translation>Dateien oder Ordner zum Wiederherstellen auswählen</translation>
+    </message>
+    <message id="aegra.restore.file.select_target">
+        <source>Select a target folder</source>
+        <translation>Zielordner auswählen</translation>
+    </message>
+    <message id="aegra.restore.file.selection_required">
+        <source>Select files to restore and a target folder</source>
+        <translation>Dateien und Zielordner zum Wiederherstellen auswählen</translation>
+    </message>
+    <message id="aegra.restore.file.started">
+        <source>File restore started</source>
+        <translation>Dateiwiederherstellung gestartet</translation>
+    </message>
+    <message id="aegra.restore.file.source_title">
+        <source>Archive files</source>
+        <translation>Archivdateien</translation>
+    </message>
+    <message id="aegra.restore.file.source_hint">
+        <source>(expand folders and check items to restore)</source>
+        <translation>(Ordner erweitern und wiederherzustellende Elemente markieren)</translation>
+    </message>
+    <message id="aegra.restore.file.empty_entries">
+        <source>No files in this recovery point</source>
+        <translation>Keine Dateien in diesem Wiederherstellungspunkt</translation>
+    </message>
+    <message id="aegra.restore.file.target_title">
+        <source>Target folder</source>
+        <translation>Zielordner</translation>
+    </message>
+    <message id="aegra.restore.file.target_hint">
+        <source>(choose one directory on this PC)</source>
+        <translation>(ein Verzeichnis auf diesem PC wählen)</translation>
+    </message>
+    <message id="aegra.restore.file.target_empty">
+        <source>Expand a drive and choose one target folder</source>
+        <translation>Laufwerk erweitern und einen Zielordner wählen</translation>
+    </message>
+    <message id="aegra.restore.file.restore_security">
+        <source>Restore security (ACL)</source>
+        <translation>Sicherheit wiederherstellen (ACL)</translation>
+    </message>
+    <message id="aegra.restore.file.restore_security_hint">
+        <source>Apply Owner, Group, DACL, and SACL from the archive. Uncheck to keep target default permissions (timestamps and attributes are still restored).</source>
+        <translation>Owner, Group, DACL und SACL aus dem Archiv anwenden. Deaktivieren, um Standardberechtigungen am Ziel zu behalten (Zeitstempel und Attribute werden weiterhin wiederhergestellt).</translation>
+    </message>
+    <message id="aegra.restore.file.restore_ads">
+        <source>Restore alternate data streams</source>
+        <translation>Alternative Datenströme wiederherstellen</translation>
+    </message>
+    <message id="aegra.restore.file.restore_ads_hint">
+        <source>Restore NTFS alternate data streams (ADS) when present in the archive.</source>
+        <translation>NTFS-ADS aus dem Archiv wiederherstellen, sofern vorhanden.</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_policy">
+        <source>If a file already exists</source>
+        <translation>Wenn die Datei bereits existiert</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_fail">
+        <source>Skip (fail on conflict)</source>
+        <translation>Überspringen (bei Konflikt fehlschlagen)</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_replace">
+        <source>Replace existing</source>
+        <translation>Vorhandene ersetzen</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_rename">
+        <source>Rename restored file</source>
+        <translation>Wiederhergestellte Datei umbenennen</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_policy_hint">
+        <source>Choose what happens when the target path already has a file with the same name.</source>
+        <translation>Verhalten, wenn am Ziel bereits eine Datei gleichen Namens liegt.</translation>
+    </message>
     <message id="aegra.backup.column.destination">
         <source>Destination</source>
         <translation>Ziel</translation>

@@ -3,6 +3,27 @@
 #include <utility>
 
 namespace aegra::adapters::sqlite::detail {
+namespace {
+
+[[nodiscard]] base::Result<ports::ScheduleRecord>
+attach_file_selections(sqlite3* const db, ports::ScheduleRecord record) {
+    if (record.content_kind != contracts::ContentKind::kFileSet) {
+        auto valid = validate_schedule_record(record);
+        return valid ? base::Result<ports::ScheduleRecord>::success(std::move(record))
+                     : base::Result<ports::ScheduleRecord>::failure(valid.error());
+    }
+    auto selections = load_schedule_file_selections(db, record.schedule_id);
+    if (!selections) {
+        return base::Result<ports::ScheduleRecord>::failure(selections.error());
+    }
+    record.file_selections = std::move(selections).value();
+    auto valid = validate_schedule_record(record);
+    return valid ? base::Result<ports::ScheduleRecord>::success(std::move(record))
+                 : base::Result<ports::ScheduleRecord>::failure(valid.error());
+}
+
+} // namespace
+
 ScheduleStore::ScheduleStore(SqliteControlPlaneState& state,
                              const bool* const unit_of_work_active) noexcept
     : state_(state), unit_of_work_active_(unit_of_work_active) {}
@@ -22,14 +43,16 @@ base::Result<void> ScheduleStore::upsert(const ports::ScheduleRecord& record,
     }
     auto statement = SqliteStatement::prepare(
         state_.db,
-        "INSERT INTO schedules(schedule_id, display_name, enabled, source_ids, "
-        "repository_connection_id, backup_type, trigger_kind, local_minute_of_day, weekday_mask, "
-        "timezone_id, next_run_utc_ms, exclude_page_and_hibernation_files, encryption_enabled, "
-        "archive_password_protected, backup_set_uuid, last_recovery_point_id, created_utc_ms, "
-        "updated_utc_ms) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+        "INSERT INTO schedules(schedule_id, display_name, enabled, content_kind, source_ids, "
+        "owner_sid, repository_connection_id, backup_type, trigger_kind, local_minute_of_day, "
+        "weekday_mask, timezone_id, next_run_utc_ms, exclude_page_and_hibernation_files, "
+        "encryption_enabled, archive_password_protected, backup_set_uuid, last_recovery_point_id, "
+        "created_utc_ms, updated_utc_ms) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(schedule_id) DO UPDATE SET "
-        "display_name=excluded.display_name, enabled=excluded.enabled, source_ids=excluded.source_ids, "
+        "display_name=excluded.display_name, enabled=excluded.enabled, "
+        "content_kind=excluded.content_kind, source_ids=excluded.source_ids, "
+        "owner_sid=excluded.owner_sid, "
         "repository_connection_id=excluded.repository_connection_id, "
         "backup_type=excluded.backup_type, trigger_kind=excluded.trigger_kind, "
         "local_minute_of_day=excluded.local_minute_of_day, weekday_mask=excluded.weekday_mask, "
@@ -53,55 +76,74 @@ base::Result<void> ScheduleStore::upsert(const ports::ScheduleRecord& record,
     if (auto bound = stmt.bind_int64(3, record.enabled ? 1 : 0); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_text(4, encode_string_list(record.source_ids)); !bound) {
+    if (auto bound = stmt.bind_int64(4, static_cast<std::int64_t>(record.content_kind)); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_text(5, record.repository_connection_id); !bound) {
+    if (auto bound = stmt.bind_text(5, encode_string_list(record.source_ids)); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_int64(6, static_cast<std::int64_t>(record.backup_type)); !bound) {
+    if (auto bound = stmt.bind_text(6, record.owner_sid); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_int64(7, static_cast<std::int64_t>(record.trigger.kind)); !bound) {
+    if (auto bound = stmt.bind_text(7, record.repository_connection_id); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_int64(8, record.trigger.local_minute_of_day); !bound) {
+    if (auto bound = stmt.bind_int64(8, static_cast<std::int64_t>(record.backup_type)); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_int64(9, record.trigger.weekday_mask); !bound) {
+    if (auto bound = stmt.bind_int64(9, static_cast<std::int64_t>(record.trigger.kind)); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_text(10, record.trigger.timezone_id); !bound) {
+    if (auto bound = stmt.bind_int64(10, record.trigger.local_minute_of_day); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_int64_nullable(11, record.next_run_utc_ms); !bound) {
+    if (auto bound = stmt.bind_int64(11, record.trigger.weekday_mask); !bound) {
+        return bound;
+    }
+    if (auto bound = stmt.bind_text(12, record.trigger.timezone_id); !bound) {
+        return bound;
+    }
+    if (auto bound = stmt.bind_int64_nullable(13, record.next_run_utc_ms); !bound) {
         return bound;
     }
     if (auto bound =
-            stmt.bind_int64(12, record.exclude_page_and_hibernation_files ? 1 : 0); !bound) {
+            stmt.bind_int64(14, record.exclude_page_and_hibernation_files ? 1 : 0); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_int64(13, record.encryption_enabled ? 1 : 0); !bound) {
+    if (auto bound = stmt.bind_int64(15, record.encryption_enabled ? 1 : 0); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_text(14, record.archive_password_protected); !bound) {
+    if (auto bound = stmt.bind_text(16, record.archive_password_protected); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_text(15, record.backup_set_uuid); !bound) {
+    if (auto bound = stmt.bind_text(17, record.backup_set_uuid); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_text_nullable(16, record.last_recovery_point_id); !bound) {
+    if (auto bound = stmt.bind_text_nullable(18, record.last_recovery_point_id); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_int64(17, static_cast<std::int64_t>(record.created_utc_ms)); !bound) {
+    if (auto bound = stmt.bind_int64(19, static_cast<std::int64_t>(record.created_utc_ms)); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_int64(18, static_cast<std::int64_t>(record.updated_utc_ms)); !bound) {
+    if (auto bound = stmt.bind_int64(20, static_cast<std::int64_t>(record.updated_utc_ms)); !bound) {
         return bound;
     }
     auto stepped = stmt.step();
     if (!stepped) {
         return base::Result<void>::failure(stepped.error());
+    }
+    if (record.content_kind == contracts::ContentKind::kFileSet) {
+        auto replaced =
+            replace_schedule_file_selections(state_.db, record.schedule_id, record.file_selections);
+        if (!replaced) {
+            return replaced;
+        }
+    } else {
+        auto cleared =
+            replace_schedule_file_selections(state_.db, record.schedule_id, {});
+        if (!cleared) {
+            return cleared;
+        }
     }
     return base::Result<void>::success();
 }
@@ -133,7 +175,11 @@ ScheduleStore::get(const std::string_view schedule_id, const base::CancellationT
     if (!record) {
         return base::Result<std::optional<ports::ScheduleRecord>>::failure(record.error());
     }
-    return base::Result<std::optional<ports::ScheduleRecord>>::success(std::move(record.value()));
+    auto attached = attach_file_selections(state_.db, std::move(record).value());
+    if (!attached) {
+        return base::Result<std::optional<ports::ScheduleRecord>>::failure(attached.error());
+    }
+    return base::Result<std::optional<ports::ScheduleRecord>>::success(std::move(attached).value());
 }
 
 base::Result<contracts::SchedulePage>
@@ -155,11 +201,10 @@ ScheduleStore::list(const contracts::ScheduleListRequest& request,
     if (!token) {
         return base::Result<contracts::SchedulePage>::failure(token.error());
     }
-    // Column order must match read_schedule() / kSelectScheduleSql.
     std::string sql =
-        "SELECT schedule_id, display_name, enabled, source_ids, repository_connection_id, "
-        "backup_type, trigger_kind, local_minute_of_day, weekday_mask, timezone_id, "
-        "next_run_utc_ms, exclude_page_and_hibernation_files, encryption_enabled, "
+        "SELECT schedule_id, display_name, enabled, content_kind, source_ids, owner_sid, "
+        "repository_connection_id, backup_type, trigger_kind, local_minute_of_day, weekday_mask, "
+        "timezone_id, next_run_utc_ms, exclude_page_and_hibernation_files, encryption_enabled, "
         "archive_password_protected, backup_set_uuid, last_recovery_point_id, created_utc_ms, "
         "updated_utc_ms FROM schedules WHERE 1=1";
     if (request.enabled) {
@@ -203,14 +248,18 @@ ScheduleStore::list(const contracts::ScheduleListRequest& request,
         if (!record) {
             return base::Result<contracts::SchedulePage>::failure(record.error());
         }
+        auto attached = attach_file_selections(state_.db, std::move(record).value());
+        if (!attached) {
+            return base::Result<contracts::SchedulePage>::failure(attached.error());
+        }
         if (page.items.size() >= request.page.maximum_results) {
             page.continuation_token =
                 encode_page_token(kPageScopeSchedules, filter, last_full->created_utc_ms,
                                   last_full->schedule_id);
             break;
         }
-        last_full = record.value();
-        page.items.push_back(to_schedule_summary(record.value()));
+        last_full = attached.value();
+        page.items.push_back(to_schedule_summary(attached.value()));
     }
     return base::Result<contracts::SchedulePage>::success(std::move(page));
 }
@@ -243,4 +292,3 @@ base::Result<void> ScheduleStore::remove(const std::string_view schedule_id,
 }
 
 } // namespace aegra::adapters::sqlite::detail
-

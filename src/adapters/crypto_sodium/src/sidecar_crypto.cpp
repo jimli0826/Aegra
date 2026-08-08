@@ -11,7 +11,7 @@
 namespace aegra::adapters::crypto_sodium {
 namespace {
 
-inline constexpr std::string_view kSidecarContext = "MYBACKUP-V6-SIDECAR";
+inline constexpr std::string_view kSidecarContext = "MYBACKUP-V7-SIDECAR";
 
 class SensitiveKey final {
   public:

@@ -17,16 +17,18 @@ constexpr std::array<std::string_view, 9> kDescriptorKeys = {
     "schema_version",  "kind",           "repository_uuid",
     "created_utc_ms",  "archive_prefix", "catalog_prefix",
     "deletion_prefix", "staging_prefix", "layout_version"};
-constexpr std::array<std::string_view, 18> kCatalogKeys = {
+constexpr std::array<std::string_view, 21> kCatalogKeys = {
     "schema_version",     "kind",
     "repository_uuid",    "file_uuid",
     "backup_set_uuid",    "parent_uuid",
-    "backup_type",        "archive_main_key",
-    "split_part_count",   "has_sidecar",
-    "format_version",     "created_utc_ms",
-    "logical_size_bytes", "stored_size_bytes",
-    "source_count",       "source_volume_ids",
-    "structural_state",   "catalog_generation",
+    "backup_type",        "content_kind",
+    "archive_main_key",   "split_part_count",
+    "has_sidecar",        "format_version",
+    "created_utc_ms",     "logical_size_bytes",
+    "stored_size_bytes",  "source_count",
+    "source_volume_ids",  "file_entry_count",
+    "file_stream_count",  "structural_state",
+    "catalog_generation",
 };
 
 [[nodiscard]] base::Result<std::optional<std::string>> parse_parent_uuid(const Json& value) {
@@ -87,9 +89,11 @@ constexpr std::array<std::string_view, 18> kCatalogKeys = {
     auto logical = detail::get_unsigned<std::uint64_t>(root, "logical_size_bytes");
     auto stored = detail::get_unsigned<std::uint64_t>(root, "stored_size_bytes");
     auto source_count = detail::get_unsigned<std::uint32_t>(root, "source_count");
+    auto file_entry_count = detail::get_unsigned<std::uint64_t>(root, "file_entry_count");
+    auto file_stream_count = detail::get_unsigned<std::uint64_t>(root, "file_stream_count");
     auto generation = detail::get_unsigned<std::uint64_t>(root, "catalog_generation");
     if (!schema || !part_count || !format_version || !created || !logical || !stored ||
-        !source_count || !generation) {
+        !source_count || !file_entry_count || !file_stream_count || !generation) {
         return base::Result<CatalogEntry>::failure(
             detail::corrupt("catalog entry unsigned field is invalid"));
     }
@@ -102,6 +106,7 @@ constexpr std::array<std::string_view, 18> kCatalogKeys = {
         result.backup_set_uuid = root.at("backup_set_uuid").get<std::string>();
         result.parent_uuid = std::move(parent).value();
         result.backup_type = type.value();
+        result.content_kind = root.at("content_kind").get<std::string>();
         result.archive_main_key = root.at("archive_main_key").get<std::string>();
         result.split_part_count = part_count.value();
         result.has_sidecar = root.at("has_sidecar").get<bool>();
@@ -111,6 +116,8 @@ constexpr std::array<std::string_view, 18> kCatalogKeys = {
         result.stored_size_bytes = stored.value();
         result.source_count = source_count.value();
         result.source_volume_ids = root.at("source_volume_ids").get<std::vector<std::string>>();
+        result.file_entry_count = file_entry_count.value();
+        result.file_stream_count = file_stream_count.value();
         result.structural_state = root.at("structural_state").get<std::string>();
         result.catalog_generation = generation.value();
         return base::Result<CatalogEntry>::success(std::move(result));
@@ -170,6 +177,7 @@ base::Result<std::string> encode_catalog_entry_json(const CatalogEntry& entry) {
         {"backup_set_uuid", entry.backup_set_uuid},
         {"parent_uuid", entry.parent_uuid ? Json(*entry.parent_uuid) : Json(nullptr)},
         {"backup_type", detail::backup_type_name(entry.backup_type)},
+        {"content_kind", entry.content_kind},
         {"archive_main_key", entry.archive_main_key},
         {"split_part_count", entry.split_part_count},
         {"has_sidecar", entry.has_sidecar},
@@ -179,6 +187,8 @@ base::Result<std::string> encode_catalog_entry_json(const CatalogEntry& entry) {
         {"stored_size_bytes", entry.stored_size_bytes},
         {"source_count", entry.source_count},
         {"source_volume_ids", entry.source_volume_ids},
+        {"file_entry_count", entry.file_entry_count},
+        {"file_stream_count", entry.file_stream_count},
         {"structural_state", entry.structural_state},
         {"catalog_generation", entry.catalog_generation},
     };

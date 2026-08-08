@@ -2,6 +2,7 @@
 
 #include "aegra/base/cancellation.h"
 #include "aegra/base/result.h"
+#include "aegra/contracts/file_set.h"
 #include "aegra/contracts/job.h"
 #include "aegra/contracts/service_control.h"
 
@@ -16,7 +17,9 @@ namespace aegra::ports {
 
 // Personal-edition control-plane schema version for durable local SQLite.
 // Not Recovery Point / Archive / Chunk Index authority.
-inline constexpr std::uint32_t kControlPlaneSchemaVersion = 10;
+// v11: content_kind on jobs/schedules + schedule_file_selections (file_set).
+// v12: restore_preflight_entry_ids for file_set selective restore preflight.
+inline constexpr std::uint32_t kControlPlaneSchemaVersion = 12;
 
 // ---- Durable records (control-plane only; no plaintext secrets, no RP authority) ----
 
@@ -37,9 +40,12 @@ struct JobRecord final {
     std::string trace_id;
     contracts::JobOperation operation{contracts::JobOperation::kBackup};
     contracts::ServiceJobState state{contracts::ServiceJobState::kQueued};
+    /// volume_set or file_set; required for backup/restore/verify jobs.
+    contracts::ContentKind content_kind{contracts::ContentKind::kVolumeSet};
     std::uint64_t created_utc_ms{0};
     std::optional<std::uint64_t> started_utc_ms;
     std::optional<std::uint64_t> completed_utc_ms;
+    /// volume_set: inventory source ids. file_set: opaque selection ids (never paths).
     std::vector<std::string> source_ids;
     std::optional<std::string> repository_connection_id;
     std::optional<std::string> target_source_id;
@@ -63,7 +69,13 @@ struct ScheduleRecord final {
     std::string schedule_id;
     std::string display_name;
     bool enabled{false};
+    contracts::ContentKind content_kind{contracts::ContentKind::kVolumeSet};
+    /// volume_set only; empty for file_set.
     std::vector<std::string> source_ids;
+    /// file_set only; empty for volume_set. Durable FileSourceRef (selection_id is UUID).
+    std::vector<contracts::FileSourceRef> file_selections;
+    /// Owner caller SID at create time. Empty only when not captured (legacy reject on open).
+    std::string owner_sid;
     std::string repository_connection_id;
     contracts::BackupType backup_type{contracts::BackupType::kFull};
     contracts::ScheduleTrigger trigger;
@@ -114,6 +126,8 @@ struct RestorePreflightRecord final {
     std::uint32_t chain_depth{0};
     std::uint64_t created_utc_ms{0};
     std::uint64_t expires_utc_ms{0};
+    /// file_set only: selected entry IDs (decimal u64 text). Empty for volume restore.
+    std::vector<std::string> entry_ids;
 };
 
 // ---- Job state machine (shared pure rules) ----

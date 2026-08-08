@@ -26,6 +26,12 @@ map_chain_state(const personal_repository::ChainState state) {
                : contracts::RecoveryPointChainState::kIncomplete;
 }
 
+[[nodiscard]] contracts::ContentKind map_content_kind(const std::string& kind) noexcept {
+    return kind == personal_repository::kCatalogContentKindFileSet
+               ? contracts::ContentKind::kFileSet
+               : contracts::ContentKind::kVolumeSet;
+}
+
 [[nodiscard]] contracts::RecoveryPointSummary
 map_recovery_point(const personal_repository::CatalogRecoveryPoint& point) {
     const auto& entry = point.entry;
@@ -34,6 +40,7 @@ map_recovery_point(const personal_repository::CatalogRecoveryPoint& point) {
         .backup_set_uuid = entry.backup_set_uuid,
         .parent_uuid = entry.parent_uuid,
         .backup_type = map_backup_type(entry.backup_type),
+        .content_kind = map_content_kind(entry.content_kind),
         .chain_state = map_chain_state(point.chain_state),
         .created_utc_ms = entry.created_utc_ms,
         .logical_size_bytes = entry.logical_size_bytes,

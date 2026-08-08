@@ -3,9 +3,14 @@
 #include "aegra/base/cancellation.h"
 #include "aegra/base/result.h"
 #include "aegra/contracts/service_control.h"
-#include "aegra/ports/control_plane.h"
 #include "aegra/ports/clock.h"
+#include "aegra/ports/control_plane.h"
+#include "aegra/ports/file_browser.h"
 #include "aegra/ports/random.h"
+
+namespace aegra::application {
+class FileBrowseService;
+}
 
 namespace aegra::apps::service {
 
@@ -13,7 +18,8 @@ namespace aegra::apps::service {
 class ScheduleService final {
   public:
     ScheduleService(ports::IControlPlaneDatabase& control_plane, ports::IClock& clock,
-                    ports::IRandomSource& random) noexcept;
+                    ports::IRandomSource& random,
+                    application::FileBrowseService* file_browse = nullptr) noexcept;
 
     [[nodiscard]] base::Result<contracts::SchedulePage>
     list_schedules(const contracts::ScheduleListRequest& request,
@@ -21,7 +27,8 @@ class ScheduleService final {
 
     [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
     upsert_schedule(const contracts::UpsertScheduleCommand& command,
-                    std::string_view idempotency_key, base::CancellationToken cancellation);
+                    std::string_view idempotency_key, const ports::FileBrowseCaller& caller,
+                    base::CancellationToken cancellation);
 
     [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
     delete_schedule(const contracts::ResourceRef& reference, std::string_view idempotency_key,
@@ -31,6 +38,7 @@ class ScheduleService final {
     ports::IControlPlaneDatabase& control_plane_;
     ports::IClock& clock_;
     ports::IRandomSource& random_;
+    application::FileBrowseService* file_browse_;
 };
 
 } // namespace aegra::apps::service

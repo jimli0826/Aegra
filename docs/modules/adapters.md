@@ -28,6 +28,13 @@ staging key。发布支持 create-only rename 与 generation 条件替换，删�
 
 个人版 Archive Adapter 组合 `format`、`IBackupSession`、`IRecoveryPointReader`、libsodium 和 Zstandard。当前全量数据面支持一个 Archive 包含多个 volume，并可在完整 chunk 边界透明分卷；每个 chunk 通过 `source_index` 归属一个 Manifest Volume，Sidecar 为每个 Volume 保存独立块表。写入期间所有分卷与 Sidecar 使用 partial 路径，全部 Volume 完整写入且 Footer 和加密 Sidecar 均写完后，先发布 Sidecar/续卷，最后发布首卷；任一 Volume 失败时 Abort 和析构清理本次创建的 partial 文件。Reader 在解析 CBOR 前必须完成 Header/Envelope 范围校验和 AEAD 认证，随后发现并验证连续分卷和每个 Volume 的完整覆盖。普通恢复不依赖 `.bhx`；增量比较通过显式 API 加载并认证 Sidecar。
 
+V7 `file_set` 由 `PersonalFileArchiveSession`（`IFileBackupSession`）与 `PersonalFileArchiveReader`
+（`IFileRecoveryPointReader`）实现：entry 先写入 index spool，finalize 时写出 leaf index page 与 Footer；
+Index page 使用独立 HKDF info `MYBACKUP-V7-FILE-INDEX-PAGE`。当前 Writer/Reader 支持单 leaf root
+（entry 数 ≤ leaf 页上限）；多 leaf B+tree 内部页与跨分卷 Index 在后续工作包完成。
+Reader 装载 Index 后校验父图（entry_id 唯一、parent 存在且为 directory、无环、深度 ≤ 64）；
+失败返回 `format.corrupt_index`（C07），避免损坏 Archive 在 Restore 父链遍历中永久循环。
+
 增量 Session 接受一或多个 Volume：创建时验证显式父 Archive 及父 Sidecar，要求父层与本次 Manifest 的有序 `volume_index` / `volume_id` / `total_size` 及 Sidecar 每卷块记录数一致，继承备份集 UUID，并把各 Volume 的完整源转换为连续变化区间组成的稀疏层；新 Sidecar 仍为每个 Volume 保存完整状态。`PersonalArchiveReader` 可以 inspect 稀疏层，`PersonalArchiveChainReader` 接受显式 base-first 层列表、校验多 Volume 几何与链关系，并按 `source_index` 叠层，对通用 Restore Pipeline 提供连续覆盖视图。多 Volume **同时写多个独立目标**的显式映射尚未完成：Restore Pipeline 在未提供映射时对 `source_index != 0` 的 chunk 拒绝。链恢复不读取 Sidecar；链发现和逐层凭据选择属于 Application，不由 Adapter 扫描目录猜测。
 
 SMB、S3 和 Azure Storage Adapter 还必须实现个人版 Repository 所需的细粒度对象 Port。Adapter
@@ -37,7 +44,38 @@ SMB、S3 和 Azure Storage Adapter 还必须实现个人版 Repository 所需的
 
 Archive Reader 分别限制 metadata、chunk stored payload 和展开后的 chunk logical size。ZERO run、压缩块和其它稀疏表示在分配恢复缓冲区前都必须通过 logical size 上限检查。
 
-密码 Adapter 使用 Argon2id v1.3 派生 master key、HKDF-SHA256 分离 metadata、Chunk Payload 和 Sidecar key，并使用 XChaCha20-Poly1305 detached tag；内容散列使用 SHA-256。每个 Chunk 使用独立随机 nonce，Header 和 BlockEntry 作为 AAD，Reader 认证完整 ciphertext 后才解压。KDF 参数、salt 和 nonce 都持久化在对应格式字段中；读取前先执行产品上下限检查。压缩 Adapter 要求调用者提供期望输出大小和硬上限。
+密码 Adapter 使用 Argon2id v1.3 派生 master key、HKDF-SHA256 分离 metadata、Chunk Payload、File Index
+page 和 Sidecar key，并使用 XChaCha20-Poly1305 detached tag；内容散列使用 SHA-256。每个 Chunk 使用独立
+随机 nonce，Header 和 BlockEntry 作为 AAD，Reader 认证完整 ciphertext 后才解压。KDF 参数、salt 和 nonce
+都持久化在对应格式字段中；读取前先执行产品上下限检查。压缩 Adapter 要求调用者提供期望输出大小和硬上限。
+
+## Windows Filesystem Adapter（F4）
+
+Target：`aegra_adapter_windows_filesystem` / `Aegra::AdapterWindowsFilesystem`。
+
+依赖：`Aegra::Format`（platform_metadata envelope 编解码）、`Advapi32`（security descriptor I/O）。
+
+- `WindowsFileSnapshotView`：接收 composition root 注入的 snapshot root 映射（不创建 VSS）；分页枚举
+  selection、no-follow 打开、主数据流读取；拒绝非 NTFS/ReFS 与 EFS。打开时启用
+  SeBackup/SeRestore/SeSecurity；每个 entry 将 self-relative SECURITY_DESCRIPTOR 写入
+  `platform_metadata`（V7 tag 1），SACL 不可读则 `file_source.security_descriptor_unreadable`。
+  递归 `FindFirstFileExW` / `FindNextFileW` 失败（访问拒绝、I/O、路径异常）按固定
+  `unreadable_policy=fail_job` 返回 `file_source.unreadable`，不得当作空目录；Pipeline 失败
+  触发 Archive Abort，避免生成不完整且可见的 Recovery Point。
+- `WindowsFileTreeSink`：绑定目标根句柄；同目录 `.aegra-partial` staging、冲突策略
+  fail/replace/rename、目录 metadata；文件/目录 metadata 应用时写回 Owner/Group/DACL/SACL
+  （`supports_security_descriptor=true`）。F8 Worker restore 与 Service Prepare 空间/能力探测
+  均经此 Sink。
+  - `kFail`：目标已存在 → `file_restore.target_collision`（不覆盖）。
+  - `kReplace`：清除目标只读后 `MOVEFILE_REPLACE_EXISTING`，失败则 Delete+rename。
+  - `kRename`：目标已存在时发布为 `name (N).ext`（N=1..9999），耗尽 →
+    `file_restore.rename_exhausted`。
+  - **能力声明（本期）**：`capabilities()` 对外宣称 `supports_reparse` /
+    `supports_hard_link` / `supports_sparse` / `supports_ads` 为 true（与 Port 形状一致，
+    供 preflight 与后续工作包接线）。**本期不实现**完整恢复语义：reparse buffer 应用、
+    hard-link 组编排、sparse allocated ranges 精确打洞、ADS 端到端产品验收均不在本期内；
+    现有 API 仅为占位或局部骨架，不得当作已交付能力。完整实现需单独工作包。
+- `WindowsFileSourceBrowser`：Service 浏览用 opaque node token；不向调用方返回路径。
 
 ## 通用规则
 

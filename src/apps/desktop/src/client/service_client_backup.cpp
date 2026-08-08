@@ -25,10 +25,22 @@ constexpr qsizetype kMaximumConnections = 1'000;
             continue;
         }
         connection_id = map.value(QStringLiteral("connectionId")).toString();
+        // volume_set: JobSummary.source_ids are volume identity codes.
         for (const auto& source : map.value(QStringLiteral("sourceIds")).toList()) {
             const auto source_id = source.toString();
             if (!source_id.isEmpty()) {
                 source_ids.push_back(source_id);
+            }
+        }
+        // file_set: schedule.source_ids is empty; Service puts selection_id on the job's
+        // source_ids field so Desktop can correlate schedule rows to job status.
+        if (source_ids.isEmpty()) {
+            for (const auto& summary : map.value(QStringLiteral("selectionSummaries")).toList()) {
+                const auto selection_id =
+                    summary.toMap().value(QStringLiteral("selectionId")).toString();
+                if (!selection_id.isEmpty()) {
+                    source_ids.push_back(selection_id);
+                }
             }
         }
         return;

@@ -621,6 +621,222 @@ Server: %1</source>
         <source>Choose Files backup →</source>
         <translation>选择 Files 备份 →</translation>
     </message>
+    <message id="aegra.backup.wizard.files_unavailable">
+        <source>File browse is not available on this Service</source>
+        <translation>当前 Service 不支持文件浏览</translation>
+    </message>
+    <message id="aegra.file.browse.loading">
+        <source>Loading folders...</source>
+        <translation>正在加载文件夹…</translation>
+    </message>
+    <message id="aegra.file.browse.empty">
+        <source>Expand a drive or folder to select files</source>
+        <translation>展开驱动器或文件夹以选择文件</translation>
+    </message>
+    <message id="aegra.file.browse.selected_label">
+        <source>Selected: %1</source>
+        <translation>已选：%1</translation>
+    </message>
+    <message id="aegra.file.browse.selection_more">
+        <source>%1 (+%2 more)</source>
+        <translation>%1（另有 %2 项）</translation>
+    </message>
+    <message id="aegra.file.browse.unsupported">
+        <source>Unsupported</source>
+        <translation>不支持</translation>
+    </message>
+    <message id="aegra.file.browse.unavailable">
+        <source>Unavailable</source>
+        <translation>不可用</translation>
+    </message>
+    <message id="aegra.file.browse.not_selectable">
+        <source>Not selectable</source>
+        <translation>不可选择</translation>
+    </message>
+    <message id="aegra.error.file_browse.query_failed">
+        <source>Unable to browse local files</source>
+        <translation>无法浏览本地文件</translation>
+    </message>
+    <message id="aegra.error.file_recover.query_failed">
+        <source>Unable to list files in this recovery point</source>
+        <translation>无法列出此恢复点中的文件</translation>
+    </message>
+    <message id="aegra.error.file_restore.preflight_failed">
+        <source>Could not verify this restore. Check the target folder and try again.</source>
+        <translation>无法完成恢复预检。请检查目标文件夹后重试。</translation>
+    </message>
+    <message id="aegra.error.file_restore.command_failed">
+        <source>Unable to start file restore</source>
+        <translation>无法启动文件恢复</translation>
+    </message>
+    <message id="aegra.error.file_restore.content_kind_mismatch">
+        <source>This recovery point is not a file backup</source>
+        <translation>此恢复点不是文件备份</translation>
+    </message>
+    <message id="aegra.error.file_restore.preflight_ok">
+        <source>Restore check completed</source>
+        <translation>恢复预检已完成</translation>
+    </message>
+    <message id="aegra.error.file_restore.preflight_expired">
+        <source>The restore check expired. Start restore again.</source>
+        <translation>恢复预检已过期，请重新开始恢复。</translation>
+    </message>
+    <message id="aegra.error.file_restore.preflight_consumed">
+        <source>This restore was already started. Start a new restore if needed.</source>
+        <translation>此恢复已启动过。如需请重新开始恢复。</translation>
+    </message>
+    <message id="aegra.error.file_restore.selection_limit">
+        <source>Too many files selected. Narrow the selection and try again.</source>
+        <translation>选择的文件过多，请缩小选择范围后重试。</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_capability_missing">
+        <source>The target folder does not support required features (for example ACL or alternate streams). Choose an NTFS folder.</source>
+        <translation>目标文件夹不支持所需功能（例如 ACL 或备用数据流）。请选择 NTFS 文件夹。</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_not_directory">
+        <source>Select a folder as the restore destination.</source>
+        <translation>请选择一个文件夹作为恢复目标。</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_reparse_escape">
+        <source>The target path is not allowed (reparse or link escape).</source>
+        <translation>目标路径不允许（重解析点或链接逃逸）。</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_collision">
+        <source>A file with the same name already exists. In Options, choose Replace or Rename, then try again.</source>
+        <translation>目标已有同名文件。请在选项中选择“替换”或“重命名”后重试。</translation>
+    </message>
+    <message id="aegra.error.file_restore.rename_exhausted">
+        <source>Could not find a free name for renamed files. Clear old copies or choose Replace.</source>
+        <translation>无法为重命名文件找到可用名称。请清理旧副本或选择替换。</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_full">
+        <source>Not enough free space on the target volume. Free up space or choose another folder.</source>
+        <translation>目标磁盘空间不足。请释放空间或选择其他文件夹。</translation>
+    </message>
+    <message id="aegra.error.file_restore.partial">
+        <source>Restore finished, but some items were skipped or failed.</source>
+        <translation>恢复已完成，但部分项目被跳过或失败。</translation>
+    </message>
+    <message id="aegra.error.file_restore.failed_before_write">
+        <source>Restore failed before any files were written.</source>
+        <translation>在写入任何文件之前恢复已失败。</translation>
+    </message>
+    <message id="aegra.error.file_restore.original_location_unsupported">
+        <source>Restoring to the original location is not supported for this item.</source>
+        <translation>此项目不支持恢复到原始位置。</translation>
+    </message>
+    <message id="aegra.error.file_restore.system_directory_unsupported">
+        <source>Cannot restore into a protected system folder. Choose another destination.</source>
+        <translation>无法恢复到受保护的系统文件夹。请选择其他目标。</translation>
+    </message>
+    <message id="aegra.error.file_restore.completed">
+        <source>File restore completed</source>
+        <translation>文件恢复已完成</translation>
+    </message>
+    <message id="aegra.error.file_recover.credential_required">
+        <source>Enter the archive password to list or restore files.</source>
+        <translation>请输入归档密码以列出或恢复文件。</translation>
+    </message>
+    <message id="aegra.error.file_recover.credential_failed">
+        <source>Incorrect archive password. Check the password and try again.</source>
+        <translation>归档密码不正确，请核对后重试。</translation>
+    </message>
+    <message id="aegra.error.file_recover.corrupt">
+        <source>The archive is damaged or unreadable.</source>
+        <translation>归档已损坏或无法读取。</translation>
+    </message>
+    <message id="aegra.error.file_recover.catalog_only">
+        <source>Only catalog information is available. Open the archive to browse files.</source>
+        <translation>当前仅有目录信息。请打开归档以浏览文件。</translation>
+    </message>
+    <message id="aegra.restore.mode_files">
+        <source>Files</source>
+        <translation>文件</translation>
+    </message>
+    <message id="aegra.restore.file.capability_missing">
+        <source>Service does not support file restore</source>
+        <translation>Service 不支持文件恢复</translation>
+    </message>
+    <message id="aegra.restore.file.loading_entries">
+        <source>Loading archive files...</source>
+        <translation>正在加载归档文件…</translation>
+    </message>
+    <message id="aegra.restore.file.select_entries">
+        <source>Select files or folders to restore</source>
+        <translation>请选择要恢复的文件或文件夹</translation>
+    </message>
+    <message id="aegra.restore.file.select_target">
+        <source>Select a target folder</source>
+        <translation>请选择目标文件夹</translation>
+    </message>
+    <message id="aegra.restore.file.selection_required">
+        <source>Select files to restore and a target folder</source>
+        <translation>请选择要恢复的文件和目标文件夹</translation>
+    </message>
+    <message id="aegra.restore.file.started">
+        <source>File restore started</source>
+        <translation>文件恢复已启动</translation>
+    </message>
+    <message id="aegra.restore.file.source_title">
+        <source>Archive files</source>
+        <translation>归档文件</translation>
+    </message>
+    <message id="aegra.restore.file.source_hint">
+        <source>(expand folders and check items to restore)</source>
+        <translation>（展开文件夹并勾选要恢复的项）</translation>
+    </message>
+    <message id="aegra.restore.file.empty_entries">
+        <source>No files in this recovery point</source>
+        <translation>此恢复点中没有文件</translation>
+    </message>
+    <message id="aegra.restore.file.target_title">
+        <source>Target folder</source>
+        <translation>目标文件夹</translation>
+    </message>
+    <message id="aegra.restore.file.target_hint">
+        <source>(choose one directory on this PC)</source>
+        <translation>（在此电脑上选择一个目录）</translation>
+    </message>
+    <message id="aegra.restore.file.target_empty">
+        <source>Expand a drive and choose one target folder</source>
+        <translation>展开驱动器并选择一个目标文件夹</translation>
+    </message>
+    <message id="aegra.restore.file.restore_security">
+        <source>Restore security (ACL)</source>
+        <translation>恢复安全设置（ACL）</translation>
+    </message>
+    <message id="aegra.restore.file.restore_security_hint">
+        <source>Apply Owner, Group, DACL, and SACL from the archive. Uncheck to keep target default permissions (timestamps and attributes are still restored).</source>
+        <translation>从归档应用所有者、组、DACL 与 SACL。取消勾选则保留目标默认权限（仍会恢复时间戳与属性）。</translation>
+    </message>
+    <message id="aegra.restore.file.restore_ads">
+        <source>Restore alternate data streams</source>
+        <translation>恢复备用数据流（ADS）</translation>
+    </message>
+    <message id="aegra.restore.file.restore_ads_hint">
+        <source>Restore NTFS alternate data streams (ADS) when present in the archive.</source>
+        <translation>当归档中存在时，恢复 NTFS 备用数据流（ADS）。</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_policy">
+        <source>If a file already exists</source>
+        <translation>若文件已存在</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_fail">
+        <source>Skip (fail on conflict)</source>
+        <translation>跳过（冲突时失败）</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_replace">
+        <source>Replace existing</source>
+        <translation>替换已有文件</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_rename">
+        <source>Rename restored file</source>
+        <translation>重命名恢复的文件</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_policy_hint">
+        <source>Choose what happens when the target path already has a file with the same name.</source>
+        <translation>当目标路径已有同名文件时的处理方式。</translation>
+    </message>
     <message id="aegra.backup.column.destination">
         <source>Destination</source>
         <translation>目标</translation>

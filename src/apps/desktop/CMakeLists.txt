@@ -18,12 +18,18 @@ set(AEGRA_DESKTOP_SOURCES
     src/client/service_request_coordinator.cpp
     src/client/service_request_coordinator.h
     src/client/service_client_backup.cpp
+    src/client/service_client_file.cpp
     src/client/service_client_mount.cpp
     src/client/service_client_repository.cpp
     src/client/service_client_restore.cpp
     src/client/service_client_schedule.cpp
+    src/client/service_protocol_file.cpp
     src/client/models/job_model.cpp
     src/client/models/job_model.h
+    src/client/models/file_browse_model.cpp
+    src/client/models/file_browse_model.h
+    src/client/models/file_recover_model.cpp
+    src/client/models/file_recover_model.h
     src/client/models/recovery_point_model.cpp
     src/client/models/recovery_point_model.h
     src/client/models/source_inventory_model.cpp

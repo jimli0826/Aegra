@@ -114,22 +114,27 @@ contracts::TaskResult failed_result(const contracts::JobRequest& job,
                                     const base::ErrorCode code) {
     const auto outcome = code == base::ErrorCode::kCancelled ? contracts::TaskOutcome::kCancelled
                                                              : contracts::TaskOutcome::kFailed;
-    return {contracts::kTaskResultSchemaVersion, job.job_id, job.trace_id, outcome, code, 0, 0, 0,
-            message_code_for(code), {}};
+    contracts::TaskResult result;
+    result.job_id = job.job_id;
+    result.trace_id = job.trace_id;
+    result.outcome = outcome;
+    result.error_code = code;
+    result.message_code = message_code_for(code);
+    return result;
 }
 
 contracts::TaskResult completed_result(const contracts::JobRequest& job,
                                        const pipeline::RestoreSummary& summary) {
-    return {contracts::kTaskResultSchemaVersion,
-            job.job_id,
-            job.trace_id,
-            contracts::TaskOutcome::kSucceeded,
-            base::ErrorCode::kNone,
-            summary.restored_bytes,
-            summary.restored_bytes,
-            summary.chunk_count,
-            "restore.completed",
-            {}};
+    contracts::TaskResult result;
+    result.job_id = job.job_id;
+    result.trace_id = job.trace_id;
+    result.outcome = contracts::TaskOutcome::kSucceeded;
+    result.error_code = base::ErrorCode::kNone;
+    result.logical_bytes = summary.restored_bytes;
+    result.stored_bytes = summary.restored_bytes;
+    result.chunk_count = summary.chunk_count;
+    result.message_code = "restore.completed";
+    return result;
 }
 
 base::Result<contracts::TaskResult> validated_result(contracts::TaskResult result) {
@@ -142,8 +147,9 @@ base::Result<contracts::TaskResult> validated_result(contracts::TaskResult resul
 
 void publish_preparing(const contracts::JobRequest& job, ports::IProgressSink* progress) {
     if (progress != nullptr) {
-        progress->publish({contracts::kTaskProgressSchemaVersion, job.job_id, job.trace_id,
-                           contracts::TaskPhase::kPreparing, 0, 0, 0, "restore.preparing"});
+        progress->publish(contracts::make_byte_progress(job.job_id, job.trace_id,
+                                                        contracts::TaskPhase::kPreparing, 0, 0, 0,
+                                                        "restore.preparing"));
     }
 }
 

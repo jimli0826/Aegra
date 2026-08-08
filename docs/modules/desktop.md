@@ -60,21 +60,27 @@ src/apps/desktop/
 - Settings 页面（D8）落地前，标题栏提供最小语言切换入口。
 - 构建时用 `lrelease` 从 `translations/*.ts` 生成 `.qm`，并由 `resources.qrc` 嵌入 `:/Aegra/i18n/`。
 
-## 客户端分层（D1）
+## 客户端分层（D1 / F9）
 
 ```text
 ServiceClient (QML 门面)
   ├── IpcFrameTransport          # 长度前缀 framing、连接/重连
-  ├── service_protocol           # Service V3 私有 Qt 编解码
+  ├── service_protocol           # Service V4 私有 Qt 编解码
   ├── ServiceRequestCoordinator  # correlation ID、deadline、断线清理、分页 continue
-  └── RecoveryPointModel         # 领域 QAbstractListModel
+  ├── RecoveryPointModel         # 领域 QAbstractListModel（含 contentKind）
+  ├── FileBrowseModel            # BrowseFileSources lazy 树（token only）
+  └── FileRecoverModel           # ListRecoveryPointEntries lazy 树（entry_id only）
 ```
 
 - 每个请求有唯一 correlation ID 与 deadline；协议损坏、超时断开并重连。
 - 重连后只重新握手并恢复幂等 query（当前为 Repository catalog 分页查询）。
 - 模型只暴露拥有生命周期的数据与展示用角色；QML 不解析 JSON、Service 枚举数值或 message code。
+- Backup 列表 STATUS 通过 `JobModel.latestBackupStatus(matchIds, connectionId)` 关联 Job：
+  `volume_set` 用 `source_ids`；`file_set` 用 `selection_summaries[].selection_id`（与 Job
+  上 Service 写入的 `source_ids=selection_id[]` 对齐）。不得因 file_set 的 `source_ids` 为空
+  而永远显示 N/A。
 - `post_to_object` 提供单线程 Qt 投递边界，供后续 task event 在对象销毁后安全丢弃更新。
-- V3 字段以 Contracts 与 ADR-0013 为准；Desktop 私有 codec 不独立扩展 wire schema。
+- V4 字段以 Contracts 与 ADR-0017 / SERVICE_CONTROL_PROTOCOL_V4 为准；Desktop 私有 codec 不独立扩展 wire schema。
 
 ## ServiceClient 行为
 
@@ -180,3 +186,17 @@ Password 在 Service 没有对应能力时不显示。布局必须在 900x600、
     PrepareRestore（`disk.N` + `source_disk_number` + 可选 `archive_password`）→ kind 40
     StartRestore；多盘为多条整盘 Job（串行提交；tip 可为 Full 或 Incremental；Service 解析
     base-first 链；非系统盘目标）。全部 accepted 后切到 Home。
+- F9 文件备份/恢复（Service V4，`content_kind=2`）：
+  - Desktop codec schema 4；kinds 13 BrowseFileSources、14 ListRecoveryPointEntries、
+    15 PrepareFileRestore、48 StartFileRestore；UpsertSchedule `file_set` 选择。
+  - `FileBrowseModel` / `FileRecoverModel` 只保存 opaque `node_token` / `entry_id`，不本地枚举路径、
+    不向 Service 发送绝对路径。
+  - Backup 向导 step 0 选 Files 后绑定 `file.browse` lazy 树与 tri-state 勾选；创建
+    `createFileSetSchedule`；Schedule 列表展示 `selection_summaries` 安全 label。
+  - Restore 按 Recovery Point `contentKind` 切换 Files 模式：归档文件树 + 单目录目标浏览 +
+    `startFileRestore`（prepare→start）；capability `file.restore` 门控。
+  - Files 模式 Options 面板显示：`restore_security`（ACL，默认开）、`restore_ads`（默认开）、
+    conflict policy（fail/replace/rename）；磁盘签名/扩容选项仅整盘模式可见。
+  - 可见文案经 `qsTrId`/`message_code_map` 五语言；`aegra_desktop` 构建验证。
+- F10：file_set 首版发布门禁已通过（Debug/Release 全量生产构建 + 静态边界审查）。Desktop 仍不得
+  用 `QDir`/`QFileInfo` 枚举 protect 源或 Archive；现场 UI 矩阵在 elevated Service 上人工执行。

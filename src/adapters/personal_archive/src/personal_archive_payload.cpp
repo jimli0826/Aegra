@@ -8,8 +8,14 @@ namespace {
 namespace archive = format::personal_archive;
 
 [[nodiscard]] base::Result<std::vector<std::byte>>
-make_authenticated_data(const archive::ChunkHeader& header,
+make_authenticated_data(const archive::EncodedBackupHeader& part_header,
+                        const std::uint64_t body_size, const archive::ChunkHeader& header,
                         const std::span<const archive::BlockEntry> entries) {
+    const auto prefix = archive::make_volume_chunk_record_prefix(body_size);
+    auto encoded_prefix = archive::encode_archive_record_prefix(prefix);
+    if (!encoded_prefix) {
+        return base::Result<std::vector<std::byte>>::failure(encoded_prefix.error());
+    }
     auto authenticated_header = header;
     authenticated_header.payload_authentication_tag.fill(std::byte{0});
     auto encoded_header = archive::encode_chunk_header(authenticated_header);
@@ -17,7 +23,10 @@ make_authenticated_data(const archive::ChunkHeader& header,
         return base::Result<std::vector<std::byte>>::failure(encoded_header.error());
     }
     std::vector<std::byte> result;
-    result.reserve(encoded_header.value().size() + entries.size() * archive::kBlockEntrySize);
+    result.reserve(part_header.size() + encoded_prefix.value().size() +
+                   encoded_header.value().size() + entries.size() * archive::kBlockEntrySize);
+    result.insert(result.end(), part_header.begin(), part_header.end());
+    result.insert(result.end(), encoded_prefix.value().begin(), encoded_prefix.value().end());
     result.insert(result.end(), encoded_header.value().begin(), encoded_header.value().end());
     for (const auto& entry : entries) {
         auto encoded_entry = archive::encode_block_entry(entry);
@@ -29,16 +38,24 @@ make_authenticated_data(const archive::ChunkHeader& header,
     return base::Result<std::vector<std::byte>>::success(std::move(result));
 }
 
+[[nodiscard]] std::uint64_t chunk_body_size(const archive::ChunkHeader& header) noexcept {
+    return static_cast<std::uint64_t>(header.block_entry_count) * archive::kBlockEntrySize +
+           header.payload_size;
+}
+
 } // namespace
 
 base::Result<void> protect_archive_chunk(PreparedArchiveChunk& chunk,
+                                         const archive::EncodedBackupHeader& part_header,
                                          const crypto_sodium::PayloadCipher& payload_cipher) {
     auto nonce = crypto_sodium::create_payload_nonce();
     if (!nonce) {
         return base::Result<void>::failure(nonce.error());
     }
     chunk.header.payload_nonce = nonce.value();
-    auto authenticated_data = make_authenticated_data(chunk.header, chunk.entries);
+    auto authenticated_data =
+        make_authenticated_data(part_header, chunk_body_size(chunk.header), chunk.header,
+                                chunk.entries);
     if (!authenticated_data) {
         return base::Result<void>::failure(authenticated_data.error());
     }
@@ -54,7 +71,8 @@ base::Result<void> protect_archive_chunk(PreparedArchiveChunk& chunk,
 }
 
 base::Result<std::vector<std::byte>>
-unprotect_archive_chunk(const archive::ChunkHeader& header,
+unprotect_archive_chunk(const archive::EncodedBackupHeader& part_header,
+                        const archive::ChunkHeader& header,
                         const std::span<const archive::BlockEntry> entries,
                         const std::span<const std::byte> ciphertext,
                         const crypto_sodium::PayloadCipher* payload_cipher) {
@@ -62,7 +80,8 @@ unprotect_archive_chunk(const archive::ChunkHeader& header,
         return base::Result<std::vector<std::byte>>::success(
             std::vector<std::byte>(ciphertext.begin(), ciphertext.end()));
     }
-    auto authenticated_data = make_authenticated_data(header, entries);
+    auto authenticated_data =
+        make_authenticated_data(part_header, chunk_body_size(header), header, entries);
     if (!authenticated_data) {
         return base::Result<std::vector<std::byte>>::failure(authenticated_data.error());
     }

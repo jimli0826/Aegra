@@ -11,7 +11,7 @@ ADR 用于记录会长期约束多个模块、持久化格式、外部协议或�
 个人版 Repository Catalog 的分页 Service 查询见
 [ADR-0012](0012-personal-repository-catalog-query.md)。
 
-本地 Service 控制面 V3 envelope、命令幂等和 task event 见
+本地 Service 控制面 V3 envelope（已被 V4 替代）见
 [ADR-0013](0013-service-control-protocol-v3.md)。
 
 Windows Service SCM 边界、显式 Named Pipe ACL 与调用方身份校验见
@@ -19,6 +19,12 @@ Windows Service SCM 边界、显式 Named Pipe ACL 与调用方身份校验见
 
 项目不维护自动化测试用例的仓库级决策见
 [ADR-0015](0015-no-project-test-suite.md)。该决策取代早期 ADR 中的自动化测试要求。
+
+文件集备份、恢复、个人 Archive V7 与控制协议升级边界见
+[ADR-0016](0016-file-set-backup-and-restore-boundary.md)。
+
+本地 Service 控制面 V4（替代 ADR-0013 wire schema）见
+[ADR-0017](0017-service-control-protocol-v4.md)。
 
 ## 状态
 

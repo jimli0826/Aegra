@@ -136,7 +136,7 @@ validate_final_footer(ports::IObjectReader& reader, const std::string_view key,
                                        "archive footer is truncated"));
     }
     auto footer = archive::decode_backup_footer(bytes);
-    if (!footer || footer.value().file_size != size_bytes) {
+    if (!footer || footer.value().part_file_size != size_bytes) {
         return base::Result<void>::failure(
             !footer ? footer.error()
                     : registration_error(base::ErrorCode::kCorruptData,
@@ -389,15 +389,32 @@ BackupCatalogRegistrar::publish(const WorkerJobRequest& request,
     entry.backup_set_uuid = std::move(set_uuid);
     entry.parent_uuid = std::move(parent_uuid);
     entry.backup_type = catalog_backup_type(backup.type);
+    const bool is_file_set =
+        request.worker_request.content_kind == contracts::ContentKind::kFileSet;
+    entry.content_kind =
+        std::string(is_file_set ? personal_repository::kCatalogContentKindFileSet
+                                : personal_repository::kCatalogContentKindVolumeSet);
     entry.archive_main_key = *request.backup_archive_key;
     entry.split_part_count = archive.value().split_part_count;
-    entry.has_sidecar = archive.value().has_sidecar;
+    entry.has_sidecar = is_file_set ? false : archive.value().has_sidecar;
+    entry.format_version = personal_repository::kPersonalArchiveFormatVersion;
     entry.created_utc_ms = static_cast<std::uint64_t>(backup.created_utc_ms);
     entry.logical_size_bytes = response.task_result->logical_bytes;
     entry.stored_size_bytes = archive.value().stored_size_bytes;
-    entry.source_count = static_cast<std::uint32_t>(request.worker_request.source_refs.size());
-    // Ordered stable Volume GUID paths used by the Worker; parent selection matches these.
-    entry.source_volume_ids = request.worker_request.source_refs;
+    if (is_file_set) {
+        entry.source_count =
+            static_cast<std::uint32_t>(request.worker_request.file_source_refs.size());
+        entry.source_volume_ids.clear();
+        entry.file_entry_count = response.task_result->entry_count;
+        entry.file_stream_count = response.task_result->stream_count;
+    } else {
+        entry.source_count =
+            static_cast<std::uint32_t>(request.worker_request.source_refs.size());
+        // Ordered stable Volume GUID paths used by the Worker; parent selection matches these.
+        entry.source_volume_ids = request.worker_request.source_refs;
+        entry.file_entry_count = 0;
+        entry.file_stream_count = 0;
+    }
     auto published = publish_entry(*storage.value(), descriptor.value(), entry,
                                    request.worker_request.job_id, cancellation);
     if (!published) {

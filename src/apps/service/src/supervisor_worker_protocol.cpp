@@ -29,9 +29,48 @@ encode_supervisor_job_request(const contracts::JobRequest& request) {
                      {"job_id", request.job_id},
                      {"tenant_id", request.tenant_id},
                      {"operation", static_cast<std::uint8_t>(request.operation)},
+                     {"content_kind", static_cast<std::uint8_t>(request.content_kind)},
                      {"source_refs", request.source_refs},
                      {"trace_id", request.trace_id},
                      {"deadline_utc_ms", request.deadline_utc_ms}};
+
+        // file_set wire payloads are added when F5/F6 start file jobs. Volume jobs keep empty
+        // file_source_refs / null file_restore_target.
+        if (!request.file_source_refs.empty()) {
+            Json file_refs = Json::array();
+            for (const auto& ref : request.file_source_refs) {
+                Json components = Json::array();
+                for (const auto& name : ref.relative_components) {
+                    std::vector<std::uint8_t> bytes;
+                    bytes.reserve(name.bytes.size());
+                    for (const auto item : name.bytes) {
+                        bytes.push_back(static_cast<std::uint8_t>(item));
+                    }
+                    components.push_back(
+                        Json{{"encoding", static_cast<std::uint8_t>(name.encoding)},
+                             {"bytes", std::move(bytes)}});
+                }
+                file_refs.push_back(
+                    Json{{"selection_id", ref.selection_id},
+                         {"volume_identity", ref.volume_identity},
+                         {"relative_components", std::move(components)},
+                         {"entry_kind", static_cast<std::uint8_t>(ref.entry_kind)},
+                         {"recursion", static_cast<std::uint8_t>(ref.recursion)},
+                         {"reparse_policy", static_cast<std::uint8_t>(ref.reparse_policy)},
+                         {"unreadable_policy", static_cast<std::uint8_t>(ref.unreadable_policy)},
+                         {"display_label", ref.display_label}});
+            }
+            root["file_source_refs"] = std::move(file_refs);
+        }
+        if (request.file_restore_target) {
+            root["file_restore_target"] =
+                Json{{"target_root_identity", request.file_restore_target->target_root_identity},
+                     {"entry_ids", request.file_restore_target->entry_ids},
+                     {"conflict_policy",
+                      static_cast<std::uint8_t>(request.file_restore_target->conflict_policy)},
+                     {"restore_security", request.file_restore_target->restore_security},
+                     {"restore_ads", request.file_restore_target->restore_ads}};
+        }
 
         if (!request.target_ref.empty()) {
             root["target_ref"] = request.target_ref;
@@ -107,9 +146,17 @@ decode_supervisor_worker_event(std::string_view json_text) {
             progress.job_id = p.at("job_id").get<std::string>();
             progress.trace_id = p.at("trace_id").get<std::string>();
             progress.phase = static_cast<contracts::TaskPhase>(p.at("phase").get<std::uint8_t>());
-            progress.logical_bytes = p.at("logical_bytes").get<std::uint64_t>();
+            if (!p.at("logical_bytes").is_null()) {
+                progress.logical_bytes = p.at("logical_bytes").get<std::uint64_t>();
+            }
             progress.processed_bytes = p.at("processed_bytes").get<std::uint64_t>();
             progress.stored_bytes = p.at("stored_bytes").get<std::uint64_t>();
+            if (p.contains("discovered_entries") && !p.at("discovered_entries").is_null()) {
+                progress.discovered_entries = p.at("discovered_entries").get<std::uint64_t>();
+            }
+            if (p.contains("processed_entries") && !p.at("processed_entries").is_null()) {
+                progress.processed_entries = p.at("processed_entries").get<std::uint64_t>();
+            }
             progress.message_code = p.at("message_code").get<std::string>();
             event.progress = progress;
         }
@@ -139,8 +186,25 @@ decode_supervisor_worker_event(std::string_view json_text) {
                 tr.logical_bytes = t.at("logical_bytes").get<std::uint64_t>();
                 tr.stored_bytes = t.at("stored_bytes").get<std::uint64_t>();
                 tr.chunk_count = t.at("chunk_count").get<std::uint64_t>();
+                if (t.contains("entry_count")) {
+                    tr.entry_count = t.at("entry_count").get<std::uint64_t>();
+                }
+                if (t.contains("stream_count")) {
+                    tr.stream_count = t.at("stream_count").get<std::uint64_t>();
+                }
                 tr.message_code = t.at("message_code").get<std::string>();
                 tr.warning_codes = t.at("warning_codes").get<std::vector<std::string>>();
+                if (t.contains("partial_restore") && !t.at("partial_restore").is_null()) {
+                    const auto& partial = t.at("partial_restore");
+                    contracts::PartialRestoreStats stats;
+                    stats.entries_requested = partial.at("entries_requested").get<std::uint64_t>();
+                    stats.entries_restored = partial.at("entries_restored").get<std::uint64_t>();
+                    stats.entries_failed = partial.at("entries_failed").get<std::uint64_t>();
+                    stats.bytes_restored = partial.at("bytes_restored").get<std::uint64_t>();
+                    stats.stable_error_codes =
+                        partial.at("stable_error_codes").get<std::vector<std::string>>();
+                    tr.partial_restore = std::move(stats);
+                }
                 response.task_result = tr;
             }
             event.response = response;

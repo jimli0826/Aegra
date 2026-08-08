@@ -302,7 +302,7 @@ SqliteControlPlaneDatabase::get_job_by_idempotency_key(const std::string_view id
     }
     auto statement = detail::SqliteStatement::prepare(
         state_->db,
-        "SELECT job_id, trace_id, operation, state, created_utc_ms, started_utc_ms, "
+        "SELECT job_id, trace_id, operation, state, content_kind, created_utc_ms, started_utc_ms, "
         "completed_utc_ms, source_ids, repository_connection_id, target_source_id, backup_type, "
         "parent_recovery_point_id, preflight_token, message_code, idempotency_key, "
         "result_error_code, result_outcome, result_message_code, "
@@ -336,7 +336,7 @@ SqliteControlPlaneDatabase::get_job_by_preflight_token(const std::string_view pr
     }
     auto statement = detail::SqliteStatement::prepare(
         state_->db,
-        "SELECT job_id, trace_id, operation, state, created_utc_ms, started_utc_ms, "
+        "SELECT job_id, trace_id, operation, state, content_kind, created_utc_ms, started_utc_ms, "
         "completed_utc_ms, source_ids, repository_connection_id, target_source_id, backup_type, "
         "parent_recovery_point_id, preflight_token, message_code, idempotency_key, "
         "result_error_code, result_outcome, result_message_code, "

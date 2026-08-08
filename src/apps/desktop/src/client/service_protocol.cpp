@@ -120,8 +120,9 @@ constexpr qsizetype kMaximumStableCodeCharacters = 128;
     }
     const auto object = value.toObject();
     if (!has_exact_keys(object, {"file_uuid", "backup_set_uuid", "parent_uuid", "backup_type",
-                                 "chain_state", "created_utc_ms", "logical_size_bytes",
-                                 "stored_size_bytes", "source_count", "has_sidecar"})) {
+                                 "content_kind", "chain_state", "created_utc_ms",
+                                 "logical_size_bytes", "stored_size_bytes", "source_count",
+                                 "has_sidecar"})) {
         return false;
     }
     const auto file_uuid = object.value(QStringLiteral("file_uuid")).toString();
@@ -129,6 +130,7 @@ constexpr qsizetype kMaximumStableCodeCharacters = 128;
     QString parent_uuid;
     bool has_parent = false;
     qint64 backup_type = 0;
+    qint64 content_kind = 0;
     qint64 chain_state = 0;
     qint64 created_utc_ms = 0;
     qint64 logical_size_bytes = 0;
@@ -137,6 +139,7 @@ constexpr qsizetype kMaximumStableCodeCharacters = 128;
     if (!canonical_uuid(file_uuid) || !canonical_uuid(backup_set_uuid) ||
         !optional_uuid(object.value(QStringLiteral("parent_uuid")), parent_uuid, has_parent) ||
         !integer_in_range(object.value(QStringLiteral("backup_type")), 1, 3, backup_type) ||
+        !integer_in_range(object.value(QStringLiteral("content_kind")), 1, 2, content_kind) ||
         !integer_in_range(object.value(QStringLiteral("chain_state")), 1, 2, chain_state) ||
         !integer_in_range(object.value(QStringLiteral("created_utc_ms")), 0,
                           (std::numeric_limits<qint64>::max)(), created_utc_ms) ||
@@ -155,10 +158,15 @@ constexpr qsizetype kMaximumStableCodeCharacters = 128;
     if (backup_type == 1 && chain_state != 1) {
         return false;
     }
+    if (content_kind == 2 &&
+        (has_parent || object.value(QStringLiteral("has_sidecar")).toBool() || backup_type != 1)) {
+        return false;
+    }
     result = {{QStringLiteral("fileUuid"), file_uuid},
               {QStringLiteral("backupSetUuid"), backup_set_uuid},
               {QStringLiteral("parentUuid"), parent_uuid},
               {QStringLiteral("backupType"), backup_type},
+              {QStringLiteral("contentKind"), content_kind},
               {QStringLiteral("chainState"), chain_state},
               {QStringLiteral("createdUtcMs"), created_utc_ms},
               {QStringLiteral("logicalSizeBytes"), logical_size_bytes},
@@ -637,13 +645,14 @@ namespace {
 
 [[nodiscard]] bool parse_job_item_object(const QJsonObject& object, QVariantMap& result) {
     if (!has_exact_keys(object,
-                        {"job_id", "trace_id", "operation", "state", "created_utc_ms",
+                        {"job_id", "trace_id", "operation", "state", "content_kind", "created_utc_ms",
                          "started_utc_ms", "completed_utc_ms", "progress", "message_code",
                          "source_ids", "repository_connection_id"})) {
         return false;
     }
     qint64 operation = 0;
     qint64 state = 0;
+    std::optional<qint64> content_kind;
     qint64 created_utc_ms = 0;
     std::optional<qint64> started_utc_ms;
     std::optional<qint64> completed_utc_ms;
@@ -653,6 +662,8 @@ namespace {
         !stable_code(object.value(QStringLiteral("trace_id")).toString(), 128) ||
         !integer_in_range(object.value(QStringLiteral("operation")), 1, 4, operation) ||
         !integer_in_range(object.value(QStringLiteral("state")), 1, 7, state) ||
+        !parse_optional_int64(object.value(QStringLiteral("content_kind")), content_kind) ||
+        (content_kind && (*content_kind < 1 || *content_kind > 2)) ||
         !integer_in_range(object.value(QStringLiteral("created_utc_ms")), 0,
                           (std::numeric_limits<qint64>::max)(), created_utc_ms) ||
         !parse_optional_int64(object.value(QStringLiteral("started_utc_ms")), started_utc_ms) ||
@@ -693,6 +704,9 @@ namespace {
         {QStringLiteral("messageCode"), object.value(QStringLiteral("message_code")).toString()},
         {QStringLiteral("sourceIds"), source_ids},
         {QStringLiteral("connectionId"), connection_id}};
+    if (content_kind) {
+        map.insert(QStringLiteral("contentKind"), *content_kind);
+    }
     if (started_utc_ms) {
         map.insert(QStringLiteral("startedUtcMs"), *started_utc_ms);
     }
@@ -707,7 +721,8 @@ namespace {
         const auto progress = progress_value.toObject();
         if (!has_exact_keys(progress,
                             {"schema_version", "job_id", "trace_id", "phase", "logical_bytes",
-                             "processed_bytes", "stored_bytes", "message_code"})) {
+                             "processed_bytes", "stored_bytes", "discovered_entries",
+                             "processed_entries", "message_code"})) {
             return false;
         }
         const auto outer_job_id = object.value(QStringLiteral("job_id")).toString();
@@ -717,27 +732,37 @@ namespace {
         const auto progress_message = progress.value(QStringLiteral("message_code")).toString();
         qint64 schema_version = 0;
         qint64 phase = 0;
-        qint64 logical_bytes = 0;
+        std::optional<qint64> logical_bytes;
         qint64 processed_bytes = 0;
         qint64 stored_bytes = 0;
-        if (!integer_in_range(progress.value(QStringLiteral("schema_version")), 1, 1,
-                              schema_version) ||
+        qint64 discovered_entries = 0;
+        qint64 processed_entries = 0;
+        if (!integer_in_range(progress.value(QStringLiteral("schema_version")),
+                              static_cast<qint64>(kServiceSchemaVersion),
+                              static_cast<qint64>(kServiceSchemaVersion), schema_version) ||
             progress_job_id != outer_job_id || progress_trace_id != outer_trace_id ||
             !stable_code(progress_message, 128) ||
             !integer_in_range(progress.value(QStringLiteral("phase")), 0, 6, phase) ||
-            !integer_in_range(progress.value(QStringLiteral("logical_bytes")), 0,
-                              (std::numeric_limits<qint64>::max)(), logical_bytes) ||
+            !parse_optional_int64(progress.value(QStringLiteral("logical_bytes")), logical_bytes) ||
             !integer_in_range(progress.value(QStringLiteral("processed_bytes")), 0,
                               (std::numeric_limits<qint64>::max)(), processed_bytes) ||
             !integer_in_range(progress.value(QStringLiteral("stored_bytes")), 0,
                               (std::numeric_limits<qint64>::max)(), stored_bytes) ||
-            processed_bytes > logical_bytes) {
+            !integer_in_range(progress.value(QStringLiteral("discovered_entries")), 0,
+                              (std::numeric_limits<qint64>::max)(), discovered_entries) ||
+            !integer_in_range(progress.value(QStringLiteral("processed_entries")), 0,
+                              (std::numeric_limits<qint64>::max)(), processed_entries) ||
+            (logical_bytes && processed_bytes > *logical_bytes)) {
             return false;
         }
         map.insert(QStringLiteral("progressPhase"), phase);
-        map.insert(QStringLiteral("progressLogicalBytes"), logical_bytes);
+        if (logical_bytes) {
+            map.insert(QStringLiteral("progressLogicalBytes"), *logical_bytes);
+        }
         map.insert(QStringLiteral("progressProcessedBytes"), processed_bytes);
         map.insert(QStringLiteral("progressStoredBytes"), stored_bytes);
+        map.insert(QStringLiteral("progressDiscoveredEntries"), discovered_entries);
+        map.insert(QStringLiteral("progressProcessedEntries"), processed_entries);
     }
     result = std::move(map);
     return true;

@@ -341,6 +341,7 @@ base::Result<DeletePlan> plan_delete_recovery_points(
         DeletionTarget target;
         target.file_uuid = entry.file_uuid;
         target.catalog_generation = entry.catalog_generation;
+        target.content_kind = entry.content_kind;
         target.archive_main_key = entry.archive_main_key;
         target.members.reserve(members.value().size());
         for (auto& key : members.value()) {

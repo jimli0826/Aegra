@@ -5,6 +5,7 @@ namespace {
 
 bool is_known_phase(const TaskPhase phase) noexcept {
     switch (phase) {
+    case TaskPhase::kUnspecified:
     case TaskPhase::kPreparing:
     case TaskPhase::kReading:
     case TaskPhase::kTransforming:
@@ -33,17 +34,41 @@ base::Result<void> validate_task_progress(const TaskProgress& progress) {
         return base::Result<void>::failure(
             base::Error{base::ErrorCode::kInvalidArgument, "task phase is invalid"});
     }
-    if (progress.processed_bytes > progress.logical_bytes) {
+    if (progress.processed_bytes > kMaximumWireInteger ||
+        progress.stored_bytes > kMaximumWireInteger ||
+        progress.discovered_entries > kMaximumWireInteger ||
+        progress.processed_entries > kMaximumWireInteger) {
         return base::Result<void>::failure(base::Error{
             base::ErrorCode::kInvalidArgument,
-            "processed_bytes exceeds logical_bytes",
+            "progress integer exceeds wire range",
         });
     }
-    if (progress.phase == TaskPhase::kCompleted &&
-        progress.processed_bytes != progress.logical_bytes) {
+    if (progress.logical_bytes) {
+        if (*progress.logical_bytes > kMaximumWireInteger) {
+            return base::Result<void>::failure(base::Error{
+                base::ErrorCode::kInvalidArgument,
+                "logical_bytes exceeds wire range",
+            });
+        }
+        if (progress.processed_bytes > *progress.logical_bytes) {
+            return base::Result<void>::failure(base::Error{
+                base::ErrorCode::kInvalidArgument,
+                "processed_bytes exceeds logical_bytes",
+            });
+        }
+        if (progress.phase == TaskPhase::kCompleted &&
+            progress.processed_bytes != *progress.logical_bytes) {
+            return base::Result<void>::failure(base::Error{
+                base::ErrorCode::kInvalidArgument,
+                "completed progress must cover all logical bytes",
+            });
+        }
+    }
+    if (progress.processed_entries > progress.discovered_entries &&
+        progress.discovered_entries != 0) {
         return base::Result<void>::failure(base::Error{
             base::ErrorCode::kInvalidArgument,
-            "completed progress must cover all logical bytes",
+            "processed_entries exceeds discovered_entries",
         });
     }
     return base::Result<void>::success();

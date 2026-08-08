@@ -448,6 +448,7 @@ base::Result<void> WorkerSupervisor::Impl::launch_worker(
     record.trace_id = state->trace_id;
     record.operation = worker_request.operation;
     record.state = contracts::ServiceJobState::kQueued;
+    record.content_kind = worker_request.content_kind;
     record.created_utc_ms = utc_now_ms(clock);
     record.source_ids = request.source_ids;
     record.repository_connection_id = request.repository_connection_id;

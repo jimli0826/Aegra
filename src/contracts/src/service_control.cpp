@@ -1,6 +1,7 @@
 #include "aegra/contracts/service_control.h"
 
 #include "aegra/base/error.h"
+#include "aegra/base/uuid.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -241,6 +242,9 @@ base::Result<void> validate_job_list_request(const JobListRequest& request) {
 }
 
 base::Result<void> validate_job_summary(const JobSummary& summary) {
+    if (summary.content_kind && !is_known_content_kind(*summary.content_kind)) {
+        return invalid("job summary content_kind is invalid");
+    }
     if (!valid_stable_value(summary.job_id, kMaximumIdentifierBytes) ||
         !valid_stable_value(summary.trace_id, kMaximumIdentifierBytes) ||
         !known_job_operation(summary.operation) ||
@@ -291,11 +295,31 @@ base::Result<void> validate_schedule_summary(const ScheduleSummary& summary) {
     auto valid_trigger = validate_schedule_trigger(summary.trigger);
     if (!valid_stable_value(summary.schedule_id, kMaximumIdentifierBytes) ||
         !valid_text(summary.display_name, kMaximumDisplayNameBytes) ||
-        !valid_source_ids(summary.source_ids, false) ||
+        !is_known_content_kind(summary.content_kind) ||
         !valid_stable_value(summary.repository_connection_id, kMaximumIdentifierBytes) ||
         !known_backup_type(summary.backup_type) || !valid_trigger ||
         !valid_optional_wire_integer(summary.next_run_utc_ms)) {
         return invalid("schedule summary is invalid");
+    }
+    if (summary.content_kind == ContentKind::kVolumeSet) {
+        if (!valid_source_ids(summary.source_ids, false) || !summary.selection_summaries.empty()) {
+            return invalid("volume schedule summary sources are invalid");
+        }
+    } else {
+        if (!summary.source_ids.empty() || summary.selection_summaries.empty() ||
+            summary.selection_summaries.size() > kMaximumFileSelections ||
+            summary.backup_type != BackupType::kFull) {
+            return invalid("file schedule summary selections are invalid");
+        }
+        std::set<std::string_view> seen;
+        for (const auto& item : summary.selection_summaries) {
+            if (!base::is_canonical_uuid(item.selection_id) ||
+                !valid_text(item.display_label, kMaximumDisplayLabelBytes) ||
+                !is_known_file_entry_kind(item.entry_kind) ||
+                !is_known_file_recursion(item.recursion) || !seen.insert(item.selection_id).second) {
+                return invalid("file schedule selection summary is invalid");
+            }
+        }
     }
     return base::Result<void>::success();
 }
@@ -452,13 +476,19 @@ base::Result<void> validate_upsert_schedule_command(const UpsertScheduleCommand&
     if ((command.schedule_id &&
          !valid_stable_value(*command.schedule_id, kMaximumIdentifierBytes)) ||
         !valid_text(command.display_name, kMaximumDisplayNameBytes) ||
-        !valid_source_ids(command.source_ids, false) ||
         !valid_stable_value(command.repository_connection_id, kMaximumIdentifierBytes) ||
         !known_backup_type(command.backup_type)) {
         return invalid("upsert schedule command is invalid");
     }
+    if (command.protection.content_kind == ContentKind::kFileSet &&
+        command.backup_type != BackupType::kFull) {
+        return invalid("file_set schedule requires full backup type");
+    }
+    auto protection = validate_protection_spec_input(command.protection, !command.schedule_id);
+    if (!protection) {
+        return protection;
+    }
     constexpr std::size_t kMaximumArchivePasswordBytes = 32;
-    // Update must not carry password material: create freezes encryption and DPAPI ciphertext.
     if (command.schedule_id && !command.archive_password.empty()) {
         return invalid("schedule password cannot be changed after create");
     }
@@ -666,6 +696,166 @@ base::Result<void> validate_delete_plan_summary(const DeletePlanSummary& summary
 base::Result<void> validate_execute_delete_plan_command(const ExecuteDeletePlanCommand& command) {
     if (!valid_token(command.plan_token) || !command.confirmed) {
         return invalid("execute delete plan command is invalid");
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void> validate_protection_spec_input(const ProtectionSpecInput& protection,
+                                                  const bool is_create) {
+    if (!is_known_content_kind(protection.content_kind)) {
+        return invalid("protection content_kind is invalid");
+    }
+    if (protection.content_kind == ContentKind::kVolumeSet) {
+        if (!protection.file_selections.empty() ||
+            !valid_source_ids(protection.volume_source_ids, !is_create)) {
+            return invalid("volume protection sources are invalid");
+        }
+        if (is_create && protection.volume_source_ids.empty()) {
+            return invalid("volume protection requires source ids on create");
+        }
+        return base::Result<void>::success();
+    }
+    if (!protection.volume_source_ids.empty()) {
+        return invalid("file protection cannot include volume source ids");
+    }
+    if (protection.file_options.reparse_policy != FileReparsePolicy::kCaptureNoFollow ||
+        protection.file_options.unreadable_policy != FileUnreadablePolicy::kFailJob) {
+        return invalid("file protection options are invalid");
+    }
+    if (!is_create) {
+        return protection.file_selections.empty()
+                   ? base::Result<void>::success()
+                   : invalid("file protection source is frozen on update");
+    }
+    if (protection.file_selections.empty() ||
+        protection.file_selections.size() > kMaximumFileSelections) {
+        return invalid("file protection selection count is invalid");
+    }
+    std::set<std::string_view> tokens;
+    for (const auto& selection : protection.file_selections) {
+        if (selection.node_token.empty() || selection.node_token.size() > kMaximumNodeTokenBytes ||
+            !is_known_file_recursion(selection.recursion) ||
+            !valid_text(selection.display_label, kMaximumDisplayLabelBytes) ||
+            !tokens.insert(selection.node_token).second) {
+            return invalid("file protection selection input is invalid");
+        }
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void> validate_browse_file_sources_request(const BrowseFileSourcesRequest& request) {
+    if (request.parent_node_token &&
+        (request.parent_node_token->empty() ||
+         request.parent_node_token->size() > kMaximumNodeTokenBytes)) {
+        return invalid("browse parent_node_token is invalid");
+    }
+    return validate_service_page_request(request.page);
+}
+
+base::Result<void> validate_file_source_node(const FileSourceNode& node) {
+    if (node.node_token.empty() || node.node_token.size() > kMaximumNodeTokenBytes ||
+        !valid_text(node.display_name, kMaximumDisplayNameBytes) ||
+        !is_known_file_entry_kind(node.entry_kind) ||
+        (node.selectability != FileNodeSelectability::kSelectable &&
+         node.selectability != FileNodeSelectability::kNotSelectable &&
+         node.selectability != FileNodeSelectability::kUnsupported) ||
+        (node.availability != SourceAvailability::kAvailable &&
+         node.availability != SourceAvailability::kUnavailable) ||
+        (node.message_code &&
+         !valid_stable_value(*node.message_code, kMaximumMessageCodeBytes))) {
+        return invalid("file source node is invalid");
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void> validate_file_source_node_page(const FileSourceNodePage& page) {
+    return validate_page(page, validate_file_source_node);
+}
+
+base::Result<void>
+validate_list_recovery_point_entries_request(const ListRecoveryPointEntriesRequest& request) {
+    if ((request.repository_connection_id &&
+         !valid_stable_value(*request.repository_connection_id, kMaximumIdentifierBytes)) ||
+        !valid_stable_value(request.recovery_point_id, kMaximumIdentifierBytes) ||
+        request.parent_entry_id.empty() || request.parent_entry_id.size() > 20 ||
+        (request.archive_secret_ref && request.archive_secret_ref->size() > 512)) {
+        return invalid("list recovery point entries request is invalid");
+    }
+    return validate_service_page_request(request.page);
+}
+
+base::Result<void>
+validate_recovery_point_entry_summary(const RecoveryPointEntrySummary& summary) {
+    if (summary.entry_id.empty() || summary.entry_id.size() > 20 ||
+        !valid_text(summary.display_name, kMaximumDisplayNameBytes) ||
+        !is_known_file_entry_kind(summary.entry_kind) ||
+        !valid_wire_integer(summary.logical_size_bytes) ||
+        (summary.message_code &&
+         !valid_stable_value(*summary.message_code, kMaximumMessageCodeBytes))) {
+        return invalid("recovery point entry summary is invalid");
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void> validate_recovery_point_entry_page(const RecoveryPointEntryPage& page) {
+    if ((page.repository_connection_id &&
+         !valid_stable_value(*page.repository_connection_id, kMaximumIdentifierBytes)) ||
+        !valid_stable_value(page.recovery_point_id, kMaximumIdentifierBytes) ||
+        page.parent_entry_id.empty() || page.index_generation.empty() ||
+        page.index_generation.size() > 128 || page.items.size() > kMaximumServicePageResults ||
+        !valid_token(page.continuation_token)) {
+        return invalid("recovery point entry page is invalid");
+    }
+    for (const auto& item : page.items) {
+        auto valid = validate_recovery_point_entry_summary(item);
+        if (!valid) {
+            return valid;
+        }
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void> validate_prepare_file_restore_request(const PrepareFileRestoreRequest& request) {
+    if ((request.repository_connection_id &&
+         !valid_stable_value(*request.repository_connection_id, kMaximumIdentifierBytes)) ||
+        !valid_stable_value(request.recovery_point_id, kMaximumIdentifierBytes) ||
+        request.entry_ids.empty() || request.entry_ids.size() > kMaximumFileRestoreEntryIds ||
+        request.target_node_token.empty() ||
+        request.target_node_token.size() > kMaximumNodeTokenBytes ||
+        !is_known_file_conflict_policy(request.conflict_policy) || !request.restore_security ||
+        !request.restore_ads ||
+        (request.archive_secret_ref && request.archive_secret_ref->size() > 512)) {
+        return invalid("prepare file restore request is invalid");
+    }
+    std::set<std::string_view> seen;
+    for (const auto& entry_id : request.entry_ids) {
+        if (entry_id.empty() || entry_id.size() > 20 || !seen.insert(entry_id).second) {
+            return invalid("prepare file restore entry_ids are invalid");
+        }
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void> validate_file_restore_preflight(const FileRestorePreflight& preflight) {
+    if (!valid_token(preflight.preflight_token) ||
+        (preflight.repository_connection_id &&
+         !valid_stable_value(*preflight.repository_connection_id, kMaximumIdentifierBytes)) ||
+        !valid_stable_value(preflight.recovery_point_id, kMaximumIdentifierBytes) ||
+        preflight.entry_count == 0 || !valid_wire_integer(preflight.entry_count) ||
+        !valid_wire_integer(preflight.logical_size_bytes) ||
+        !valid_wire_integer(preflight.target_free_bytes) ||
+        !is_known_file_conflict_policy(preflight.conflict_policy) ||
+        preflight.expires_utc_ms == 0 || !valid_wire_integer(preflight.expires_utc_ms) ||
+        !valid_stable_value(preflight.message_code, kMaximumMessageCodeBytes)) {
+        return invalid("file restore preflight is invalid");
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void> validate_start_file_restore_command(const StartFileRestoreCommand& command) {
+    if (!valid_token(command.preflight_token) || !command.confirmed ||
+        (command.archive_secret_ref && command.archive_secret_ref->size() > 512)) {
+        return invalid("start file restore command is invalid");
     }
     return base::Result<void>::success();
 }

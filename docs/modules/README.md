@@ -19,13 +19,19 @@
 | `apps` | [apps.md](apps.md) | 进程入口、依赖注入和运行时边界 |
 | `apps/worker` | [worker_host.md](worker_host.md) | 单任务 Host、进程协议、deadline 与退出码 |
 | `apps/service` | [service_host.md](service_host.md) | 本地控制面 Host、Service IPC 与生命周期 |
-| Service 协议 V3 wire | [../protocol/SERVICE_CONTROL_PROTOCOL_V3.md](../protocol/SERVICE_CONTROL_PROTOCOL_V3.md) | Desktop↔Service 逐条 kind 字段、枚举与示例 JSON |
+| Service 协议 V4 wire | [../protocol/SERVICE_CONTROL_PROTOCOL_V4.md](../protocol/SERVICE_CONTROL_PROTOCOL_V4.md) | Desktop↔Service 逐条 kind 字段、枚举与示例 JSON（含文件浏览/恢复） |
 | `adapters/windows_ipc` | [windows_ipc.md](windows_ipc.md) | Named Pipe framing、Service ACL 与调用方身份 |
 | `apps/desktop` | [desktop.md](desktop.md) | Qt/QML 客户端、Service 连接与页面迁移边界 |
 | Repository Catalog 查询 | [personal_repository_catalog_query.md](personal_repository_catalog_query.md) | Scanner、Service 分页查询与 Desktop 列表 |
 | 个人版 Verify | [personal_archive_verify.md](personal_archive_verify.md) | `.bkf` 完整只读认证与解压校验 |
 | Windows 个人版恢复 | [windows_personal_restore.md](windows_personal_restore.md) | 卷恢复；Full/Incremental tip 整盘 disk→disk（Worker + Service + Desktop） |
+| Windows 文件集备份 | [windows_file_set_backup.md](windows_file_set_backup.md) | schema 4 file_set Full：VSS + Filesystem Adapter + FileSet Pipeline + V7 Archive |
 | Desktop / Service 完成计划 | [../migration/DESKTOP_SERVICE_COMPLETION_PLAN.md](../migration/DESKTOP_SERVICE_COMPLETION_PLAN.md) | UI 国际化、剩余页面迁移、Service 控制面与 agent 分工 |
+| 文件集备份与恢复设计 | [../architecture/FILE_SET_BACKUP_RESTORE.md](../architecture/FILE_SET_BACKUP_RESTORE.md) | 文件/目录保护、V7 Archive、V4 Service、Windows 文件语义与恢复边界 |
+| 文件集备份与恢复开发计划 | [../development/FILE_SET_BACKUP_DEVELOPMENT_PLAN.md](../development/FILE_SET_BACKUP_DEVELOPMENT_PLAN.md) | F0-F11 工作包、agent 文件所有权、前置关系与验收 |
+| 文件集产品上限与稳定码 | [../development/FILE_SET_PRODUCT_LIMITS_AND_CODES.md](../development/FILE_SET_PRODUCT_LIMITS_AND_CODES.md) | 上限、message_code、人工损坏/失败矩阵 |
+| 个人版 `.bkf` V7 | [../format/PERSONAL_BACKUP_FORMAT_V7.md](../format/PERSONAL_BACKUP_FORMAT_V7.md) | volume_set/file_set Archive 字节布局与 File Index |
+| Repository Catalog V2 | [../format/PERSONAL_REPOSITORY_FORMAT_V2.md](../format/PERSONAL_REPOSITORY_FORMAT_V2.md) | content_kind 与文件统计可重建摘要 |
 
 ## 通用模块模板
 
@@ -42,4 +48,4 @@
 
 ## 当前阶段
 
-阶段 1 至阶段 13 已建立核心模块、个人版 Archive/Repository、Windows 数据源与 Worker、Service IPC、SQLite 控制面和 Qt Desktop 的主要纵向切片。当前 S4 已完成 Inventory、Repository connection 和多连接 Recovery Point API 并接入 Service composition root；后续阶段继续遵循本索引中的模块边界。仓库不维护测试用例，阶段验收使用生产 Target 构建、静态/架构检查和必要的人工运行或 UI 验证。
+阶段 1 至阶段 13 已建立核心模块、个人版 Archive/Repository、Windows 数据源与 Worker、Service IPC、SQLite 控制面和 Qt Desktop 的主要纵向切片。当前 S4 已完成 Inventory、Repository connection 和多连接 Recovery Point API 并接入 Service composition root。file_set 首版工作包 **F0–F10 已完成**（V7 Archive、Catalog V2、Service V4、Worker Full 备份/Verify/选择性恢复、Desktop UX、发布门禁）；**F11 文件级 Incremental 暂缓**。后续阶段继续遵循本索引中的模块边界。仓库不维护测试用例，阶段验收使用生产 Target 构建、静态/架构检查和必要的人工运行或 UI 验证。

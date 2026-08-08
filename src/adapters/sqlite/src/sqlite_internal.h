@@ -274,10 +274,10 @@ inline constexpr const char* kSelectConnectionSql =
     "WHERE connection_id = ?";
 
 inline constexpr const char* kSelectJobSql =
-    "SELECT job_id, trace_id, operation, state, created_utc_ms, started_utc_ms, completed_utc_ms, "
-    "source_ids, repository_connection_id, target_source_id, backup_type, parent_recovery_point_id, "
-    "preflight_token, message_code, idempotency_key, result_error_code, result_outcome, "
-    "result_message_code, exclude_page_and_hibernation_files, request_fingerprint "
+    "SELECT job_id, trace_id, operation, state, content_kind, created_utc_ms, started_utc_ms, "
+    "completed_utc_ms, source_ids, repository_connection_id, target_source_id, backup_type, "
+    "parent_recovery_point_id, preflight_token, message_code, idempotency_key, result_error_code, "
+    "result_outcome, result_message_code, exclude_page_and_hibernation_files, request_fingerprint "
     "FROM jobs WHERE job_id = ?";
 
 inline constexpr const char* kSelectCommandSql =
@@ -285,10 +285,25 @@ inline constexpr const char* kSelectCommandSql =
     "FROM commands WHERE idempotency_key = ?";
 
 inline constexpr const char* kSelectScheduleSql =
-    "SELECT schedule_id, display_name, enabled, source_ids, repository_connection_id, backup_type, "
-    "trigger_kind, local_minute_of_day, weekday_mask, timezone_id, next_run_utc_ms, "
-    "exclude_page_and_hibernation_files, encryption_enabled, archive_password_protected, "
-    "backup_set_uuid, last_recovery_point_id, created_utc_ms, updated_utc_ms "
-    "FROM schedules WHERE schedule_id = ?";
+    "SELECT schedule_id, display_name, enabled, content_kind, source_ids, owner_sid, "
+    "repository_connection_id, backup_type, trigger_kind, local_minute_of_day, weekday_mask, "
+    "timezone_id, next_run_utc_ms, exclude_page_and_hibernation_files, encryption_enabled, "
+    "archive_password_protected, backup_set_uuid, last_recovery_point_id, created_utc_ms, "
+    "updated_utc_ms FROM schedules WHERE schedule_id = ?";
+
+[[nodiscard]] std::string encode_relative_path_blob(
+    const std::vector<contracts::EncodedName>& components);
+[[nodiscard]] base::Result<std::vector<contracts::EncodedName>>
+decode_relative_path_blob(std::string_view encoded);
+[[nodiscard]] base::Result<void>
+replace_schedule_file_selections(sqlite3* db, std::string_view schedule_id,
+                                 const std::vector<contracts::FileSourceRef>& selections);
+[[nodiscard]] base::Result<std::vector<contracts::FileSourceRef>>
+load_schedule_file_selections(sqlite3* db, std::string_view schedule_id);
+[[nodiscard]] base::Result<void>
+replace_restore_preflight_entry_ids(sqlite3* db, std::string_view preflight_token,
+                                    const std::vector<std::string>& entry_ids);
+[[nodiscard]] base::Result<std::vector<std::string>>
+load_restore_preflight_entry_ids(sqlite3* db, std::string_view preflight_token);
 
 } // namespace aegra::adapters::sqlite::detail

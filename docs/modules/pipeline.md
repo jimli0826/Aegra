@@ -62,6 +62,24 @@ Recovery Point Reader -> Manifest Validation -> Chunk Resolver
 
 真实 transform、通用 Manifest 和个人 `.bkf` Session 属于阶段 3，不属于阶段 2。
 
+## FileSet Pipeline（F3）
+
+```text
+IFileSnapshotView -> FileSetBackupPipeline -> IFileBackupSession (finalize/commit)
+IFileRecoveryPointReader -> FileSetRestorePipeline -> IFileTreeSink
+```
+
+- 备份：分页枚举 → 计划 stream/hard-link → 按 block 读内容写 chunk → 写 entry spool → finalize/commit。
+  Adapter 在 entry 上填充 `platform_metadata`（含 security）；Pipeline 原样写入 index。
+- 恢复：选择闭包（目录 seed 展开全部可达后代 + 路径祖先）→ capability 预检 → 按深度建目录骨架 →
+  文件 staging/publish → reparse → 目录 metadata。`entry_ids` 是 seed，不是最终写出集合。
+  文件/目录始终应用时间戳与属性；仅当 `FileSetRestorePlan.restore_security=true` 时向 Sink
+  传递 `platform_metadata` 中的 security descriptor。
+  祖先遍历与 `path_for_entry` 带 visited/depth 上限，环或超深返回 `format.corrupt_index`。
+  Partial `stable_error_codes` 去重且 ≤ `kMaximumPartialRestoreErrorCodes`（64）；目录 metadata
+  失败会回退 `entries_restored` 并计入 `entries_failed`（仅对已成功 create 的目录）。
+- 不 include personal_archive 实现类、Windows filesystem 或 VSS；只依赖 ports + format 常量。
+
 ## 当前状态
 
 阶段 2 已实现 fixed-size raw Chunk、Memory Adapter、Backup/Restore Pipeline、按字节预算的有界队列、取消、Commit/Abort、Restore 预检和内存 roundtrip。
@@ -69,6 +87,10 @@ Recovery Point Reader -> Manifest Validation -> Chunk Resolver
 阶段 3 已完成第一条纵向切片：同一 Pipeline 可把 Memory Block Source 写入一个正式加密 metadata、逐块 Zstandard 压缩、Footer 完成标记的单 volume `.bkf`，再通过 `IRecoveryPointReader` 还原到 Block Sink。Pipeline 没有新增对具体 Adapter 的依赖。后续 Transform 组合接口将用于企业 Repository、payload 加密和去重，不把个人格式判断加入 Pipeline。
 
 阶段 6 的个人增量实现仍复用同一 Backup Pipeline 读取完整源，由 Archive Session 在 Adapter 内形成稀疏变化层；恢复侧由 Chain Reader 先合并为连续视图，再交给原 Restore Pipeline。Pipeline 不知道父 UUID、Sidecar 或个人备份链。
+
+F3 已实现 `FileSetBackupPipeline` / `FileSetRestorePipeline`。背压队列的 producer/consumer 线程模型与
+百万级 multi-leaf 优化在 F5 纵向切片继续加强；当前实现为可取消的顺序数据面。F10 将 file_set 首版
+Pipeline 路径纳入发布门禁（与 volume Pipeline 并存；无兼容分支）。
 
 ## 验证
 

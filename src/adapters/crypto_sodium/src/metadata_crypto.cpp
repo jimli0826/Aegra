@@ -14,7 +14,7 @@ namespace {
 
 inline constexpr std::uint64_t kMaximumOpslimit = 10;
 inline constexpr std::uint64_t kMaximumMemlimitBytes = 1024ULL * 1024ULL * 1024ULL;
-inline constexpr std::string_view kMetadataContext = "MYBACKUP-V6-CBOR-METADATA";
+inline constexpr std::string_view kMetadataContext = "MYBACKUP-V7-CBOR-METADATA";
 
 class SensitiveKey final {
   public:

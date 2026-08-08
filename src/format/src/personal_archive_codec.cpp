@@ -13,7 +13,9 @@ namespace {
 
 constexpr std::array<char, 8> kBackupMagic = {'M', 'Y', 'B', 'A', 'C', 'K', 'U', 'P'};
 constexpr std::array<char, 8> kEnvelopeMagic = {'M', 'Y', 'B', 'K', 'C', 'B', 'R', '\0'};
+constexpr std::array<char, 8> kRecordMagic = {'M', 'Y', 'B', 'K', 'R', 'E', 'C', '\0'};
 constexpr std::array<char, 8> kChunkMagic = {'M', 'Y', 'B', 'K', 'C', 'H', 'K', '\0'};
+constexpr std::array<char, 8> kIndexPageMagic = {'M', 'Y', 'B', 'K', 'I', 'D', 'X', '\0'};
 constexpr std::array<char, 8> kFooterMagic = {'M', 'Y', 'B', 'K', 'E', 'N', 'D', '\0'};
 
 [[nodiscard]] base::Error corrupt(std::string message) {
@@ -87,11 +89,54 @@ template <std::size_t Size>
                        [](const std::byte item) { return item == std::byte{0}; });
 }
 
+[[nodiscard]] bool is_zero_span(const std::span<const std::byte> value) noexcept {
+    return std::all_of(value.begin(), value.end(),
+                       [](const std::byte item) { return item == std::byte{0}; });
+}
+
 [[nodiscard]] base::Result<void> validate_parent_uuid(const BackupHeader& header,
                                                       const std::uint32_t backup_type) {
     const bool parent_is_zero = is_zero_uuid(header.parent_uuid);
     if ((backup_type == kBackupFlagFull) != parent_is_zero) {
         return base::Result<void>::failure(corrupt("backup parent UUID is invalid"));
+    }
+    return base::Result<void>::success();
+}
+
+[[nodiscard]] base::Result<void> validate_block_size(const BackupHeader& header) {
+    if (header.block_size == 0 || header.block_size > kMaximumBlockSizeBytes) {
+        return base::Result<void>::failure(corrupt("backup block size is invalid"));
+    }
+    if (header.content_kind == kContentKindVolumeSet) {
+        if (header.block_size % kVolumeBlockSizeAlignment != 0) {
+            return base::Result<void>::failure(corrupt("volume block size alignment is invalid"));
+        }
+        return base::Result<void>::success();
+    }
+    if (header.block_size < kMinimumFileBlockSizeBytes ||
+        header.block_size % kFileBlockSizeAlignment != 0) {
+        return base::Result<void>::failure(corrupt("file block size is invalid"));
+    }
+    return base::Result<void>::success();
+}
+
+[[nodiscard]] base::Result<void> validate_content_kind(const BackupHeader& header) {
+    if (header.content_kind != kContentKindVolumeSet &&
+        header.content_kind != kContentKindFileSet) {
+        return base::Result<void>::failure(corrupt("backup content kind is invalid"));
+    }
+    const auto known_caps = kCapabilityHasFileIndex | kCapabilityVolumeSidecarOk;
+    if ((header.capability_flags & ~known_caps) != 0) {
+        return base::Result<void>::failure(corrupt("backup capability flags are unknown"));
+    }
+    if (header.content_kind == kContentKindFileSet) {
+        const auto backup_type =
+            header.flags & (kBackupFlagFull | kBackupFlagIncremental | kBackupFlagDifferential);
+        if (backup_type != kBackupFlagFull || !is_zero_uuid(header.parent_uuid) ||
+            (header.capability_flags & kCapabilityHasFileIndex) == 0 ||
+            (header.capability_flags & kCapabilityVolumeSidecarOk) != 0) {
+            return base::Result<void>::failure(corrupt("file_set header flags are invalid"));
+        }
     }
     return base::Result<void>::success();
 }
@@ -102,9 +147,16 @@ template <std::size_t Size>
                                  kBackupFlagSplit;
     const auto backup_type =
         header.flags & (kBackupFlagFull | kBackupFlagIncremental | kBackupFlagDifferential);
-    if (header.block_size == 0 || header.default_chunk_size == 0 ||
-        (header.flags & ~known_flags) != 0) {
+    if (header.default_chunk_size == 0 || (header.flags & ~known_flags) != 0) {
         return base::Result<void>::failure(corrupt("backup header fields are invalid"));
+    }
+    auto block_size = validate_block_size(header);
+    if (!block_size) {
+        return block_size;
+    }
+    auto content = validate_content_kind(header);
+    if (!content) {
+        return content;
     }
     const bool encrypted = (header.flags & kBackupFlagEncrypted) != 0;
     if (encrypted) {
@@ -134,8 +186,11 @@ template <std::size_t Size>
 
 [[nodiscard]] base::Result<void> validate_primary_header(const BackupHeader& header) {
     if (header.cbor_size == 0 || header.cbor_offset != kBackupHeaderSize ||
-        header.first_chunk_offset != header.cbor_offset + header.cbor_size) {
+        header.first_record_offset != header.cbor_offset + header.cbor_size) {
         return base::Result<void>::failure(corrupt("primary header offsets are inconsistent"));
+    }
+    if (header.cbor_size > kMaximumCborMetadataBytes + kMetadataEnvelopeHeaderSize + 16U) {
+        return base::Result<void>::failure(corrupt("primary metadata size exceeds limit"));
     }
     return base::Result<void>::success();
 }
@@ -157,7 +212,7 @@ template <std::size_t Size>
         return validate_primary_header(header);
     }
     if (header.cbor_offset != kBackupHeaderSize || header.cbor_size != 0 ||
-        header.first_chunk_offset != kBackupHeaderSize) {
+        header.first_record_offset != kBackupHeaderSize) {
         return base::Result<void>::failure(corrupt("continuation header offsets are invalid"));
     }
     return base::Result<void>::success();
@@ -221,7 +276,63 @@ template <std::size_t Size>
     return base::Result<void>::success();
 }
 
+[[nodiscard]] base::Result<void> validate_record_prefix(const ArchiveRecordPrefix& prefix) {
+    if (prefix.prefix_version != kRecordPrefixVersion) {
+        return base::Result<void>::failure(unsupported("archive record prefix version unsupported"));
+    }
+    switch (prefix.record_kind) {
+    case kRecordKindVolumeChunk:
+        if (prefix.header_size != kVolumeChunkRecordHeaderSize) {
+            return base::Result<void>::failure(corrupt("volume chunk record header size invalid"));
+        }
+        break;
+    case kRecordKindFileStreamChunk:
+        if (prefix.header_size != kFileStreamChunkRecordHeaderSize) {
+            return base::Result<void>::failure(
+                corrupt("file stream chunk record header size invalid"));
+        }
+        break;
+    case kRecordKindFileIndexPage:
+        if (prefix.header_size != kFileIndexPageRecordHeaderSize) {
+            return base::Result<void>::failure(corrupt("index page record header size invalid"));
+        }
+        break;
+    case kRecordKindFooter:
+        if (prefix.header_size != kArchiveRecordPrefixSize ||
+            prefix.body_size != kBackupFooterBodySize) {
+            return base::Result<void>::failure(corrupt("footer record sizes are invalid"));
+        }
+        break;
+    default:
+        return base::Result<void>::failure(corrupt("archive record kind is unknown"));
+    }
+    if (prefix.flags != 0 || prefix.header_size < kArchiveRecordPrefixSize) {
+        return base::Result<void>::failure(corrupt("archive record prefix fields are invalid"));
+    }
+    return base::Result<void>::success();
+}
+
 } // namespace
+
+ArchiveRecordPrefix make_volume_chunk_record_prefix(const std::uint64_t body_size) noexcept {
+    return {kRecordPrefixVersion, kRecordKindVolumeChunk, kVolumeChunkRecordHeaderSize, body_size,
+            0};
+}
+
+ArchiveRecordPrefix make_file_stream_chunk_record_prefix(const std::uint64_t body_size) noexcept {
+    return {kRecordPrefixVersion, kRecordKindFileStreamChunk, kFileStreamChunkRecordHeaderSize,
+            body_size, 0};
+}
+
+ArchiveRecordPrefix make_file_index_page_record_prefix(const std::uint64_t body_size) noexcept {
+    return {kRecordPrefixVersion, kRecordKindFileIndexPage, kFileIndexPageRecordHeaderSize,
+            body_size, 0};
+}
+
+ArchiveRecordPrefix make_footer_record_prefix() noexcept {
+    return {kRecordPrefixVersion, kRecordKindFooter, kArchiveRecordPrefixSize, kBackupFooterBodySize,
+            0};
+}
 
 base::Result<EncodedBackupHeader> encode_backup_header(const BackupHeader& header) {
     auto validation = validate_header(header);
@@ -241,13 +352,17 @@ base::Result<EncodedBackupHeader> encode_backup_header(const BackupHeader& heade
     write_integer(output, 72, header.cbor_offset);
     write_integer(output, 80, header.cbor_size);
     write_integer(output, 88, header.cbor_schema_version);
-    write_integer(output, 92, header.first_chunk_offset);
+    write_integer(output, 92, header.first_record_offset);
     write_integer(output, 100, header.default_chunk_size);
     output[104] = static_cast<std::byte>(header.compression_method);
     output[105] = static_cast<std::byte>(header.encryption_method);
-    write_integer(output, 106, header.split_part_index);
-    write_integer(output, 110, header.split_part_count);
-    write_integer(output, 114, header.split_size_bytes);
+    output[106] = static_cast<std::byte>(header.content_kind);
+    output[107] = std::byte{0};
+    write_integer(output, 108, header.split_part_index);
+    write_integer(output, 112, header.split_part_count);
+    write_integer(output, 116, header.split_size_bytes);
+    write_integer(output, 124, header.capability_flags);
+    // reserved[128] already zero-initialized
     return base::Result<EncodedBackupHeader>::success(output);
 }
 
@@ -263,6 +378,10 @@ base::Result<BackupHeader> decode_backup_header(std::span<const std::byte> bytes
     if (read_integer<std::uint32_t>(bytes, 12) != kBackupHeaderSize) {
         return base::Result<BackupHeader>::failure(corrupt("backup header size is invalid"));
     }
+    if (std::to_integer<std::uint8_t>(bytes[107]) != 0 ||
+        !is_zero_span(bytes.subspan(128, 128))) {
+        return base::Result<BackupHeader>::failure(corrupt("backup header reserved fields are set"));
+    }
     BackupHeader result;
     result.file_uuid = read_bytes<16>(bytes, 16);
     result.backup_set_uuid = read_bytes<16>(bytes, 32);
@@ -272,18 +391,57 @@ base::Result<BackupHeader> decode_backup_header(std::span<const std::byte> bytes
     result.cbor_offset = read_integer<std::uint64_t>(bytes, 72);
     result.cbor_size = read_integer<std::uint64_t>(bytes, 80);
     result.cbor_schema_version = read_integer<std::uint32_t>(bytes, 88);
-    result.first_chunk_offset = read_integer<std::uint64_t>(bytes, 92);
+    result.first_record_offset = read_integer<std::uint64_t>(bytes, 92);
     result.default_chunk_size = read_integer<std::uint32_t>(bytes, 100);
     result.compression_method =
         static_cast<CompressionMethod>(std::to_integer<std::uint8_t>(bytes[104]));
     result.encryption_method =
         static_cast<PayloadEncryptionMethod>(std::to_integer<std::uint8_t>(bytes[105]));
-    result.split_part_index = read_integer<std::uint32_t>(bytes, 106);
-    result.split_part_count = read_integer<std::uint32_t>(bytes, 110);
-    result.split_size_bytes = read_integer<std::uint64_t>(bytes, 114);
+    result.content_kind = std::to_integer<std::uint8_t>(bytes[106]);
+    result.split_part_index = read_integer<std::uint32_t>(bytes, 108);
+    result.split_part_count = read_integer<std::uint32_t>(bytes, 112);
+    result.split_size_bytes = read_integer<std::uint64_t>(bytes, 116);
+    result.capability_flags = read_integer<std::uint32_t>(bytes, 124);
     auto validation = validate_header(result);
     return validation ? base::Result<BackupHeader>::success(result)
                       : base::Result<BackupHeader>::failure(validation.error());
+}
+
+base::Result<EncodedArchiveRecordPrefix>
+encode_archive_record_prefix(const ArchiveRecordPrefix& prefix) {
+    auto validation = validate_record_prefix(prefix);
+    if (!validation) {
+        return base::Result<EncodedArchiveRecordPrefix>::failure(validation.error());
+    }
+    EncodedArchiveRecordPrefix output{};
+    write_magic(output, kRecordMagic);
+    write_integer<std::uint16_t>(output, 8, prefix.prefix_version);
+    write_integer<std::uint16_t>(output, 10, prefix.record_kind);
+    write_integer(output, 12, prefix.header_size);
+    write_integer(output, 16, prefix.body_size);
+    write_integer(output, 24, prefix.flags);
+    write_integer(output, 28, std::uint32_t{0});
+    return base::Result<EncodedArchiveRecordPrefix>::success(output);
+}
+
+base::Result<ArchiveRecordPrefix> decode_archive_record_prefix(std::span<const std::byte> bytes) {
+    if (bytes.size() < kArchiveRecordPrefixSize || !has_magic(bytes, kRecordMagic)) {
+        return base::Result<ArchiveRecordPrefix>::failure(
+            corrupt("archive record prefix is invalid"));
+    }
+    if (!is_zero_span(bytes.subspan(28, 4))) {
+        return base::Result<ArchiveRecordPrefix>::failure(
+            corrupt("archive record prefix reserved is set"));
+    }
+    ArchiveRecordPrefix result;
+    result.prefix_version = read_integer<std::uint16_t>(bytes, 8);
+    result.record_kind = read_integer<std::uint16_t>(bytes, 10);
+    result.header_size = read_integer<std::uint32_t>(bytes, 12);
+    result.body_size = read_integer<std::uint64_t>(bytes, 16);
+    result.flags = read_integer<std::uint32_t>(bytes, 24);
+    auto validation = validate_record_prefix(result);
+    return validation ? base::Result<ArchiveRecordPrefix>::success(result)
+                      : base::Result<ArchiveRecordPrefix>::failure(validation.error());
 }
 
 base::Result<EncodedMetadataEnvelopeHeader>
@@ -347,7 +505,9 @@ decode_metadata_envelope_header(std::span<const std::byte> bytes) {
 
 base::Result<EncodedChunkHeader> encode_chunk_header(const ChunkHeader& header) {
     if (header.block_entry_count == 0 || header.flags != 0 || header.header_crc32 != 0 ||
-        is_zero_bytes(header.payload_nonce)) {
+        is_zero_bytes(header.payload_nonce) || header.source_type != kSourceTypeVolume ||
+        header.block_entry_count > kMaximumBlockEntriesPerChunk ||
+        header.payload_size > kMaximumChunkPayloadBytes) {
         return base::Result<EncodedChunkHeader>::failure(
             corrupt("chunk encryption fields are invalid"));
     }
@@ -391,10 +551,124 @@ base::Result<ChunkHeader> decode_chunk_header(std::span<const std::byte> bytes) 
                     [](const std::byte value) { return value == std::byte{0}; });
     if (result.block_entry_count == 0 || result.flags != 0 || result.header_crc32 != 0 ||
         is_zero_bytes(result.payload_nonce) || !reserved_source_is_zero ||
-        !reserved_fields_are_zero) {
+        !reserved_fields_are_zero || result.source_type != kSourceTypeVolume ||
+        result.block_entry_count > kMaximumBlockEntriesPerChunk ||
+        result.payload_size > kMaximumChunkPayloadBytes) {
         return base::Result<ChunkHeader>::failure(corrupt("chunk header fields are invalid"));
     }
     return base::Result<ChunkHeader>::success(result);
+}
+
+base::Result<EncodedFileStreamChunkHeader>
+encode_file_stream_chunk_header(const FileStreamChunkHeader& header) {
+    if (header.block_entry_count == 0 || header.chunk_flags != 0 ||
+        is_zero_bytes(header.payload_nonce) || header.source_type != kSourceTypeFileStream ||
+        header.block_entry_count > kMaximumBlockEntriesPerChunk ||
+        header.payload_size > kMaximumChunkPayloadBytes) {
+        return base::Result<EncodedFileStreamChunkHeader>::failure(
+            corrupt("file stream chunk header fields are invalid"));
+    }
+    EncodedFileStreamChunkHeader output{};
+    write_integer(output, 0, header.chunk_index);
+    output[8] = static_cast<std::byte>(header.source_type);
+    write_integer(output, 12, header.source_index);
+    write_integer(output, 16, header.block_entry_count);
+    write_integer(output, 24, header.payload_size);
+    write_integer(output, 32, header.chunk_flags);
+    write_bytes(output, 40, header.payload_nonce);
+    write_bytes(output, 64, header.payload_authentication_tag);
+    return base::Result<EncodedFileStreamChunkHeader>::success(output);
+}
+
+base::Result<FileStreamChunkHeader>
+decode_file_stream_chunk_header(std::span<const std::byte> bytes) {
+    if (bytes.size() < kFileStreamChunkHeaderSize) {
+        return base::Result<FileStreamChunkHeader>::failure(
+            corrupt("file stream chunk header is truncated"));
+    }
+    FileStreamChunkHeader result;
+    result.chunk_index = read_integer<std::uint64_t>(bytes, 0);
+    result.source_type = std::to_integer<std::uint8_t>(bytes[8]);
+    result.source_index = read_integer<std::uint32_t>(bytes, 12);
+    result.block_entry_count = read_integer<std::uint32_t>(bytes, 16);
+    result.payload_size = read_integer<std::uint64_t>(bytes, 24);
+    result.chunk_flags = read_integer<std::uint32_t>(bytes, 32);
+    result.payload_nonce = read_bytes<24>(bytes, 40);
+    result.payload_authentication_tag = read_bytes<16>(bytes, 64);
+    const bool reserved_zero =
+        std::all_of(bytes.begin() + 9, bytes.begin() + 12,
+                    [](const std::byte value) { return value == std::byte{0}; }) &&
+        std::all_of(bytes.begin() + 20, bytes.begin() + 24,
+                    [](const std::byte value) { return value == std::byte{0}; }) &&
+        std::all_of(bytes.begin() + 36, bytes.begin() + 40,
+                    [](const std::byte value) { return value == std::byte{0}; });
+    if (!reserved_zero || result.block_entry_count == 0 || result.chunk_flags != 0 ||
+        is_zero_bytes(result.payload_nonce) || result.source_type != kSourceTypeFileStream ||
+        result.block_entry_count > kMaximumBlockEntriesPerChunk ||
+        result.payload_size > kMaximumChunkPayloadBytes) {
+        return base::Result<FileStreamChunkHeader>::failure(
+            corrupt("file stream chunk header fields are invalid"));
+    }
+    return base::Result<FileStreamChunkHeader>::success(result);
+}
+
+base::Result<EncodedFileIndexPageHeader>
+encode_file_index_page_header(const FileIndexPageHeader& header) {
+    if (header.page_format_version != kFileIndexPageFormatVersion || header.page_id == 0 ||
+        header.plain_size == 0 || header.plain_size > kMaximumIndexPagePlainBytes ||
+        header.encoded_size != header.plain_size ||
+        header.protection_mode != kIndexProtectAead ||
+        (header.page_kind != kIndexPageLeaf && header.page_kind != kIndexPageInternal) ||
+        is_zero_bytes(header.nonce)) {
+        return base::Result<EncodedFileIndexPageHeader>::failure(
+            corrupt("file index page header fields are invalid"));
+    }
+    EncodedFileIndexPageHeader output{};
+    write_magic(output, kIndexPageMagic);
+    write_integer<std::uint16_t>(output, 8, header.page_format_version);
+    write_integer<std::uint16_t>(output, 10, header.page_kind);
+    write_integer(output, 12, header.page_id);
+    write_integer(output, 20, header.plain_size);
+    write_integer(output, 24, header.encoded_size);
+    output[28] = static_cast<std::byte>(header.protection_mode);
+    write_bytes(output, 32, header.nonce);
+    write_bytes(output, 56, header.authentication_tag);
+    write_bytes(output, 72, header.content_digest);
+    write_integer(output, 104, header.entry_count);
+    return base::Result<EncodedFileIndexPageHeader>::success(output);
+}
+
+base::Result<FileIndexPageHeader> decode_file_index_page_header(std::span<const std::byte> bytes) {
+    if (bytes.size() < kFileIndexPageHeaderSize || !has_magic(bytes, kIndexPageMagic)) {
+        return base::Result<FileIndexPageHeader>::failure(
+            corrupt("file index page header is invalid"));
+    }
+    FileIndexPageHeader result;
+    result.page_format_version = read_integer<std::uint16_t>(bytes, 8);
+    result.page_kind = read_integer<std::uint16_t>(bytes, 10);
+    result.page_id = read_integer<std::uint64_t>(bytes, 12);
+    result.plain_size = read_integer<std::uint32_t>(bytes, 20);
+    result.encoded_size = read_integer<std::uint32_t>(bytes, 24);
+    result.protection_mode = std::to_integer<std::uint8_t>(bytes[28]);
+    result.nonce = read_bytes<24>(bytes, 32);
+    result.authentication_tag = read_bytes<16>(bytes, 56);
+    result.content_digest = read_bytes<32>(bytes, 72);
+    result.entry_count = read_integer<std::uint32_t>(bytes, 104);
+    const bool reserved_zero =
+        std::all_of(bytes.begin() + 29, bytes.begin() + 32,
+                    [](const std::byte value) { return value == std::byte{0}; }) &&
+        std::all_of(bytes.begin() + 108, bytes.begin() + 112,
+                    [](const std::byte value) { return value == std::byte{0}; });
+    if (!reserved_zero || result.page_format_version != kFileIndexPageFormatVersion ||
+        result.page_id == 0 || result.plain_size == 0 ||
+        result.plain_size > kMaximumIndexPagePlainBytes ||
+        result.encoded_size != result.plain_size || result.protection_mode != kIndexProtectAead ||
+        (result.page_kind != kIndexPageLeaf && result.page_kind != kIndexPageInternal) ||
+        is_zero_bytes(result.nonce)) {
+        return base::Result<FileIndexPageHeader>::failure(
+            corrupt("file index page header fields are invalid"));
+    }
+    return base::Result<FileIndexPageHeader>::success(result);
 }
 
 base::Result<EncodedBlockEntry> encode_block_entry(const BlockEntry& entry) {
@@ -427,38 +701,80 @@ base::Result<BlockEntry> decode_block_entry(std::span<const std::byte> bytes) {
 }
 
 base::Result<EncodedBackupFooter> encode_backup_footer(const BackupFooter& footer) {
-    if (footer.file_size < kBackupFooterSize) {
+    if (footer.part_file_size < kBackupFooterSize) {
         return base::Result<EncodedBackupFooter>::failure(corrupt("footer file size is invalid"));
     }
+    const auto prefix = make_footer_record_prefix();
+    auto encoded_prefix = encode_archive_record_prefix(prefix);
+    if (!encoded_prefix) {
+        return base::Result<EncodedBackupFooter>::failure(encoded_prefix.error());
+    }
     EncodedBackupFooter output{};
-    write_magic(output, kFooterMagic);
-    write_integer<std::uint16_t>(output, 8, kFooterVersion);
-    write_integer<std::uint16_t>(output, 10, kFormatVersion);
-    write_integer<std::uint32_t>(output, 12, kBackupFooterSize);
-    write_integer(output, 16, footer.chunk_count);
-    write_integer(output, 24, footer.total_block_count);
-    write_integer(output, 32, footer.total_payload_size);
-    write_integer(output, 40, footer.file_size);
+    std::copy(encoded_prefix.value().begin(), encoded_prefix.value().end(), output.begin());
+    write_magic(std::span(output).subspan(32), kFooterMagic);
+    write_integer<std::uint16_t>(output, 40, kFooterVersion);
+    write_integer<std::uint16_t>(output, 42, kFormatVersion);
+    write_integer<std::uint32_t>(output, 44, kBackupFooterSize);
+    write_integer(output, 48, footer.volume_chunk_count);
+    write_integer(output, 56, footer.file_stream_chunk_count);
+    write_integer(output, 64, footer.index_page_count);
+    write_integer(output, 72, footer.total_block_entry_count);
+    write_integer(output, 80, footer.total_payload_size);
+    write_integer(output, 88, footer.logical_bytes);
+    write_integer(output, 96, footer.stored_bytes);
+    write_integer(output, 104, footer.entry_count);
+    write_integer(output, 112, footer.stream_count);
+    write_integer(output, 120, footer.index_root_part_index);
+    write_integer(output, 124, std::uint32_t{0});
+    write_integer(output, 128, footer.index_root_offset);
+    write_integer(output, 136, footer.index_root_page_id);
+    write_bytes(output, 144, footer.index_root_digest);
+    write_integer(output, 176, footer.part_file_size);
+    write_bytes(output, 184, footer.file_uuid);
+    // reserved body tail zero-initialized
     return base::Result<EncodedBackupFooter>::success(output);
 }
 
 base::Result<BackupFooter> decode_backup_footer(std::span<const std::byte> bytes) {
-    if (bytes.size() < kBackupFooterSize || !has_magic(bytes, kFooterMagic)) {
+    if (bytes.size() < kBackupFooterSize) {
         return base::Result<BackupFooter>::failure(corrupt("backup footer is invalid"));
     }
-    if (read_integer<std::uint16_t>(bytes, 8) != kFooterVersion ||
-        read_integer<std::uint16_t>(bytes, 10) != kFormatVersion) {
+    auto prefix = decode_archive_record_prefix(bytes.subspan(0, kArchiveRecordPrefixSize));
+    if (!prefix || prefix.value().record_kind != kRecordKindFooter) {
+        return base::Result<BackupFooter>::failure(
+            !prefix ? prefix.error() : corrupt("backup footer record kind is invalid"));
+    }
+    const auto body = bytes.subspan(kArchiveRecordPrefixSize);
+    if (!has_magic(body, kFooterMagic)) {
+        return base::Result<BackupFooter>::failure(corrupt("backup footer magic is invalid"));
+    }
+    if (read_integer<std::uint16_t>(body, 8) != kFooterVersion ||
+        read_integer<std::uint16_t>(body, 10) != kFormatVersion) {
         return base::Result<BackupFooter>::failure(unsupported("footer version is unsupported"));
     }
-    if (read_integer<std::uint32_t>(bytes, 12) != kBackupFooterSize) {
+    if (read_integer<std::uint32_t>(body, 12) != kBackupFooterSize) {
         return base::Result<BackupFooter>::failure(corrupt("footer size is invalid"));
     }
+    if (read_integer<std::uint32_t>(body, 92) != 0 || !is_zero_span(body.subspan(168, 312))) {
+        return base::Result<BackupFooter>::failure(corrupt("footer reserved fields are set"));
+    }
     BackupFooter result;
-    result.chunk_count = read_integer<std::uint64_t>(bytes, 16);
-    result.total_block_count = read_integer<std::uint64_t>(bytes, 24);
-    result.total_payload_size = read_integer<std::uint64_t>(bytes, 32);
-    result.file_size = read_integer<std::uint64_t>(bytes, 40);
-    if (result.file_size < kBackupFooterSize) {
+    result.volume_chunk_count = read_integer<std::uint64_t>(body, 16);
+    result.file_stream_chunk_count = read_integer<std::uint64_t>(body, 24);
+    result.index_page_count = read_integer<std::uint64_t>(body, 32);
+    result.total_block_entry_count = read_integer<std::uint64_t>(body, 40);
+    result.total_payload_size = read_integer<std::uint64_t>(body, 48);
+    result.logical_bytes = read_integer<std::uint64_t>(body, 56);
+    result.stored_bytes = read_integer<std::uint64_t>(body, 64);
+    result.entry_count = read_integer<std::uint64_t>(body, 72);
+    result.stream_count = read_integer<std::uint64_t>(body, 80);
+    result.index_root_part_index = read_integer<std::uint32_t>(body, 88);
+    result.index_root_offset = read_integer<std::uint64_t>(body, 96);
+    result.index_root_page_id = read_integer<std::uint64_t>(body, 104);
+    result.index_root_digest = read_bytes<32>(body, 112);
+    result.part_file_size = read_integer<std::uint64_t>(body, 144);
+    result.file_uuid = read_bytes<16>(body, 152);
+    if (result.part_file_size < kBackupFooterSize) {
         return base::Result<BackupFooter>::failure(corrupt("footer file size is invalid"));
     }
     return base::Result<BackupFooter>::success(result);

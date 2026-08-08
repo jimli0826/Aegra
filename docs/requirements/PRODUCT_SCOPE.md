@@ -12,12 +12,15 @@ Aegra Image 为 Windows 物理机和主流虚拟化平台提供映像级备份�
 ## 个人版范围
 
 - 卷、磁盘和系统备份。
-- 全量、差异和增量备份链。
+- 本机 NTFS/ReFS 文件/目录集（`file_set`）全量备份与选择性恢复（见
+  [ADR-0016](../adr/0016-file-set-backup-and-restore-boundary.md)）。
+- 全量、差异和增量备份链（**volume_set**；file_set 首版仅 Full）。
 - 本地、SMB、S3 和 Azure 等存储目标，通过统一 Storage Port 接入。
-- 卷恢复、整盘恢复、系统盘 WinPE 离线恢复。
-- 恢复点检查、文件级挂载和虚拟磁盘呈现。
+- 卷恢复、整盘恢复、系统盘 WinPE 离线恢复；文件恢复到用户选择的新目标目录。
+- 恢复点检查、文件级挂载和虚拟磁盘呈现（挂载仍以 volume 能力为主）。
 - 计划、保留策略、验证和任务进度。
-- 单文件 `.bkf` V6，格式见[个人版格式规范](../format/PERSONAL_BACKUP_FORMAT_V6.md)。
+- 单文件 `.bkf` **V7**，格式见[个人版格式规范](../format/PERSONAL_BACKUP_FORMAT_V7.md)；
+  Catalog **V2** 与 Service 控制面 **V4**。
 
 个人版不使用企业 CAS Repository，不要求 PostgreSQL，也不维护 Repository 级全局 Chunk Index。
 个人版可以使用受管理 Archive Store：`.bkf` Archive Group 是恢复权威，Storage Root 中的 Catalog 和

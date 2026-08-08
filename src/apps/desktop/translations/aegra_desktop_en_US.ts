@@ -621,6 +621,222 @@ Server: %1</translation>
         <source>Choose Files backup →</source>
         <translation>Choose Files backup →</translation>
     </message>
+    <message id="aegra.backup.wizard.files_unavailable">
+        <source>File browse is not available on this Service</source>
+        <translation>File browse is not available on this Service</translation>
+    </message>
+    <message id="aegra.file.browse.loading">
+        <source>Loading folders...</source>
+        <translation>Loading folders...</translation>
+    </message>
+    <message id="aegra.file.browse.empty">
+        <source>Expand a drive or folder to select files</source>
+        <translation>Expand a drive or folder to select files</translation>
+    </message>
+    <message id="aegra.file.browse.selected_label">
+        <source>Selected: %1</source>
+        <translation>Selected: %1</translation>
+    </message>
+    <message id="aegra.file.browse.selection_more">
+        <source>%1 (+%2 more)</source>
+        <translation>%1 (+%2 more)</translation>
+    </message>
+    <message id="aegra.file.browse.unsupported">
+        <source>Unsupported</source>
+        <translation>Unsupported</translation>
+    </message>
+    <message id="aegra.file.browse.unavailable">
+        <source>Unavailable</source>
+        <translation>Unavailable</translation>
+    </message>
+    <message id="aegra.file.browse.not_selectable">
+        <source>Not selectable</source>
+        <translation>Not selectable</translation>
+    </message>
+    <message id="aegra.error.file_browse.query_failed">
+        <source>Unable to browse local files</source>
+        <translation>Unable to browse local files</translation>
+    </message>
+    <message id="aegra.error.file_recover.query_failed">
+        <source>Unable to list files in this recovery point</source>
+        <translation>Unable to list files in this recovery point</translation>
+    </message>
+    <message id="aegra.error.file_restore.preflight_failed">
+        <source>Could not verify this restore. Check the target folder and try again.</source>
+        <translation>Could not verify this restore. Check the target folder and try again.</translation>
+    </message>
+    <message id="aegra.error.file_restore.command_failed">
+        <source>Unable to start file restore</source>
+        <translation>Unable to start file restore</translation>
+    </message>
+    <message id="aegra.error.file_restore.content_kind_mismatch">
+        <source>This recovery point is not a file backup</source>
+        <translation>This recovery point is not a file backup</translation>
+    </message>
+    <message id="aegra.error.file_restore.preflight_ok">
+        <source>Restore check completed</source>
+        <translation>Restore check completed</translation>
+    </message>
+    <message id="aegra.error.file_restore.preflight_expired">
+        <source>The restore check expired. Start restore again.</source>
+        <translation>The restore check expired. Start restore again.</translation>
+    </message>
+    <message id="aegra.error.file_restore.preflight_consumed">
+        <source>This restore was already started. Start a new restore if needed.</source>
+        <translation>This restore was already started. Start a new restore if needed.</translation>
+    </message>
+    <message id="aegra.error.file_restore.selection_limit">
+        <source>Too many files selected. Narrow the selection and try again.</source>
+        <translation>Too many files selected. Narrow the selection and try again.</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_capability_missing">
+        <source>The target folder does not support required features (for example ACL or alternate streams). Choose an NTFS folder.</source>
+        <translation>The target folder does not support required features (for example ACL or alternate streams). Choose an NTFS folder.</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_not_directory">
+        <source>Select a folder as the restore destination.</source>
+        <translation>Select a folder as the restore destination.</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_reparse_escape">
+        <source>The target path is not allowed (reparse or link escape).</source>
+        <translation>The target path is not allowed (reparse or link escape).</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_collision">
+        <source>A file with the same name already exists. In Options, choose Replace or Rename, then try again.</source>
+        <translation>A file with the same name already exists. In Options, choose Replace or Rename, then try again.</translation>
+    </message>
+    <message id="aegra.error.file_restore.rename_exhausted">
+        <source>Could not find a free name for renamed files. Clear old copies or choose Replace.</source>
+        <translation>Could not find a free name for renamed files. Clear old copies or choose Replace.</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_full">
+        <source>Not enough free space on the target volume. Free up space or choose another folder.</source>
+        <translation>Not enough free space on the target volume. Free up space or choose another folder.</translation>
+    </message>
+    <message id="aegra.error.file_restore.partial">
+        <source>Restore finished, but some items were skipped or failed.</source>
+        <translation>Restore finished, but some items were skipped or failed.</translation>
+    </message>
+    <message id="aegra.error.file_restore.failed_before_write">
+        <source>Restore failed before any files were written.</source>
+        <translation>Restore failed before any files were written.</translation>
+    </message>
+    <message id="aegra.error.file_restore.original_location_unsupported">
+        <source>Restoring to the original location is not supported for this item.</source>
+        <translation>Restoring to the original location is not supported for this item.</translation>
+    </message>
+    <message id="aegra.error.file_restore.system_directory_unsupported">
+        <source>Cannot restore into a protected system folder. Choose another destination.</source>
+        <translation>Cannot restore into a protected system folder. Choose another destination.</translation>
+    </message>
+    <message id="aegra.error.file_restore.completed">
+        <source>File restore completed</source>
+        <translation>File restore completed</translation>
+    </message>
+    <message id="aegra.error.file_recover.credential_required">
+        <source>Enter the archive password to list or restore files.</source>
+        <translation>Enter the archive password to list or restore files.</translation>
+    </message>
+    <message id="aegra.error.file_recover.credential_failed">
+        <source>Incorrect archive password. Check the password and try again.</source>
+        <translation>Incorrect archive password. Check the password and try again.</translation>
+    </message>
+    <message id="aegra.error.file_recover.corrupt">
+        <source>The archive is damaged or unreadable.</source>
+        <translation>The archive is damaged or unreadable.</translation>
+    </message>
+    <message id="aegra.error.file_recover.catalog_only">
+        <source>Only catalog information is available. Open the archive to browse files.</source>
+        <translation>Only catalog information is available. Open the archive to browse files.</translation>
+    </message>
+    <message id="aegra.restore.mode_files">
+        <source>Files</source>
+        <translation>Files</translation>
+    </message>
+    <message id="aegra.restore.file.capability_missing">
+        <source>Service does not support file restore</source>
+        <translation>Service does not support file restore</translation>
+    </message>
+    <message id="aegra.restore.file.loading_entries">
+        <source>Loading archive files...</source>
+        <translation>Loading archive files...</translation>
+    </message>
+    <message id="aegra.restore.file.select_entries">
+        <source>Select files or folders to restore</source>
+        <translation>Select files or folders to restore</translation>
+    </message>
+    <message id="aegra.restore.file.select_target">
+        <source>Select a target folder</source>
+        <translation>Select a target folder</translation>
+    </message>
+    <message id="aegra.restore.file.selection_required">
+        <source>Select files to restore and a target folder</source>
+        <translation>Select files to restore and a target folder</translation>
+    </message>
+    <message id="aegra.restore.file.started">
+        <source>File restore started</source>
+        <translation>File restore started</translation>
+    </message>
+    <message id="aegra.restore.file.source_title">
+        <source>Archive files</source>
+        <translation>Archive files</translation>
+    </message>
+    <message id="aegra.restore.file.source_hint">
+        <source>(expand folders and check items to restore)</source>
+        <translation>(expand folders and check items to restore)</translation>
+    </message>
+    <message id="aegra.restore.file.empty_entries">
+        <source>No files in this recovery point</source>
+        <translation>No files in this recovery point</translation>
+    </message>
+    <message id="aegra.restore.file.target_title">
+        <source>Target folder</source>
+        <translation>Target folder</translation>
+    </message>
+    <message id="aegra.restore.file.target_hint">
+        <source>(choose one directory on this PC)</source>
+        <translation>(choose one directory on this PC)</translation>
+    </message>
+    <message id="aegra.restore.file.target_empty">
+        <source>Expand a drive and choose one target folder</source>
+        <translation>Expand a drive and choose one target folder</translation>
+    </message>
+    <message id="aegra.restore.file.restore_security">
+        <source>Restore security (ACL)</source>
+        <translation>Restore security (ACL)</translation>
+    </message>
+    <message id="aegra.restore.file.restore_security_hint">
+        <source>Apply Owner, Group, DACL, and SACL from the archive. Uncheck to keep target default permissions (timestamps and attributes are still restored).</source>
+        <translation>Apply Owner, Group, DACL, and SACL from the archive. Uncheck to keep target default permissions (timestamps and attributes are still restored).</translation>
+    </message>
+    <message id="aegra.restore.file.restore_ads">
+        <source>Restore alternate data streams</source>
+        <translation>Restore alternate data streams</translation>
+    </message>
+    <message id="aegra.restore.file.restore_ads_hint">
+        <source>Restore NTFS alternate data streams (ADS) when present in the archive.</source>
+        <translation>Restore NTFS alternate data streams (ADS) when present in the archive.</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_policy">
+        <source>If a file already exists</source>
+        <translation>If a file already exists</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_fail">
+        <source>Skip (fail on conflict)</source>
+        <translation>Skip (fail on conflict)</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_replace">
+        <source>Replace existing</source>
+        <translation>Replace existing</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_rename">
+        <source>Rename restored file</source>
+        <translation>Rename restored file</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_policy_hint">
+        <source>Choose what happens when the target path already has a file with the same name.</source>
+        <translation>Choose what happens when the target path already has a file with the same name.</translation>
+    </message>
     <message id="aegra.backup.column.destination">
         <source>Destination</source>
         <translation>Destination</translation>

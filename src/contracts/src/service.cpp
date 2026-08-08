@@ -89,6 +89,15 @@ template <typename Payload, typename Validator>
     case ServiceRequestKind::kPlanDeleteRecoveryPoints:
     case ServiceRequestKind::kGetRecoveryPointLayout:
         return validate_payload<RecoveryPointRef>(request, validate_recovery_point_ref);
+    case ServiceRequestKind::kBrowseFileSources:
+        return validate_payload<BrowseFileSourcesRequest>(request,
+                                                          validate_browse_file_sources_request);
+    case ServiceRequestKind::kListRecoveryPointEntries:
+        return validate_payload<ListRecoveryPointEntriesRequest>(
+            request, validate_list_recovery_point_entries_request);
+    case ServiceRequestKind::kPrepareFileRestore:
+        return validate_payload<PrepareFileRestoreRequest>(request,
+                                                           validate_prepare_file_restore_request);
     default:
         return invalid("service query kind is invalid");
     }
@@ -126,6 +135,9 @@ template <typename Payload, typename Validator>
     case ServiceRequestKind::kExecuteDeletePlan:
         return validate_payload<ExecuteDeletePlanCommand>(request,
                                                           validate_execute_delete_plan_command);
+    case ServiceRequestKind::kStartFileRestore:
+        return validate_payload<StartFileRestoreCommand>(request,
+                                                         validate_start_file_restore_command);
     default:
         return invalid("service command kind is invalid");
     }
@@ -169,6 +181,15 @@ template <typename Payload, typename Validator>
     case ServiceRequestKind::kGetRecoveryPointLayout:
         return validate_response_payload<RecoveryPointLayout>(response,
                                                               validate_recovery_point_layout);
+    case ServiceRequestKind::kBrowseFileSources:
+        return validate_response_payload<FileSourceNodePage>(response,
+                                                             validate_file_source_node_page);
+    case ServiceRequestKind::kListRecoveryPointEntries:
+        return validate_response_payload<RecoveryPointEntryPage>(
+            response, validate_recovery_point_entry_page);
+    case ServiceRequestKind::kPrepareFileRestore:
+        return validate_response_payload<FileRestorePreflight>(response,
+                                                               validate_file_restore_preflight);
     default:
         return invalid("service query response kind is invalid");
     }
@@ -199,12 +220,13 @@ template <typename Payload, typename Validator>
 
 bool is_service_query_kind(const ServiceRequestKind kind) noexcept {
     return kind >= ServiceRequestKind::kGetServiceInfo &&
-           kind <= ServiceRequestKind::kGetRecoveryPointLayout;
+           kind <= ServiceRequestKind::kPrepareFileRestore;
 }
 
 bool is_service_command_kind(const ServiceRequestKind kind) noexcept {
-    return kind >= ServiceRequestKind::kAddRepositoryConnection &&
-           kind <= ServiceRequestKind::kExecuteDeletePlan;
+    return (kind >= ServiceRequestKind::kAddRepositoryConnection &&
+            kind <= ServiceRequestKind::kExecuteDeletePlan) ||
+           kind == ServiceRequestKind::kStartFileRestore;
 }
 
 base::Result<void> validate_service_request(const ServiceRequest& request) {
@@ -309,9 +331,11 @@ base::Result<void> validate_service_event(const ServiceEvent& event) {
     constexpr auto maximum_wire_integer =
         static_cast<std::uint64_t>((std::numeric_limits<std::int64_t>::max)());
     if (const auto* progress = std::get_if<TaskProgress>(&event.payload)) {
-        if (progress->logical_bytes > maximum_wire_integer ||
+        if ((progress->logical_bytes && *progress->logical_bytes > maximum_wire_integer) ||
             progress->processed_bytes > maximum_wire_integer ||
             progress->stored_bytes > maximum_wire_integer ||
+            progress->discovered_entries > maximum_wire_integer ||
+            progress->processed_entries > maximum_wire_integer ||
             !valid_stable_code(progress->message_code, kMaximumMessageCodeBytes)) {
             return invalid("service task progress exceeds the wire integer range");
         }

@@ -26,8 +26,9 @@ base::Result<void> invalid(const char* message) {
 }
 
 base::Result<void> validate_success(const TaskResult& result) {
-    if (result.error_code != base::ErrorCode::kNone || !result.warning_codes.empty()) {
-        return invalid("successful task result cannot contain errors or warnings");
+    if (result.error_code != base::ErrorCode::kNone || !result.warning_codes.empty() ||
+        result.partial_restore) {
+        return invalid("successful task result cannot contain errors, warnings, or partial restore");
     }
     return base::Result<void>::success();
 }
@@ -35,6 +36,9 @@ base::Result<void> validate_success(const TaskResult& result) {
 base::Result<void> validate_warning(const TaskResult& result) {
     if (result.error_code != base::ErrorCode::kNone || result.warning_codes.empty()) {
         return invalid("warning task result requires a warning and no error");
+    }
+    if (result.partial_restore) {
+        return validate_partial_restore_stats(*result.partial_restore);
     }
     return base::Result<void>::success();
 }
@@ -50,6 +54,9 @@ base::Result<void> validate_failure(const TaskResult& result) {
     if (result.error_code == base::ErrorCode::kNone ||
         result.error_code == base::ErrorCode::kCancelled) {
         return invalid("failed task result requires a non-cancellation error");
+    }
+    if (result.partial_restore) {
+        return validate_partial_restore_stats(*result.partial_restore);
     }
     return base::Result<void>::success();
 }
@@ -68,6 +75,11 @@ base::Result<void> validate_task_result(const TaskResult& result) {
     }
     if (!is_known_outcome(result.outcome) || has_empty_warning(result)) {
         return invalid("task result outcome or warning code is invalid");
+    }
+    if (result.logical_bytes > kMaximumWireInteger || result.stored_bytes > kMaximumWireInteger ||
+        result.chunk_count > kMaximumWireInteger || result.entry_count > kMaximumWireInteger ||
+        result.stream_count > kMaximumWireInteger) {
+        return invalid("task result integer exceeds wire range");
     }
     switch (result.outcome) {
     case TaskOutcome::kSucceeded:

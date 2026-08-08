@@ -228,6 +228,9 @@ using Json = nlohmann::json;
 [[nodiscard]] Manifest decode_root(const Json& root) {
     Manifest result;
     root.at("schema_version").get_to(result.schema_version);
+    if (root.contains("content_kind")) {
+        result.content_kind = root.at("content_kind").get<std::uint8_t>();
+    }
     for (const auto& disk : root.at("disks")) {
         result.disks.push_back(decode_disk(disk));
     }
@@ -252,6 +255,7 @@ using Json = nlohmann::json;
         volumes.push_back(encode_volume(volume));
     }
     return {{"schema_version", manifest.schema_version},
+            {"content_kind", manifest.content_kind},
             {"disks", std::move(disks)},
             {"system", encode_system(manifest.system)},
             {"backup_job", encode_job(manifest.backup_job)},

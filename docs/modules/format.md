@@ -12,7 +12,8 @@
 
 ### `personal_archive`
 
-实现个人版 `.bkf` Header、加密 CBOR Metadata、Chunk、BlockEntry、Footer 和 `.bhx` Sidecar。唯一权威规范是[个人版 V6 格式](../format/PERSONAL_BACKUP_FORMAT_V6.md)。
+实现个人版 `.bkf` Header、Archive Record、加密 CBOR Metadata、Volume/File Chunk、File Index page、
+BlockEntry、Footer 和 `.bhx` Sidecar。唯一权威规范是[个人版 V7 格式](../format/PERSONAL_BACKUP_FORMAT_V7.md)。
 
 ### `enterprise_repository`
 
@@ -40,13 +41,22 @@
 
 ## 当前状态
 
-阶段 3 已实现：
+F2（Personal Archive V7 + Catalog V2）已实现：
 
-- `Manifest` 的字符串键 CBOR 编解码和引用/唯一性校验；
-- `BackupHeader`、`CborMetadataEnvelopeHeader`、`ChunkHeader`、`BlockEntry`、`BackupFooter` 的显式小端编解码；
-- 整数 CBOR Map key、非法 magic/版本/尺寸、未加密 metadata envelope 和非法 BlockEntry 的拒绝路径。
+- `format_version=7` / `header_version=2` Header：`content_kind`、`capability_flags`、
+  `first_record_offset`；拒绝非 V7 与未知 capability bit；
+- 统一 `ArchiveRecordPrefix`（`MYBKREC`）包装 volume chunk、file stream chunk、index page 与 Footer；
+- Volume chunk 仍为 96 字节 kind 头；AAD = Header ‖ RecordPrefix ‖ ChunkHeader(tag=0) ‖ BlockEntry[]；
+- Footer 为 512 字节完整 record（prefix + body），含 file/index 统计与 index root 定位；
+- File Index page header codec 与 leaf/internal CBOR body codec（`file_index.h`）；
+- Manifest CBOR schema 1，根字段 `content_kind`；file_set 禁止 disks/volumes；
+- AEAD HKDF info 升级为 `MYBACKUP-V7-*`；
+- Catalog Entry schema 2：`content_kind`、`file_entry_count`、`file_stream_count`、`format_version=7`。
 
-当前实现不使用 packed C++ struct 直接映射外部字节。`.bhx` Sidecar 采用固定 96 字节头和显式小端 payload codec；DATA 使用 SHA-256，ZERO/SKIP hash 全零。V6 Header codec 区分非分卷、首卷和续卷规则，并校验全量/增量 `parent_uuid`。ChunkHeader 固定为 96 字节，保存独立 XChaCha20-Poly1305 nonce/tag；tag 清零的 Header 和全部 BlockEntry 作为 AAD。Adapter 已实现 Chunk Payload 认证加密、完整 chunk 边界分卷、末卷 Footer、多 Volume 全量/增量 Archive（父层有序 volume 几何与 Sidecar 块表匹配）、稀疏增量层和多 Volume 链式覆盖读取。DEDUP 写入、差异备份和多目标（多 volume 显式映射）Restore 仍是后续工作。
+Adapter 侧 volume session/reader 已按 V7 record 边界写读；`PersonalFileArchiveSession` /
+`PersonalFileArchiveReader` 支持单 leaf root 的 file_set 写入、Footer/`index_root_digest` 校验、
+分页 `list_children` 与 stream 范围读取。多 leaf 内部页与完整 Verify 编排在 F5/F7 继续。
+DEDUP 写入、差异备份和多目标 Restore 仍是后续工作。
 
 ## 完成标准
 

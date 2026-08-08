@@ -279,16 +279,9 @@ base::Result<void> publish_progress(ports::IProgressSink* sink, const BackupPlan
     if (!stored_ok) {
         return stored_ok;
     }
-    sink->publish(contracts::TaskProgress{
-        contracts::kTaskProgressSchemaVersion,
-        plan.job_id,
-        plan.trace_id,
-        phase,
-        logical,
-        processed.value(),
-        stored.value(),
-        backup_phase_message(phase),
-    });
+    sink->publish(contracts::make_byte_progress(plan.job_id, plan.trace_id, phase, logical,
+                                                processed.value(), stored.value(),
+                                                backup_phase_message(phase)));
     return base::Result<void>::success();
 }
 

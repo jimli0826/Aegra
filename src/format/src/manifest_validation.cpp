@@ -116,8 +116,24 @@ base::Result<void> validate_manifest(const Manifest& manifest) {
     if (manifest.schema_version != kManifestSchemaVersion) {
         return invalid("manifest schema version is unsupported");
     }
+    if (manifest.content_kind != kManifestContentKindVolumeSet &&
+        manifest.content_kind != kManifestContentKindFileSet) {
+        return invalid("manifest content kind is invalid");
+    }
     if (manifest.backup_job.created_utc.empty()) {
         return invalid("manifest backup creation time is required");
+    }
+    if (manifest.content_kind == kManifestContentKindFileSet) {
+        if (!manifest.disks.empty() || !manifest.volumes.empty()) {
+            return invalid("file_set manifest must not include disks or volumes");
+        }
+        if (manifest.backup_job.backup_type != BackupType::kFull) {
+            return invalid("file_set manifest requires full backup type");
+        }
+        return validate_extensions(manifest);
+    }
+    if (manifest.volumes.empty()) {
+        return invalid("volume_set manifest requires at least one volume");
     }
     auto disks = validate_disks(manifest.disks);
     if (!disks) {

@@ -1,10 +1,11 @@
 # ADR-0013：本地 Service 控制面协议 V3
 
-- 状态：Accepted
+- 状态：Superseded
 - 日期：2026-08-03
 - 决策者：Aegra 项目
 - 关联模块：contracts、application、apps/service、apps/desktop
 - 替代范围：ADR-0011 与 ADR-0012 中的 Service wire schema；传输与 Repository 权威决策不变
+- 被替代：wire schema 与 API version 由 [ADR-0017](0017-service-control-protocol-v4.md) 替代；本文保留作开发史
 
 ## 背景
 

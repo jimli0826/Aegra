@@ -53,6 +53,9 @@ base::Result<void> validate_task(const contracts::JobRequest& job,
         return valid_job;
     }
     // Credential refs carry dpapi-lm ciphertext for encrypted archives; empty when unencrypted.
+    if (job.content_kind != contracts::ContentKind::kVolumeSet) {
+        return invalid("volume backup task requires content_kind=volume_set");
+    }
     if (job.operation != contracts::JobOperation::kBackup || job.source_refs.empty() ||
         job.source_refs.size() > contracts::kMaximumBackupSources) {
         return invalid("personal backup task source count is invalid");
@@ -96,40 +99,33 @@ base::ErrorCode credential_error_code(const base::ErrorCode code) noexcept {
 contracts::TaskResult failed_result(const contracts::JobRequest& job, const base::ErrorCode code) {
     const auto outcome = code == base::ErrorCode::kCancelled ? contracts::TaskOutcome::kCancelled
                                                              : contracts::TaskOutcome::kFailed;
-    return contracts::TaskResult{
-        contracts::kTaskResultSchemaVersion,
-        job.job_id,
-        job.trace_id,
-        outcome,
-        code,
-        0,
-        0,
-        0,
-        message_code_for(code),
-        {},
-    };
+    contracts::TaskResult result;
+    result.job_id = job.job_id;
+    result.trace_id = job.trace_id;
+    result.outcome = outcome;
+    result.error_code = code;
+    result.message_code = message_code_for(code);
+    return result;
 }
 
 contracts::TaskResult completed_result(const contracts::JobRequest& job,
                                        const WindowsPersonalBackupResult& backup) {
     const bool has_warning = backup.snapshot_cleanup_error.has_value();
-    std::vector<std::string> warnings;
+    contracts::TaskResult result;
+    result.job_id = job.job_id;
+    result.trace_id = job.trace_id;
+    result.outcome = has_warning ? contracts::TaskOutcome::kSucceededWithWarning
+                                 : contracts::TaskOutcome::kSucceeded;
+    result.error_code = base::ErrorCode::kNone;
+    result.logical_bytes = backup.backup.logical_bytes;
+    result.stored_bytes = backup.backup.stored_bytes;
+    result.chunk_count = backup.backup.chunk_count;
+    result.message_code =
+        has_warning ? "backup.completed_with_warning" : "backup.completed";
     if (has_warning) {
-        warnings.emplace_back("backup.snapshot_cleanup_failed");
+        result.warning_codes.emplace_back("backup.snapshot_cleanup_failed");
     }
-    return contracts::TaskResult{
-        contracts::kTaskResultSchemaVersion,
-        job.job_id,
-        job.trace_id,
-        has_warning ? contracts::TaskOutcome::kSucceededWithWarning
-                    : contracts::TaskOutcome::kSucceeded,
-        base::ErrorCode::kNone,
-        backup.backup.logical_bytes,
-        backup.backup.stored_bytes,
-        backup.backup.chunk_count,
-        has_warning ? "backup.completed_with_warning" : "backup.completed",
-        std::move(warnings),
-    };
+    return result;
 }
 
 base::Result<contracts::TaskResult> validated_task_result(contracts::TaskResult result) {
@@ -144,16 +140,8 @@ void publish_preparing(const contracts::JobRequest& job, ports::IProgressSink* p
     if (progress == nullptr) {
         return;
     }
-    progress->publish(contracts::TaskProgress{
-        contracts::kTaskProgressSchemaVersion,
-        job.job_id,
-        job.trace_id,
-        contracts::TaskPhase::kPreparing,
-        0,
-        0,
-        0,
-        "backup.preparing",
-    });
+    progress->publish(contracts::make_byte_progress(
+        job.job_id, job.trace_id, contracts::TaskPhase::kPreparing, 0, 0, 0, "backup.preparing"));
 }
 
 base::Result<std::string> format_utc(const std::int64_t utc_ms) {

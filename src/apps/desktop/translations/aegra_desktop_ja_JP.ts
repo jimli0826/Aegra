@@ -621,6 +621,222 @@ Server: %1</source>
         <source>Choose Files backup →</source>
         <translation>ファイルバックアップを選択 →</translation>
     </message>
+    <message id="aegra.backup.wizard.files_unavailable">
+        <source>File browse is not available on this Service</source>
+        <translation>この Service ではファイル参照を利用できません</translation>
+    </message>
+    <message id="aegra.file.browse.loading">
+        <source>Loading folders...</source>
+        <translation>フォルダーを読み込み中…</translation>
+    </message>
+    <message id="aegra.file.browse.empty">
+        <source>Expand a drive or folder to select files</source>
+        <translation>ドライブまたはフォルダーを展開してファイルを選択します</translation>
+    </message>
+    <message id="aegra.file.browse.selected_label">
+        <source>Selected: %1</source>
+        <translation>選択済み: %1</translation>
+    </message>
+    <message id="aegra.file.browse.selection_more">
+        <source>%1 (+%2 more)</source>
+        <translation>%1（他 %2 件）</translation>
+    </message>
+    <message id="aegra.file.browse.unsupported">
+        <source>Unsupported</source>
+        <translation>非対応</translation>
+    </message>
+    <message id="aegra.file.browse.unavailable">
+        <source>Unavailable</source>
+        <translation>利用不可</translation>
+    </message>
+    <message id="aegra.file.browse.not_selectable">
+        <source>Not selectable</source>
+        <translation>選択不可</translation>
+    </message>
+    <message id="aegra.error.file_browse.query_failed">
+        <source>Unable to browse local files</source>
+        <translation>ローカルファイルを参照できません</translation>
+    </message>
+    <message id="aegra.error.file_recover.query_failed">
+        <source>Unable to list files in this recovery point</source>
+        <translation>この復旧ポイントのファイルを一覧表示できません</translation>
+    </message>
+    <message id="aegra.error.file_restore.preflight_failed">
+        <source>Could not verify this restore. Check the target folder and try again.</source>
+        <translation>復元の事前確認に失敗しました。ターゲットフォルダーを確認して再試行してください。</translation>
+    </message>
+    <message id="aegra.error.file_restore.command_failed">
+        <source>Unable to start file restore</source>
+        <translation>ファイル復元を開始できません</translation>
+    </message>
+    <message id="aegra.error.file_restore.content_kind_mismatch">
+        <source>This recovery point is not a file backup</source>
+        <translation>この復旧ポイントはファイルバックアップではありません</translation>
+    </message>
+    <message id="aegra.error.file_restore.preflight_ok">
+        <source>Restore check completed</source>
+        <translation>復元チェックが完了しました</translation>
+    </message>
+    <message id="aegra.error.file_restore.preflight_expired">
+        <source>The restore check expired. Start restore again.</source>
+        <translation>復元チェックの有効期限が切れました。もう一度開始してください。</translation>
+    </message>
+    <message id="aegra.error.file_restore.preflight_consumed">
+        <source>This restore was already started. Start a new restore if needed.</source>
+        <translation>この復元は既に開始されています。必要なら新しく開始してください。</translation>
+    </message>
+    <message id="aegra.error.file_restore.selection_limit">
+        <source>Too many files selected. Narrow the selection and try again.</source>
+        <translation>選択したファイルが多すぎます。選択を減らして再試行してください。</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_capability_missing">
+        <source>The target folder does not support required features (for example ACL or alternate streams). Choose an NTFS folder.</source>
+        <translation>ターゲットフォルダーが必要な機能（ACL や代替ストリームなど）に対応していません。NTFS フォルダーを選んでください。</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_not_directory">
+        <source>Select a folder as the restore destination.</source>
+        <translation>復元先としてフォルダーを選択してください。</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_reparse_escape">
+        <source>The target path is not allowed (reparse or link escape).</source>
+        <translation>ターゲットパスは許可されていません（リパース/リンク逸脱）。</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_collision">
+        <source>A file with the same name already exists. In Options, choose Replace or Rename, then try again.</source>
+        <translation>同名のファイルが既にあります。オプションで「置き換え」または「リネーム」を選んで再試行してください。</translation>
+    </message>
+    <message id="aegra.error.file_restore.rename_exhausted">
+        <source>Could not find a free name for renamed files. Clear old copies or choose Replace.</source>
+        <translation>リネーム用の空き名が見つかりません。古いコピーを削除するか置き換えを選んでください。</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_full">
+        <source>Not enough free space on the target volume. Free up space or choose another folder.</source>
+        <translation>ターゲットの空き容量が不足しています。容量を空けるか別のフォルダーを選んでください。</translation>
+    </message>
+    <message id="aegra.error.file_restore.partial">
+        <source>Restore finished, but some items were skipped or failed.</source>
+        <translation>復元は完了しましたが、一部の項目がスキップまたは失敗しました。</translation>
+    </message>
+    <message id="aegra.error.file_restore.failed_before_write">
+        <source>Restore failed before any files were written.</source>
+        <translation>ファイル書き込み前に復元が失敗しました。</translation>
+    </message>
+    <message id="aegra.error.file_restore.original_location_unsupported">
+        <source>Restoring to the original location is not supported for this item.</source>
+        <translation>この項目の元の場所への復元はサポートされていません。</translation>
+    </message>
+    <message id="aegra.error.file_restore.system_directory_unsupported">
+        <source>Cannot restore into a protected system folder. Choose another destination.</source>
+        <translation>保護されたシステムフォルダーには復元できません。別の場所を選んでください。</translation>
+    </message>
+    <message id="aegra.error.file_restore.completed">
+        <source>File restore completed</source>
+        <translation>ファイル復元が完了しました</translation>
+    </message>
+    <message id="aegra.error.file_recover.credential_required">
+        <source>Enter the archive password to list or restore files.</source>
+        <translation>ファイルの一覧表示または復元にはアーカイブのパスワードが必要です。</translation>
+    </message>
+    <message id="aegra.error.file_recover.credential_failed">
+        <source>Incorrect archive password. Check the password and try again.</source>
+        <translation>アーカイブのパスワードが正しくありません。確認して再試行してください。</translation>
+    </message>
+    <message id="aegra.error.file_recover.corrupt">
+        <source>The archive is damaged or unreadable.</source>
+        <translation>アーカイブが破損しているか読み取れません。</translation>
+    </message>
+    <message id="aegra.error.file_recover.catalog_only">
+        <source>Only catalog information is available. Open the archive to browse files.</source>
+        <translation>カタログ情報のみ利用可能です。ファイルを見るにはアーカイブを開いてください。</translation>
+    </message>
+    <message id="aegra.restore.mode_files">
+        <source>Files</source>
+        <translation>ファイル</translation>
+    </message>
+    <message id="aegra.restore.file.capability_missing">
+        <source>Service does not support file restore</source>
+        <translation>Service はファイル復元に対応していません</translation>
+    </message>
+    <message id="aegra.restore.file.loading_entries">
+        <source>Loading archive files...</source>
+        <translation>アーカイブファイルを読み込み中…</translation>
+    </message>
+    <message id="aegra.restore.file.select_entries">
+        <source>Select files or folders to restore</source>
+        <translation>復元するファイルまたはフォルダーを選択してください</translation>
+    </message>
+    <message id="aegra.restore.file.select_target">
+        <source>Select a target folder</source>
+        <translation>ターゲットフォルダーを選択してください</translation>
+    </message>
+    <message id="aegra.restore.file.selection_required">
+        <source>Select files to restore and a target folder</source>
+        <translation>復元するファイルとターゲットフォルダーを選択してください</translation>
+    </message>
+    <message id="aegra.restore.file.started">
+        <source>File restore started</source>
+        <translation>ファイル復元を開始しました</translation>
+    </message>
+    <message id="aegra.restore.file.source_title">
+        <source>Archive files</source>
+        <translation>アーカイブファイル</translation>
+    </message>
+    <message id="aegra.restore.file.source_hint">
+        <source>(expand folders and check items to restore)</source>
+        <translation>（フォルダーを展開し、復元する項目にチェック）</translation>
+    </message>
+    <message id="aegra.restore.file.empty_entries">
+        <source>No files in this recovery point</source>
+        <translation>この復旧ポイントにファイルはありません</translation>
+    </message>
+    <message id="aegra.restore.file.target_title">
+        <source>Target folder</source>
+        <translation>ターゲットフォルダー</translation>
+    </message>
+    <message id="aegra.restore.file.target_hint">
+        <source>(choose one directory on this PC)</source>
+        <translation>（この PC 上のディレクトリを 1 つ選択）</translation>
+    </message>
+    <message id="aegra.restore.file.target_empty">
+        <source>Expand a drive and choose one target folder</source>
+        <translation>ドライブを展開してターゲットフォルダーを 1 つ選択します</translation>
+    </message>
+    <message id="aegra.restore.file.restore_security">
+        <source>Restore security (ACL)</source>
+        <translation>セキュリティ（ACL）を復元</translation>
+    </message>
+    <message id="aegra.restore.file.restore_security_hint">
+        <source>Apply Owner, Group, DACL, and SACL from the archive. Uncheck to keep target default permissions (timestamps and attributes are still restored).</source>
+        <translation>アーカイブから所有者・グループ・DACL・SACL を適用します。オフにするとターゲット既定のアクセス権を維持します（タイムスタンプと属性は復元されます）。</translation>
+    </message>
+    <message id="aegra.restore.file.restore_ads">
+        <source>Restore alternate data streams</source>
+        <translation>代替データ ストリームを復元</translation>
+    </message>
+    <message id="aegra.restore.file.restore_ads_hint">
+        <source>Restore NTFS alternate data streams (ADS) when present in the archive.</source>
+        <translation>アーカイブに含まれる場合、NTFS 代替データ ストリーム（ADS）を復元します。</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_policy">
+        <source>If a file already exists</source>
+        <translation>ファイルが既に存在する場合</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_fail">
+        <source>Skip (fail on conflict)</source>
+        <translation>スキップ（競合で失敗）</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_replace">
+        <source>Replace existing</source>
+        <translation>既存を置き換え</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_rename">
+        <source>Rename restored file</source>
+        <translation>復元ファイルをリネーム</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_policy_hint">
+        <source>Choose what happens when the target path already has a file with the same name.</source>
+        <translation>ターゲットに同名ファイルがある場合の動作を選びます。</translation>
+    </message>
     <message id="aegra.backup.column.destination">
         <source>Destination</source>
         <translation>保存先</translation>

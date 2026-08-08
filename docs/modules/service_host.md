@@ -24,6 +24,7 @@ src/apps/service/
 │   └── worker_supervisor.h
 └── src/
     ├── recovery_point_layout_service.cpp  # GetRecoveryPointLayout：Catalog → Archive Manifest volumes
+    ├── file_recovery_point_query.cpp      # ListRecoveryPointEntries：file_set Index 分页
     ├── service_host.cpp
     ├── service_log_formatter.cpp
     ├── service_main.cpp
@@ -35,13 +36,15 @@ src/apps/service/
     ├── windows_service_control_win32.cpp
     ├── windows_service_scm_host.cpp
     ├── worker_job_service.cpp
+    ├── worker_job_service_file_restore.cpp  # PrepareFileRestore + StartFileRestore
+    ├── worker_job_service_restore.cpp      # volume PrepareRestore + StartRestore
     └── worker_supervisor.cpp
 ```
 
 - `aegra_app_service` / `Aegra::AppService`：依赖 Application、Base、Contracts、Ports、WindowsIpc；
   PRIVATE nlohmann-json 与 Advapi32。
 - `aegra_service.exe`：Composition Root，依赖 AppService、SQLite、Local Storage、Windows Disk、
-  Windows Process、Windows System 与 Windows IPC Adapter。
+  Windows Filesystem、Windows Process、Windows System 与 Windows IPC Adapter。
 - JSON、Win32、Qt、数据库类型不得进入 Contracts。
 
 ## 生命周期
@@ -149,3 +152,61 @@ per-file Archive Credential 映射与 Local Storage 故障恢复验证仍待补�
   `CRYPTPROTECT_LOCAL_MACHINE`（`pOptionalEntropy` = `schedule_id`）写入 SQLite
   `archive_password_protected`。`StartBackup` 仅接收 `schedule_id` + `backup_type`，从 Schedule
   展开其余参数与密文交给 Worker。Layout 当前优先打开无加密 Archive（空密码）。
+
+### F6：文件浏览与 file_set 备份编排
+
+- **API**：Service 控制协议 **V4**（见 [ADR-0017](../adr/0017-service-control-protocol-v4.md) 与
+  [SERVICE_CONTROL_PROTOCOL_V4](../protocol/SERVICE_CONTROL_PROTOCOL_V4.md)）。
+- **Browse**：`BrowseFileSources` 经 `FileBrowseService` 组合 Windows `IFileSourceBrowser`；
+  Service 铸造短期 opaque token（TTL、caller SID + pipe session 绑定、断线 `clear_session`）。
+  根节点仅包含带盘符的卷（如 `新加卷 (D:)` / `System (C:)`）；无盘符的系统隐藏分区
+  （EFI/MSR/Recovery 等）不进入树。子节点枚举跳过 `HIDDEN|SYSTEM` 与
+  `System Volume Information` / `$RECYCLE.BIN` 等系统保护项（仅浏览过滤，不改变备份语义）。
+  `display_name` 为 UTF-8（含中文等非 ASCII 文件名），不再做 ASCII `?` 投影。
+- **Session**：每个 Named Pipe 连接携带 `ServiceSessionContext`（peer SID + 唯一 session id）；
+  `UpsertSchedule` 用其解析 file_set selection 并写入 `owner_sid`。
+- **Schedule / Job**：控制面 schema **12**（含 F8 `restore_preflight_entry_ids`）；file_set selections
+  存 `schedule_file_selections`；`StartBackup` 按 `content_kind` 构造 schema 4 Worker Job
+  （file 路径走 `file_source_refs`，Job `source_ids` 仅为 selection UUID）。
+- **Capabilities**（在 volume 根可用时）：`file.browse`、`schedule.file_set`；F8 另声明
+  `file.restore`。
+- **Catalog 发布**：`BackupCatalogRegistrar` 按 `content_kind` 写 Catalog V2（file_set 无 sidecar /
+  source_volume_ids，写入 entry/stream 计数）。
+
+### F7：Recovery Point 文件查询与 Verify
+
+- **API**：kind 14 `ListRecoveryPointEntries`（capability `file.recover_browse`）。
+- **实现**：`file_recovery_point_query` 经 Catalog V2 定位 `file_set` Archive →
+  `PersonalFileArchiveReader` 认证 metadata/index → 分页 `list_children`；
+  `display_name` 为 UTF-16LE 名称的可打印 ASCII 投影（非路径）；响应不含 Archive key / stream offset。
+- **Continuation**：绑定 `index_generation`（index root digest）+ `parent_entry_id` + reader offset；
+  generation 变化或 parent 不匹配时拒绝。
+- **错误码**：`file_recover.credential_required|failed|corrupt|catalog_only`、
+  `service.content_kind_mismatch`（volume_set RP）。
+- **凭证**：先空口令打开未加密 Archive；失败且 connection 声明 `archive.default_credential` 时
+  使用 connection SecretRef；请求可带 `archive_secret_ref`（`dpapi-lm:`）。
+- **Verify**：runtime 声明 `recovery_point.verify`；`prepare_verify` 从 Catalog 设置 Job
+  `content_kind`；file_set 走 Worker 全量 stream 读取认证。
+
+### F8：文件选择性恢复
+
+- **API**：kind 15 `PrepareFileRestore` + kind 48 `StartFileRestore`（capability `file.restore`，
+  与 `file.browse` 同条件启用）。
+- **Prepare**：`FileBrowseService::resolve_selection` 解析 target 目录 token → inventory 拒绝 system /
+  read-only → `WindowsFileTreeSink` 探测 free_bytes 与 security 能力（ADS/sparse/reparse/hard link
+  本期仅 capabilities 声明，完整恢复不在本期）→ 打开 V7 File Archive 累加
+  entry logical size → 写入 durable preflight（TTL 30 min）：
+  - `chain_fingerprint` = `filec|archive_key|file_uuid|index_digest|…|target_root_identity`
+  - `entry_ids` 存 companion 表 `restore_preflight_entry_ids`（控制面 schema **12**）
+  - 不存 Archive/target 绝对路径或明文 Secret
+- **Start**：校验 token 未过期、`filec|` 前缀、唯一占用；重开 Archive 比对 `index_root_digest`；
+  构造 schema 4 Worker Job（`content_kind=file_set`、`file_restore_target`、DPAPI credential）。
+- **错误码**：`file_restore.preflight_ok|expired|consumed|target_full|system_directory_unsupported`
+  等；volume preflight token 不得启动 file restore。
+
+### F10：发布门禁
+
+- Debug/Release 生产构建通过；控制协议仅 V4、Job schema 仅 4、Catalog 仅 V2、控制面 schema 12；
+  无 V6 dual-read / V3 negotiation / SQLite migration 分支。
+- Capabilities 在 volume 根可用时声明：`file.browse`、`file.recover_browse`、`file.restore`、
+  `schedule.file_set`（与 volume 能力并存，不互相替换）。

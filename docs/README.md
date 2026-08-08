@@ -9,6 +9,12 @@
 3. [模块开发文档索引](modules/README.md)
 4. [架构决策记录规则](adr/README.md)
 
+专题设计与执行计划：
+
+- [文件集备份与恢复设计](architecture/FILE_SET_BACKUP_RESTORE.md)
+- [文件集备份与恢复分阶段开发计划](development/FILE_SET_BACKUP_DEVELOPMENT_PLAN.md)
+- [文件集产品上限、稳定码与验证矩阵](development/FILE_SET_PRODUCT_LIMITS_AND_CODES.md)
+
 现行核心决策：
 
 - [ADR-0001：个人版格式的加密与编解码依赖](adr/0001-personal-format-crypto-and-codec-dependencies.md)
@@ -17,14 +23,22 @@
 - [ADR-0004：个人版稀疏增量层与链式恢复视图](adr/0004-personal-incremental-layers-and-chain-reader.md)
 - [ADR-0010：个人版 Repository 权威边界与可重建目录](adr/0010-personal-repository-authority-and-catalog.md)
 - [ADR-0015：项目不维护自动化测试用例](adr/0015-no-project-test-suite.md)
+- [ADR-0016：文件集备份、恢复与个人 Archive V7 边界](adr/0016-file-set-backup-and-restore-boundary.md)
+- [ADR-0017：本地 Service 控制面协议 V4](adr/0017-service-control-protocol-v4.md)
 
 ## 权威格式与需求
 
-- [个人版 `.bkf` V6 格式](format/PERSONAL_BACKUP_FORMAT_V6.md)
-- [个人版 Repository Descriptor 与 Catalog V1](format/PERSONAL_REPOSITORY_FORMAT_V1.md)
-- [本地 Service 控制面协议 V3（逐条 wire 说明）](protocol/SERVICE_CONTROL_PROTOCOL_V3.md)
+- [个人版 `.bkf` V7 格式](format/PERSONAL_BACKUP_FORMAT_V7.md)
+- [个人版 Repository Descriptor 与 Catalog V2](format/PERSONAL_REPOSITORY_FORMAT_V2.md)
+- [本地 Service 控制面协议 V4（逐条 wire 说明）](protocol/SERVICE_CONTROL_PROTOCOL_V4.md)
 - [产品范围](requirements/PRODUCT_SCOPE.md)
 - [品牌与命名](branding/BRAND.md)
+
+开发史（生产不实现）：
+
+- [个人版 `.bkf` V6 格式](format/PERSONAL_BACKUP_FORMAT_V6.md)
+- [个人版 Repository Catalog V1](format/PERSONAL_REPOSITORY_FORMAT_V1.md)
+- [本地 Service 控制面协议 V3](protocol/SERVICE_CONTROL_PROTOCOL_V3.md)
 
 ## 文档权威顺序
 

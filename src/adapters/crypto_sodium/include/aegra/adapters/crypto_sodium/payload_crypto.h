@@ -35,6 +35,11 @@ class PayloadCipher final {
     create(std::string_view password, KdfParameters parameters,
            const std::array<std::byte, kMetadataSaltSize>& salt);
 
+    /// Same AEAD as create(), but HKDF info = MYBACKUP-V7-FILE-INDEX-PAGE.
+    [[nodiscard]] static base::Result<std::unique_ptr<PayloadCipher>>
+    create_index_page(std::string_view password, KdfParameters parameters,
+                      const std::array<std::byte, kMetadataSaltSize>& salt);
+
     [[nodiscard]] base::Result<ProtectedPayload>
     protect(std::span<const std::byte> plaintext, std::span<const std::byte> authenticated_data,
             const PayloadNonce& nonce) const;

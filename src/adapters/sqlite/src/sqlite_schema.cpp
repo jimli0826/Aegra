@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     trace_id TEXT NOT NULL,
     operation INTEGER NOT NULL CHECK (operation BETWEEN 1 AND 4),
     state INTEGER NOT NULL CHECK (state BETWEEN 1 AND 7),
+    content_kind INTEGER NOT NULL DEFAULT 1 CHECK (content_kind IN (1, 2)),
     created_utc_ms INTEGER NOT NULL CHECK (created_utc_ms >= 0),
     started_utc_ms INTEGER CHECK (started_utc_ms IS NULL OR started_utc_ms >= 0),
     completed_utc_ms INTEGER CHECK (completed_utc_ms IS NULL OR completed_utc_ms >= 0),
@@ -60,7 +61,9 @@ CREATE TABLE IF NOT EXISTS schedules (
     schedule_id TEXT PRIMARY KEY NOT NULL,
     display_name TEXT NOT NULL,
     enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+    content_kind INTEGER NOT NULL DEFAULT 1 CHECK (content_kind IN (1, 2)),
     source_ids TEXT NOT NULL,
+    owner_sid TEXT NOT NULL DEFAULT '',
     repository_connection_id TEXT NOT NULL,
     backup_type INTEGER NOT NULL CHECK (backup_type BETWEEN 1 AND 3),
     trigger_kind INTEGER NOT NULL CHECK (trigger_kind IN (1, 2)),
@@ -82,6 +85,23 @@ CREATE TABLE IF NOT EXISTS schedules (
         REFERENCES repository_connections(connection_id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS ix_schedules_enabled ON schedules(enabled, schedule_id);
+CREATE TABLE IF NOT EXISTS schedule_file_selections (
+    schedule_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL CHECK (ordinal >= 0 AND ordinal < 100),
+    selection_id TEXT NOT NULL,
+    volume_identity TEXT NOT NULL,
+    relative_path_blob TEXT NOT NULL,
+    entry_kind INTEGER NOT NULL CHECK (entry_kind BETWEEN 1 AND 4),
+    recursion INTEGER NOT NULL CHECK (recursion IN (1, 2)),
+    reparse_policy INTEGER NOT NULL CHECK (reparse_policy = 1),
+    unreadable_policy INTEGER NOT NULL CHECK (unreadable_policy = 1),
+    display_label TEXT NOT NULL,
+    PRIMARY KEY (schedule_id, ordinal),
+    UNIQUE (schedule_id, selection_id),
+    FOREIGN KEY (schedule_id) REFERENCES schedules(schedule_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_schedule_file_selections_schedule
+    ON schedule_file_selections(schedule_id, ordinal);
 CREATE TABLE IF NOT EXISTS audit_events (
     event_id TEXT PRIMARY KEY NOT NULL,
     created_utc_ms INTEGER NOT NULL CHECK (created_utc_ms >= 0),
@@ -106,7 +126,7 @@ CREATE TABLE IF NOT EXISTS restore_preflights (
     recovery_point_id TEXT NOT NULL,
     target_source_id TEXT NOT NULL,
     chain_fingerprint TEXT NOT NULL,
-    logical_size_bytes INTEGER NOT NULL CHECK (logical_size_bytes > 0),
+    logical_size_bytes INTEGER NOT NULL CHECK (logical_size_bytes >= 0),
     target_capacity_bytes INTEGER NOT NULL CHECK (target_capacity_bytes >= logical_size_bytes),
     chain_depth INTEGER NOT NULL CHECK (chain_depth > 0 AND chain_depth <= 4294967295),
     created_utc_ms INTEGER NOT NULL CHECK (created_utc_ms >= 0),
@@ -114,6 +134,16 @@ CREATE TABLE IF NOT EXISTS restore_preflights (
 );
 CREATE INDEX IF NOT EXISTS ix_restore_preflights_expires
     ON restore_preflights(expires_utc_ms);
+CREATE TABLE IF NOT EXISTS restore_preflight_entry_ids (
+    preflight_token TEXT NOT NULL,
+    ordinal INTEGER NOT NULL CHECK (ordinal >= 0 AND ordinal < 10000),
+    entry_id TEXT NOT NULL,
+    PRIMARY KEY (preflight_token, ordinal),
+    UNIQUE (preflight_token, entry_id),
+    FOREIGN KEY (preflight_token) REFERENCES restore_preflights(preflight_token) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_restore_preflight_entry_ids_token
+    ON restore_preflight_entry_ids(preflight_token, ordinal);
 )sql";
     return exec_sql(db, kSchema);
 }

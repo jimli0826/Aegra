@@ -178,7 +178,9 @@ random_uuid(ports::IRandomSource& random, const base::CancellationToken cancella
 struct ResolvedBackupPlan final {
     std::string schedule_id;
     contracts::BackupType backup_type{contracts::BackupType::kFull};
+    contracts::ContentKind content_kind{contracts::ContentKind::kVolumeSet};
     std::vector<std::string> source_ids;
+    std::vector<contracts::FileSourceRef> file_selections;
     std::string repository_connection_id;
     bool exclude_page_and_hibernation_files{true};
     bool encryption_enabled{false};
@@ -194,10 +196,18 @@ struct ResolvedBackupPlan final {
     fingerprint += "|";
     fingerprint += std::to_string(static_cast<int>(plan.backup_type));
     fingerprint += "|";
+    fingerprint += std::to_string(static_cast<int>(plan.content_kind));
+    fingerprint += "|";
     for (const auto& source_id : plan.source_ids) {
         fingerprint += std::to_string(source_id.size());
         fingerprint += ":";
         fingerprint += source_id;
+        fingerprint += "|";
+    }
+    for (const auto& selection : plan.file_selections) {
+        fingerprint += std::to_string(selection.selection_id.size());
+        fingerprint += ":";
+        fingerprint += selection.selection_id;
         fingerprint += "|";
     }
     fingerprint += plan.repository_connection_id;
@@ -290,10 +300,17 @@ resolve_backup_plan(ports::IControlPlaneDatabase& control_plane,
         return base::Result<ResolvedBackupPlan>::failure(
             {base::ErrorCode::kUnauthorized, "encrypted schedule is missing a protected password"});
     }
+    if (record.content_kind == contracts::ContentKind::kFileSet &&
+        command.backup_type != contracts::BackupType::kFull) {
+        return base::Result<ResolvedBackupPlan>::failure(
+            {base::ErrorCode::kInvalidArgument, "file_set backup requires full backup type"});
+    }
     ResolvedBackupPlan plan;
     plan.schedule_id = command.schedule_id;
     plan.backup_type = command.backup_type;
+    plan.content_kind = record.content_kind;
     plan.source_ids = record.source_ids;
+    plan.file_selections = record.file_selections;
     plan.repository_connection_id = record.repository_connection_id;
     plan.exclude_page_and_hibernation_files = record.exclude_page_and_hibernation_files;
     plan.encryption_enabled = record.encryption_enabled;
@@ -587,8 +604,8 @@ make_backup_options(const BackupOptionsInput& input) {
 }
 
 [[nodiscard]] base::Result<PreparedBackup>
-prepare_backup(const ResolvedBackupPlan& plan, PrepareBackupContext& context,
-               const base::CancellationToken cancellation) {
+prepare_volume_backup(const ResolvedBackupPlan& plan, PrepareBackupContext& context,
+                      const base::CancellationToken cancellation) {
     auto sources = resolve_backup_source_refs(plan, context.source_inventory, cancellation);
     if (!sources) {
         return base::Result<PreparedBackup>::failure(sources.error());
@@ -619,6 +636,7 @@ prepare_backup(const ResolvedBackupPlan& plan, PrepareBackupContext& context,
     worker.job_id = identity.value().job_id;
     worker.tenant_id = "personal";
     worker.operation = contracts::JobOperation::kBackup;
+    worker.content_kind = contracts::ContentKind::kVolumeSet;
     worker.source_refs = std::move(sources).value();
     worker.target_ref = path_to_utf8(identity.value().archive_path);
     worker.trace_id = identity.value().trace_id;
@@ -642,6 +660,122 @@ prepare_backup(const ResolvedBackupPlan& plan, PrepareBackupContext& context,
     request.backup_archive_key = identity.value().archive_key;
     return base::Result<PreparedBackup>::success(
         {std::move(request), std::move(identity).value().job_id});
+}
+
+[[nodiscard]] std::string source_id_from_volume_identity(const std::string_view identity) {
+    const auto begin = identity.find('{');
+    const auto end = identity.find('}', begin == std::string_view::npos ? 0 : begin + 1);
+    if (begin == std::string_view::npos || end == std::string_view::npos || end <= begin + 1) {
+        return {};
+    }
+    std::string id = "vol.";
+    id.append(identity.substr(begin + 1, end - begin - 1));
+    std::ranges::transform(id, id.begin(), [](const unsigned char character) {
+        return static_cast<char>(std::tolower(character));
+    });
+    return id;
+}
+
+[[nodiscard]] base::Result<void>
+revalidate_file_set_volumes(const std::vector<contracts::FileSourceRef>& selections,
+                            application::ISourceInventoryQuery& source_inventory,
+                            const base::CancellationToken cancellation) {
+    std::vector<std::string> checked;
+    checked.reserve(selections.size());
+    for (const auto& selection : selections) {
+        if (std::ranges::find(checked, selection.volume_identity) != checked.end()) {
+            continue;
+        }
+        checked.push_back(selection.volume_identity);
+        const auto source_id = source_id_from_volume_identity(selection.volume_identity);
+        if (source_id.empty()) {
+            return base::Result<void>::failure(
+                {base::ErrorCode::kInvalidArgument, "file_source.volume_identity_mismatch"});
+        }
+        auto source = source_inventory.resolve_source(source_id, cancellation);
+        if (!source) {
+            return base::Result<void>::failure(source.error());
+        }
+        if (source.value().stable_key != selection.volume_identity) {
+            return base::Result<void>::failure(
+                {base::ErrorCode::kConflict, "file_source.volume_identity_mismatch"});
+        }
+    }
+    return base::Result<void>::success();
+}
+
+[[nodiscard]] base::Result<PreparedBackup>
+prepare_file_set_backup(const ResolvedBackupPlan& plan, PrepareBackupContext& context,
+                        const base::CancellationToken cancellation) {
+    if (plan.file_selections.empty()) {
+        return base::Result<PreparedBackup>::failure(
+            {base::ErrorCode::kInvalidArgument, "file_set schedule has no selections"});
+    }
+    auto refs = contracts::validate_file_source_refs(plan.file_selections);
+    if (!refs) {
+        return base::Result<PreparedBackup>::failure(refs.error());
+    }
+    if (auto volumes = revalidate_file_set_volumes(plan.file_selections, context.source_inventory,
+                                                   cancellation);
+        !volumes) {
+        return base::Result<PreparedBackup>::failure(volumes.error());
+    }
+    auto repository = load_available_repository(context.control_plane,
+                                                plan.repository_connection_id, cancellation);
+    if (!repository) {
+        return base::Result<PreparedBackup>::failure(repository.error());
+    }
+    auto identity = allocate_backup_identity(repository.value().locator, context.clock,
+                                             context.random, cancellation);
+    if (!identity) {
+        return base::Result<PreparedBackup>::failure(identity.error());
+    }
+    IncrementalParentResolution no_parent{};
+    const BackupOptionsInput options_input{plan, identity.value(), no_parent,
+                                           repository.value().locator};
+    auto backup = make_backup_options(options_input);
+    if (!backup) {
+        return base::Result<PreparedBackup>::failure(backup.error());
+    }
+    backup.value().type = contracts::BackupType::kFull;
+    backup.value().backup_set_uuid = plan.backup_set_uuid;
+    contracts::JobRequest worker;
+    worker.job_id = identity.value().job_id;
+    worker.tenant_id = "personal";
+    worker.operation = contracts::JobOperation::kBackup;
+    worker.content_kind = contracts::ContentKind::kFileSet;
+    worker.file_source_refs = plan.file_selections;
+    worker.target_ref = path_to_utf8(identity.value().archive_path);
+    worker.trace_id = identity.value().trace_id;
+    auto credentials =
+        assign_backup_credentials(worker, plan, context.control_plane, cancellation);
+    if (!credentials) {
+        return base::Result<PreparedBackup>::failure(credentials.error());
+    }
+    worker.backup = std::move(backup).value();
+    std::vector<std::string> selection_ids;
+    selection_ids.reserve(plan.file_selections.size());
+    for (const auto& selection : plan.file_selections) {
+        selection_ids.push_back(selection.selection_id);
+    }
+    WorkerJobRequest request;
+    request.worker_request = std::move(worker);
+    request.source_ids = std::move(selection_ids);
+    request.repository_connection_id = plan.repository_connection_id;
+    request.request_fingerprint = backup_request_fingerprint(plan);
+    request.schedule_id = plan.schedule_id;
+    request.backup_archive_key = identity.value().archive_key;
+    return base::Result<PreparedBackup>::success(
+        {std::move(request), std::move(identity).value().job_id});
+}
+
+[[nodiscard]] base::Result<PreparedBackup>
+prepare_backup(const ResolvedBackupPlan& plan, PrepareBackupContext& context,
+               const base::CancellationToken cancellation) {
+    if (plan.content_kind == contracts::ContentKind::kFileSet) {
+        return prepare_file_set_backup(plan, context, cancellation);
+    }
+    return prepare_volume_backup(plan, context, cancellation);
 }
 
 [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
@@ -736,22 +870,28 @@ prepare_verify(const contracts::StartVerifyCommand& command,
         return base::Result<PreparedBackup>::failure(
             {base::ErrorCode::kNotFound, "recovery point was not found"});
     }
+    if (found->structural_state != "complete") {
+        return base::Result<PreparedBackup>::failure(
+            {base::ErrorCode::kConflict, "file_recover.catalog_only"});
+    }
+    const bool is_file_set =
+        found->content_kind == personal_repository::kCatalogContentKindFileSet;
     // Archive credential selection: never reuse a connection SecretRef without an explicit
     // repository_uuid+file_uuid mapping. Mapping store is not yet durable; refuse with
     // credential_required rather than guessing with the repository connection credential.
     static_cast<void>(found->repository_uuid);
-    if (!repository.value()->credential_ref) {
-        return base::Result<PreparedBackup>::failure(
-            {base::ErrorCode::kUnauthorized, "archive.credential_required"});
-    }
-    // Explicit mapping table is not available yet. Connection credential is only valid when the
-    // connection advertises archive.default_credential (Service-managed single-secret repos).
-    // Import/connections without that capability must register a per-file mapping (future S5+).
     const auto& capabilities = repository.value()->capabilities;
     const bool allows_connection_secret =
         std::find(capabilities.begin(), capabilities.end(), "archive.default_credential") !=
         capabilities.end();
-    if (!allows_connection_secret) {
+    std::optional<contracts::SecretRef> credential;
+    if (allows_connection_secret && repository.value()->credential_ref) {
+        credential = *repository.value()->credential_ref;
+    } else if (is_file_set) {
+        // Unencrypted file_set archives open with an empty password. Encrypted archives without
+        // archive.default_credential need a durable per-file mapping (future).
+        credential = contracts::SecretRef{};
+    } else if (!repository.value()->credential_ref || !allows_connection_secret) {
         return base::Result<PreparedBackup>::failure(
             {base::ErrorCode::kUnauthorized, "archive.credential_required"});
     }
@@ -768,9 +908,11 @@ prepare_verify(const contracts::StartVerifyCommand& command,
     worker.job_id = job_id.value();
     worker.tenant_id = "personal";
     worker.operation = contracts::JobOperation::kVerify;
+    worker.content_kind =
+        is_file_set ? contracts::ContentKind::kFileSet : contracts::ContentKind::kVolumeSet;
     worker.source_refs = {archive_path.value()};
     worker.target_ref.clear();
-    worker.credential_refs = {*repository.value()->credential_ref};
+    worker.credential_refs = {credential.value_or(contracts::SecretRef{})};
     worker.trace_id = trace_id.value();
     WorkerJobRequest request;
     request.worker_request = std::move(worker);
@@ -787,9 +929,11 @@ WorkerJobService::WorkerJobService(application::ISourceInventoryQuery& source_in
                                    ports::IControlPlaneDatabase& control_plane,
                                    ports::IRepositoryStorageFactory& storage_factory,
                                    WorkerSupervisor& supervisor, ports::IClock& clock,
-                                   ports::IRandomSource& random) noexcept
+                                   ports::IRandomSource& random,
+                                   application::FileBrowseService* const file_browse) noexcept
     : source_inventory_(source_inventory), control_plane_(control_plane),
-      storage_factory_(storage_factory), supervisor_(supervisor), clock_(clock), random_(random) {}
+      storage_factory_(storage_factory), supervisor_(supervisor), clock_(clock), random_(random),
+      file_browse_(file_browse) {}
 
 base::Result<contracts::CommandAcknowledgement>
 WorkerJobService::start_backup(const contracts::StartBackupCommand& command,

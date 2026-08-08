@@ -1,5 +1,7 @@
 #pragma once
 
+#include "client/models/file_browse_model.h"
+#include "client/models/file_recover_model.h"
 #include "client/models/job_model.h"
 #include "client/models/recovery_point_model.h"
 #include "client/models/repository_connection_model.h"
@@ -49,6 +51,12 @@ class ServiceClient final : public QObject {
     Q_PROPERTY(bool inventoryLoading READ inventoryLoading NOTIFY inventoryChanged)
     Q_PROPERTY(bool inventoryAvailable READ inventoryAvailable NOTIFY stateChanged)
     Q_PROPERTY(QString inventoryErrorText READ inventoryErrorText NOTIFY inventoryChanged)
+    Q_PROPERTY(bool fileBrowseAvailable READ fileBrowseAvailable NOTIFY stateChanged)
+    Q_PROPERTY(bool fileRecoverBrowseAvailable READ fileRecoverBrowseAvailable NOTIFY stateChanged)
+    Q_PROPERTY(bool fileRestoreAvailable READ fileRestoreAvailable NOTIFY stateChanged)
+    Q_PROPERTY(aegra::desktop::FileBrowseModel* fileBrowseSources READ fileBrowseSources CONSTANT)
+    Q_PROPERTY(aegra::desktop::FileBrowseModel* fileRestoreTargets READ fileRestoreTargets CONSTANT)
+    Q_PROPERTY(aegra::desktop::FileRecoverModel* fileRecoverEntries READ fileRecoverEntries CONSTANT)
     Q_PROPERTY(QVariantList schedules READ schedules NOTIFY schedulesChanged)
     Q_PROPERTY(bool schedulesLoading READ schedulesLoading NOTIFY schedulesChanged)
     Q_PROPERTY(bool schedulesAvailable READ schedulesAvailable NOTIFY stateChanged)
@@ -124,6 +132,12 @@ class ServiceClient final : public QObject {
     [[nodiscard]] bool inventoryLoading() const noexcept;
     [[nodiscard]] bool inventoryAvailable() const noexcept;
     [[nodiscard]] QString inventoryErrorText() const;
+    [[nodiscard]] bool fileBrowseAvailable() const noexcept;
+    [[nodiscard]] bool fileRecoverBrowseAvailable() const noexcept;
+    [[nodiscard]] bool fileRestoreAvailable() const noexcept;
+    [[nodiscard]] FileBrowseModel* fileBrowseSources() noexcept;
+    [[nodiscard]] FileBrowseModel* fileRestoreTargets() noexcept;
+    [[nodiscard]] FileRecoverModel* fileRecoverEntries() noexcept;
     [[nodiscard]] QVariantList schedules() const;
     [[nodiscard]] bool schedulesLoading() const noexcept;
     [[nodiscard]] bool schedulesAvailable() const noexcept;
@@ -202,6 +216,13 @@ class ServiceClient final : public QObject {
                                     bool encryption_enabled = false,
                                     const QString& archive_password = {},
                                     bool start_full_backup_after_create = false);
+    /// Creates a file_set schedule from the current fileBrowseSources selection (opaque tokens).
+    Q_INVOKABLE bool createFileSetSchedule(const QString& connection_id, const QString& frequency,
+                                           const QString& time_of_day,
+                                           bool exclude_page_and_hibernation_files = true,
+                                           bool encryption_enabled = false,
+                                           const QString& archive_password = {},
+                                           bool start_full_backup_after_create = false);
     Q_INVOKABLE bool deleteSchedule(const QString& schedule_id);
     Q_INVOKABLE bool setScheduleEnabled(const QString& schedule_id, bool enabled);
     Q_INVOKABLE void selectRepositoryConnection(const QString& connection_id);
@@ -247,6 +268,18 @@ class ServiceClient final : public QObject {
     Q_INVOKABLE QString defaultConnectionId() const;
     /// First selectable inventory source id, or empty.
     Q_INVOKABLE QString firstSelectableSourceId() const;
+    /// Loads local file-tree roots via BrowseFileSources (backup source selection).
+    Q_INVOKABLE void loadFileBrowseRoots();
+    /// Loads local directory roots for file restore target (single-directory selection).
+    Q_INVOKABLE void loadFileRestoreTargetRoots();
+    /// Loads Recovery Point file Index roots (ListRecoveryPointEntries parent=0).
+    Q_INVOKABLE void loadFileRecoverRoots(const QString& recovery_point_id,
+                                          const QString& archive_password = {});
+    /// Prepare + Start file restore from fileRecoverEntries + fileRestoreTargets selection.
+    /// conflict_policy: 1 fail, 2 replace, 3 rename. restore_security / restore_ads default on.
+    Q_INVOKABLE bool startFileRestore(const QString& recovery_point_id, int conflict_policy = 1,
+                                      const QString& archive_password = {},
+                                      bool restore_security = true, bool restore_ads = true);
 
   signals:
     void stateChanged();
@@ -311,6 +344,15 @@ class ServiceClient final : public QObject {
     [[nodiscard]] RequestDisposition handle_mount_list_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_mount_command_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_unmount_command_frame(const QByteArray& body);
+    [[nodiscard]] RequestDisposition handle_browse_file_sources_frame(const QByteArray& body);
+    [[nodiscard]] RequestDisposition handle_file_target_browse_frame(const QByteArray& body);
+    [[nodiscard]] RequestDisposition handle_list_recovery_point_entries_frame(const QByteArray& body);
+    [[nodiscard]] RequestDisposition handle_prepare_file_restore_frame(const QByteArray& body);
+    [[nodiscard]] RequestDisposition handle_start_file_restore_frame(const QByteArray& body);
+    void on_file_browse_expand_requested(const QString& node_token);
+    void on_file_target_expand_requested(const QString& node_token);
+    void on_file_recover_expand_requested(const QString& entry_id);
+    void reset_file_models();
     void finish_repository_failure(const QString& message_code);
     void finish_recovery_point_layout_failure(const QString& message_code);
     void finish_job_failure(const QString& message_code);
@@ -359,6 +401,9 @@ class ServiceClient final : public QObject {
     RecoveryPointModel recovery_points_;
     JobModel jobs_;
     SourceInventoryModel sources_;
+    FileBrowseModel file_browse_sources_;
+    FileBrowseModel file_restore_targets_;
+    FileRecoverModel file_recover_entries_;
     RepositoryConnectionModel connections_;
     std::unique_ptr<IpcFrameTransport> transport_;
     std::unique_ptr<ServiceRequestCoordinator> coordinator_;
@@ -427,6 +472,21 @@ class ServiceClient final : public QObject {
     bool job_list_available_{false};
     bool inventory_loading_{false};
     bool inventory_available_{false};
+    bool file_browse_available_{false};
+    bool file_recover_browse_available_{false};
+    bool file_restore_available_{false};
+    QString file_browse_request_id_;
+    QString file_browse_parent_token_;
+    QString file_target_browse_request_id_;
+    QString file_target_browse_parent_token_;
+    QString file_recover_request_id_;
+    QString file_recover_parent_entry_id_;
+    QString file_recover_archive_password_;
+    QStringList file_restore_entry_ids_;
+    QString file_restore_target_token_;
+    int file_restore_conflict_policy_{1};
+    bool file_restore_security_{true};
+    bool file_restore_ads_{true};
     bool schedules_loading_{false};
     bool schedules_available_{false};
     bool schedule_command_busy_{false};

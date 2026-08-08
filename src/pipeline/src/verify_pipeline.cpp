@@ -51,15 +51,10 @@ void publish_progress(ports::IProgressSink* progress, const VerifyPlan& plan,
     if (progress == nullptr) {
         return;
     }
-    progress->publish({contracts::kTaskProgressSchemaVersion,
-                       plan.job_id,
-                       plan.trace_id,
-                       phase,
-                       verify_bytes,
-                       summary.verified_bytes,
-                       summary.verified_bytes,
-                       phase == contracts::TaskPhase::kCompleted ? "verify.completed"
-                                                                  : "verify.reading"});
+    progress->publish(contracts::make_byte_progress(
+        plan.job_id, plan.trace_id, phase, verify_bytes, summary.verified_bytes,
+        summary.verified_bytes,
+        phase == contracts::TaskPhase::kCompleted ? "verify.completed" : "verify.reading"));
 }
 
 base::Result<void> verify_chunk(ports::IRecoveryPointReader& reader,

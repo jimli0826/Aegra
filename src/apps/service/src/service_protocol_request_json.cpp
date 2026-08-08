@@ -366,11 +366,88 @@ encode_mount_recovery_point(const contracts::MountRecoveryPointCommand& command)
     return trigger;
 }
 
+[[nodiscard]] Json encode_protection_spec(const contracts::ProtectionSpecInput& protection) {
+    Json volume = Json(nullptr);
+    Json file = Json(nullptr);
+    if (protection.content_kind == contracts::ContentKind::kVolumeSet) {
+        volume = Json{{"source_ids", protection.volume_source_ids}};
+    } else {
+        Json selections = Json::array();
+        for (const auto& item : protection.file_selections) {
+            selections.push_back(
+                Json{{"node_token", item.node_token},
+                     {"recursion", static_cast<std::uint8_t>(item.recursion)},
+                     {"display_label", item.display_label}});
+        }
+        file = Json{{"selections", std::move(selections)},
+                    {"options",
+                     Json{{"reparse_policy",
+                           static_cast<std::uint8_t>(protection.file_options.reparse_policy)},
+                          {"unreadable_policy",
+                           static_cast<std::uint8_t>(protection.file_options.unreadable_policy)}}}};
+    }
+    return Json{{"content_kind", static_cast<std::uint8_t>(protection.content_kind)},
+                {"volume_set", std::move(volume)},
+                {"file_set", std::move(file)}};
+}
+
+[[nodiscard]] contracts::ProtectionSpecInput parse_protection_spec(const Json& payload) {
+    constexpr std::array<std::string_view, 3> keys{"content_kind", "volume_set", "file_set"};
+    if (!exact_keys(payload, keys)) {
+        throw std::invalid_argument("protection spec fields are invalid");
+    }
+    contracts::ProtectionSpecInput protection;
+    protection.content_kind =
+        static_cast<contracts::ContentKind>(unsigned_value<std::uint8_t>(payload, "content_kind"));
+    if (protection.content_kind == contracts::ContentKind::kVolumeSet) {
+        if (payload.at("volume_set").is_null() || !payload.at("file_set").is_null()) {
+            throw std::invalid_argument("volume protection requires volume_set only");
+        }
+        constexpr std::array<std::string_view, 1> volume_keys{"source_ids"};
+        if (!exact_keys(payload.at("volume_set"), volume_keys)) {
+            throw std::invalid_argument("volume protection fields are invalid");
+        }
+        protection.volume_source_ids =
+            payload.at("volume_set").at("source_ids").get<std::vector<std::string>>();
+        return protection;
+    }
+    if (payload.at("file_set").is_null() || !payload.at("volume_set").is_null()) {
+        throw std::invalid_argument("file protection requires file_set only");
+    }
+    constexpr std::array<std::string_view, 2> file_keys{"selections", "options"};
+    if (!exact_keys(payload.at("file_set"), file_keys)) {
+        throw std::invalid_argument("file protection fields are invalid");
+    }
+    const auto& options = payload.at("file_set").at("options");
+    constexpr std::array<std::string_view, 2> option_keys{"reparse_policy", "unreadable_policy"};
+    if (!exact_keys(options, option_keys)) {
+        throw std::invalid_argument("file protection options are invalid");
+    }
+    protection.file_options.reparse_policy = static_cast<contracts::FileReparsePolicy>(
+        unsigned_value<std::uint8_t>(options, "reparse_policy"));
+    protection.file_options.unreadable_policy = static_cast<contracts::FileUnreadablePolicy>(
+        unsigned_value<std::uint8_t>(options, "unreadable_policy"));
+    for (const auto& item : payload.at("file_set").at("selections")) {
+        constexpr std::array<std::string_view, 3> selection_keys{"node_token", "recursion",
+                                                                 "display_label"};
+        if (!exact_keys(item, selection_keys)) {
+            throw std::invalid_argument("file selection fields are invalid");
+        }
+        contracts::FileSelectionInput selection;
+        selection.node_token = item.at("node_token").get<std::string>();
+        selection.recursion =
+            static_cast<contracts::FileRecursion>(unsigned_value<std::uint8_t>(item, "recursion"));
+        selection.display_label = item.at("display_label").get<std::string>();
+        protection.file_selections.push_back(std::move(selection));
+    }
+    return protection;
+}
+
 [[nodiscard]] Json encode_upsert_schedule(const contracts::UpsertScheduleCommand& command) {
     return Json{{"schedule_id", optional_string_json(command.schedule_id)},
                 {"display_name", command.display_name},
                 {"enabled", command.enabled},
-                {"source_ids", command.source_ids},
+                {"protection", encode_protection_spec(command.protection)},
                 {"repository_connection_id", command.repository_connection_id},
                 {"backup_type", static_cast<std::uint8_t>(command.backup_type)},
                 {"trigger", encode_schedule_trigger(command.trigger)},
@@ -384,7 +461,7 @@ encode_mount_recovery_point(const contracts::MountRecoveryPointCommand& command)
         "schedule_id",
         "display_name",
         "enabled",
-        "source_ids",
+        "protection",
         "repository_connection_id",
         "backup_type",
         "trigger",
@@ -398,7 +475,7 @@ encode_mount_recovery_point(const contracts::MountRecoveryPointCommand& command)
     command.schedule_id = optional_string(payload.at("schedule_id"));
     command.display_name = payload.at("display_name").get<std::string>();
     command.enabled = payload.at("enabled").get<bool>();
-    command.source_ids = payload.at("source_ids").get<std::vector<std::string>>();
+    command.protection = parse_protection_spec(payload.at("protection"));
     command.repository_connection_id = payload.at("repository_connection_id").get<std::string>();
     command.backup_type =
         static_cast<contracts::BackupType>(unsigned_value<std::uint8_t>(payload, "backup_type"));
@@ -561,6 +638,37 @@ Json encode_request_payload(const contracts::ServiceRequest& request) {
     case contracts::ServiceRequestKind::kExecuteDeletePlan:
         return encode_execute_delete_plan(
             std::get<contracts::ExecuteDeletePlanCommand>(request.payload));
+    case contracts::ServiceRequestKind::kBrowseFileSources: {
+        const auto& body = std::get<contracts::BrowseFileSourcesRequest>(request.payload);
+        return Json{{"parent_node_token", optional_string_json(body.parent_node_token)},
+                    {"page", encode_page_request(body.page)},
+                    {"include_unavailable", body.include_unavailable}};
+    }
+    case contracts::ServiceRequestKind::kListRecoveryPointEntries: {
+        const auto& body = std::get<contracts::ListRecoveryPointEntriesRequest>(request.payload);
+        return Json{{"repository_connection_id", optional_string_json(body.repository_connection_id)},
+                    {"recovery_point_id", body.recovery_point_id},
+                    {"parent_entry_id", body.parent_entry_id},
+                    {"page", encode_page_request(body.page)},
+                    {"archive_secret_ref", optional_string_json(body.archive_secret_ref)}};
+    }
+    case contracts::ServiceRequestKind::kPrepareFileRestore: {
+        const auto& body = std::get<contracts::PrepareFileRestoreRequest>(request.payload);
+        return Json{{"repository_connection_id", optional_string_json(body.repository_connection_id)},
+                    {"recovery_point_id", body.recovery_point_id},
+                    {"entry_ids", body.entry_ids},
+                    {"target_node_token", body.target_node_token},
+                    {"conflict_policy", static_cast<std::uint8_t>(body.conflict_policy)},
+                    {"archive_secret_ref", optional_string_json(body.archive_secret_ref)},
+                    {"restore_security", body.restore_security},
+                    {"restore_ads", body.restore_ads}};
+    }
+    case contracts::ServiceRequestKind::kStartFileRestore: {
+        const auto& body = std::get<contracts::StartFileRestoreCommand>(request.payload);
+        return Json{{"preflight_token", body.preflight_token},
+                    {"confirmed", body.confirmed},
+                    {"archive_secret_ref", optional_string_json(body.archive_secret_ref)}};
+    }
     }
     throw std::invalid_argument("service request kind is invalid");
 }
@@ -624,6 +732,64 @@ contracts::ServiceRequestPayload parse_request_payload(const contracts::ServiceR
         return parse_event_acknowledgement(payload);
     case contracts::ServiceRequestKind::kExecuteDeletePlan:
         return parse_execute_delete_plan(payload);
+    case contracts::ServiceRequestKind::kBrowseFileSources: {
+        constexpr std::array<std::string_view, 3> keys{"parent_node_token", "page",
+                                                       "include_unavailable"};
+        if (!exact_keys(payload, keys)) {
+            throw std::invalid_argument("browse file sources fields are invalid");
+        }
+        contracts::BrowseFileSourcesRequest request;
+        request.parent_node_token = optional_string(payload.at("parent_node_token"));
+        request.page = parse_page_request(payload.at("page"));
+        request.include_unavailable = payload.at("include_unavailable").get<bool>();
+        return request;
+    }
+    case contracts::ServiceRequestKind::kListRecoveryPointEntries: {
+        constexpr std::array<std::string_view, 5> keys{
+            "repository_connection_id", "recovery_point_id", "parent_entry_id", "page",
+            "archive_secret_ref"};
+        if (!exact_keys(payload, keys)) {
+            throw std::invalid_argument("list recovery point entries fields are invalid");
+        }
+        contracts::ListRecoveryPointEntriesRequest request;
+        request.repository_connection_id = optional_string(payload.at("repository_connection_id"));
+        request.recovery_point_id = payload.at("recovery_point_id").get<std::string>();
+        request.parent_entry_id = payload.at("parent_entry_id").get<std::string>();
+        request.page = parse_page_request(payload.at("page"));
+        request.archive_secret_ref = optional_string(payload.at("archive_secret_ref"));
+        return request;
+    }
+    case contracts::ServiceRequestKind::kPrepareFileRestore: {
+        constexpr std::array<std::string_view, 8> keys{
+            "repository_connection_id", "recovery_point_id", "entry_ids", "target_node_token",
+            "conflict_policy", "archive_secret_ref", "restore_security", "restore_ads"};
+        if (!exact_keys(payload, keys)) {
+            throw std::invalid_argument("prepare file restore fields are invalid");
+        }
+        contracts::PrepareFileRestoreRequest request;
+        request.repository_connection_id = optional_string(payload.at("repository_connection_id"));
+        request.recovery_point_id = payload.at("recovery_point_id").get<std::string>();
+        request.entry_ids = payload.at("entry_ids").get<std::vector<std::string>>();
+        request.target_node_token = payload.at("target_node_token").get<std::string>();
+        request.conflict_policy = static_cast<contracts::FileConflictPolicy>(
+            unsigned_value<std::uint8_t>(payload, "conflict_policy"));
+        request.archive_secret_ref = optional_string(payload.at("archive_secret_ref"));
+        request.restore_security = payload.at("restore_security").get<bool>();
+        request.restore_ads = payload.at("restore_ads").get<bool>();
+        return request;
+    }
+    case contracts::ServiceRequestKind::kStartFileRestore: {
+        constexpr std::array<std::string_view, 3> keys{"preflight_token", "confirmed",
+                                                       "archive_secret_ref"};
+        if (!exact_keys(payload, keys)) {
+            throw std::invalid_argument("start file restore fields are invalid");
+        }
+        contracts::StartFileRestoreCommand command;
+        command.preflight_token = payload.at("preflight_token").get<std::string>();
+        command.confirmed = payload.at("confirmed").get<bool>();
+        command.archive_secret_ref = optional_string(payload.at("archive_secret_ref"));
+        return command;
+    }
     }
     throw std::invalid_argument("service request kind is invalid");
 }

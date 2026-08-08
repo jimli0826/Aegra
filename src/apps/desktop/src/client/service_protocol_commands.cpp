@@ -236,12 +236,17 @@ QByteArray encode_upsert_schedule_request(const QString& request_id, const QStri
                               {QStringLiteral("local_minute_of_day"), local_minute_of_day},
                               {QStringLiteral("weekday_mask"), weekday_mask},
                               {QStringLiteral("timezone_id"), timezone_id}};
+    const QJsonObject protection{
+        {QStringLiteral("content_kind"), 1},
+        {QStringLiteral("volume_set"),
+         QJsonObject{{QStringLiteral("source_ids"), QJsonArray::fromVariantList(source_ids)}}},
+        {QStringLiteral("file_set"), QJsonValue(QJsonValue::Null)}};
     const QJsonObject payload{
         {QStringLiteral("schedule_id"),
          schedule_id.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(schedule_id)},
         {QStringLiteral("display_name"), display_name},
         {QStringLiteral("enabled"), enabled},
-        {QStringLiteral("source_ids"), QJsonArray::fromVariantList(source_ids)},
+        {QStringLiteral("protection"), protection},
         {QStringLiteral("repository_connection_id"), repository_connection_id},
         {QStringLiteral("backup_type"), backup_type},
         {QStringLiteral("trigger"), trigger},
@@ -469,11 +474,11 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
         return false;
     }
     const auto object = value.toObject();
-    // Must match Service encode_schedule / ScheduleSummary wire fields.
-    if (!has_exact_keys(object, {"schedule_id", "display_name", "enabled", "source_ids",
-                                 "repository_connection_id", "backup_type", "trigger",
-                                 "next_run_utc_ms", "exclude_page_and_hibernation_files",
-                                 "encryption_enabled"})) {
+    // Must match Service encode_schedule / ScheduleSummary wire fields (schema 4).
+    if (!has_exact_keys(object, {"schedule_id", "display_name", "enabled", "content_kind",
+                                 "source_ids", "selection_summaries", "repository_connection_id",
+                                 "backup_type", "trigger", "next_run_utc_ms",
+                                 "exclude_page_and_hibernation_files", "encryption_enabled"})) {
         return false;
     }
     const auto schedule_id = object.value(QStringLiteral("schedule_id")).toString();
@@ -490,19 +495,58 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
         source_ids.push_back(source_id);
     }
     QString display_name;
+    qint64 content_kind = 0;
     qint64 backup_type = 0;
+    const auto summary_array = object.value(QStringLiteral("selection_summaries")).toArray();
     if (!object.value(QStringLiteral("schedule_id")).isString() || !stable_code(schedule_id, 128) ||
         !parse_display_name(object.value(QStringLiteral("display_name")), display_name) ||
         !object.value(QStringLiteral("enabled")).isBool() ||
-        !object.value(QStringLiteral("source_ids")).isArray() || source_ids.isEmpty() ||
-        source_ids.size() > 100 ||
+        !integer_in_range(object.value(QStringLiteral("content_kind")), 1, 2, content_kind) ||
+        !object.value(QStringLiteral("source_ids")).isArray() ||
+        !object.value(QStringLiteral("selection_summaries")).isArray() ||
+        (content_kind == 1 &&
+         (source_ids.isEmpty() || source_ids.size() > 100 || !summary_array.isEmpty())) ||
+        (content_kind == 2 &&
+         (!source_ids.isEmpty() || summary_array.isEmpty() || summary_array.size() > 100)) ||
         !object.value(QStringLiteral("repository_connection_id")).isString() ||
         !stable_code(object.value(QStringLiteral("repository_connection_id")).toString(), 128) ||
         !integer_in_range(object.value(QStringLiteral("backup_type")), 1, 3, backup_type) ||
+        (content_kind == 2 && backup_type != 1) ||
         !object.value(QStringLiteral("trigger")).isObject() ||
         !object.value(QStringLiteral("exclude_page_and_hibernation_files")).isBool() ||
         !object.value(QStringLiteral("encryption_enabled")).isBool()) {
         return false;
+    }
+    QVariantList selection_summaries;
+    QSet<QString> seen_selection_ids;
+    for (const auto& summary_value : summary_array) {
+        if (!summary_value.isObject()) {
+            return false;
+        }
+        const auto summary_object = summary_value.toObject();
+        if (!has_exact_keys(summary_object,
+                            {"selection_id", "display_label", "entry_kind", "recursion"})) {
+            return false;
+        }
+        const auto selection_id = summary_object.value(QStringLiteral("selection_id")).toString();
+        QString display_label;
+        qint64 entry_kind = 0;
+        qint64 recursion = 0;
+        if (!summary_object.value(QStringLiteral("selection_id")).isString() ||
+            !stable_code(selection_id, 128) || seen_selection_ids.contains(selection_id) ||
+            !parse_display_name(summary_object.value(QStringLiteral("display_label")),
+                                display_label) ||
+            !integer_in_range(summary_object.value(QStringLiteral("entry_kind")), 1, 4,
+                              entry_kind) ||
+            !integer_in_range(summary_object.value(QStringLiteral("recursion")), 1, 2, recursion)) {
+            return false;
+        }
+        seen_selection_ids.insert(selection_id);
+        selection_summaries.push_back(QVariantMap{
+            {QStringLiteral("selectionId"), selection_id},
+            {QStringLiteral("displayLabel"), display_label},
+            {QStringLiteral("entryKind"), entry_kind},
+            {QStringLiteral("recursion"), recursion}});
     }
     const auto trigger = object.value(QStringLiteral("trigger")).toObject();
     if (!has_exact_keys(trigger,
@@ -538,7 +582,9 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
               {QStringLiteral("displayName"), display_name},
               {QStringLiteral("sourceName"), display_name},
               {QStringLiteral("enabled"), object.value(QStringLiteral("enabled")).toBool()},
+              {QStringLiteral("contentKind"), content_kind},
               {QStringLiteral("sourceIds"), source_ids},
+              {QStringLiteral("selectionSummaries"), selection_summaries},
               {QStringLiteral("connectionId"),
                object.value(QStringLiteral("repository_connection_id")).toString()},
               {QStringLiteral("backupType"), backup_type},

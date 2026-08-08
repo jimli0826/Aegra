@@ -11,7 +11,8 @@
 namespace aegra::adapters::crypto_sodium {
 namespace {
 
-inline constexpr std::string_view kPayloadContext = "MYBACKUP-V6-CHUNK-PAYLOAD";
+inline constexpr std::string_view kPayloadContext = "MYBACKUP-V7-CHUNK-PAYLOAD";
+inline constexpr std::string_view kIndexPageContext = "MYBACKUP-V7-FILE-INDEX-PAGE";
 
 class SensitiveKey final {
   public:
@@ -60,10 +61,11 @@ class SensitiveKey final {
 }
 
 [[nodiscard]] base::Result<SensitiveKey>
-derive_payload_key(const std::string_view password, const KdfParameters parameters,
-                   const std::array<std::byte, kMetadataSaltSize>& salt) {
+derive_separated_key(const std::string_view password, const KdfParameters parameters,
+                     const std::array<std::byte, kMetadataSaltSize>& salt,
+                     const std::string_view context) {
     SensitiveKey master_key;
-    SensitiveKey payload_key;
+    SensitiveKey derived_key;
     SensitiveKey pseudo_random_key;
     if (crypto_pwhash(master_key.data(), master_key.size(), password.data(), password.size(),
                       as_unsigned(salt.data()), parameters.opslimit,
@@ -74,13 +76,12 @@ derive_payload_key(const std::string_view password, const KdfParameters paramete
     }
     if (crypto_kdf_hkdf_sha256_extract(pseudo_random_key.data(), as_unsigned(salt.data()),
                                        salt.size(), master_key.data(), master_key.size()) != 0 ||
-        crypto_kdf_hkdf_sha256_expand(payload_key.data(), payload_key.size(),
-                                      kPayloadContext.data(), kPayloadContext.size(),
-                                      pseudo_random_key.data()) != 0) {
+        crypto_kdf_hkdf_sha256_expand(derived_key.data(), derived_key.size(), context.data(),
+                                      context.size(), pseudo_random_key.data()) != 0) {
         return base::Result<SensitiveKey>::failure(
             error(base::ErrorCode::kInternal, "payload key separation failed"));
     }
-    return base::Result<SensitiveKey>::success(std::move(payload_key));
+    return base::Result<SensitiveKey>::success(std::move(derived_key));
 }
 
 } // namespace
@@ -102,7 +103,23 @@ PayloadCipher::create(const std::string_view password, const KdfParameters param
     if (!validation) {
         return base::Result<std::unique_ptr<PayloadCipher>>::failure(validation.error());
     }
-    auto key = derive_payload_key(password, parameters, salt);
+    auto key = derive_separated_key(password, parameters, salt, kPayloadContext);
+    if (!key) {
+        return base::Result<std::unique_ptr<PayloadCipher>>::failure(key.error());
+    }
+    auto implementation = std::make_unique<Impl>(std::move(key).value());
+    return base::Result<std::unique_ptr<PayloadCipher>>::success(
+        std::unique_ptr<PayloadCipher>(new PayloadCipher(std::move(implementation))));
+}
+
+base::Result<std::unique_ptr<PayloadCipher>>
+PayloadCipher::create_index_page(const std::string_view password, const KdfParameters parameters,
+                                 const std::array<std::byte, kMetadataSaltSize>& salt) {
+    auto validation = validate_request(password, parameters);
+    if (!validation) {
+        return base::Result<std::unique_ptr<PayloadCipher>>::failure(validation.error());
+    }
+    auto key = derive_separated_key(password, parameters, salt, kIndexPageContext);
     if (!key) {
         return base::Result<std::unique_ptr<PayloadCipher>>::failure(key.error());
     }

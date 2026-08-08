@@ -1,6 +1,7 @@
 #include "aegra/apps/service/service_host.h"
 
 #include "aegra/application/connected_repository_query.h"
+#include "aegra/application/file_browse_service.h"
 #include "aegra/application/personal_repository_query.h"
 #include "aegra/application/recovery_point_operations.h"
 #include "aegra/application/repository_connection_service.h"
@@ -10,6 +11,7 @@
 #include "aegra/apps/service/service_protocol.h"
 #include "aegra/apps/service/worker_job_service.h"
 #include "aegra/apps/service/worker_supervisor.h"
+#include "file_recovery_point_query.h"
 #include "recovery_point_layout_service.h"
 #include "service_log_formatter.h"
 #include "aegra/contracts/progress.h"
@@ -59,6 +61,11 @@ void write_interaction_log(const ServiceRuntimeInfo& runtime, const std::string_
         return "recovery_point.delete";
     case contracts::ServiceRequestKind::kStartVerify:
         return "recovery_point.verify";
+    case contracts::ServiceRequestKind::kListRecoveryPointEntries:
+        return "file.recover_browse";
+    case contracts::ServiceRequestKind::kPrepareFileRestore:
+    case contracts::ServiceRequestKind::kStartFileRestore:
+        return "file.restore";
     default:
         return {};
     }
@@ -253,7 +260,7 @@ run_repository_command(const contracts::ServiceRequest& request, const ServiceRu
 
 [[nodiscard]] base::Result<contracts::ServiceResponse>
 command_response(const contracts::ServiceRequest& request, const ServiceRuntimeInfo& runtime,
-                 const base::CancellationToken cancellation) {
+                 const ServiceSessionContext& session, const base::CancellationToken cancellation) {
     base::Result<contracts::CommandAcknowledgement> result =
         base::Result<contracts::CommandAcknowledgement>::failure(
             {base::ErrorCode::kConflict, "command unavailable"});
@@ -287,6 +294,12 @@ command_response(const contracts::ServiceRequest& request, const ServiceRuntimeI
             std::get<contracts::StartRestoreCommand>(request.payload), *request.idempotency_key,
             cancellation);
     } else if (runtime.worker_jobs && request.idempotency_key &&
+               request.kind == contracts::ServiceRequestKind::kStartFileRestore) {
+        handled = true;
+        result = runtime.worker_jobs->start_file_restore(
+            std::get<contracts::StartFileRestoreCommand>(request.payload), *request.idempotency_key,
+            cancellation);
+    } else if (runtime.worker_jobs && request.idempotency_key &&
                request.kind == contracts::ServiceRequestKind::kCancelJob) {
         handled = true;
         result = runtime.worker_jobs->cancel_job(std::get<contracts::ResourceRef>(request.payload),
@@ -296,7 +309,7 @@ command_response(const contracts::ServiceRequest& request, const ServiceRuntimeI
         handled = true;
         result = runtime.schedules->upsert_schedule(
             std::get<contracts::UpsertScheduleCommand>(request.payload), *request.idempotency_key,
-            cancellation);
+            session.caller, cancellation);
     } else if (runtime.schedules && request.idempotency_key &&
                request.kind == contracts::ServiceRequestKind::kDeleteSchedule) {
         handled = true;
@@ -486,9 +499,97 @@ mount_list_response(const contracts::ServiceRequest& request, const ServiceRunti
 
 } // namespace
 
+[[nodiscard]] base::Result<contracts::ServiceResponse>
+browse_file_sources_response(const contracts::ServiceRequest& request,
+                             const ServiceRuntimeInfo& runtime,
+                             const ServiceSessionContext& session,
+                             const base::CancellationToken cancellation) {
+    if (runtime.file_browse == nullptr) {
+        return capability_unavailable(request);
+    }
+    if (session.caller.caller_sid.empty() || session.caller.session_id.empty()) {
+        return base::Result<contracts::ServiceResponse>::success(
+            failure(base::ErrorCode::kUnauthorized, request.request_id, request.kind,
+                    "file_browse.caller_required"));
+    }
+    auto page = runtime.file_browse->browse(
+        session.caller, std::get<contracts::BrowseFileSourcesRequest>(request.payload),
+        cancellation);
+    if (!page) {
+        return base::Result<contracts::ServiceResponse>::success(
+            failure(page.error().code, request.request_id, request.kind,
+                    page.error().message.empty() ? "file_browse.failed" : page.error().message));
+    }
+    contracts::ServiceResponse response;
+    response.request_id = request.request_id;
+    response.kind = contracts::ServiceResponseKind::kQueryResult;
+    response.request_kind = request.kind;
+    response.boundary_error_code = base::ErrorCode::kNone;
+    response.message_code = "file_browse.ready";
+    response.payload = std::move(page).value();
+    return base::Result<contracts::ServiceResponse>::success(std::move(response));
+}
+
+[[nodiscard]] base::Result<contracts::ServiceResponse>
+list_recovery_point_entries_response(const contracts::ServiceRequest& request,
+                                     const ServiceRuntimeInfo& runtime,
+                                     const base::CancellationToken cancellation) {
+    if (runtime.control_plane == nullptr || runtime.storage_factory == nullptr) {
+        return capability_unavailable(request);
+    }
+    auto page = list_recovery_point_entries(
+        *runtime.control_plane, *runtime.storage_factory,
+        std::get<contracts::ListRecoveryPointEntriesRequest>(request.payload), cancellation);
+    if (!page) {
+        const auto& error = page.error();
+        const auto message =
+            error.message.empty() ? std::string("file_recover.failed") : error.message;
+        return base::Result<contracts::ServiceResponse>::success(
+            failure(error.code, request.request_id, request.kind, message));
+    }
+    contracts::ServiceResponse response;
+    response.request_id = request.request_id;
+    response.kind = contracts::ServiceResponseKind::kQueryResult;
+    response.request_kind = request.kind;
+    response.boundary_error_code = base::ErrorCode::kNone;
+    response.message_code = "file_recover.ready";
+    response.payload = std::move(page).value();
+    return base::Result<contracts::ServiceResponse>::success(std::move(response));
+}
+
+[[nodiscard]] base::Result<contracts::ServiceResponse>
+prepare_file_restore_response(const contracts::ServiceRequest& request,
+                              const ServiceRuntimeInfo& runtime,
+                              const ServiceSessionContext& session,
+                              const base::CancellationToken cancellation) {
+    if (runtime.worker_jobs == nullptr) {
+        return capability_unavailable(request);
+    }
+    auto result = runtime.worker_jobs->prepare_file_restore(
+        std::get<contracts::PrepareFileRestoreRequest>(request.payload), session.caller,
+        cancellation);
+    if (!result) {
+        const auto& error = result.error();
+        const auto message =
+            error.message.empty() ? std::string("file_restore.preflight_failed") : error.message;
+        write_log(runtime, ServiceLogLevel::kWarning, "file_restore.preflight_failed",
+                  error.message.empty() ? "prepare file restore failed" : error.message);
+        return base::Result<contracts::ServiceResponse>::success(
+            failure(error.code, request.request_id, request.kind, message));
+    }
+    contracts::ServiceResponse response;
+    response.request_id = request.request_id;
+    response.kind = contracts::ServiceResponseKind::kQueryResult;
+    response.request_kind = request.kind;
+    response.boundary_error_code = base::ErrorCode::kNone;
+    response.message_code = "file_restore.preflight_ok";
+    response.payload = std::move(result).value();
+    return base::Result<contracts::ServiceResponse>::success(std::move(response));
+}
+
 base::Result<contracts::ServiceResponse>
 dispatch_service_request(const contracts::ServiceRequest& request,
-                         const ServiceRuntimeInfo& runtime,
+                         const ServiceRuntimeInfo& runtime, const ServiceSessionContext& session,
                          const base::CancellationToken cancellation) {
     write_log(runtime, ServiceLogLevel::kInfo, "service.request_received",
               request_detail(request));
@@ -560,28 +661,38 @@ dispatch_service_request(const contracts::ServiceRequest& request,
     case contracts::ServiceRequestKind::kStartBackup:
     case contracts::ServiceRequestKind::kStartVerify:
     case contracts::ServiceRequestKind::kStartRestore:
+    case contracts::ServiceRequestKind::kStartFileRestore:
     case contracts::ServiceRequestKind::kExecuteDeletePlan:
     case contracts::ServiceRequestKind::kCancelJob:
-        response = command_response(request, runtime, cancellation);
+        response = command_response(request, runtime, session, cancellation);
         break;
     case contracts::ServiceRequestKind::kListSchedules:
         response = query_response(request, runtime, cancellation);
         break;
     case contracts::ServiceRequestKind::kUpsertSchedule:
     case contracts::ServiceRequestKind::kDeleteSchedule:
-        response = command_response(request, runtime, cancellation);
+        response = command_response(request, runtime, session, cancellation);
         break;
     case contracts::ServiceRequestKind::kListMountSessions:
         response = mount_list_response(request, runtime, cancellation);
         break;
     case contracts::ServiceRequestKind::kMountRecoveryPoint:
     case contracts::ServiceRequestKind::kUnmountSession:
-        response = command_response(request, runtime, cancellation);
+        response = command_response(request, runtime, session, cancellation);
         break;
     case contracts::ServiceRequestKind::kListEvents:
     case contracts::ServiceRequestKind::kSubscribeTaskEvents:
     case contracts::ServiceRequestKind::kAcknowledgeEvents:
         response = capability_unavailable(request);
+        break;
+    case contracts::ServiceRequestKind::kBrowseFileSources:
+        response = browse_file_sources_response(request, runtime, session, cancellation);
+        break;
+    case contracts::ServiceRequestKind::kListRecoveryPointEntries:
+        response = list_recovery_point_entries_response(request, runtime, cancellation);
+        break;
+    case contracts::ServiceRequestKind::kPrepareFileRestore:
+        response = prepare_file_restore_response(request, runtime, session, cancellation);
         break;
     }
     if (!response) {
@@ -602,6 +713,7 @@ dispatch_service_request(const contracts::ServiceRequest& request,
 
 base::Result<std::string> handle_service_message(const std::string_view encoded_request,
                                                  const ServiceRuntimeInfo& runtime,
+                                                 const ServiceSessionContext& session,
                                                  const base::CancellationToken cancellation) {
     write_interaction_log(runtime, "Inbound", encoded_request);
     auto request = decode_service_request(encoded_request);
@@ -618,7 +730,7 @@ base::Result<std::string> handle_service_message(const std::string_view encoded_
         }
         return encoded_response;
     }
-    auto response = dispatch_service_request(request.value(), runtime, cancellation);
+    auto response = dispatch_service_request(request.value(), runtime, session, cancellation);
     if (!response) {
         return base::Result<std::string>::failure(response.error());
     }
@@ -631,23 +743,36 @@ base::Result<std::string> handle_service_message(const std::string_view encoded_
 
 base::Result<void> run_service_session(ports::IMessageChannel& channel,
                                        const ServiceRuntimeInfo& runtime,
+                                       const ServiceSessionContext& session,
                                        const base::CancellationToken& cancellation,
                                        const std::size_t maximum_requests) {
     std::size_t processed = 0;
     while (maximum_requests == 0 || processed < maximum_requests) {
         auto request = channel.receive(cancellation);
         if (!request) {
+            if (runtime.file_browse != nullptr && !session.caller.session_id.empty()) {
+                runtime.file_browse->clear_session(session.caller.session_id);
+            }
             return base::Result<void>::failure(request.error());
         }
-        auto response = handle_service_message(request.value(), runtime, cancellation);
+        auto response = handle_service_message(request.value(), runtime, session, cancellation);
         if (!response) {
+            if (runtime.file_browse != nullptr && !session.caller.session_id.empty()) {
+                runtime.file_browse->clear_session(session.caller.session_id);
+            }
             return base::Result<void>::failure(response.error());
         }
         auto sent = channel.send(response.value(), cancellation);
         if (!sent) {
+            if (runtime.file_browse != nullptr && !session.caller.session_id.empty()) {
+                runtime.file_browse->clear_session(session.caller.session_id);
+            }
             return sent;
         }
         ++processed;
+    }
+    if (runtime.file_browse != nullptr && !session.caller.session_id.empty()) {
+        runtime.file_browse->clear_session(session.caller.session_id);
     }
     return base::Result<void>::success();
 }

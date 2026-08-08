@@ -1,11 +1,14 @@
 #include "aegra/apps/service/service_security_host.h"
 
+#include <atomic>
 #include <chrono>
 #include <thread>
 #include <utility>
 
 namespace aegra::apps::service {
 namespace {
+
+std::atomic<std::uint64_t> g_next_session_serial{1};
 
 [[nodiscard]] bool wait_until_stopped(const base::CancellationToken& cancellation,
                                       const std::chrono::milliseconds deadline) {
@@ -19,6 +22,16 @@ namespace {
     return true;
 }
 
+[[nodiscard]] ServiceSessionContext
+make_session_context(const adapters::windows_ipc::WindowsNamedPipePeerIdentity& peer) {
+    ServiceSessionContext session;
+    session.caller.caller_sid = peer.user_sid;
+    session.caller.session_id =
+        "pipe|" + std::to_string(peer.process_id) + "|" + std::to_string(peer.session_id) + "|" +
+        std::to_string(g_next_session_serial.fetch_add(1, std::memory_order_relaxed));
+    return session;
+}
+
 [[nodiscard]] base::Result<void>
 serve_one(adapters::windows_ipc::WindowsNamedPipeListener& listener,
           const ServiceRuntimeInfo& runtime, const ServiceSecurityHostOptions& options,
@@ -27,7 +40,8 @@ serve_one(adapters::windows_ipc::WindowsNamedPipeListener& listener,
     if (!accepted) {
         return base::Result<void>::failure(accepted.error());
     }
-    return run_service_session(*accepted.value().channel, runtime, cancellation,
+    const auto session = make_session_context(accepted.value().peer);
+    return run_service_session(*accepted.value().channel, runtime, session, cancellation,
                                options.maximum_requests_per_session);
 }
 

@@ -27,53 +27,57 @@
 
 ## 当前状态
 
-`JobRequest` schema 3 是当前 Worker 的版本化任务信封，拥有 job、tenant、operation、source/target、
-`SecretRef`、trace 和 deadline。Backup Job 还必须拥有 `BackupOptions`：显式 `type`、`file_uuid`、
-`created_utc_ms`，全量必须拥有不同于 `file_uuid` 的 `backup_set_uuid`，增量时同时拥有
-`parent_source_ref` 与 `parent_credential_ref`。Service 在提交 Worker 前分配持久化身份和创建时间，Worker
-不得重新生成 Archive 身份。`SecretRef` 只保存凭据定位符，禁止保存明文 Secret。
+`JobRequest` schema **4** 是当前 Worker 的版本化任务信封，拥有 job、tenant、operation、`content_kind`、
+source/target、`SecretRef`、trace 和 deadline。`content_kind` 为 `volume_set` 或 `file_set`，payload 互斥：
 
-`TaskProgress` 同时携带 `job_id` 与 `trace_id`，用于跨线程和跨进程关联。`TaskResult` 使用稳定的
-`TaskOutcome`、`ErrorCode`、message code、warning code 和容量指标；不得复制 Adapter 的原始错误文本。
-请求校验失败表示任务没有被接受，已接受任务的运行失败则形成合法 `TaskResult`。
+- **volume_set**：`source_refs` / `target_ref` / 可选 `RestoreOptions`；`file_source_refs` 与
+  `file_restore_target` 必须为空。
+- **file_set backup**：`file_source_refs`（1..100）+ `target_ref`；`source_refs` 为空。
+- **file_set restore**：`source_refs`（archive 路径）+ `file_restore_target`；`target_ref` 为空。
 
-`WorkerResponse` 是 Worker 的版本化根响应，互斥表达已接受任务的 `TaskResult`、请求拒绝和 Host 故障。
-响应与内部结果必须保持 job/trace 关联一致。传输编码和进程退出码属于 `apps/worker`，不进入契约实现。
+Backup Job 还必须拥有 `BackupOptions`：显式 `type`、`file_uuid`、`created_utc_ms`，全量必须拥有不同于
+`file_uuid` 的 `backup_set_uuid`，增量时同时拥有 `parent_source_ref` 与 `parent_credential_ref`。
+file_set 首版仅 Full。Service 在提交 Worker 前分配持久化身份和创建时间，Worker 不得重新生成 Archive 身份。
+`SecretRef` 只保存凭据定位符，禁止保存明文 Secret。
 
-`WorkerCommand` 与 `WorkerEvent` 定义双向会话契约。首阶段 Command 只支持关联当前 job/trace 的 Cancel；
-Event 互斥表达 `TaskProgress` 或最终 `WorkerResponse`。协议要求零到多个 Progress，随后至多一个 Result；
-具体 framing、JSON 和 Named Pipe 不进入 Contracts。长期决策见
+`TaskProgress` schema 4 同时携带 `job_id` 与 `trace_id`；`logical_bytes` 可为 null（文件枚举阶段未知总量），
+并增加 `discovered_entries` / `processed_entries`。`TaskResult` schema 4 增加 `entry_count`、
+`stream_count` 与可选 `partial_restore`。不得复制 Adapter 的原始错误文本。
+
+`file_set.h` 定义 `ContentKind`、名称编码、`FileSourceRef`、`FileEntryDesc`、`FileRestoreTarget`、
+`PartialRestoreStats` 与产品上限常量；Contracts/Ports 禁止路径类型、HANDLE、Qt、JSON。
+
+`WorkerResponse` / `WorkerCommand` / `WorkerEvent` 语义不变；具体 framing 见
 [ADR-0008](../adr/0008-worker-session-named-pipe-protocol.md)。
 
-`ServiceRequest`、`ServiceResponse` 与 `ServiceEvent` schema 3 定义本地 Desktop 控制面契约。根 envelope
-显式区分 Request、Response 和 Event，request kind 与强类型 payload 必须匹配。查询不携带幂等键，命令必须
-携带稳定幂等键；Response 互斥表达 QueryResult、CommandAccepted 或 RequestFailed。
+`ServiceRequest` / `ServiceResponse` / `ServiceEvent` schema **4**（API 4）定义本地 Desktop 控制面契约。
+新增 query kind 13–15（浏览文件源、列出 RP 条目、PrepareFileRestore）与 command kind 48
+（StartFileRestore）。`UpsertScheduleCommand` 使用 tagged `ProtectionSpecInput`（`volume_source_ids` 与
+file selections 互斥）。`ScheduleSummary` / `JobSummary` / `RecoveryPointSummary` 携带 `content_kind`。
+完整 wire 见 [ADR-0017](../adr/0017-service-control-protocol-v4.md) 与
+[SERVICE_CONTROL_PROTOCOL_V4](../protocol/SERVICE_CONTROL_PROTOCOL_V4.md)。产品未发布，不实现 V3 解析。
 
-V3 已定义 Repository connection、Source Inventory、Job、Schedule、Audit Event、Restore preflight、Mount
-Session 和 task event DTO。列表每页最多 100 项，event 未确认窗口最多 128；所有 Qt 可见整数不超过非负
-有符号 64 位范围。Catalog 状态仍不表达 Archive 已认证或 Restore Ready。完整 wire 决策见
-[ADR-0013](../adr/0013-service-control-protocol-v3.md)；**逐条协议字段与示例 JSON** 见
-[SERVICE_CONTROL_PROTOCOL_V3](../protocol/SERVICE_CONTROL_PROTOCOL_V3.md)。
+Volume schedule 创建/更新：
 
-Backup Start、Schedule 与 Backup Job 使用有序 `source_ids[]`，包含 1 至 100 个稳定且无重复的 Source ID。
-该数组是一个 Job 的原子 Source 集合；协议层不得只保留第一个 ID，也不得拆成多个命令。Worker
-`JobRequest.source_refs[]` 按相同顺序保存解析后的稳定 Volume 引用。
-
-`UpsertScheduleCommand` 区分创建与更新：
-
-- **创建**（无 `schedule_id`）：可设置完整 `source_ids`、Backup options、加密与 1–32 字符口令；
+- **创建**（无 `schedule_id`）：`protection.volume_source_ids`、Backup options、加密与 1–32 字符口令；
   口令经 Service 用 DPAPI `CRYPTPROTECT_LOCAL_MACHINE` 保护（`pOptionalEntropy` = `schedule_id`）
-  并以 Base64 写入 SQLite `schedules.archive_password_protected`
-  （`dpapi-lm:<schedule_id>:<base64>`）。
-- **更新**（有 `schedule_id`）：不得携带 `archive_password`；`source_ids`、`backup_type`、
-  `exclude_page_and_hibernation_files`、`encryption_enabled` 与保护口令必须与已有记录一致（创建后冻结）。
-  允许修改 `display_name`、`enabled`、`repository_connection_id`、`trigger`（Schedule settings）。
-  Backup options 中除未来的 shutdown-on-complete 外均不可改。
+  并以 Base64 写入 SQLite。
+- **更新**（有 `schedule_id`）：不得携带 `archive_password`；保护源、`backup_type`、
+  `exclude_page_and_hibernation_files`、`encryption_enabled` 与保护口令创建后冻结。
+  允许修改 `display_name`、`enabled`、`repository_connection_id`、`trigger`。
 
-S6 修正了 Restore V3 DTO：Prepare 必须携带 Repository connection、Recovery Point 和 opaque target source ID；
-成功 preflight 返回相同资源归属、逻辑大小、目标容量、链深、过期 UTC、eligibility 与稳定 message code；Start
-只接受 opaque preflight token 且必须显式 `confirmed=true`。协议不接受 Archive path、对象 key、链数组、
-SecretRef、Volume GUID 或任意设备路径。
+file_set schedule（F6）：
+
+- **创建**：`protection.file_selections[]` 携带短期 browse `node_token`；Service 在调用方 SID/session 下
+  解析为 durable `FileSourceRef`（canonical `selection_id` UUID + `volume_identity` + 相对组件），
+  规范化/去重后写入控制面；`owner_sid` 记录创建者。
+- **更新**：不得更换 `content_kind` 或重新提交 file selections（`schedule.source_frozen`）；
+  与 volume 相同，`backup_type` / 加密选项冻结。
+- Desktop 永不发送绝对路径；列表摘要只含 display label，不含路径或 volume GUID。
+
+Volume Restore：Prepare 必须携带 Repository connection、Recovery Point 和 opaque target source ID；
+Start 只接受 opaque preflight token 且 `confirmed=true`。file_set 恢复使用 kind 15/48，不得走 volume
+Prepare/Start。
 
 ## 验证
 

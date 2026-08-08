@@ -22,12 +22,12 @@ base::Result<void> JobStore::insert(const ports::JobRecord& record,
     }
     auto statement = SqliteStatement::prepare(
         state_.db,
-        "INSERT INTO jobs(job_id, trace_id, operation, state, created_utc_ms, started_utc_ms, "
-        "completed_utc_ms, source_ids, repository_connection_id, target_source_id, backup_type, "
-        "parent_recovery_point_id, preflight_token, message_code, idempotency_key, "
+        "INSERT INTO jobs(job_id, trace_id, operation, state, content_kind, created_utc_ms, "
+        "started_utc_ms, completed_utc_ms, source_ids, repository_connection_id, target_source_id, "
+        "backup_type, parent_recovery_point_id, preflight_token, message_code, idempotency_key, "
         "result_error_code, result_outcome, result_message_code, "
         "exclude_page_and_hibernation_files, request_fingerprint) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     if (!statement) {
         return base::Result<void>::failure(statement.error());
     }
@@ -44,73 +44,76 @@ base::Result<void> JobStore::insert(const ports::JobRecord& record,
     if (auto bound = stmt.bind_int64(4, static_cast<std::int64_t>(record.state)); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_int64(5, static_cast<std::int64_t>(record.created_utc_ms)); !bound) {
+    if (auto bound = stmt.bind_int64(5, static_cast<std::int64_t>(record.content_kind)); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_int64_nullable(6, record.started_utc_ms); !bound) {
+    if (auto bound = stmt.bind_int64(6, static_cast<std::int64_t>(record.created_utc_ms)); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_int64_nullable(7, record.completed_utc_ms); !bound) {
+    if (auto bound = stmt.bind_int64_nullable(7, record.started_utc_ms); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_text(8, encode_string_list(record.source_ids)); !bound) {
+    if (auto bound = stmt.bind_int64_nullable(8, record.completed_utc_ms); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_text_nullable(9, record.repository_connection_id); !bound) {
+    if (auto bound = stmt.bind_text(9, encode_string_list(record.source_ids)); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_text_nullable(10, record.target_source_id); !bound) {
+    if (auto bound = stmt.bind_text_nullable(10, record.repository_connection_id); !bound) {
+        return bound;
+    }
+    if (auto bound = stmt.bind_text_nullable(11, record.target_source_id); !bound) {
         return bound;
     }
     if (record.backup_type) {
-        if (auto bound = stmt.bind_int64(11, static_cast<std::int64_t>(*record.backup_type));
+        if (auto bound = stmt.bind_int64(12, static_cast<std::int64_t>(*record.backup_type));
             !bound) {
             return bound;
         }
-    } else if (auto bound = stmt.bind_null(11); !bound) {
+    } else if (auto bound = stmt.bind_null(12); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_text_nullable(12, record.parent_recovery_point_id); !bound) {
+    if (auto bound = stmt.bind_text_nullable(13, record.parent_recovery_point_id); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_text_nullable(13, record.preflight_token); !bound) {
+    if (auto bound = stmt.bind_text_nullable(14, record.preflight_token); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_text(14, record.message_code); !bound) {
+    if (auto bound = stmt.bind_text(15, record.message_code); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_text_nullable(15, record.idempotency_key); !bound) {
+    if (auto bound = stmt.bind_text_nullable(16, record.idempotency_key); !bound) {
         return bound;
     }
     if (record.result_error_code) {
-        if (auto bound = stmt.bind_int64(16, static_cast<std::int64_t>(*record.result_error_code));
-            !bound) {
-            return bound;
-        }
-    } else if (auto bound = stmt.bind_null(16); !bound) {
-        return bound;
-    }
-    if (record.result_outcome) {
-        if (auto bound = stmt.bind_int64(17, static_cast<std::int64_t>(*record.result_outcome));
+        if (auto bound = stmt.bind_int64(17, static_cast<std::int64_t>(*record.result_error_code));
             !bound) {
             return bound;
         }
     } else if (auto bound = stmt.bind_null(17); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_text_nullable(18, record.result_message_code); !bound) {
+    if (record.result_outcome) {
+        if (auto bound = stmt.bind_int64(18, static_cast<std::int64_t>(*record.result_outcome));
+            !bound) {
+            return bound;
+        }
+    } else if (auto bound = stmt.bind_null(18); !bound) {
+        return bound;
+    }
+    if (auto bound = stmt.bind_text_nullable(19, record.result_message_code); !bound) {
         return bound;
     }
     if (record.exclude_page_and_hibernation_files) {
         if (auto bound =
-                stmt.bind_int64(19, *record.exclude_page_and_hibernation_files ? 1 : 0);
+                stmt.bind_int64(20, *record.exclude_page_and_hibernation_files ? 1 : 0);
             !bound) {
             return bound;
         }
-    } else if (auto bound = stmt.bind_null(19); !bound) {
+    } else if (auto bound = stmt.bind_null(20); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_text(20, record.request_fingerprint); !bound) {
+    if (auto bound = stmt.bind_text(21, record.request_fingerprint); !bound) {
         return bound;
     }
     auto stepped = stmt.step();
@@ -169,13 +172,11 @@ base::Result<contracts::JobPage> JobStore::list(const contracts::JobListRequest&
         return base::Result<contracts::JobPage>::failure(token.error());
     }
     std::string sql =
-        "SELECT job_id, trace_id, operation, state, created_utc_ms, started_utc_ms, "
-        "completed_utc_ms, "
-        "source_ids, repository_connection_id, target_source_id, backup_type, "
-        "parent_recovery_point_id, "
-        "preflight_token, message_code, idempotency_key, result_error_code, result_outcome, "
-        "result_message_code, exclude_page_and_hibernation_files, request_fingerprint "
-        "FROM jobs WHERE 1=1";
+        "SELECT job_id, trace_id, operation, state, content_kind, created_utc_ms, started_utc_ms, "
+        "completed_utc_ms, source_ids, repository_connection_id, target_source_id, backup_type, "
+        "parent_recovery_point_id, preflight_token, message_code, idempotency_key, "
+        "result_error_code, result_outcome, result_message_code, "
+        "exclude_page_and_hibernation_files, request_fingerprint FROM jobs WHERE 1=1";
     if (request.operation) {
         sql += " AND operation = ?";
     }

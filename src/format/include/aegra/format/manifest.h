@@ -10,7 +10,9 @@
 
 namespace aegra::format {
 
-inline constexpr std::uint32_t kManifestSchemaVersion = 6;
+inline constexpr std::uint32_t kManifestSchemaVersion = 1;
+inline constexpr std::uint8_t kManifestContentKindVolumeSet = 1;
+inline constexpr std::uint8_t kManifestContentKindFileSet = 2;
 using Guid = std::array<std::byte, 16>;
 
 enum class PartitionStyle : std::uint8_t {
@@ -116,6 +118,7 @@ struct ProviderExtension final {
 
 struct Manifest final {
     std::uint32_t schema_version{kManifestSchemaVersion};
+    std::uint8_t content_kind{kManifestContentKindVolumeSet};
     std::vector<Disk> disks;
     SystemInfo system;
     BackupJob backup_job;

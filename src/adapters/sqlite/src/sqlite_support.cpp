@@ -1,14 +1,17 @@
 #include "sqlite_internal.h"
 
 #include "aegra/base/uuid.h"
+#include "aegra/contracts/file_set.h"
 #include "aegra/contracts/service_control.h"
 
 #include <algorithm>
 #include <cctype>
 #include <limits>
 #include <set>
+#include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace aegra::adapters::sqlite::detail {
 namespace {
@@ -425,6 +428,7 @@ base::Result<void> validate_job_record(const ports::JobRecord& record) {
     if (!valid_stable_value(record.job_id, kMaximumIdentifierBytes) ||
         !valid_stable_value(record.trace_id, kMaximumIdentifierBytes) ||
         !known_job_operation(record.operation) || !known_job_state(record.state) ||
+        !contracts::is_known_content_kind(record.content_kind) ||
         !valid_wire_integer(record.created_utc_ms) ||
         !valid_optional_wire_integer(record.started_utc_ms) ||
         !valid_optional_wire_integer(record.completed_utc_ms) ||
@@ -468,7 +472,7 @@ base::Result<void> validate_schedule_record(const ports::ScheduleRecord& record)
     auto valid_trigger = contracts::validate_schedule_trigger(record.trigger);
     if (!valid_stable_value(record.schedule_id, kMaximumIdentifierBytes) ||
         !valid_text(record.display_name, kMaximumDisplayNameBytes) ||
-        !valid_source_ids(record.source_ids, false) ||
+        !contracts::is_known_content_kind(record.content_kind) ||
         !valid_stable_value(record.repository_connection_id, kMaximumIdentifierBytes) ||
         !known_backup_type(record.backup_type) || !valid_trigger ||
         !valid_optional_wire_integer(record.next_run_utc_ms) ||
@@ -478,6 +482,24 @@ base::Result<void> validate_schedule_record(const ports::ScheduleRecord& record)
         !valid_wire_integer(record.created_utc_ms) || !valid_wire_integer(record.updated_utc_ms) ||
         record.updated_utc_ms < record.created_utc_ms) {
         return invalid("schedule record is invalid");
+    }
+    if (record.owner_sid.size() > kMaximumLocatorBytes) {
+        return invalid("schedule owner identity is invalid");
+    }
+    if (record.content_kind == contracts::ContentKind::kVolumeSet) {
+        if (!valid_source_ids(record.source_ids, false) || !record.file_selections.empty()) {
+            return invalid("volume schedule sources are invalid");
+        }
+    } else {
+        if (!record.source_ids.empty() || record.file_selections.empty() ||
+            record.file_selections.size() > contracts::kMaximumFileSelections ||
+            record.backup_type != contracts::BackupType::kFull) {
+            return invalid("file schedule sources are invalid");
+        }
+        auto refs = contracts::validate_file_source_refs(record.file_selections);
+        if (!refs) {
+            return refs;
+        }
     }
     if (record.trigger.timezone_id.size() > kMaximumTimezoneBytes) {
         return invalid("schedule timezone is invalid");
@@ -528,20 +550,35 @@ base::Result<void> validate_command_record(const ports::CommandRecord& record) {
 }
 
 base::Result<void> validate_restore_preflight_record(const ports::RestorePreflightRecord& record) {
-    // chain_fingerprint is an opaque binding string (disk restore uses '|' + archive key paths
-    // like archives/yyyy/mm/uuid.bkf). Validate as printable text, not a stable identifier.
+    // chain_fingerprint is an opaque binding string (disk/volume/file restore prefixes).
+    // Validate as printable text, not a stable identifier.
     if (!valid_text(record.preflight_token, kMaximumTokenBytes) ||
         !valid_stable_value(record.repository_connection_id, kMaximumIdentifierBytes) ||
         !valid_stable_value(record.repository_uuid, kMaximumIdentifierBytes) ||
         !valid_stable_value(record.recovery_point_id, kMaximumIdentifierBytes) ||
         !valid_stable_value(record.target_source_id, kMaximumIdentifierBytes) ||
         !valid_text(record.chain_fingerprint, kMaximumCommandFingerprintBytes) ||
-        record.logical_size_bytes == 0 || !valid_wire_integer(record.logical_size_bytes) ||
+        !valid_wire_integer(record.logical_size_bytes) ||
         record.target_capacity_bytes < record.logical_size_bytes ||
         !valid_wire_integer(record.target_capacity_bytes) || record.chain_depth == 0 ||
         !valid_wire_integer(record.created_utc_ms) || !valid_wire_integer(record.expires_utc_ms) ||
         record.expires_utc_ms <= record.created_utc_ms) {
         return invalid("restore preflight record is invalid");
+    }
+    const bool is_file = record.chain_fingerprint.starts_with("filec|");
+    if (is_file) {
+        if (record.entry_ids.empty() ||
+            record.entry_ids.size() > contracts::kMaximumFileRestoreEntryIds) {
+            return invalid("file restore preflight entry_ids are invalid");
+        }
+        std::set<std::string_view> seen;
+        for (const auto& entry_id : record.entry_ids) {
+            if (entry_id.empty() || entry_id.size() > 20 || !seen.insert(entry_id).second) {
+                return invalid("file restore preflight entry_ids are invalid");
+            }
+        }
+    } else if (!record.entry_ids.empty() || record.logical_size_bytes == 0) {
+        return invalid("volume restore preflight record is invalid");
     }
     return base::Result<void>::success();
 }
@@ -645,34 +682,35 @@ base::Result<ports::JobRecord> read_job(sqlite3_stmt* const stmt) {
     record.trace_id = column_text_required(stmt, 1);
     record.operation = static_cast<contracts::JobOperation>(sqlite3_column_int(stmt, 2));
     record.state = static_cast<contracts::ServiceJobState>(sqlite3_column_int(stmt, 3));
-    record.created_utc_ms = column_uint64(stmt, 4);
-    record.started_utc_ms = column_uint64_optional(stmt, 5);
-    record.completed_utc_ms = column_uint64_optional(stmt, 6);
-    auto source_ids = decode_string_list(column_text_required(stmt, 7));
+    record.content_kind = static_cast<contracts::ContentKind>(sqlite3_column_int(stmt, 4));
+    record.created_utc_ms = column_uint64(stmt, 5);
+    record.started_utc_ms = column_uint64_optional(stmt, 6);
+    record.completed_utc_ms = column_uint64_optional(stmt, 7);
+    auto source_ids = decode_string_list(column_text_required(stmt, 8));
     if (!source_ids) {
         return base::Result<ports::JobRecord>::failure(source_ids.error());
     }
     record.source_ids = std::move(source_ids).value();
-    record.repository_connection_id = column_text_optional(stmt, 8);
-    record.target_source_id = column_text_optional(stmt, 9);
-    if (sqlite3_column_type(stmt, 10) != SQLITE_NULL) {
-        record.backup_type = static_cast<contracts::BackupType>(sqlite3_column_int(stmt, 10));
+    record.repository_connection_id = column_text_optional(stmt, 9);
+    record.target_source_id = column_text_optional(stmt, 10);
+    if (sqlite3_column_type(stmt, 11) != SQLITE_NULL) {
+        record.backup_type = static_cast<contracts::BackupType>(sqlite3_column_int(stmt, 11));
     }
-    record.parent_recovery_point_id = column_text_optional(stmt, 11);
-    record.preflight_token = column_text_optional(stmt, 12);
-    record.message_code = column_text_required(stmt, 13);
-    record.idempotency_key = column_text_optional(stmt, 14);
-    if (sqlite3_column_type(stmt, 15) != SQLITE_NULL) {
-        record.result_error_code = static_cast<std::uint32_t>(sqlite3_column_int64(stmt, 15));
-    }
+    record.parent_recovery_point_id = column_text_optional(stmt, 12);
+    record.preflight_token = column_text_optional(stmt, 13);
+    record.message_code = column_text_required(stmt, 14);
+    record.idempotency_key = column_text_optional(stmt, 15);
     if (sqlite3_column_type(stmt, 16) != SQLITE_NULL) {
-        record.result_outcome = static_cast<std::uint32_t>(sqlite3_column_int64(stmt, 16));
+        record.result_error_code = static_cast<std::uint32_t>(sqlite3_column_int64(stmt, 16));
     }
-    record.result_message_code = column_text_optional(stmt, 17);
-    if (sqlite3_column_type(stmt, 18) != SQLITE_NULL) {
-        record.exclude_page_and_hibernation_files = sqlite3_column_int(stmt, 18) != 0;
+    if (sqlite3_column_type(stmt, 17) != SQLITE_NULL) {
+        record.result_outcome = static_cast<std::uint32_t>(sqlite3_column_int64(stmt, 17));
     }
-    record.request_fingerprint = column_text_required(stmt, 19);
+    record.result_message_code = column_text_optional(stmt, 18);
+    if (sqlite3_column_type(stmt, 19) != SQLITE_NULL) {
+        record.exclude_page_and_hibernation_files = sqlite3_column_int(stmt, 19) != 0;
+    }
+    record.request_fingerprint = column_text_required(stmt, 20);
     auto valid = validate_job_record(record);
     if (!valid) {
         return base::Result<ports::JobRecord>::failure(valid.error());
@@ -685,26 +723,34 @@ base::Result<ports::ScheduleRecord> read_schedule(sqlite3_stmt* const stmt) {
     record.schedule_id = column_text_required(stmt, 0);
     record.display_name = column_text_required(stmt, 1);
     record.enabled = sqlite3_column_int(stmt, 2) != 0;
-    auto source_ids = decode_string_list(column_text_required(stmt, 3));
+    record.content_kind = static_cast<contracts::ContentKind>(sqlite3_column_int(stmt, 3));
+    auto source_ids = decode_string_list(column_text_required(stmt, 4));
     if (!source_ids) {
         return base::Result<ports::ScheduleRecord>::failure(source_ids.error());
     }
     record.source_ids = std::move(source_ids).value();
-    record.repository_connection_id = column_text_required(stmt, 4);
-    record.backup_type = static_cast<contracts::BackupType>(sqlite3_column_int(stmt, 5));
-    record.trigger.kind = static_cast<contracts::ScheduleTriggerKind>(sqlite3_column_int(stmt, 6));
-    record.trigger.local_minute_of_day = static_cast<std::uint16_t>(sqlite3_column_int(stmt, 7));
-    record.trigger.weekday_mask = static_cast<std::uint8_t>(sqlite3_column_int(stmt, 8));
-    record.trigger.timezone_id = column_text_required(stmt, 9);
-    record.next_run_utc_ms = column_uint64_optional(stmt, 10);
-    record.exclude_page_and_hibernation_files = sqlite3_column_int(stmt, 11) != 0;
-    record.encryption_enabled = sqlite3_column_int(stmt, 12) != 0;
-    record.archive_password_protected = column_text_required(stmt, 13);
-    record.backup_set_uuid = column_text_required(stmt, 14);
-    record.last_recovery_point_id = column_text_optional(stmt, 15);
-    record.created_utc_ms = column_uint64(stmt, 16);
-    record.updated_utc_ms = column_uint64(stmt, 17);
+    record.owner_sid = column_text_required(stmt, 5);
+    record.repository_connection_id = column_text_required(stmt, 6);
+    record.backup_type = static_cast<contracts::BackupType>(sqlite3_column_int(stmt, 7));
+    record.trigger.kind = static_cast<contracts::ScheduleTriggerKind>(sqlite3_column_int(stmt, 8));
+    record.trigger.local_minute_of_day = static_cast<std::uint16_t>(sqlite3_column_int(stmt, 9));
+    record.trigger.weekday_mask = static_cast<std::uint8_t>(sqlite3_column_int(stmt, 10));
+    record.trigger.timezone_id = column_text_required(stmt, 11);
+    record.next_run_utc_ms = column_uint64_optional(stmt, 12);
+    record.exclude_page_and_hibernation_files = sqlite3_column_int(stmt, 13) != 0;
+    record.encryption_enabled = sqlite3_column_int(stmt, 14) != 0;
+    record.archive_password_protected = column_text_required(stmt, 15);
+    record.backup_set_uuid = column_text_required(stmt, 16);
+    record.last_recovery_point_id = column_text_optional(stmt, 17);
+    record.created_utc_ms = column_uint64(stmt, 18);
+    record.updated_utc_ms = column_uint64(stmt, 19);
+    // file_selections loaded by schedule store after read when content_kind is file_set.
     auto valid = validate_schedule_record(record);
+    if (!valid && record.content_kind == contracts::ContentKind::kFileSet &&
+        record.file_selections.empty()) {
+        // Defer full validation until selections are attached by the store.
+        return base::Result<ports::ScheduleRecord>::success(std::move(record));
+    }
     if (!valid) {
         return base::Result<ports::ScheduleRecord>::failure(valid.error());
     }
@@ -760,9 +806,26 @@ base::Result<ports::RestorePreflightRecord> read_restore_preflight(sqlite3_stmt*
     record.chain_depth = static_cast<std::uint32_t>(chain_depth);
     record.created_utc_ms = column_uint64(stmt, 9);
     record.expires_utc_ms = column_uint64(stmt, 10);
-    auto valid = validate_restore_preflight_record(record);
-    return valid ? base::Result<ports::RestorePreflightRecord>::success(std::move(record))
-                 : base::Result<ports::RestorePreflightRecord>::failure(valid.error());
+    // entry_ids are attached by the store after this read; validate base fields only here.
+    if (!valid_text(record.preflight_token, kMaximumTokenBytes) ||
+        !valid_stable_value(record.repository_connection_id, kMaximumIdentifierBytes) ||
+        !valid_stable_value(record.repository_uuid, kMaximumIdentifierBytes) ||
+        !valid_stable_value(record.recovery_point_id, kMaximumIdentifierBytes) ||
+        !valid_stable_value(record.target_source_id, kMaximumIdentifierBytes) ||
+        !valid_text(record.chain_fingerprint, kMaximumCommandFingerprintBytes) ||
+        !valid_wire_integer(record.logical_size_bytes) ||
+        record.target_capacity_bytes < record.logical_size_bytes ||
+        !valid_wire_integer(record.target_capacity_bytes) || record.chain_depth == 0 ||
+        !valid_wire_integer(record.created_utc_ms) || !valid_wire_integer(record.expires_utc_ms) ||
+        record.expires_utc_ms <= record.created_utc_ms) {
+        return base::Result<ports::RestorePreflightRecord>::failure(
+            make_error(base::ErrorCode::kCorruptData, "restore preflight record is invalid"));
+    }
+    if (!record.chain_fingerprint.starts_with("filec|") && record.logical_size_bytes == 0) {
+        return base::Result<ports::RestorePreflightRecord>::failure(
+            make_error(base::ErrorCode::kCorruptData, "restore preflight record is invalid"));
+    }
+    return base::Result<ports::RestorePreflightRecord>::success(std::move(record));
 }
 
 contracts::RepositoryConnectionSummary
@@ -777,6 +840,11 @@ contracts::JobSummary to_job_summary(const ports::JobRecord& record) {
     summary.trace_id = record.trace_id;
     summary.operation = record.operation;
     summary.state = record.state;
+    if (record.operation == contracts::JobOperation::kBackup ||
+        record.operation == contracts::JobOperation::kRestore ||
+        record.operation == contracts::JobOperation::kVerify) {
+        summary.content_kind = record.content_kind;
+    }
     summary.created_utc_ms = record.created_utc_ms;
     summary.started_utc_ms = record.started_utc_ms;
     summary.completed_utc_ms = record.completed_utc_ms;
@@ -787,16 +855,306 @@ contracts::JobSummary to_job_summary(const ports::JobRecord& record) {
 }
 
 contracts::ScheduleSummary to_schedule_summary(const ports::ScheduleRecord& record) {
-    return {record.schedule_id,
-            record.display_name,
-            record.enabled,
-            record.source_ids,
-            record.repository_connection_id,
-            record.backup_type,
-            record.trigger,
-            record.next_run_utc_ms,
-            record.exclude_page_and_hibernation_files,
-            record.encryption_enabled};
+    contracts::ScheduleSummary summary;
+    summary.schedule_id = record.schedule_id;
+    summary.display_name = record.display_name;
+    summary.enabled = record.enabled;
+    summary.content_kind = record.content_kind;
+    if (record.content_kind == contracts::ContentKind::kVolumeSet) {
+        summary.source_ids = record.source_ids;
+    } else {
+        summary.selection_summaries.reserve(record.file_selections.size());
+        for (const auto& selection : record.file_selections) {
+            contracts::FileSelectionSummary item;
+            item.selection_id = selection.selection_id;
+            item.display_label = selection.display_label;
+            item.entry_kind = selection.entry_kind;
+            item.recursion = selection.recursion;
+            summary.selection_summaries.push_back(std::move(item));
+        }
+    }
+    summary.repository_connection_id = record.repository_connection_id;
+    summary.backup_type = record.backup_type;
+    summary.trigger = record.trigger;
+    summary.next_run_utc_ms = record.next_run_utc_ms;
+    summary.exclude_page_and_hibernation_files = record.exclude_page_and_hibernation_files;
+    summary.encryption_enabled = record.encryption_enabled;
+    return summary;
+}
+
+namespace {
+
+[[nodiscard]] char path_hex_digit(const unsigned value) noexcept {
+    return static_cast<char>(value < 10 ? '0' + value : 'a' + (value - 10));
+}
+
+[[nodiscard]] int path_hex_value(const char character) noexcept {
+    if (character >= '0' && character <= '9') {
+        return character - '0';
+    }
+    if (character >= 'a' && character <= 'f') {
+        return character - 'a' + 10;
+    }
+    if (character >= 'A' && character <= 'F') {
+        return character - 'A' + 10;
+    }
+    return -1;
+}
+
+} // namespace
+
+std::string encode_relative_path_blob(const std::vector<contracts::EncodedName>& components) {
+    std::string encoded = "v1";
+    for (const auto& component : components) {
+        encoded.push_back('|');
+        encoded += std::to_string(static_cast<unsigned>(component.encoding));
+        encoded.push_back(':');
+        for (const auto byte : component.bytes) {
+            const auto value = std::to_integer<unsigned>(byte);
+            encoded.push_back(path_hex_digit((value >> 4U) & 0x0FU));
+            encoded.push_back(path_hex_digit(value & 0x0FU));
+        }
+    }
+    return encoded;
+}
+
+base::Result<std::vector<contracts::EncodedName>>
+decode_relative_path_blob(const std::string_view encoded) {
+    if (!encoded.starts_with("v1")) {
+        return base::Result<std::vector<contracts::EncodedName>>::failure(
+            make_error(base::ErrorCode::kCorruptData, "relative path blob version is unsupported"));
+    }
+    std::vector<contracts::EncodedName> components;
+    std::size_t index = 2;
+    while (index < encoded.size()) {
+        if (encoded[index] != '|') {
+            return base::Result<std::vector<contracts::EncodedName>>::failure(
+                make_error(base::ErrorCode::kCorruptData, "relative path blob is corrupt"));
+        }
+        ++index;
+        const std::size_t colon = encoded.find(':', index);
+        if (colon == std::string_view::npos || colon == index) {
+            return base::Result<std::vector<contracts::EncodedName>>::failure(
+                make_error(base::ErrorCode::kCorruptData, "relative path blob is corrupt"));
+        }
+        unsigned encoding = 0;
+        for (std::size_t cursor = index; cursor < colon; ++cursor) {
+            if (encoded[cursor] < '0' || encoded[cursor] > '9') {
+                return base::Result<std::vector<contracts::EncodedName>>::failure(
+                    make_error(base::ErrorCode::kCorruptData, "relative path blob is corrupt"));
+            }
+            encoding = encoding * 10U + static_cast<unsigned>(encoded[cursor] - '0');
+        }
+        index = colon + 1;
+        std::size_t next = encoded.find('|', index);
+        if (next == std::string_view::npos) {
+            next = encoded.size();
+        }
+        const auto hex = encoded.substr(index, next - index);
+        if ((hex.size() % 2U) != 0U) {
+            return base::Result<std::vector<contracts::EncodedName>>::failure(
+                make_error(base::ErrorCode::kCorruptData, "relative path blob is corrupt"));
+        }
+        contracts::EncodedName name;
+        name.encoding = static_cast<contracts::NameEncoding>(encoding);
+        name.bytes.reserve(hex.size() / 2U);
+        for (std::size_t byte_index = 0; byte_index < hex.size(); byte_index += 2) {
+            const int high = path_hex_value(hex[byte_index]);
+            const int low = path_hex_value(hex[byte_index + 1]);
+            if (high < 0 || low < 0) {
+                return base::Result<std::vector<contracts::EncodedName>>::failure(
+                    make_error(base::ErrorCode::kCorruptData, "relative path blob is corrupt"));
+            }
+            name.bytes.push_back(static_cast<std::byte>((high << 4) | low));
+        }
+        components.push_back(std::move(name));
+        index = next;
+    }
+    return base::Result<std::vector<contracts::EncodedName>>::success(std::move(components));
+}
+
+base::Result<void>
+replace_schedule_file_selections(sqlite3* const db, const std::string_view schedule_id,
+                                 const std::vector<contracts::FileSourceRef>& selections) {
+    auto clear = SqliteStatement::prepare(db,
+                                          "DELETE FROM schedule_file_selections WHERE schedule_id = ?");
+    if (!clear) {
+        return base::Result<void>::failure(clear.error());
+    }
+    if (auto bound = clear.value().bind_text(1, schedule_id); !bound) {
+        return bound;
+    }
+    if (auto stepped = clear.value().step(); !stepped) {
+        return base::Result<void>::failure(stepped.error());
+    }
+    auto insert = SqliteStatement::prepare(
+        db,
+        "INSERT INTO schedule_file_selections(schedule_id, ordinal, selection_id, volume_identity, "
+        "relative_path_blob, entry_kind, recursion, reparse_policy, unreadable_policy, "
+        "display_label) VALUES(?,?,?,?,?,?,?,?,?,?)");
+    if (!insert) {
+        return base::Result<void>::failure(insert.error());
+    }
+    for (std::size_t ordinal = 0; ordinal < selections.size(); ++ordinal) {
+        const auto& selection = selections[ordinal];
+        if (auto reset = insert.value().reset(); !reset) {
+            return reset;
+        }
+        if (auto bound = insert.value().bind_text(1, schedule_id); !bound) {
+            return bound;
+        }
+        if (auto bound = insert.value().bind_int64(2, static_cast<std::int64_t>(ordinal)); !bound) {
+            return bound;
+        }
+        if (auto bound = insert.value().bind_text(3, selection.selection_id); !bound) {
+            return bound;
+        }
+        if (auto bound = insert.value().bind_text(4, selection.volume_identity); !bound) {
+            return bound;
+        }
+        if (auto bound =
+                insert.value().bind_text(5, encode_relative_path_blob(selection.relative_components));
+            !bound) {
+            return bound;
+        }
+        if (auto bound = insert.value().bind_int64(6, static_cast<std::int64_t>(selection.entry_kind));
+            !bound) {
+            return bound;
+        }
+        if (auto bound = insert.value().bind_int64(7, static_cast<std::int64_t>(selection.recursion));
+            !bound) {
+            return bound;
+        }
+        if (auto bound =
+                insert.value().bind_int64(8, static_cast<std::int64_t>(selection.reparse_policy));
+            !bound) {
+            return bound;
+        }
+        if (auto bound = insert.value().bind_int64(
+                9, static_cast<std::int64_t>(selection.unreadable_policy));
+            !bound) {
+            return bound;
+        }
+        if (auto bound = insert.value().bind_text(10, selection.display_label); !bound) {
+            return bound;
+        }
+        if (auto stepped = insert.value().step(); !stepped) {
+            return base::Result<void>::failure(stepped.error());
+        }
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<std::vector<contracts::FileSourceRef>>
+load_schedule_file_selections(sqlite3* const db, const std::string_view schedule_id) {
+    auto statement = SqliteStatement::prepare(
+        db,
+        "SELECT selection_id, volume_identity, relative_path_blob, entry_kind, recursion, "
+        "reparse_policy, unreadable_policy, display_label FROM schedule_file_selections "
+        "WHERE schedule_id = ? ORDER BY ordinal ASC");
+    if (!statement) {
+        return base::Result<std::vector<contracts::FileSourceRef>>::failure(statement.error());
+    }
+    if (auto bound = statement.value().bind_text(1, schedule_id); !bound) {
+        return base::Result<std::vector<contracts::FileSourceRef>>::failure(bound.error());
+    }
+    std::vector<contracts::FileSourceRef> selections;
+    while (true) {
+        auto stepped = statement.value().step();
+        if (!stepped) {
+            return base::Result<std::vector<contracts::FileSourceRef>>::failure(stepped.error());
+        }
+        if (stepped.value() == SQLITE_DONE) {
+            break;
+        }
+        contracts::FileSourceRef ref;
+        ref.selection_id = column_text_required(statement.value().get(), 0);
+        ref.volume_identity = column_text_required(statement.value().get(), 1);
+        auto components = decode_relative_path_blob(column_text_required(statement.value().get(), 2));
+        if (!components) {
+            return base::Result<std::vector<contracts::FileSourceRef>>::failure(components.error());
+        }
+        ref.relative_components = std::move(components).value();
+        ref.entry_kind =
+            static_cast<contracts::FileEntryKind>(sqlite3_column_int(statement.value().get(), 3));
+        ref.recursion =
+            static_cast<contracts::FileRecursion>(sqlite3_column_int(statement.value().get(), 4));
+        ref.reparse_policy =
+            static_cast<contracts::FileReparsePolicy>(sqlite3_column_int(statement.value().get(), 5));
+        ref.unreadable_policy = static_cast<contracts::FileUnreadablePolicy>(
+            sqlite3_column_int(statement.value().get(), 6));
+        ref.display_label = column_text_required(statement.value().get(), 7);
+        selections.push_back(std::move(ref));
+    }
+    return base::Result<std::vector<contracts::FileSourceRef>>::success(std::move(selections));
+}
+
+base::Result<void>
+replace_restore_preflight_entry_ids(sqlite3* const db, const std::string_view preflight_token,
+                                    const std::vector<std::string>& entry_ids) {
+    auto clear = SqliteStatement::prepare(
+        db, "DELETE FROM restore_preflight_entry_ids WHERE preflight_token = ?");
+    if (!clear) {
+        return base::Result<void>::failure(clear.error());
+    }
+    if (auto bound = clear.value().bind_text(1, preflight_token); !bound) {
+        return bound;
+    }
+    if (auto stepped = clear.value().step(); !stepped) {
+        return base::Result<void>::failure(stepped.error());
+    }
+    if (entry_ids.empty()) {
+        return base::Result<void>::success();
+    }
+    auto insert = SqliteStatement::prepare(
+        db,
+        "INSERT INTO restore_preflight_entry_ids(preflight_token, ordinal, entry_id) VALUES(?,?,?)");
+    if (!insert) {
+        return base::Result<void>::failure(insert.error());
+    }
+    for (std::size_t ordinal = 0; ordinal < entry_ids.size(); ++ordinal) {
+        if (auto reset = insert.value().reset(); !reset) {
+            return reset;
+        }
+        if (auto bound = insert.value().bind_text(1, preflight_token); !bound) {
+            return bound;
+        }
+        if (auto bound = insert.value().bind_int64(2, static_cast<std::int64_t>(ordinal)); !bound) {
+            return bound;
+        }
+        if (auto bound = insert.value().bind_text(3, entry_ids[ordinal]); !bound) {
+            return bound;
+        }
+        if (auto stepped = insert.value().step(); !stepped) {
+            return base::Result<void>::failure(stepped.error());
+        }
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<std::vector<std::string>>
+load_restore_preflight_entry_ids(sqlite3* const db, const std::string_view preflight_token) {
+    auto statement = SqliteStatement::prepare(
+        db, "SELECT entry_id FROM restore_preflight_entry_ids WHERE preflight_token = ? "
+            "ORDER BY ordinal ASC");
+    if (!statement) {
+        return base::Result<std::vector<std::string>>::failure(statement.error());
+    }
+    if (auto bound = statement.value().bind_text(1, preflight_token); !bound) {
+        return base::Result<std::vector<std::string>>::failure(bound.error());
+    }
+    std::vector<std::string> entry_ids;
+    while (true) {
+        auto stepped = statement.value().step();
+        if (!stepped) {
+            return base::Result<std::vector<std::string>>::failure(stepped.error());
+        }
+        if (stepped.value() == SQLITE_DONE) {
+            break;
+        }
+        entry_ids.push_back(column_text_required(statement.value().get(), 0));
+    }
+    return base::Result<std::vector<std::string>>::success(std::move(entry_ids));
 }
 
 contracts::AuditEventSummary to_audit_summary(const ports::AuditEventRecord& record) {

@@ -165,16 +165,9 @@ void publish_progress(ports::IProgressSink* sink, const RestorePlan& plan,
     if (sink == nullptr) {
         return;
     }
-    sink->publish(contracts::TaskProgress{
-        contracts::kTaskProgressSchemaVersion,
-        plan.job_id,
-        plan.trace_id,
-        phase,
-        logical_size,
-        summary.restored_bytes,
-        summary.restored_bytes,
-        restore_phase_message(phase),
-    });
+    sink->publish(contracts::make_byte_progress(
+        plan.job_id, plan.trace_id, phase, logical_size, summary.restored_bytes,
+        summary.restored_bytes, restore_phase_message(phase)));
 }
 
 base::Result<RestoreSummary> consume_chunks(RestoreConsumerContext& context) {

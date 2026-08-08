@@ -1,14 +1,18 @@
 #include "aegra/apps/service/schedule_service.h"
 
 #include "aegra/adapters/windows_system/windows_system.h"
+#include "aegra/application/file_browse_service.h"
 #include "aegra/base/uuid.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace aegra::apps::service {
 namespace {
@@ -42,7 +46,6 @@ make_canonical_uuid(ports::IRandomSource& random, const base::CancellationToken&
     if (auto filled = random.fill(bytes, cancellation); !filled) {
         return base::Result<std::string>::failure(filled.error());
     }
-    // RFC 4122 version 4 / variant 1.
     bytes[6] = static_cast<std::byte>((std::to_integer<unsigned>(bytes[6]) & 0x0FU) | 0x40U);
     bytes[8] = static_cast<std::byte>((std::to_integer<unsigned>(bytes[8]) & 0x3FU) | 0x80U);
     return base::Result<std::string>::success(base::format_uuid(bytes));
@@ -58,8 +61,6 @@ make_canonical_uuid(ports::IRandomSource& random, const base::CancellationToken&
 
 [[nodiscard]] std::uint64_t compute_next_run_utc_ms(const contracts::ScheduleTrigger& trigger,
                                                     const std::uint64_t now_ms) {
-    // Personal edition: next daily/weekly fire as next wall-clock occurrence of local_minute_of_day
-    // measured in UTC minutes (timezone conversion deferred).
     constexpr std::uint64_t kDayMs = 24ULL * 60ULL * 60ULL * 1000ULL;
     constexpr std::uint64_t kMinuteMs = 60ULL * 1000ULL;
     const auto minute = static_cast<std::uint64_t>(trigger.local_minute_of_day);
@@ -69,10 +70,8 @@ make_canonical_uuid(ports::IRandomSource& random, const base::CancellationToken&
         candidate += kDayMs;
     }
     if (trigger.kind == contracts::ScheduleTriggerKind::kWeekly && trigger.weekday_mask != 0) {
-        // Advance day-by-day until weekday_mask bit matches (bit0=Sunday … bit6=Saturday).
         for (int step = 0; step < 8; ++step) {
             const auto days_since_epoch = candidate / kDayMs;
-            // 1970-01-01 was Thursday (4). Convert to Sunday=0.
             const auto weekday = static_cast<std::uint8_t>((days_since_epoch + 4U) % 7U);
             if ((trigger.weekday_mask & static_cast<std::uint8_t>(1U << weekday)) != 0) {
                 break;
@@ -114,12 +113,10 @@ make_canonical_uuid(ports::IRandomSource& random, const base::CancellationToken&
     };
 }
 
-/// Irreversible password identity for fingerprint only — never stores plaintext.
 [[nodiscard]] std::string password_digest_token(const std::string_view password) {
     if (password.empty()) {
         return "none";
     }
-    // FNV-1a 64-bit; distinguishes same-key password differences without retaining the secret.
     std::uint64_t hash = 14695981039346656037ULL;
     for (const char ch : password) {
         hash ^= static_cast<std::uint64_t>(static_cast<unsigned char>(ch));
@@ -142,10 +139,20 @@ make_canonical_uuid(ports::IRandomSource& random, const base::CancellationToken&
     fingerprint += "|";
     fingerprint += command.enabled ? "1" : "0";
     fingerprint += "|";
-    for (const auto& source_id : command.source_ids) {
+    fingerprint += std::to_string(static_cast<int>(command.protection.content_kind));
+    fingerprint += "|";
+    for (const auto& source_id : command.protection.volume_source_ids) {
         fingerprint += std::to_string(source_id.size());
         fingerprint += ":";
         fingerprint += source_id;
+        fingerprint += "|";
+    }
+    for (const auto& selection : command.protection.file_selections) {
+        fingerprint += std::to_string(selection.node_token.size());
+        fingerprint += ":";
+        fingerprint += selection.node_token;
+        fingerprint += ":";
+        fingerprint += std::to_string(static_cast<int>(selection.recursion));
         fingerprint += "|";
     }
     fingerprint += command.repository_connection_id;
@@ -178,14 +185,100 @@ replay_if_same_request(const ports::CommandRecord& existing, const std::string& 
         replayed(existing.command_id, existing.resource_id));
 }
 
-/// Create freezes sources, encryption, password, and other backup options (except future
-/// shutdown-on-complete). Update may change repository, schedule settings, enabled, display name.
+[[nodiscard]] std::string path_key(const contracts::FileSourceRef& ref) {
+    std::string key = ref.volume_identity;
+    key.push_back('|');
+    for (const auto& component : ref.relative_components) {
+        key.push_back('/');
+        for (const auto byte : component.bytes) {
+            key.push_back(static_cast<char>(std::to_integer<unsigned>(byte)));
+        }
+    }
+    key.push_back('|');
+    key += std::to_string(static_cast<int>(ref.recursion));
+    return key;
+}
+
+[[nodiscard]] base::Result<std::vector<contracts::FileSourceRef>>
+normalize_file_selections(std::vector<contracts::FileSourceRef> selections) {
+    std::ranges::sort(selections, [](const contracts::FileSourceRef& left,
+                                     const contracts::FileSourceRef& right) {
+        if (left.volume_identity != right.volume_identity) {
+            return left.volume_identity < right.volume_identity;
+        }
+        if (left.relative_components.size() != right.relative_components.size()) {
+            return left.relative_components.size() < right.relative_components.size();
+        }
+        return path_key(left) < path_key(right);
+    });
+    std::vector<contracts::FileSourceRef> unique;
+    unique.reserve(selections.size());
+    std::map<std::string, std::size_t> seen;
+    for (auto& selection : selections) {
+        const auto key = path_key(selection);
+        const auto existing = seen.find(key);
+        if (existing != seen.end()) {
+            return base::Result<std::vector<contracts::FileSourceRef>>::failure(
+                {base::ErrorCode::kConflict, "file protection selection is duplicate"});
+        }
+        seen.emplace(key, unique.size());
+        unique.push_back(std::move(selection));
+    }
+    // Drop children covered by a recursive parent on the same volume.
+    std::vector<contracts::FileSourceRef> pruned;
+    for (std::size_t index = 0; index < unique.size(); ++index) {
+        bool covered = false;
+        for (std::size_t parent = 0; parent < unique.size(); ++parent) {
+            if (parent == index) {
+                continue;
+            }
+            const auto& candidate = unique[parent];
+            const auto& child = unique[index];
+            if (candidate.volume_identity != child.volume_identity ||
+                candidate.recursion != contracts::FileRecursion::kRecursive ||
+                candidate.entry_kind != contracts::FileEntryKind::kDirectory ||
+                candidate.relative_components.size() >= child.relative_components.size()) {
+                continue;
+            }
+            bool prefix = true;
+            for (std::size_t part = 0; part < candidate.relative_components.size(); ++part) {
+                if (candidate.relative_components[part].bytes !=
+                    child.relative_components[part].bytes) {
+                    prefix = false;
+                    break;
+                }
+            }
+            if (prefix) {
+                covered = true;
+                break;
+            }
+        }
+        if (!covered) {
+            pruned.push_back(std::move(unique[index]));
+        }
+    }
+    if (pruned.empty()) {
+        return base::Result<std::vector<contracts::FileSourceRef>>::failure(
+            {base::ErrorCode::kInvalidArgument, "file protection selections are empty after prune"});
+    }
+    return base::Result<std::vector<contracts::FileSourceRef>>::success(std::move(pruned));
+}
+
 [[nodiscard]] base::Result<void>
 enforce_schedule_update_invariants(const contracts::UpsertScheduleCommand& command,
                                    const ports::ScheduleRecord& existing) {
-    if (command.source_ids != existing.source_ids) {
+    if (command.protection.content_kind != existing.content_kind) {
         return base::Result<void>::failure(
-            {base::ErrorCode::kInvalidArgument, "schedule sources cannot be changed after create"});
+            {base::ErrorCode::kInvalidArgument, "schedule content_kind cannot be changed after create"});
+    }
+    if (existing.content_kind == contracts::ContentKind::kVolumeSet) {
+        if (command.protection.volume_source_ids != existing.source_ids) {
+            return base::Result<void>::failure(
+                {base::ErrorCode::kInvalidArgument, "schedule sources cannot be changed after create"});
+        }
+    } else if (!command.protection.file_selections.empty()) {
+        return base::Result<void>::failure(
+            {base::ErrorCode::kConflict, "schedule.source_frozen"});
     }
     if (command.backup_type != existing.backup_type) {
         return base::Result<void>::failure(
@@ -211,8 +304,9 @@ enforce_schedule_update_invariants(const contracts::UpsertScheduleCommand& comma
 } // namespace
 
 ScheduleService::ScheduleService(ports::IControlPlaneDatabase& control_plane, ports::IClock& clock,
-                                 ports::IRandomSource& random) noexcept
-    : control_plane_(control_plane), clock_(clock), random_(random) {}
+                                 ports::IRandomSource& random,
+                                 application::FileBrowseService* const file_browse) noexcept
+    : control_plane_(control_plane), clock_(clock), random_(random), file_browse_(file_browse) {}
 
 base::Result<contracts::SchedulePage>
 ScheduleService::list_schedules(const contracts::ScheduleListRequest& request,
@@ -223,6 +317,7 @@ ScheduleService::list_schedules(const contracts::ScheduleListRequest& request,
 base::Result<contracts::CommandAcknowledgement>
 ScheduleService::upsert_schedule(const contracts::UpsertScheduleCommand& command,
                                  const std::string_view idempotency_key,
+                                 const ports::FileBrowseCaller& caller,
                                  const base::CancellationToken cancellation) {
     if (auto key = require_idempotency_key(idempotency_key); !key) {
         return base::Result<contracts::CommandAcknowledgement>::failure(key.error());
@@ -241,6 +336,31 @@ ScheduleService::upsert_schedule(const contracts::UpsertScheduleCommand& command
         return replay_if_same_request(*existing_command.value(), fingerprint);
     }
 
+    std::vector<contracts::FileSourceRef> resolved_files;
+    if (command.protection.content_kind == contracts::ContentKind::kFileSet && !command.schedule_id) {
+        if (file_browse_ == nullptr) {
+            return base::Result<contracts::CommandAcknowledgement>::failure(
+                {base::ErrorCode::kConflict, "file_set schedules are not enabled"});
+        }
+        resolved_files.reserve(command.protection.file_selections.size());
+        for (const auto& selection : command.protection.file_selections) {
+            auto resolved = file_browse_->resolve_selection(
+                caller, selection.node_token, selection.recursion, selection.display_label,
+                cancellation);
+            if (!resolved) {
+                return base::Result<contracts::CommandAcknowledgement>::failure(resolved.error());
+            }
+            resolved.value().reparse_policy = command.protection.file_options.reparse_policy;
+            resolved.value().unreadable_policy = command.protection.file_options.unreadable_policy;
+            resolved_files.push_back(std::move(resolved).value());
+        }
+        auto normalized = normalize_file_selections(std::move(resolved_files));
+        if (!normalized) {
+            return base::Result<contracts::CommandAcknowledgement>::failure(normalized.error());
+        }
+        resolved_files = std::move(normalized).value();
+    }
+
     auto unit = control_plane_.begin_unit_of_work(cancellation);
     if (!unit) {
         return base::Result<contracts::CommandAcknowledgement>::failure(unit.error());
@@ -255,6 +375,10 @@ ScheduleService::upsert_schedule(const contracts::UpsertScheduleCommand& command
     std::string schedule_id;
     std::string backup_set_uuid;
     std::string archive_password_protected;
+    std::string owner_sid = caller.caller_sid;
+    std::vector<std::string> source_ids;
+    std::vector<contracts::FileSourceRef> file_selections;
+    contracts::ContentKind content_kind = command.protection.content_kind;
     std::optional<std::string> last_recovery_point_id;
     std::uint64_t created_utc_ms = now;
     if (command.schedule_id) {
@@ -274,10 +398,12 @@ ScheduleService::upsert_schedule(const contracts::UpsertScheduleCommand& command
             return base::Result<contracts::CommandAcknowledgement>::failure(frozen.error());
         }
         created_utc_ms = existing.value()->created_utc_ms;
-        // Chain identity and protected password are fixed for the lifetime of the schedule.
         backup_set_uuid = existing.value()->backup_set_uuid;
         archive_password_protected = existing.value()->archive_password_protected;
-        // Tip is runtime state: preserve across edits; clear when repository connection changes.
+        owner_sid = existing.value()->owner_sid;
+        content_kind = existing.value()->content_kind;
+        source_ids = existing.value()->source_ids;
+        file_selections = existing.value()->file_selections;
         if (command.repository_connection_id == existing.value()->repository_connection_id) {
             last_recovery_point_id = existing.value()->last_recovery_point_id;
         }
@@ -294,8 +420,12 @@ ScheduleService::upsert_schedule(const contracts::UpsertScheduleCommand& command
             return base::Result<contracts::CommandAcknowledgement>::failure(set_uuid.error());
         }
         backup_set_uuid = std::move(set_uuid).value();
+        if (content_kind == contracts::ContentKind::kVolumeSet) {
+            source_ids = command.protection.volume_source_ids;
+        } else {
+            file_selections = std::move(resolved_files);
+        }
         if (command.encryption_enabled) {
-            // pOptionalEntropy = schedule_id so ciphertext is bound to this schedule.
             auto protected_secret = adapters::windows_system::protect_local_machine_secret(
                 command.archive_password, schedule_id);
             if (!protected_secret) {
@@ -311,7 +441,10 @@ ScheduleService::upsert_schedule(const contracts::UpsertScheduleCommand& command
     record.schedule_id = schedule_id;
     record.display_name = command.display_name;
     record.enabled = command.enabled;
-    record.source_ids = command.source_ids;
+    record.content_kind = content_kind;
+    record.source_ids = std::move(source_ids);
+    record.file_selections = std::move(file_selections);
+    record.owner_sid = std::move(owner_sid);
     record.repository_connection_id = command.repository_connection_id;
     record.backup_type = command.backup_type;
     record.trigger = command.trigger;

@@ -68,6 +68,8 @@ QVariant RecoveryPointModel::data(const QModelIndex& index, const int role) cons
         return row.parent_uuid;
     case BackupTypeTextRole:
         return backup_type_text(row.backup_type);
+    case ContentKindRole:
+        return static_cast<qint64>(row.content_kind);
     case ChainCompleteRole:
         return row.chain_state == 1;
     case ChainStateTextRole:
@@ -100,6 +102,7 @@ QHash<int, QByteArray> RecoveryPointModel::roleNames() const {
         {BackupSetUuidRole, "backupSetUuid"},
         {ParentUuidRole, "parentUuid"},
         {BackupTypeTextRole, "backupTypeText"},
+        {ContentKindRole, "contentKind"},
         {ChainCompleteRole, "chainComplete"},
         {ChainStateTextRole, "chainStateText"},
         {CreatedUtcMsRole, "createdUtcMs"},
@@ -189,6 +192,7 @@ QVariantList RecoveryPointModel::checkpointsForDate(const QString& date_ymd) con
         map.insert(QStringLiteral("backupSetUuid"), row->backup_set_uuid);
         map.insert(QStringLiteral("timeText"), local_time_hm(row->created_utc_ms));
         map.insert(QStringLiteral("backupType"), backup_type_text(row->backup_type));
+        map.insert(QStringLiteral("contentKind"), static_cast<qint64>(row->content_kind));
         map.insert(QStringLiteral("sizeText"),
                    format_ != nullptr ? format_->format_bytes(row->logical_size_bytes) : QString{});
         map.insert(QStringLiteral("logicalSizeBytes"), static_cast<qint64>(row->logical_size_bytes));
@@ -213,6 +217,10 @@ QVector<RecoveryPointRow> recovery_points_from_variant_list(const QVariantList& 
         row.backup_set_uuid = map.value(QStringLiteral("backupSetUuid")).toString();
         row.parent_uuid = map.value(QStringLiteral("parentUuid")).toString();
         row.backup_type = map.value(QStringLiteral("backupType")).toLongLong();
+        row.content_kind = map.value(QStringLiteral("contentKind"), 1).toLongLong();
+        if (row.content_kind != 1 && row.content_kind != 2) {
+            row.content_kind = 1;
+        }
         row.chain_state = map.value(QStringLiteral("chainState")).toLongLong();
         row.created_utc_ms = map.value(QStringLiteral("createdUtcMs")).toLongLong();
         row.logical_size_bytes = map.value(QStringLiteral("logicalSizeBytes")).toLongLong();

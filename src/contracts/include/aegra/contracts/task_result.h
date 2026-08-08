@@ -2,14 +2,16 @@
 
 #include "aegra/base/error.h"
 #include "aegra/base/result.h"
+#include "aegra/contracts/file_set.h"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace aegra::contracts {
 
-inline constexpr std::uint32_t kTaskResultSchemaVersion = 1;
+inline constexpr std::uint32_t kTaskResultSchemaVersion = 4;
 
 enum class TaskOutcome : std::uint8_t {
     kSucceeded = 1,
@@ -27,8 +29,11 @@ struct TaskResult final {
     std::uint64_t logical_bytes{0};
     std::uint64_t stored_bytes{0};
     std::uint64_t chunk_count{0};
+    std::uint64_t entry_count{0};
+    std::uint64_t stream_count{0};
     std::string message_code;
     std::vector<std::string> warning_codes;
+    std::optional<PartialRestoreStats> partial_restore;
 };
 
 [[nodiscard]] base::Result<void> validate_task_result(const TaskResult& result);

@@ -12,6 +12,19 @@ Item {
     /// Request Main to switch to Home after a restore job is accepted.
     signal navigateHomeRequested()
 
+    Component {
+        id: restoreVolumeIconComponent
+        DiskIcon { size: 16; variant: "hdd" }
+    }
+    Component {
+        id: restoreFolderIconComponent
+        FolderIcon { size: 16 }
+    }
+    Component {
+        id: restoreFileIconComponent
+        FileDocIcon { size: 16 }
+    }
+
     /// Options expanded by default (old RestorePage: optionsCollapsed: false).
     property bool optionsCollapsed: false
     readonly property int optionsCollapsedWidth: 36
@@ -27,9 +40,18 @@ Item {
     property string panelSelectedDate: ""
     property var panelCheckpoints: []
     property int panelCheckpointsEpoch: 0
-    /// "disk" = full-disk restore; "volume" = volume→volume restore.
+    /// "disk" = full-disk restore; "volume" = volume→volume restore; "files" = file_set.
     property string restoreMode: "disk"
     readonly property bool isVolumeMode: root.restoreMode === "volume"
+    readonly property bool isFileMode: root.restoreMode === "files"
+    /// 1 volume_set, 2 file_set — taken from selected checkpoint.
+    property int selectedContentKind: 1
+    /// File restore conflict policy: 1 fail, 2 replace, 3 rename.
+    property int fileConflictPolicy: 1
+    /// File restore: apply Owner/Group/DACL/SACL from archive (default on).
+    property bool fileRestoreSecurity: true
+    /// File restore: restore NTFS alternate data streams (default on).
+    property bool fileRestoreAds: true
 
     /// Source disks from Service GetRecoveryPointLayout (Manifest volumes). Empty until a
     /// checkpoint is selected and the layout query succeeds.
@@ -88,6 +110,9 @@ Item {
     function setRestoreMode(mode) {
         if (mode !== "disk" && mode !== "volume")
             return
+        // File-set recovery points stay in files mode; do not switch to disk/volume layout.
+        if (root.selectedContentKind === 2)
+            return
         if (root.restoreMode === mode)
             return
         root.restoreMode = mode
@@ -122,25 +147,52 @@ Item {
 
     readonly property bool hasCheckpoint: root.selectedCheckpointId.length > 0
     readonly property bool hasMapping: root.mappedCount > 0
-    readonly property bool canRestore: serviceClient.connected
-                                       && serviceClient.restoreStartAvailable
-                                       && !serviceClient.restoreCommandBusy
-                                       && root.hasCheckpoint
-                                       && root.hasMapping
-                                       && !root.sourceLayoutLoading
+    readonly property bool canRestore: {
+        if (!serviceClient.connected || serviceClient.restoreCommandBusy || !root.hasCheckpoint)
+            return false
+        if (root.isFileMode) {
+            var entries = serviceClient.fileRecoverEntries
+            var targets = serviceClient.fileRestoreTargets
+            return serviceClient.fileRestoreAvailable
+                   && entries && entries.selectedCount > 0
+                   && targets && targets.selectedCount > 0
+                   && !(entries.loading)
+                   && !(targets.loading)
+        }
+        return serviceClient.restoreStartAvailable
+               && root.hasMapping
+               && !root.sourceLayoutLoading
+    }
     readonly property string restoreBlockReason: {
         if (!serviceClient.connected)
             //% "Service is not connected"
             return qsTrId("aegra.error.service.disconnected")
-        if (!serviceClient.restoreStartAvailable)
-            //% "Service does not support restore"
-            return qsTrId("aegra.restore.capability_missing")
         if (serviceClient.restoreCommandBusy)
             //% "A restore command is already in progress"
             return qsTrId("aegra.restore.busy")
         if (!root.hasCheckpoint)
             //% "Select a checkpoint first"
             return qsTrId("aegra.restore.select_checkpoint_first")
+        if (root.isFileMode) {
+            if (!serviceClient.fileRestoreAvailable)
+                //% "Service does not support file restore"
+                return qsTrId("aegra.restore.file.capability_missing")
+            var entries = serviceClient.fileRecoverEntries
+            var targets = serviceClient.fileRestoreTargets
+            if (entries && entries.loading)
+                //% "Loading archive files..."
+                return qsTrId("aegra.restore.file.loading_entries")
+            if (!entries || entries.selectedCount <= 0)
+                //% "Select files or folders to restore"
+                return qsTrId("aegra.restore.file.select_entries")
+            if (!targets || targets.selectedCount <= 0)
+                //% "Select a target folder"
+                return qsTrId("aegra.restore.file.select_target")
+            return ""
+        }
+        if (!serviceClient.restoreStartAvailable)
+            //% "Service does not support restore"
+            return qsTrId("aegra.restore.capability_missing")
         if (root.sourceLayoutLoading)
             //% "Loading source disks..."
             return qsTrId("aegra.restore.loading_source")
@@ -543,6 +595,16 @@ Item {
     function startMappedRestore() {
         if (!root.canRestore)
             return
+        if (root.isFileMode) {
+            if (!serviceClient.startFileRestore(root.selectedCheckpointId,
+                                                root.fileConflictPolicy,
+                                                root.pendingLayoutPassword,
+                                                root.fileRestoreSecurity,
+                                                root.fileRestoreAds)) {
+                // Toast already shown by ServiceClient when selection is incomplete.
+            }
+            return
+        }
         var pairs = root.isVolumeMode ? root.allMappedVolumePairs()
                                       : root.allMappedPairs()
         if (pairs.length === 0) {
@@ -607,6 +669,8 @@ Item {
         if (!item) {
             root.selectedCheckpointId = ""
             root.selectedCheckpointLabel = ""
+            root.selectedContentKind = 1
+            root.restoreMode = "disk"
             root.pendingLayoutPassword = ""
             root.clearDiskMappings()
             root.clearVolumeMappings()
@@ -614,6 +678,7 @@ Item {
             return
         }
         root.selectedCheckpointId = item.fileUuid || ""
+        root.selectedContentKind = Number(item.contentKind || 1)
         root.pendingLayoutPassword = ""
         root.clearDiskMappings()
         root.clearVolumeMappings()
@@ -630,7 +695,17 @@ Item {
             bits.push(item.backupType)
         if (item.sizeText)
             bits.push(item.sizeText)
+        if (root.selectedContentKind === 2)
+            //% "Files"
+            bits.push(qsTrId("aegra.restore.mode_files"))
         root.selectedCheckpointLabel = bits.join("  ·  ")
+        if (root.selectedContentKind === 2) {
+            root.restoreMode = "files"
+            serviceClient.loadFileRecoverRoots(root.selectedCheckpointId, "")
+            serviceClient.loadFileRestoreTargetRoots()
+            return
+        }
+        root.restoreMode = "disk"
         // Try empty password first (unencrypted). Encrypted archives prompt for password.
         serviceClient.loadRecoveryPointLayout(root.selectedCheckpointId, "")
     }
@@ -641,6 +716,12 @@ Item {
         root.pendingLayoutPassword = password || ""
         root.clearDiskMappings()
         root.clearVolumeMappings()
+        if (root.selectedContentKind === 2) {
+            serviceClient.loadFileRecoverRoots(root.selectedCheckpointId,
+                                               root.pendingLayoutPassword)
+            serviceClient.loadFileRestoreTargetRoots()
+            return
+        }
         serviceClient.loadRecoveryPointLayout(root.selectedCheckpointId, root.pendingLayoutPassword)
     }
 
@@ -1601,10 +1682,11 @@ Item {
                 }
             }
             Item { Layout.fillWidth: true }
-            // Disk / Volume restore mode
+            // Disk / Volume restore mode (hidden for file_set recovery points)
             Row {
                 spacing: 0
                 Layout.alignment: Qt.AlignVCenter
+                visible: !root.isFileMode
                 Rectangle {
                     width: Math.max(88, diskModeLabel.implicitWidth + 20)
                     height: 28
@@ -1652,6 +1734,26 @@ Item {
                     }
                 }
             }
+            Rectangle {
+                Layout.alignment: Qt.AlignVCenter
+                visible: root.isFileMode
+                width: Math.max(88, filesModeLabel.implicitWidth + 20)
+                height: 28
+                radius: 4
+                color: Theme.colorGreen
+                border.width: 1
+                border.color: Theme.colorBorder
+                Text {
+                    id: filesModeLabel
+                    anchors.centerIn: parent
+                    //% "Files"
+                    text: qsTrId("aegra.restore.mode_files")
+                    color: Theme.colorTextWhite
+                    font.pixelSize: 12
+                    font.bold: true
+                    font.family: Theme.fontFamily
+                }
+            }
         }
 
         // Main: Source + Target (left) | Options (right) — old 2/3 | 1/3
@@ -1697,22 +1799,28 @@ Item {
                                 Layout.alignment: Qt.AlignVCenter
                             }
                             Text {
-                                text: root.isVolumeMode
-                                      //% "Source Volumes"
-                                      ? qsTrId("aegra.restore.source_volumes")
-                                      //% "Source Disks"
-                                      : qsTrId("aegra.restore.source_disks")
+                                text: root.isFileMode
+                                      //% "Archive files"
+                                      ? qsTrId("aegra.restore.file.source_title")
+                                      : (root.isVolumeMode
+                                         //% "Source Volumes"
+                                         ? qsTrId("aegra.restore.source_volumes")
+                                         //% "Source Disks"
+                                         : qsTrId("aegra.restore.source_disks"))
                                 color: Theme.colorTextWhite
                                 font.pixelSize: 14
                                 font.bold: true
                                 font.family: Theme.fontFamily
                             }
                             Text {
-                                text: root.isVolumeMode
-                                      //% "(drag onto a target volume, or use Restore to)"
-                                      ? qsTrId("aegra.restore.source_volume_hint")
-                                      //% "(drag onto a target disk, or use Restore to)"
-                                      : qsTrId("aegra.restore.source_hint")
+                                text: root.isFileMode
+                                      //% "(expand folders and check items to restore)"
+                                      ? qsTrId("aegra.restore.file.source_hint")
+                                      : (root.isVolumeMode
+                                         //% "(drag onto a target volume, or use Restore to)"
+                                         ? qsTrId("aegra.restore.source_volume_hint")
+                                         //% "(drag onto a target disk, or use Restore to)"
+                                         : qsTrId("aegra.restore.source_hint"))
                                 color: Theme.colorTextGrey
                                 font.pixelSize: 11
                                 font.family: Theme.fontFamily
@@ -1743,12 +1851,120 @@ Item {
                         }
 
                         ListView {
+                            id: fileRecoverList
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            clip: true
+                            spacing: 2
+                            visible: root.isFileMode
+                            model: serviceClient.fileRecoverEntries
+                            delegate: Rectangle {
+                                required property string entryId
+                                required property string displayName
+                                required property bool hasChildren
+                                required property bool isDirectory
+                                required property int depth
+                                required property bool expanded
+                                required property bool nodeLoading
+                                required property int checkState
+                                width: fileRecoverList.width
+                                height: 34
+                                radius: 4
+                                color: Theme.colorListItem
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 8 + Math.max(0, depth) * 14
+                                    anchors.rightMargin: 8
+                                    spacing: 8
+                                    Text {
+                                        text: hasChildren ? (expanded ? "▾" : "▸") : " "
+                                        color: Theme.colorTextGrey
+                                        font.pixelSize: 12
+                                        Layout.preferredWidth: 14
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            enabled: hasChildren
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: serviceClient.fileRecoverEntries
+                                                           .toggleExpanded(entryId)
+                                        }
+                                    }
+                                    Rectangle {
+                                        width: 16
+                                        height: 16
+                                        radius: 3
+                                        color: checkState === 2
+                                               ? Theme.colorAccentBlue
+                                               : (checkState === 1
+                                                  ? Theme.colorAccentBlue : "transparent")
+                                        opacity: checkState === 1 ? 0.45 : 1.0
+                                        border.width: 2
+                                        border.color: checkState > 0
+                                                      ? Theme.colorAccentBlue
+                                                      : Theme.colorTextGrey
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: checkState === 2 ? "\u2713"
+                                                  : (checkState === 1 ? "−" : "")
+                                            color: "white"
+                                            font.pixelSize: 11
+                                            font.bold: true
+                                        }
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: serviceClient.fileRecoverEntries
+                                                           .toggleChecked(entryId)
+                                        }
+                                    }
+                                    Loader {
+                                        Layout.preferredWidth: 16
+                                        Layout.preferredHeight: 16
+                                        Layout.alignment: Qt.AlignVCenter
+                                        sourceComponent: isDirectory
+                                                         ? restoreFolderIconComponent
+                                                         : restoreFileIconComponent
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: displayName + (nodeLoading ? " …" : "")
+                                        color: Theme.colorTextWhite
+                                        font.pixelSize: 12
+                                        font.family: Theme.fontFamily
+                                        elide: Text.ElideMiddle
+                                    }
+                                }
+                            }
+                            Text {
+                                anchors.centerIn: parent
+                                width: parent.width - 24
+                                horizontalAlignment: Text.AlignHCenter
+                                wrapMode: Text.WordWrap
+                                visible: fileRecoverList.count === 0
+                                text: {
+                                    if (!root.hasCheckpoint)
+                                        return qsTrId("aegra.restore.select_checkpoint_source")
+                                    if (serviceClient.fileRecoverEntries
+                                            && serviceClient.fileRecoverEntries.loading)
+                                        return qsTrId("aegra.restore.file.loading_entries")
+                                    if (serviceClient.fileRecoverEntries
+                                            && serviceClient.fileRecoverEntries.errorText)
+                                        return serviceClient.fileRecoverEntries.errorText
+                                    //% "No files in this recovery point"
+                                    return qsTrId("aegra.restore.file.empty_entries")
+                                }
+                                color: Theme.colorTextGrey
+                                font.pixelSize: 12
+                                font.family: Theme.fontFamily
+                            }
+                        }
+                        ListView {
                             id: sourceList
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             clip: true
                             spacing: 10
-                            visible: !root.isVolumeMode
+                            visible: !root.isVolumeMode && !root.isFileMode
                             model: root.sourceDisks
                             delegate: DiskRow {
                                 required property var modelData
@@ -1787,7 +2003,7 @@ Item {
                             Layout.fillHeight: true
                             clip: true
                             spacing: 8
-                            visible: root.isVolumeMode
+                            visible: root.isVolumeMode && !root.isFileMode
                             model: root.sourceVolumes
                             delegate: VolumeRow {
                                 required property var modelData
@@ -1891,27 +2107,159 @@ Item {
                                 Layout.alignment: Qt.AlignVCenter
                             }
                             Text {
-                                text: root.isVolumeMode
-                                      //% "Target Volumes"
-                                      ? qsTrId("aegra.restore.target_volumes")
-                                      //% "Target Disks"
-                                      : qsTrId("aegra.restore.target_disks")
+                                text: root.isFileMode
+                                      //% "Target folder"
+                                      ? qsTrId("aegra.restore.file.target_title")
+                                      : (root.isVolumeMode
+                                         //% "Target Volumes"
+                                         ? qsTrId("aegra.restore.target_volumes")
+                                         //% "Target Disks"
+                                         : qsTrId("aegra.restore.target_disks"))
                                 color: Theme.colorTextWhite
                                 font.pixelSize: 14
                                 font.bold: true
                                 font.family: Theme.fontFamily
                             }
                             Text {
-                                text: root.isVolumeMode
-                                      //% "(this PC — drop a source volume here)"
-                                      ? qsTrId("aegra.restore.target_volume_hint")
-                                      //% "(this PC — drop a source disk here)"
-                                      : qsTrId("aegra.restore.target_hint")
+                                text: root.isFileMode
+                                      //% "(choose one directory on this PC)"
+                                      ? qsTrId("aegra.restore.file.target_hint")
+                                      : (root.isVolumeMode
+                                         //% "(this PC — drop a source volume here)"
+                                         ? qsTrId("aegra.restore.target_volume_hint")
+                                         //% "(this PC — drop a source disk here)"
+                                         : qsTrId("aegra.restore.target_hint"))
                                 color: Theme.colorTextGrey
                                 font.pixelSize: 11
                                 font.family: Theme.fontFamily
                                 elide: Text.ElideRight
                                 Layout.fillWidth: true
+                            }
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            visible: root.isFileMode
+                                     && serviceClient.fileRestoreTargets
+                                     && serviceClient.fileRestoreTargets.selectedCount > 0
+                            //% "Selected: %1"
+                            text: qsTrId("aegra.file.browse.selected_label").arg(
+                                      serviceClient.fileRestoreTargets
+                                      ? serviceClient.fileRestoreTargets.selectionSummary
+                                      : "")
+                            color: Theme.colorAccentBlue
+                            font.pixelSize: 11
+                            font.family: Theme.fontFamily
+                            elide: Text.ElideMiddle
+                        }
+
+                        ListView {
+                            id: fileTargetList
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            clip: true
+                            spacing: 2
+                            visible: root.isFileMode
+                            model: serviceClient.fileRestoreTargets
+                            delegate: Rectangle {
+                                required property string nodeToken
+                                required property string displayName
+                                required property bool hasChildren
+                                required property bool isDirectory
+                                required property int depth
+                                required property bool expanded
+                                required property bool nodeLoading
+                                required property int checkState
+                                required property bool isSelectable
+                                width: fileTargetList.width
+                                height: 34
+                                radius: 4
+                                color: Theme.colorListItem
+                                opacity: isSelectable ? 1.0 : 0.55
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 8 + Math.max(0, depth) * 14
+                                    anchors.rightMargin: 8
+                                    spacing: 8
+                                    Text {
+                                        text: hasChildren ? (expanded ? "▾" : "▸") : " "
+                                        color: Theme.colorTextGrey
+                                        font.pixelSize: 12
+                                        Layout.preferredWidth: 14
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            enabled: hasChildren
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: serviceClient.fileRestoreTargets
+                                                           .toggleExpanded(nodeToken)
+                                        }
+                                    }
+                                    Rectangle {
+                                        width: 16
+                                        height: 16
+                                        radius: 3
+                                        visible: isSelectable && isDirectory
+                                        color: checkState === 2
+                                               ? Theme.colorGreen : "transparent"
+                                        border.width: 2
+                                        border.color: checkState === 2
+                                                      ? Theme.colorGreen
+                                                      : Theme.colorTextGrey
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: checkState === 2 ? "\u2713" : ""
+                                            color: "white"
+                                            font.pixelSize: 11
+                                            font.bold: true
+                                        }
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: serviceClient.fileRestoreTargets
+                                                           .toggleChecked(nodeToken)
+                                        }
+                                    }
+                                    Loader {
+                                        Layout.preferredWidth: 16
+                                        Layout.preferredHeight: 16
+                                        Layout.alignment: Qt.AlignVCenter
+                                        sourceComponent: {
+                                            if (depth === 0)
+                                                return restoreVolumeIconComponent
+                                            if (isDirectory)
+                                                return restoreFolderIconComponent
+                                            return restoreFileIconComponent
+                                        }
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: displayName + (nodeLoading ? " …" : "")
+                                        color: Theme.colorTextWhite
+                                        font.pixelSize: 12
+                                        font.family: Theme.fontFamily
+                                        elide: Text.ElideMiddle
+                                    }
+                                }
+                            }
+                            Text {
+                                anchors.centerIn: parent
+                                width: parent.width - 24
+                                horizontalAlignment: Text.AlignHCenter
+                                wrapMode: Text.WordWrap
+                                visible: fileTargetList.count === 0
+                                text: {
+                                    if (serviceClient.fileRestoreTargets
+                                            && serviceClient.fileRestoreTargets.loading)
+                                        return qsTrId("aegra.file.browse.loading")
+                                    if (serviceClient.fileRestoreTargets
+                                            && serviceClient.fileRestoreTargets.errorText)
+                                        return serviceClient.fileRestoreTargets.errorText
+                                    //% "Expand a drive and choose one target folder"
+                                    return qsTrId("aegra.restore.file.target_empty")
+                                }
+                                color: Theme.colorTextGrey
+                                font.pixelSize: 12
+                                font.family: Theme.fontFamily
                             }
                         }
 
@@ -1921,7 +2269,7 @@ Item {
                             Layout.fillHeight: true
                             clip: true
                             spacing: 10
-                            visible: !root.isVolumeMode
+                            visible: !root.isVolumeMode && !root.isFileMode
                             boundsBehavior: Flickable.StopAtBounds
                             readonly property bool needsScroll: contentHeight > height + 1
                             model: root.targetDisks
@@ -1957,7 +2305,7 @@ Item {
                             Layout.fillHeight: true
                             clip: true
                             spacing: 8
-                            visible: root.isVolumeMode
+                            visible: root.isVolumeMode && !root.isFileMode
                             boundsBehavior: Flickable.StopAtBounds
                             readonly property bool needsScroll: contentHeight > height + 1
                             model: root.targetVolumes
@@ -2146,10 +2494,11 @@ Item {
                         }
                     }
 
+                    // --- Disk full-disk options (not volume, not file_set) ---
                     CheckBox {
                         id: preserveBox
                         Layout.fillWidth: true
-                        visible: !root.isVolumeMode
+                        visible: !root.isVolumeMode && !root.isFileMode
                         //% "Preserve disk signature"
                         text: qsTrId("aegra.restore.preserve_signature")
                         checked: root.preserveSignature
@@ -2185,7 +2534,7 @@ Item {
                     }
                     Text {
                         Layout.fillWidth: true
-                        visible: !root.isVolumeMode
+                        visible: !root.isVolumeMode && !root.isFileMode
                         //% "Keep MBR signature / GPT DiskId (recommended for bootable disks). Uncheck only when cloning a data disk while the source remains online."
                         text: qsTrId("aegra.restore.preserve_signature_hint")
                         color: Theme.colorTextGrey
@@ -2198,7 +2547,7 @@ Item {
                         id: extendBox
                         Layout.fillWidth: true
                         Layout.topMargin: 8
-                        visible: !root.isVolumeMode
+                        visible: !root.isVolumeMode && !root.isFileMode
                         //% "Auto expand last partition"
                         text: qsTrId("aegra.restore.auto_extend")
                         checked: root.autoExtend
@@ -2234,7 +2583,7 @@ Item {
                     }
                     Text {
                         Layout.fillWidth: true
-                        visible: !root.isVolumeMode
+                        visible: !root.isVolumeMode && !root.isFileMode
                         //% "When the target disk is larger than the source, grow the last data partition (and filesystem) into free space so no large unallocated region remains. Uncheck to leave free space unallocated. Note: FAT/FAT32 volumes cannot be auto-expanded (Windows does not support online extend); free space stays unallocated."
                         text: qsTrId("aegra.restore.auto_extend_hint")
                         color: Theme.colorTextGrey
@@ -2248,6 +2597,205 @@ Item {
                         visible: root.isVolumeMode
                         //% "Volume restore writes one backup volume onto an existing non-system volume of equal or larger size. Partition layout is not changed."
                         text: qsTrId("aegra.restore.volume_options_hint")
+                        color: Theme.colorTextGrey
+                        font.pixelSize: 11
+                        font.family: Theme.fontFamily
+                        wrapMode: Text.WordWrap
+                    }
+
+                    // --- File-set restore options ---
+                    CheckBox {
+                        id: restoreSecurityBox
+                        Layout.fillWidth: true
+                        visible: root.isFileMode
+                        //% "Restore security (ACL)"
+                        text: qsTrId("aegra.restore.file.restore_security")
+                        checked: root.fileRestoreSecurity
+                        onToggled: root.fileRestoreSecurity = checked
+                        font.pixelSize: 12
+                        font.family: Theme.fontFamily
+                        spacing: 10
+                        indicator: Rectangle {
+                            implicitWidth: 18
+                            implicitHeight: 18
+                            x: restoreSecurityBox.leftPadding
+                            y: parent.height / 2 - height / 2
+                            radius: 3
+                            color: restoreSecurityBox.checked ? Theme.colorAccentBlue
+                                                              : Theme.colorInput
+                            border.width: 1
+                            border.color: Theme.colorBorder
+                            Text {
+                                anchors.centerIn: parent
+                                text: restoreSecurityBox.checked ? "\u2713" : ""
+                                color: Theme.colorTextWhite
+                                font.pixelSize: 12
+                                font.bold: true
+                            }
+                        }
+                        contentItem: Text {
+                            text: restoreSecurityBox.text
+                            color: Theme.colorTextWhite
+                            font: restoreSecurityBox.font
+                            leftPadding: restoreSecurityBox.indicator.width
+                                         + restoreSecurityBox.spacing
+                            wrapMode: Text.WordWrap
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        visible: root.isFileMode
+                        //% "Apply Owner, Group, DACL, and SACL from the archive. Uncheck to keep target default permissions (timestamps and attributes are still restored)."
+                        text: qsTrId("aegra.restore.file.restore_security_hint")
+                        color: Theme.colorTextGrey
+                        font.pixelSize: 11
+                        font.family: Theme.fontFamily
+                        wrapMode: Text.WordWrap
+                    }
+
+                    CheckBox {
+                        id: restoreAdsBox
+                        Layout.fillWidth: true
+                        Layout.topMargin: 8
+                        visible: root.isFileMode
+                        //% "Restore alternate data streams"
+                        text: qsTrId("aegra.restore.file.restore_ads")
+                        checked: root.fileRestoreAds
+                        onToggled: root.fileRestoreAds = checked
+                        font.pixelSize: 12
+                        font.family: Theme.fontFamily
+                        spacing: 10
+                        indicator: Rectangle {
+                            implicitWidth: 18
+                            implicitHeight: 18
+                            x: restoreAdsBox.leftPadding
+                            y: parent.height / 2 - height / 2
+                            radius: 3
+                            color: restoreAdsBox.checked ? Theme.colorAccentBlue
+                                                         : Theme.colorInput
+                            border.width: 1
+                            border.color: Theme.colorBorder
+                            Text {
+                                anchors.centerIn: parent
+                                text: restoreAdsBox.checked ? "\u2713" : ""
+                                color: Theme.colorTextWhite
+                                font.pixelSize: 12
+                                font.bold: true
+                            }
+                        }
+                        contentItem: Text {
+                            text: restoreAdsBox.text
+                            color: Theme.colorTextWhite
+                            font: restoreAdsBox.font
+                            leftPadding: restoreAdsBox.indicator.width + restoreAdsBox.spacing
+                            wrapMode: Text.WordWrap
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        visible: root.isFileMode
+                        //% "Restore NTFS alternate data streams (ADS) when present in the archive."
+                        text: qsTrId("aegra.restore.file.restore_ads_hint")
+                        color: Theme.colorTextGrey
+                        font.pixelSize: 11
+                        font.family: Theme.fontFamily
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 12
+                        visible: root.isFileMode
+                        //% "If a file already exists"
+                        text: qsTrId("aegra.restore.file.conflict_policy")
+                        color: Theme.colorTextWhite
+                        font.pixelSize: 12
+                        font.family: Theme.fontFamily
+                        font.bold: true
+                        wrapMode: Text.WordWrap
+                    }
+                    ComboBox {
+                        id: fileConflictCombo
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 32
+                        visible: root.isFileMode
+                        model: [
+                            //% "Skip (fail on conflict)"
+                            qsTrId("aegra.restore.file.conflict_fail"),
+                            //% "Replace existing"
+                            qsTrId("aegra.restore.file.conflict_replace"),
+                            //% "Rename restored file"
+                            qsTrId("aegra.restore.file.conflict_rename")
+                        ]
+                        // policy values are 1-based; ComboBox index is 0-based
+                        currentIndex: Math.max(0, Math.min(2, root.fileConflictPolicy - 1))
+                        onActivated: root.fileConflictPolicy = index + 1
+                        font.pixelSize: 12
+                        font.family: Theme.fontFamily
+                        background: Rectangle {
+                            color: Theme.colorInput
+                            radius: 4
+                            border.width: 1
+                            border.color: fileConflictCombo.activeFocus
+                                          || fileConflictCombo.popup.visible
+                                          ? Theme.colorAccentBlue : Theme.colorBorder
+                        }
+                        indicator: ComboBoxIndicator { combo: fileConflictCombo }
+                        contentItem: Text {
+                            leftPadding: 10
+                            rightPadding: fileConflictCombo.indicator
+                                          ? fileConflictCombo.indicator.width + 12 : 10
+                            text: fileConflictCombo.displayText
+                            color: Theme.colorTextWhite
+                            font.pixelSize: 12
+                            font.family: Theme.fontFamily
+                            verticalAlignment: Text.AlignVCenter
+                            elide: Text.ElideRight
+                        }
+                        popup: Popup {
+                            y: fileConflictCombo.height + 2
+                            width: fileConflictCombo.width
+                            implicitHeight: Math.min(contentItem.implicitHeight + 4, 160)
+                            padding: 2
+                            contentItem: ListView {
+                                clip: true
+                                implicitHeight: contentHeight
+                                model: fileConflictCombo.popup.visible
+                                       ? fileConflictCombo.delegateModel : null
+                                currentIndex: fileConflictCombo.highlightedIndex
+                                ScrollIndicator.vertical: ScrollIndicator { }
+                            }
+                            background: Rectangle {
+                                color: Theme.colorCard
+                                radius: 4
+                                border.width: 1
+                                border.color: Theme.colorBorder
+                            }
+                        }
+                        delegate: ItemDelegate {
+                            width: fileConflictCombo.width
+                            height: 30
+                            highlighted: fileConflictCombo.highlightedIndex === index
+                            contentItem: Text {
+                                text: modelData
+                                color: Theme.colorTextWhite
+                                font.pixelSize: 12
+                                font.family: Theme.fontFamily
+                                elide: Text.ElideRight
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                color: parent.highlighted ? Theme.colorHover : "transparent"
+                            }
+                        }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        visible: root.isFileMode
+                        //% "Choose what happens when the target path already has a file with the same name."
+                        text: qsTrId("aegra.restore.file.conflict_policy_hint")
                         color: Theme.colorTextGrey
                         font.pixelSize: 11
                         font.family: Theme.fontFamily

@@ -15,8 +15,8 @@ using detail::Json;
 
 constexpr std::array<std::string_view, 6> kTombstoneKeys = {
     "schema_version", "kind", "repository_uuid", "operation_uuid", "created_utc_ms", "targets"};
-constexpr std::array<std::string_view, 4> kTargetKeys = {"file_uuid", "catalog_generation",
-                                                         "archive_main_key", "members"};
+constexpr std::array<std::string_view, 5> kTargetKeys = {
+    "file_uuid", "catalog_generation", "content_kind", "archive_main_key", "members"};
 constexpr std::array<std::string_view, 2> kMemberKeys = {"key", "generation"};
 
 [[nodiscard]] base::Result<DeletionMember> parse_member(const Json& value) {
@@ -81,6 +81,7 @@ parse_members(const Json& value, const CatalogCodecLimits& limits) {
         DeletionTarget result;
         result.file_uuid = value.at("file_uuid").get<std::string>();
         result.catalog_generation = generation.value();
+        result.content_kind = value.at("content_kind").get<std::string>();
         result.archive_main_key = value.at("archive_main_key").get<std::string>();
         result.members = std::move(members).value();
         return base::Result<DeletionTarget>::success(std::move(result));
@@ -147,6 +148,7 @@ parse_targets(const Json& value, const CatalogCodecLimits& limits) {
     }
     return {{"file_uuid", target.file_uuid},
             {"catalog_generation", target.catalog_generation},
+            {"content_kind", target.content_kind},
             {"archive_main_key", target.archive_main_key},
             {"members", std::move(members)}};
 }

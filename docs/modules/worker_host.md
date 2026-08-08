@@ -45,23 +45,39 @@ task log 与 Service 分级日志（`logs/trace.log` 等）同树。
 
 | 字段 | JSON 类型 | 规则 |
 | --- | --- | --- |
-| `schema_version` | unsigned integer | 当前固定为 `3` |
+| `schema_version` | unsigned integer | 当前固定为 `4` |
 | `job_id` | string | 必填、非空 |
 | `tenant_id` | string | 必填、非空 |
 | `operation` | unsigned integer | 使用 `JobOperation` 的显式数值 |
-| `source_refs` | string array | 至少一个非空值 |
-| `target_ref` | string | Backup/Restore/Export 必填；Verify 为空 |
+| `content_kind` | unsigned integer | `1=volume_set`，`2=file_set`；省略时按 volume_set 再由校验拒绝非法组合 |
+| `source_refs` | string array | volume_set：Volume/Archive 引用；file_set backup：必须 `[]` |
+| `file_source_refs` | object array | file_set backup 必填；字段见下 |
+| `file_restore_target` | object \| null | file_set restore 必填（F8）；其它操作为 null/省略 |
+| `target_ref` | string | Backup/Restore/Export 必填；Verify 为空；file_set restore 为空 |
 | `credential_refs` | string array | 只允许 `SecretRef` 定位符 |
-| `backup` | object | Backup 必填；含 `type`，增量还含两个父引用 |
-| `restore` | object | Restore 选项：`disk_restore`、`source_disk_number`、`source_volume_index`、`bring_target_online`、`preserve_disk_signature`、`auto_expand_last_partition`。整盘必填 `disk_restore=true`；卷还原 `disk_restore=false` + `source_volume_index`（可省略整个 `restore`，则 volume_index=0） |
+| `backup` | object | Backup 必填；含 `type`，增量还含两个父引用；file_set 仅 `type=1`（full） |
+| `restore` | object | volume_set Restore 选项：`disk_restore`、`source_disk_number`、`source_volume_index`、`bring_target_online`、`preserve_disk_signature`、`auto_expand_last_partition` |
 | `trace_id` | string | 必填、非空 |
 | `deadline_utc_ms` | signed integer | 可选；`0` 表示无 deadline |
+
+### file_source_refs 元素
+
+| 字段 | 类型 | 规则 |
+| --- | --- | --- |
+| `selection_id` | string | 规范 UUID |
+| `volume_identity` | string | 受信任 Volume 身份（典型为 canonical Volume GUID Path UTF-8） |
+| `relative_components` | array | 每项 `{encoding:1, bytes:[u8…]}`，UTF-16LE 原始字节 |
+| `entry_kind` | unsigned | `FileEntryKind` |
+| `recursion` | unsigned | `1=self_only`，`2=recursive` |
+| `reparse_policy` | unsigned | 首版固定 `1`（capture_no_follow） |
+| `unreadable_policy` | unsigned | 首版固定 `1`（fail_job） |
+| `display_label` | string | 非权威 UI 标签；不得当作路径解析 |
 
 任何字段名包含 `password` 或 `secret` 的明文凭据字段一律拒绝。解析器检查 JSON 类型和整数范围，未知 schema、无效枚举、
 字段缺失或格式错误都表示请求未被接受。业务运行参数，例如 block/chunk 大小、KDF 参数、应用版本和
 主机名，来自 Worker 的受信任配置，不从 Job 消息接收。
 
-个人版 Windows Worker 的 Backup 接受 1 至 100 个有序且无重复的 Volume `source_refs`，并在一个 VSS
+个人版 Windows Worker 的 **volume_set** Backup 接受 1 至 100 个有序且无重复的 Volume `source_refs`，并在一个 VSS
 Snapshot Set 中为同一 Job 创建一致性快照。`credential_refs` 为 `dpapi-lm:<entropy_id>:<base64>`
 密文引用；Worker 经 `ICredentialResolver` 用 DPAPI LOCAL_MACHINE 与同一 `entropy_id` 解密得到非空密码字节。
 Job 和响应都不携带明文。Backup 的
@@ -69,6 +85,18 @@ Job 和响应都不携带明文。Backup 的
 Worker 明确拒绝 differential。Incremental 必须提供 `parent_source_ref`；`parent_credential_ref` 可选
 （缺省时复用当前 Archive 口令或空口令），并在 Backend 调用期间同时保持新 Archive 和父 Archive 的
 Secret 存活。多 Volume 增量要求父 Archive 与当前 Job 的有序 Volume 集合一致。
+
+**file_set** Backup（`content_kind=2`）只接受 Full：`file_source_refs` 1–100 条，`source_refs=[]`，
+`target_ref` 为 Archive 目标。Worker 对涉及 Volume 创建**同一个** VSS Snapshot Set（无 raw 回退），
+注入 `WindowsFileSnapshotView`，经 `FileSetBackupPipeline` 写入 `PersonalFileArchiveSession`（V7）。
+Index spool 位于 `AEGRA_DATA_DIR/staging/job-<job_id>/index-spool/`（或 LOCALAPPDATA/ProgramData 回退）。
+任务日志只记录 `selection_id`，不记录路径组件。详见
+[windows_file_set_backup.md](windows_file_set_backup.md)。file_set **Verify**（F7）打开
+`PersonalFileArchiveReader`，按 `stream_index` 去重后真实读取每个 stream 的全部逻辑字节并认证。
+file_set **Restore**（F8）要求 `file_restore_target`（`target_root_identity`、`entry_ids`、冲突策略、
+security/ADS 标志），`target_ref` 为空、`source_refs` 恰好一个 `.bkf`；Worker 解析
+`f1|{volume_identity}|{path_blob}`、校验 Volume GUID 在线且可写、打开 `WindowsFileTreeSink`，经
+`FileSetRestorePipeline` 选择性恢复。TaskResult 使用 `file_restore.*` message code（含 partial）。
 
 Verify Job 的 `operation` 为 `3`，`source_refs` 恰好一个 `.bkf`，`target_ref` 为空；Worker 会完整读取并
 认证每个 Chunk，不创建目标文件。成功结果使用 `verify.completed`，错误使用脱敏的 `verify.*` code。

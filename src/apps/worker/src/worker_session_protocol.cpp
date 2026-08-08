@@ -42,15 +42,17 @@ Json encode_progress(const contracts::TaskProgress& progress) {
         {"job_id", progress.job_id},
         {"trace_id", progress.trace_id},
         {"phase", static_cast<std::uint8_t>(progress.phase)},
-        {"logical_bytes", progress.logical_bytes},
+        {"logical_bytes", progress.logical_bytes ? Json(*progress.logical_bytes) : Json(nullptr)},
         {"processed_bytes", progress.processed_bytes},
         {"stored_bytes", progress.stored_bytes},
+        {"discovered_entries", progress.discovered_entries},
+        {"processed_entries", progress.processed_entries},
         {"message_code", progress.message_code},
     };
 }
 
 Json encode_task_result(const contracts::TaskResult& result) {
-    return Json{
+    Json encoded{
         {"schema_version", result.schema_version},
         {"job_id", result.job_id},
         {"trace_id", result.trace_id},
@@ -59,9 +61,21 @@ Json encode_task_result(const contracts::TaskResult& result) {
         {"logical_bytes", result.logical_bytes},
         {"stored_bytes", result.stored_bytes},
         {"chunk_count", result.chunk_count},
+        {"entry_count", result.entry_count},
+        {"stream_count", result.stream_count},
         {"message_code", result.message_code},
         {"warning_codes", result.warning_codes},
+        {"partial_restore", nullptr},
     };
+    if (result.partial_restore) {
+        encoded["partial_restore"] =
+            Json{{"entries_requested", result.partial_restore->entries_requested},
+                 {"entries_restored", result.partial_restore->entries_restored},
+                 {"entries_failed", result.partial_restore->entries_failed},
+                 {"bytes_restored", result.partial_restore->bytes_restored},
+                 {"stable_error_codes", result.partial_restore->stable_error_codes}};
+    }
+    return encoded;
 }
 
 Json encode_response(const contracts::WorkerResponse& response) {

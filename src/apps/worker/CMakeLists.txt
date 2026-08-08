@@ -5,11 +5,15 @@ add_library(aegra_app_worker_personal STATIC
     src/personal_archive_restore_task_backend.cpp
     src/personal_archive_verify_task.cpp
     src/personal_archive_verify_task_backend.cpp
+    src/personal_file_archive_restore_task.cpp
+    src/personal_file_archive_verify_task.cpp
     src/worker_host.cpp
     src/worker_protocol.cpp
     src/worker_session.cpp
     src/worker_session_protocol.cpp
     src/worker_task_log.cpp
+    src/windows_file_set_backup.cpp
+    src/windows_file_set_backup_task.cpp
     src/windows_personal_backup.cpp
     src/windows_personal_backup_runtime.cpp
     src/windows_personal_backup_task.cpp
@@ -30,6 +34,7 @@ target_link_libraries(
     PRIVATE
         Aegra::AdapterPersonalArchive
         Aegra::AdapterWindowsDisk
+        Aegra::AdapterWindowsFilesystem
         Aegra::AdapterWindowsVss
         Aegra::Format
         Aegra::ThirdPartySpdlog

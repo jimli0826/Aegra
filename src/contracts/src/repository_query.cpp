@@ -68,7 +68,8 @@ base::Result<void> validate_recovery_point_list_request(const RecoveryPointListR
 base::Result<void> validate_recovery_point_summary(const RecoveryPointSummary& summary) {
     if (!canonical_uuid(summary.file_uuid) || !canonical_uuid(summary.backup_set_uuid) ||
         (summary.parent_uuid && !canonical_uuid(*summary.parent_uuid)) ||
-        !known_backup_type(summary.backup_type) || !known_chain_state(summary.chain_state)) {
+        !known_backup_type(summary.backup_type) || !known_chain_state(summary.chain_state) ||
+        !is_known_content_kind(summary.content_kind)) {
         return invalid("recovery point summary identity or state is invalid");
     }
     if ((summary.backup_type == PersonalBackupType::kFull) != !summary.parent_uuid ||
@@ -79,11 +80,15 @@ base::Result<void> validate_recovery_point_summary(const RecoveryPointSummary& s
         summary.chain_state != RecoveryPointChainState::kComplete) {
         return invalid("full recovery point chain state is invalid");
     }
-    constexpr auto maximum_wire_integer =
-        static_cast<std::uint64_t>((std::numeric_limits<std::int64_t>::max)());
-    if (summary.created_utc_ms > maximum_wire_integer ||
-        summary.logical_size_bytes > maximum_wire_integer ||
-        summary.stored_size_bytes > maximum_wire_integer) {
+    if (summary.content_kind == ContentKind::kFileSet) {
+        if (summary.backup_type != PersonalBackupType::kFull || summary.parent_uuid ||
+            summary.has_sidecar) {
+            return invalid("file_set recovery point summary constraints violated");
+        }
+    }
+    if (summary.created_utc_ms > kMaximumWireInteger ||
+        summary.logical_size_bytes > kMaximumWireInteger ||
+        summary.stored_size_bytes > kMaximumWireInteger) {
         return invalid("recovery point summary integer exceeds the service wire range");
     }
     return base::Result<void>::success();

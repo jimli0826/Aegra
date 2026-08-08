@@ -7,6 +7,9 @@
 ## 端口集合
 
 - 数据面：`IBlockSource`、`IBlockSink`、`ISequentialWriter`、`IRandomAccessReader`。
+- 文件数据面（F1，`file_*.h`）：`IFileTreeEnumerator`、`IFileStreamReader`、`IFileSourceBrowser`、
+  `IFileBackupSession`、`IFileRecoveryPointReader`、`IFileStagedSink` 等；输入/输出使用 opaque node
+  identity 与 `contracts::FileEntryDesc`，禁止路径类型与 Win32 HANDLE。
 - Repository Storage：`IObjectReader`、`IStagedObjectWriter`、`IPrefixEnumerator`、
   `IObjectPublisher`、`IObjectDeleter`。
 - 生命周期：`ISnapshotSession`、`IBackupSession`、`IRecoveryPointReader`。
@@ -53,6 +56,16 @@
 - `IBackupSession`、`IRecoveryPointReader`。
 - `ChunkDescriptor`、调用期 `ChunkWriteRequest` 和拥有数据的 `ChunkData`。
 - 引用 `contracts::TaskProgress` 的 `IProgressSink`。
+
+## 文件集端口（F1）
+
+头文件仅声明接口与所有权/取消/线程语义注释；具体 Adapter 在 F4（Windows filesystem）与 F2（Archive
+session）实现。每个 Port 约定：
+
+- 短读与 payload 生命周期由调用方在返回前消费或复制；
+- 枚举分页 token opaque，禁止拼接路径；
+- 析构不隐式 commit；失败路径由调用方 Abort；
+- 不暴露 `std::filesystem::path`、`HANDLE`、Qt 或 SQLite 类型。
 
 ## Worker 系统能力
 

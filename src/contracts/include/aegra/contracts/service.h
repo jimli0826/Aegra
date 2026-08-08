@@ -12,10 +12,10 @@
 
 namespace aegra::contracts {
 
-inline constexpr std::uint32_t kServiceRequestSchemaVersion = 3;
-inline constexpr std::uint32_t kServiceResponseSchemaVersion = 3;
-inline constexpr std::uint32_t kServiceEventSchemaVersion = 3;
-inline constexpr std::uint32_t kServiceApiVersion = 3;
+inline constexpr std::uint32_t kServiceRequestSchemaVersion = 4;
+inline constexpr std::uint32_t kServiceResponseSchemaVersion = 4;
+inline constexpr std::uint32_t kServiceEventSchemaVersion = 4;
+inline constexpr std::uint32_t kServiceApiVersion = 4;
 
 enum class ServiceMessageType : std::uint8_t {
     kRequest = 1,
@@ -37,6 +37,9 @@ enum class ServiceRequestKind : std::uint8_t {
     kPlanDeleteRecoveryPoints = 11,
     /// Open archive manifest for a recovery point; returns source volume geometry for Restore UI.
     kGetRecoveryPointLayout = 12,
+    kBrowseFileSources = 13,
+    kListRecoveryPointEntries = 14,
+    kPrepareFileRestore = 15,
     kAddRepositoryConnection = 32,
     kImportRepositoryConnection = 33,
     kTestRepositoryConnection = 34,
@@ -53,6 +56,7 @@ enum class ServiceRequestKind : std::uint8_t {
     kSubscribeTaskEvents = 45,
     kAcknowledgeEvents = 46,
     kExecuteDeletePlan = 47,
+    kStartFileRestore = 48,
 };
 
 enum class ServiceResponseKind : std::uint8_t {
@@ -82,7 +86,9 @@ using ServiceRequestPayload =
                  RestorePreflightRequest, RecoveryPointRef, RepositoryConnectionInput, ResourceRef,
                  StartBackupCommand, StartVerifyCommand, StartRestoreCommand,
                  MountRecoveryPointCommand, UpsertScheduleCommand, EventSubscriptionRequest,
-                 EventAcknowledgement, ExecuteDeletePlanCommand>;
+                 EventAcknowledgement, ExecuteDeletePlanCommand, BrowseFileSourcesRequest,
+                 ListRecoveryPointEntriesRequest, PrepareFileRestoreRequest,
+                 StartFileRestoreCommand>;
 
 struct ServiceRequest final {
     std::uint32_t schema_version{kServiceRequestSchemaVersion};
@@ -97,7 +103,8 @@ using ServiceResponsePayload =
     std::variant<std::monostate, ServiceInfo, ServiceRecoveryPointPage, RepositoryConnectionPage,
                  SourceInventoryPage, JobPage, SchedulePage, AuditEventPage, MountSessionPage,
                  RestorePreflight, RecoveryPointChainResult, DeletePlanSummary,
-                 RecoveryPointLayout, CommandAcknowledgement>;
+                 RecoveryPointLayout, CommandAcknowledgement, FileSourceNodePage,
+                 RecoveryPointEntryPage, FileRestorePreflight>;
 
 struct ServiceResponse final {
     std::uint32_t schema_version{kServiceResponseSchemaVersion};

@@ -26,8 +26,8 @@ struct MessageArgument final {
 using MessageArguments = std::vector<MessageArgument>;
 
 struct ServiceVersionRange final {
-    std::uint32_t minimum_api_version{3};
-    std::uint32_t maximum_api_version{3};
+    std::uint32_t minimum_api_version{4};
+    std::uint32_t maximum_api_version{4};
 };
 
 struct ServicePageRequest final {
@@ -65,6 +65,7 @@ struct RepositoryConnectionListRequest final {
 
 enum class SourceKind : std::uint8_t {
     kVolume = 1,
+    kFileSelection = 2,
 };
 
 enum class SourceAvailability : std::uint8_t {
@@ -119,12 +120,14 @@ struct JobSummary final {
     std::string trace_id;
     JobOperation operation{JobOperation::kBackup};
     ServiceJobState state{ServiceJobState::kQueued};
+    std::optional<ContentKind> content_kind;
     std::uint64_t created_utc_ms{0};
     std::optional<std::uint64_t> started_utc_ms;
     std::optional<std::uint64_t> completed_utc_ms;
     std::optional<TaskProgress> progress;
     std::string message_code;
     // Present for backup/restore jobs when the control plane stored them.
+    // Volume: inventory source ids. File: opaque selection ids (never paths).
     std::vector<std::string> source_ids;
     std::optional<std::string> repository_connection_id;
 };
@@ -147,11 +150,22 @@ struct ScheduleTrigger final {
     std::string timezone_id;
 };
 
+struct FileSelectionSummary final {
+    std::string selection_id;
+    std::string display_label;
+    FileEntryKind entry_kind{FileEntryKind::kDirectory};
+    FileRecursion recursion{FileRecursion::kRecursive};
+};
+
 struct ScheduleSummary final {
     std::string schedule_id;
     std::string display_name;
     bool enabled{false};
+    ContentKind content_kind{ContentKind::kVolumeSet};
+    /// volume_set only; empty for file_set.
     std::vector<std::string> source_ids;
+    /// file_set only; empty for volume_set. No paths or volume identities.
+    std::vector<FileSelectionSummary> selection_summaries;
     std::string repository_connection_id;
     BackupType backup_type{BackupType::kFull};
     ScheduleTrigger trigger;
@@ -414,28 +428,121 @@ struct MountRecoveryPointCommand final {
     std::string archive_password;
 };
 
+struct FileSelectionInput final {
+    std::string node_token;
+    FileRecursion recursion{FileRecursion::kRecursive};
+    std::string display_label;
+};
+
+struct FileSetOptionsInput final {
+    FileReparsePolicy reparse_policy{FileReparsePolicy::kCaptureNoFollow};
+    FileUnreadablePolicy unreadable_policy{FileUnreadablePolicy::kFailJob};
+};
+
+/// Tagged protection object for UpsertSchedule (exact mutual exclusion).
+struct ProtectionSpecInput final {
+    ContentKind content_kind{ContentKind::kVolumeSet};
+    /// volume_set create/list wire: 1..100 inventory source ids.
+    std::vector<std::string> volume_source_ids;
+    /// file_set create only: node tokens; empty on update (source frozen).
+    std::vector<FileSelectionInput> file_selections;
+    FileSetOptionsInput file_options{};
+};
+
 struct UpsertScheduleCommand final {
     /// Absent = create; present = update an existing schedule.
     /// Update mutability (Service enforces against the durable record):
-    /// - Immutable after create: source_ids, backup_type, exclude_page_and_hibernation_files,
+    /// - Immutable after create: protection source, backup_type, exclude_page_and_hibernation_files,
     ///   encryption_enabled, archive password (DPAPI ciphertext in SQLite).
     /// - Mutable: display_name, enabled, repository_connection_id, trigger (schedule settings).
-    /// - Backup options other than future shutdown-on-complete stay create-time only.
     std::optional<std::string> schedule_id;
     std::string display_name;
     bool enabled{false};
-    std::vector<std::string> source_ids;
+    ProtectionSpecInput protection{};
     std::string repository_connection_id;
     BackupType backup_type{BackupType::kFull};
     ScheduleTrigger trigger;
     bool exclude_page_and_hibernation_files{true};
     bool encryption_enabled{false};
-    /// Create-only when encryption_enabled: DPAPI-protected (LOCAL_MACHINE,
-    /// pOptionalEntropy = schedule_id) then base64; stored as
-    /// schedules.archive_password_protected = dpapi-lm:<schedule_id>:<base64>.
-    /// Must be empty on update (password cannot be set, cleared, or rotated after create).
+    /// Create-only when encryption_enabled. Must be empty on update.
     std::string archive_password;
 };
+
+struct BrowseFileSourcesRequest final {
+    std::optional<std::string> parent_node_token;
+    ServicePageRequest page{};
+    bool include_unavailable{false};
+};
+
+struct FileSourceNode final {
+    std::string node_token;
+    std::string display_name;
+    FileEntryKind entry_kind{FileEntryKind::kDirectory};
+    FileNodeSelectability selectability{FileNodeSelectability::kSelectable};
+    bool has_children{false};
+    bool is_directory{true};
+    SourceAvailability availability{SourceAvailability::kAvailable};
+    std::optional<std::string> message_code;
+};
+
+struct ListRecoveryPointEntriesRequest final {
+    std::optional<std::string> repository_connection_id;
+    std::string recovery_point_id;
+    /// Decimal u64; root children use "0".
+    std::string parent_entry_id{"0"};
+    ServicePageRequest page{};
+    std::optional<std::string> archive_secret_ref;
+};
+
+struct RecoveryPointEntrySummary final {
+    std::string entry_id;
+    std::string display_name;
+    FileEntryKind entry_kind{FileEntryKind::kFile};
+    std::uint64_t logical_size_bytes{0};
+    bool has_children{false};
+    std::optional<std::string> message_code;
+};
+
+struct RecoveryPointEntryPage final {
+    std::optional<std::string> repository_connection_id;
+    std::string recovery_point_id;
+    std::string parent_entry_id;
+    std::string index_generation;
+    std::vector<RecoveryPointEntrySummary> items;
+    std::optional<std::string> continuation_token;
+};
+
+struct PrepareFileRestoreRequest final {
+    std::optional<std::string> repository_connection_id;
+    std::string recovery_point_id;
+    std::vector<std::string> entry_ids;
+    std::string target_node_token;
+    FileConflictPolicy conflict_policy{FileConflictPolicy::kFail};
+    std::optional<std::string> archive_secret_ref;
+    bool restore_security{true};
+    bool restore_ads{true};
+};
+
+struct FileRestorePreflight final {
+    std::string preflight_token;
+    std::optional<std::string> repository_connection_id;
+    std::string recovery_point_id;
+    std::uint64_t entry_count{0};
+    std::uint64_t logical_size_bytes{0};
+    std::uint64_t target_free_bytes{0};
+    FileConflictPolicy conflict_policy{FileConflictPolicy::kFail};
+    std::uint64_t expires_utc_ms{0};
+    bool restore_eligible{false};
+    std::string message_code;
+};
+
+struct StartFileRestoreCommand final {
+    std::string preflight_token;
+    bool confirmed{false};
+    std::optional<std::string> archive_secret_ref;
+};
+
+using FileSourceNodePage = ServicePage<FileSourceNode>;
 
 struct EventSubscriptionRequest final {
     std::optional<std::string> resume_token;
@@ -519,6 +626,25 @@ validate_recovery_point_layout(const RecoveryPointLayout& layout);
 [[nodiscard]] base::Result<void> validate_delete_plan_summary(const DeletePlanSummary& summary);
 [[nodiscard]] base::Result<void>
 validate_execute_delete_plan_command(const ExecuteDeletePlanCommand& command);
+
+[[nodiscard]] base::Result<void> validate_protection_spec_input(const ProtectionSpecInput& protection,
+                                                                bool is_create);
+[[nodiscard]] base::Result<void>
+validate_browse_file_sources_request(const BrowseFileSourcesRequest& request);
+[[nodiscard]] base::Result<void> validate_file_source_node(const FileSourceNode& node);
+[[nodiscard]] base::Result<void> validate_file_source_node_page(const FileSourceNodePage& page);
+[[nodiscard]] base::Result<void>
+validate_list_recovery_point_entries_request(const ListRecoveryPointEntriesRequest& request);
+[[nodiscard]] base::Result<void>
+validate_recovery_point_entry_summary(const RecoveryPointEntrySummary& summary);
+[[nodiscard]] base::Result<void>
+validate_recovery_point_entry_page(const RecoveryPointEntryPage& page);
+[[nodiscard]] base::Result<void>
+validate_prepare_file_restore_request(const PrepareFileRestoreRequest& request);
+[[nodiscard]] base::Result<void>
+validate_file_restore_preflight(const FileRestorePreflight& preflight);
+[[nodiscard]] base::Result<void>
+validate_start_file_restore_command(const StartFileRestoreCommand& command);
 
 [[nodiscard]] base::Result<void>
 validate_repository_connection_page(const RepositoryConnectionPage& page);

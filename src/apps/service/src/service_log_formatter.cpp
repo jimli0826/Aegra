@@ -76,6 +76,14 @@ void redact(Json& value) {
         return "Resolve recovery point chain";
     case contracts::ServiceRequestKind::kPlanDeleteRecoveryPoints:
         return "Plan recovery point deletion";
+    case contracts::ServiceRequestKind::kGetRecoveryPointLayout:
+        return "Get recovery point layout";
+    case contracts::ServiceRequestKind::kBrowseFileSources:
+        return "Browse file sources";
+    case contracts::ServiceRequestKind::kListRecoveryPointEntries:
+        return "List recovery point entries";
+    case contracts::ServiceRequestKind::kPrepareFileRestore:
+        return "Prepare file restore";
     default:
         return "Unknown query";
     }
@@ -115,6 +123,8 @@ void redact(Json& value) {
         return "Acknowledge events";
     case contracts::ServiceRequestKind::kExecuteDeletePlan:
         return "Execute recovery point deletion";
+    case contracts::ServiceRequestKind::kStartFileRestore:
+        return "Start file restore";
     default:
         return "Unknown command";
     }

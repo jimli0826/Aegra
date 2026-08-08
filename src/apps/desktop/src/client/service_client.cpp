@@ -26,7 +26,9 @@ constexpr int kJobPollIntervalMilliseconds = 2'000;
 } // namespace
 
 ServiceClient::ServiceClient(QObject* parent)
-    : QObject(parent), recovery_points_(this), jobs_(this), sources_(this), connections_(this),
+    : QObject(parent), recovery_points_(this), jobs_(this), sources_(this),
+      file_browse_sources_(this), file_restore_targets_(this), file_recover_entries_(this),
+      connections_(this),
       transport_(std::make_unique<IpcFrameTransport>(QLatin1String(kServicePipeName))),
       coordinator_(std::make_unique<ServiceRequestCoordinator>(*transport_)),
       job_poll_timer_(new QTimer(this)), toast_timer_(new QTimer(this)),
@@ -34,6 +36,13 @@ ServiceClient::ServiceClient(QObject* parent)
     recovery_points_.set_locale_format(&format_);
     jobs_.set_locale_format(&format_);
     sources_.set_locale_format(&format_);
+    file_restore_targets_.setSingleDirectoryMode(true);
+    connect(&file_browse_sources_, &FileBrowseModel::expandRequested, this,
+            &ServiceClient::on_file_browse_expand_requested);
+    connect(&file_restore_targets_, &FileBrowseModel::expandRequested, this,
+            &ServiceClient::on_file_target_expand_requested);
+    connect(&file_recover_entries_, &FileRecoverModel::expandRequested, this,
+            &ServiceClient::on_file_recover_expand_requested);
     job_poll_timer_->setInterval(kJobPollIntervalMilliseconds);
     toast_timer_->setSingleShot(true);
     toast_timer_->setInterval(4'000);
@@ -505,6 +514,9 @@ RequestDisposition ServiceClient::handle_service_info_frame(const QByteArray& bo
     inventory_available_ = capabilities_.contains(QStringLiteral("source.inventory"));
     connections_available_ = capabilities_.contains(QStringLiteral("repository.connection"));
     schedules_available_ = capabilities_.contains(QStringLiteral("schedule"));
+    file_browse_available_ = capabilities_.contains(QStringLiteral("file.browse"));
+    file_recover_browse_available_ = capabilities_.contains(QStringLiteral("file.recover_browse"));
+    file_restore_available_ = capabilities_.contains(QStringLiteral("file.restore"));
     backup_start_available_ = capabilities_.contains(QStringLiteral("backup.start"));
     restore_preflight_available_ = capabilities_.contains(QStringLiteral("restore.preflight"));
     restore_start_available_ = capabilities_.contains(QStringLiteral("restore.start"));
@@ -631,6 +643,24 @@ void ServiceClient::reset_jobs() {
     update_active_backup_observe();
 }
 
+void ServiceClient::reset_file_models() {
+    file_browse_sources_.clear();
+    file_restore_targets_.clear();
+    file_recover_entries_.clear();
+    file_browse_request_id_.clear();
+    file_browse_parent_token_.clear();
+    file_target_browse_request_id_.clear();
+    file_target_browse_parent_token_.clear();
+    file_recover_request_id_.clear();
+    file_recover_parent_entry_id_.clear();
+    file_recover_archive_password_.clear();
+    file_restore_entry_ids_.clear();
+    file_restore_target_token_.clear();
+    file_restore_conflict_policy_ = kFileConflictPolicyFail;
+    file_restore_security_ = true;
+    file_restore_ads_ = true;
+}
+
 void ServiceClient::set_state(const State state, QString error_code) {
     const bool same_state = (state_ == state);
     const bool same_error = (error_code_ == error_code);
@@ -660,6 +690,9 @@ void ServiceClient::set_state(const State state, QString error_code) {
             inventory_available_ = false;
             connections_available_ = false;
             schedules_available_ = false;
+            file_browse_available_ = false;
+            file_recover_browse_available_ = false;
+            file_restore_available_ = false;
             backup_start_available_ = false;
             restore_preflight_available_ = false;
             restore_start_available_ = false;
@@ -674,6 +707,7 @@ void ServiceClient::set_state(const State state, QString error_code) {
             reset_recovery_point_layout();
             reset_jobs();
             reset_inventory();
+            reset_file_models();
             reset_connections();
             reset_schedules();
             reset_repository_command();

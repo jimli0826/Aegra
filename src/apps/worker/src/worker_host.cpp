@@ -2,9 +2,13 @@
 
 #include "worker_host_internal.h"
 
-#include "aegra/apps/worker/personal_archive_verify_task.h"
 #include "aegra/apps/worker/personal_archive_restore_task.h"
+#include "aegra/apps/worker/personal_archive_verify_task.h"
+#include "aegra/apps/worker/personal_file_archive_restore_task.h"
+#include "aegra/apps/worker/personal_file_archive_verify_task.h"
+#include "aegra/apps/worker/windows_file_set_backup_task.h"
 #include "aegra/base/error.h"
+#include "aegra/contracts/file_set.h"
 #include "aegra/contracts/task_result.h"
 #include "aegra/contracts/worker_response.h"
 
@@ -145,6 +149,23 @@ class PersonalBackupExecutor final : public IWorkerTaskExecutor {
 
     [[nodiscard]] base::Result<contracts::TaskResult>
     execute(const base::CancellationToken& cancellation) override {
+        if (job_.content_kind == contracts::ContentKind::kFileSet) {
+            if (job_.operation == contracts::JobOperation::kBackup) {
+                return execute_windows_file_set_backup_task(job_, options_, context_, cancellation);
+            }
+            if (job_.operation == contracts::JobOperation::kVerify) {
+                return execute_personal_file_archive_verify_task(job_, options_, context_,
+                                                                cancellation);
+            }
+            if (job_.operation == contracts::JobOperation::kRestore) {
+                return execute_personal_file_archive_restore_task(job_, options_, context_,
+                                                                  cancellation);
+            }
+            return base::Result<contracts::TaskResult>::failure(base::Error{
+                base::ErrorCode::kInvalidArgument,
+                "file_set operation is not available in this worker build",
+            });
+        }
         if (job_.operation == contracts::JobOperation::kVerify) {
             return execute_personal_archive_verify_task(job_, options_, context_, cancellation);
         }

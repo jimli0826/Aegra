@@ -1,6 +1,7 @@
 #pragma once
 
 #include "aegra/base/result.h"
+#include "aegra/contracts/file_set.h"
 
 #include <cstdint>
 #include <optional>
@@ -37,6 +38,7 @@ struct RecoveryPointSummary final {
     std::string backup_set_uuid;
     std::optional<std::string> parent_uuid;
     PersonalBackupType backup_type{PersonalBackupType::kFull};
+    ContentKind content_kind{ContentKind::kVolumeSet};
     RecoveryPointChainState chain_state{RecoveryPointChainState::kIncomplete};
     std::uint64_t created_utc_ms{0};
     std::uint64_t logical_size_bytes{0};

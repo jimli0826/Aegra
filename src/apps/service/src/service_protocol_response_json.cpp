@@ -37,6 +37,7 @@ namespace {
                 {"backup_set_uuid", point.backup_set_uuid},
                 {"parent_uuid", optional_string_json(point.parent_uuid)},
                 {"backup_type", static_cast<std::uint8_t>(point.backup_type)},
+                {"content_kind", static_cast<std::uint8_t>(point.content_kind)},
                 {"chain_state", static_cast<std::uint8_t>(point.chain_state)},
                 {"created_utc_ms", point.created_utc_ms},
                 {"logical_size_bytes", point.logical_size_bytes},
@@ -46,9 +47,11 @@ namespace {
 }
 
 [[nodiscard]] contracts::RecoveryPointSummary parse_recovery_point(const Json& payload) {
-    constexpr std::array<std::string_view, 10> keys{
-        "file_uuid",      "backup_set_uuid",    "parent_uuid",       "backup_type",  "chain_state",
-        "created_utc_ms", "logical_size_bytes", "stored_size_bytes", "source_count", "has_sidecar"};
+    constexpr std::array<std::string_view, 11> keys{
+        "file_uuid",         "backup_set_uuid",    "parent_uuid",
+        "backup_type",       "content_kind",       "chain_state",
+        "created_utc_ms",    "logical_size_bytes", "stored_size_bytes",
+        "source_count",      "has_sidecar"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("recovery point summary fields are invalid");
     }
@@ -58,6 +61,8 @@ namespace {
     point.parent_uuid = optional_string(payload.at("parent_uuid"));
     point.backup_type = static_cast<contracts::PersonalBackupType>(
         unsigned_value<std::uint8_t>(payload, "backup_type"));
+    point.content_kind =
+        static_cast<contracts::ContentKind>(unsigned_value<std::uint8_t>(payload, "content_kind"));
     point.chain_state = static_cast<contracts::RecoveryPointChainState>(
         unsigned_value<std::uint8_t>(payload, "chain_state"));
     point.created_utc_ms = unsigned_value<std::uint64_t>(payload, "created_utc_ms");
@@ -187,21 +192,84 @@ parse_repository_connection(const Json& payload) {
     return item;
 }
 
+[[nodiscard]] Json optional_content_kind_json(const std::optional<contracts::ContentKind>& kind) {
+    return kind ? Json(static_cast<std::uint8_t>(*kind)) : Json(nullptr);
+}
+
+[[nodiscard]] std::optional<contracts::ContentKind> optional_content_kind(const Json& value) {
+    if (value.is_null()) {
+        return std::nullopt;
+    }
+    if (!value.is_number_unsigned()) {
+        throw std::invalid_argument("content_kind is invalid");
+    }
+    const auto decoded = value.get<std::uint64_t>();
+    if (decoded > std::numeric_limits<std::uint8_t>::max()) {
+        throw std::out_of_range("content_kind is out of range");
+    }
+    return static_cast<contracts::ContentKind>(static_cast<std::uint8_t>(decoded));
+}
+
+[[nodiscard]] Json optional_wire_uint64_json(const std::optional<std::uint64_t>& value) {
+    return value ? Json(*value) : Json(nullptr);
+}
+
+[[nodiscard]] std::optional<std::uint64_t> optional_wire_uint64(const Json& value) {
+    if (value.is_null()) {
+        return std::nullopt;
+    }
+    if (!value.is_number_unsigned()) {
+        throw std::invalid_argument("optional wire integer is invalid");
+    }
+    const auto decoded = value.get<std::uint64_t>();
+    if (decoded > static_cast<std::uint64_t>((std::numeric_limits<std::int64_t>::max)())) {
+        throw std::out_of_range("optional wire integer is out of range");
+    }
+    return decoded;
+}
+
+[[nodiscard]] Json encode_partial_restore(const contracts::PartialRestoreStats& stats) {
+    return Json{{"entries_requested", stats.entries_requested},
+                {"entries_restored", stats.entries_restored},
+                {"entries_failed", stats.entries_failed},
+                {"bytes_restored", stats.bytes_restored},
+                {"stable_error_codes", stats.stable_error_codes}};
+}
+
+[[nodiscard]] contracts::PartialRestoreStats parse_partial_restore(const Json& payload) {
+    constexpr std::array<std::string_view, 5> keys{
+        "entries_requested", "entries_restored", "entries_failed", "bytes_restored",
+        "stable_error_codes"};
+    if (!exact_keys(payload, keys)) {
+        throw std::invalid_argument("partial restore stats fields are invalid");
+    }
+    contracts::PartialRestoreStats stats;
+    stats.entries_requested = unsigned_value<std::uint64_t>(payload, "entries_requested");
+    stats.entries_restored = unsigned_value<std::uint64_t>(payload, "entries_restored");
+    stats.entries_failed = unsigned_value<std::uint64_t>(payload, "entries_failed");
+    stats.bytes_restored = unsigned_value<std::uint64_t>(payload, "bytes_restored");
+    stats.stable_error_codes = payload.at("stable_error_codes").get<std::vector<std::string>>();
+    return stats;
+}
+
 [[nodiscard]] Json encode_task_progress(const contracts::TaskProgress& progress) {
     return Json{{"schema_version", progress.schema_version},
                 {"job_id", progress.job_id},
                 {"trace_id", progress.trace_id},
                 {"phase", static_cast<std::uint8_t>(progress.phase)},
-                {"logical_bytes", progress.logical_bytes},
+                {"logical_bytes", optional_wire_uint64_json(progress.logical_bytes)},
                 {"processed_bytes", progress.processed_bytes},
                 {"stored_bytes", progress.stored_bytes},
+                {"discovered_entries", progress.discovered_entries},
+                {"processed_entries", progress.processed_entries},
                 {"message_code", progress.message_code}};
 }
 
 [[nodiscard]] contracts::TaskProgress parse_task_progress(const Json& payload) {
-    constexpr std::array<std::string_view, 8> keys{
-        "schema_version", "job_id",          "trace_id",     "phase",
-        "logical_bytes",  "processed_bytes", "stored_bytes", "message_code"};
+    constexpr std::array<std::string_view, 10> keys{
+        "schema_version", "job_id",           "trace_id",           "phase",
+        "logical_bytes",  "processed_bytes",  "stored_bytes",       "discovered_entries",
+        "processed_entries", "message_code"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("task progress fields are invalid");
     }
@@ -211,9 +279,11 @@ parse_repository_connection(const Json& payload) {
     progress.trace_id = payload.at("trace_id").get<std::string>();
     progress.phase =
         static_cast<contracts::TaskPhase>(unsigned_value<std::uint8_t>(payload, "phase"));
-    progress.logical_bytes = unsigned_value<std::uint64_t>(payload, "logical_bytes");
+    progress.logical_bytes = optional_wire_uint64(payload.at("logical_bytes"));
     progress.processed_bytes = unsigned_value<std::uint64_t>(payload, "processed_bytes");
     progress.stored_bytes = unsigned_value<std::uint64_t>(payload, "stored_bytes");
+    progress.discovered_entries = unsigned_value<std::uint64_t>(payload, "discovered_entries");
+    progress.processed_entries = unsigned_value<std::uint64_t>(payload, "processed_entries");
     progress.message_code = payload.at("message_code").get<std::string>();
     return progress;
 }
@@ -224,6 +294,7 @@ parse_repository_connection(const Json& payload) {
         {"trace_id", summary.trace_id},
         {"operation", static_cast<std::uint8_t>(summary.operation)},
         {"state", static_cast<std::uint8_t>(summary.state)},
+        {"content_kind", optional_content_kind_json(summary.content_kind)},
         {"created_utc_ms", summary.created_utc_ms},
         {"started_utc_ms", optional_uint64_json(summary.started_utc_ms)},
         {"completed_utc_ms", optional_uint64_json(summary.completed_utc_ms)},
@@ -234,11 +305,11 @@ parse_repository_connection(const Json& payload) {
 }
 
 [[nodiscard]] contracts::JobSummary parse_job(const Json& payload) {
-    constexpr std::array<std::string_view, 11> keys{
+    constexpr std::array<std::string_view, 12> keys{
         "job_id",         "trace_id",         "operation",
-        "state",          "created_utc_ms",   "started_utc_ms",
-        "completed_utc_ms", "progress",       "message_code",
-        "source_ids",     "repository_connection_id"};
+        "state",          "content_kind",     "created_utc_ms",
+        "started_utc_ms", "completed_utc_ms", "progress",
+        "message_code",   "source_ids",       "repository_connection_id"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("job summary fields are invalid");
     }
@@ -249,6 +320,7 @@ parse_repository_connection(const Json& payload) {
         static_cast<contracts::JobOperation>(unsigned_value<std::uint8_t>(payload, "operation"));
     summary.state =
         static_cast<contracts::ServiceJobState>(unsigned_value<std::uint8_t>(payload, "state"));
+    summary.content_kind = optional_content_kind(payload.at("content_kind"));
     summary.created_utc_ms = unsigned_value<std::uint64_t>(payload, "created_utc_ms");
     summary.started_utc_ms = optional_uint64(payload.at("started_utc_ms"));
     summary.completed_utc_ms = optional_uint64(payload.at("completed_utc_ms"));
@@ -437,11 +509,40 @@ parse_recovery_point_source_volume(const Json& payload) {
         payload.at("timezone_id").get<std::string>()};
 }
 
+[[nodiscard]] Json encode_selection_summary(const contracts::FileSelectionSummary& summary) {
+    return Json{{"selection_id", summary.selection_id},
+                {"display_label", summary.display_label},
+                {"entry_kind", static_cast<std::uint8_t>(summary.entry_kind)},
+                {"recursion", static_cast<std::uint8_t>(summary.recursion)}};
+}
+
+[[nodiscard]] contracts::FileSelectionSummary parse_selection_summary(const Json& payload) {
+    constexpr std::array<std::string_view, 4> keys{"selection_id", "display_label", "entry_kind",
+                                                   "recursion"};
+    if (!exact_keys(payload, keys)) {
+        throw std::invalid_argument("file selection summary fields are invalid");
+    }
+    contracts::FileSelectionSummary summary;
+    summary.selection_id = payload.at("selection_id").get<std::string>();
+    summary.display_label = payload.at("display_label").get<std::string>();
+    summary.entry_kind =
+        static_cast<contracts::FileEntryKind>(unsigned_value<std::uint8_t>(payload, "entry_kind"));
+    summary.recursion =
+        static_cast<contracts::FileRecursion>(unsigned_value<std::uint8_t>(payload, "recursion"));
+    return summary;
+}
+
 [[nodiscard]] Json encode_schedule(const contracts::ScheduleSummary& summary) {
+    Json selections = Json::array();
+    for (const auto& item : summary.selection_summaries) {
+        selections.push_back(encode_selection_summary(item));
+    }
     return Json{{"schedule_id", summary.schedule_id},
                 {"display_name", summary.display_name},
                 {"enabled", summary.enabled},
+                {"content_kind", static_cast<std::uint8_t>(summary.content_kind)},
                 {"source_ids", summary.source_ids},
+                {"selection_summaries", std::move(selections)},
                 {"repository_connection_id", summary.repository_connection_id},
                 {"backup_type", static_cast<std::uint8_t>(summary.backup_type)},
                 {"trigger", encode_schedule_trigger(summary.trigger)},
@@ -451,11 +552,13 @@ parse_recovery_point_source_volume(const Json& payload) {
 }
 
 [[nodiscard]] contracts::ScheduleSummary parse_schedule(const Json& payload) {
-    constexpr std::array<std::string_view, 10> keys{
+    constexpr std::array<std::string_view, 12> keys{
         "schedule_id",
         "display_name",
         "enabled",
+        "content_kind",
         "source_ids",
+        "selection_summaries",
         "repository_connection_id",
         "backup_type",
         "trigger",
@@ -469,7 +572,12 @@ parse_recovery_point_source_volume(const Json& payload) {
     summary.schedule_id = payload.at("schedule_id").get<std::string>();
     summary.display_name = payload.at("display_name").get<std::string>();
     summary.enabled = payload.at("enabled").get<bool>();
+    summary.content_kind =
+        static_cast<contracts::ContentKind>(unsigned_value<std::uint8_t>(payload, "content_kind"));
     summary.source_ids = payload.at("source_ids").get<std::vector<std::string>>();
+    for (const auto& item : payload.at("selection_summaries")) {
+        summary.selection_summaries.push_back(parse_selection_summary(item));
+    }
     summary.repository_connection_id = payload.at("repository_connection_id").get<std::string>();
     summary.backup_type =
         static_cast<contracts::BackupType>(unsigned_value<std::uint8_t>(payload, "backup_type"));
@@ -765,14 +873,20 @@ template <typename Item, typename Parser>
                 {"logical_bytes", result.logical_bytes},
                 {"stored_bytes", result.stored_bytes},
                 {"chunk_count", result.chunk_count},
+                {"entry_count", result.entry_count},
+                {"stream_count", result.stream_count},
                 {"message_code", result.message_code},
-                {"warning_codes", result.warning_codes}};
+                {"warning_codes", result.warning_codes},
+                {"partial_restore", result.partial_restore
+                                        ? encode_partial_restore(*result.partial_restore)
+                                        : Json(nullptr)}};
 }
 
 [[nodiscard]] contracts::TaskResult parse_task_result(const Json& payload) {
-    constexpr std::array<std::string_view, 10> keys{
-        "schema_version", "job_id",       "trace_id",    "outcome",      "error_code",
-        "logical_bytes",  "stored_bytes", "chunk_count", "message_code", "warning_codes"};
+    constexpr std::array<std::string_view, 13> keys{
+        "schema_version", "job_id",       "trace_id",     "outcome",      "error_code",
+        "logical_bytes",  "stored_bytes", "chunk_count",  "entry_count",  "stream_count",
+        "message_code",   "warning_codes", "partial_restore"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("task result fields are invalid");
     }
@@ -787,8 +901,13 @@ template <typename Item, typename Parser>
     result.logical_bytes = unsigned_value<std::uint64_t>(payload, "logical_bytes");
     result.stored_bytes = unsigned_value<std::uint64_t>(payload, "stored_bytes");
     result.chunk_count = unsigned_value<std::uint64_t>(payload, "chunk_count");
+    result.entry_count = unsigned_value<std::uint64_t>(payload, "entry_count");
+    result.stream_count = unsigned_value<std::uint64_t>(payload, "stream_count");
     result.message_code = payload.at("message_code").get<std::string>();
     result.warning_codes = payload.at("warning_codes").get<std::vector<std::string>>();
+    if (!payload.at("partial_restore").is_null()) {
+        result.partial_restore = parse_partial_restore(payload.at("partial_restore"));
+    }
     return result;
 }
 
@@ -832,6 +951,54 @@ Json encode_response_payload(const contracts::ServiceResponse& response) {
     case contracts::ServiceRequestKind::kGetRecoveryPointLayout:
         return encode_recovery_point_layout(
             std::get<contracts::RecoveryPointLayout>(response.payload));
+    case contracts::ServiceRequestKind::kBrowseFileSources:
+        return encode_page(std::get<contracts::FileSourceNodePage>(response.payload),
+                           [](const contracts::FileSourceNode& node) {
+                               return Json{
+                                   {"node_token", node.node_token},
+                                   {"display_name", node.display_name},
+                                   {"entry_kind", static_cast<std::uint8_t>(node.entry_kind)},
+                                   {"selectability", static_cast<std::uint8_t>(node.selectability)},
+                                   {"has_children", node.has_children},
+                                   {"is_directory", node.is_directory},
+                                   {"availability", static_cast<std::uint8_t>(node.availability)},
+                                   {"message_code", optional_string_json(node.message_code)}};
+                           });
+    case contracts::ServiceRequestKind::kListRecoveryPointEntries:
+        return [&]() {
+            const auto& page = std::get<contracts::RecoveryPointEntryPage>(response.payload);
+            Json items = Json::array();
+            for (const auto& item : page.items) {
+                items.push_back(
+                    Json{{"entry_id", item.entry_id},
+                         {"display_name", item.display_name},
+                         {"entry_kind", static_cast<std::uint8_t>(item.entry_kind)},
+                         {"logical_size_bytes", item.logical_size_bytes},
+                         {"has_children", item.has_children},
+                         {"message_code", optional_string_json(item.message_code)}});
+            }
+            return Json{{"repository_connection_id",
+                         optional_string_json(page.repository_connection_id)},
+                        {"recovery_point_id", page.recovery_point_id},
+                        {"parent_entry_id", page.parent_entry_id},
+                        {"index_generation", page.index_generation},
+                        {"items", std::move(items)},
+                        {"continuation_token", optional_string_json(page.continuation_token)}};
+        }();
+    case contracts::ServiceRequestKind::kPrepareFileRestore: {
+        const auto& preflight = std::get<contracts::FileRestorePreflight>(response.payload);
+        return Json{{"preflight_token", preflight.preflight_token},
+                    {"repository_connection_id",
+                     optional_string_json(preflight.repository_connection_id)},
+                    {"recovery_point_id", preflight.recovery_point_id},
+                    {"entry_count", preflight.entry_count},
+                    {"logical_size_bytes", preflight.logical_size_bytes},
+                    {"target_free_bytes", preflight.target_free_bytes},
+                    {"conflict_policy", static_cast<std::uint8_t>(preflight.conflict_policy)},
+                    {"expires_utc_ms", preflight.expires_utc_ms},
+                    {"restore_eligible", preflight.restore_eligible},
+                    {"message_code", preflight.message_code}};
+    }
     default:
         throw std::invalid_argument("service query response kind is invalid");
     }
@@ -878,6 +1045,84 @@ parse_response_payload(const contracts::ServiceResponseKind response_kind,
         return parse_delete_plan_summary(payload);
     case contracts::ServiceRequestKind::kGetRecoveryPointLayout:
         return parse_recovery_point_layout(payload);
+    case contracts::ServiceRequestKind::kBrowseFileSources:
+        return parse_page<contracts::FileSourceNode>(payload, [](const Json& item) {
+            constexpr std::array<std::string_view, 8> keys{
+                "node_token",  "display_name", "entry_kind",   "selectability",
+                "has_children", "is_directory", "availability", "message_code"};
+            if (!exact_keys(item, keys)) {
+                throw std::invalid_argument("file source node fields are invalid");
+            }
+            contracts::FileSourceNode node;
+            node.node_token = item.at("node_token").get<std::string>();
+            node.display_name = item.at("display_name").get<std::string>();
+            node.entry_kind = static_cast<contracts::FileEntryKind>(
+                unsigned_value<std::uint8_t>(item, "entry_kind"));
+            node.selectability = static_cast<contracts::FileNodeSelectability>(
+                unsigned_value<std::uint8_t>(item, "selectability"));
+            node.has_children = item.at("has_children").get<bool>();
+            node.is_directory = item.at("is_directory").get<bool>();
+            node.availability = static_cast<contracts::SourceAvailability>(
+                unsigned_value<std::uint8_t>(item, "availability"));
+            node.message_code = optional_string(item.at("message_code"));
+            return node;
+        });
+    case contracts::ServiceRequestKind::kListRecoveryPointEntries: {
+        constexpr std::array<std::string_view, 6> keys{
+            "repository_connection_id", "recovery_point_id", "parent_entry_id",
+            "index_generation",         "items",             "continuation_token"};
+        if (!exact_keys(payload, keys) || !payload.at("items").is_array()) {
+            throw std::invalid_argument("recovery point entry page fields are invalid");
+        }
+        contracts::RecoveryPointEntryPage page;
+        page.repository_connection_id = optional_string(payload.at("repository_connection_id"));
+        page.recovery_point_id = payload.at("recovery_point_id").get<std::string>();
+        page.parent_entry_id = payload.at("parent_entry_id").get<std::string>();
+        page.index_generation = payload.at("index_generation").get<std::string>();
+        page.continuation_token = optional_string(payload.at("continuation_token"));
+        for (const auto& item : payload.at("items")) {
+            constexpr std::array<std::string_view, 6> item_keys{
+                "entry_id", "display_name", "entry_kind", "logical_size_bytes", "has_children",
+                "message_code"};
+            if (!exact_keys(item, item_keys)) {
+                throw std::invalid_argument("recovery point entry fields are invalid");
+            }
+            contracts::RecoveryPointEntrySummary summary;
+            summary.entry_id = item.at("entry_id").get<std::string>();
+            summary.display_name = item.at("display_name").get<std::string>();
+            summary.entry_kind = static_cast<contracts::FileEntryKind>(
+                unsigned_value<std::uint8_t>(item, "entry_kind"));
+            summary.logical_size_bytes =
+                unsigned_value<std::uint64_t>(item, "logical_size_bytes");
+            summary.has_children = item.at("has_children").get<bool>();
+            summary.message_code = optional_string(item.at("message_code"));
+            page.items.push_back(std::move(summary));
+        }
+        return page;
+    }
+    case contracts::ServiceRequestKind::kPrepareFileRestore: {
+        constexpr std::array<std::string_view, 10> keys{
+            "preflight_token", "repository_connection_id", "recovery_point_id", "entry_count",
+            "logical_size_bytes", "target_free_bytes", "conflict_policy", "expires_utc_ms",
+            "restore_eligible", "message_code"};
+        if (!exact_keys(payload, keys)) {
+            throw std::invalid_argument("file restore preflight fields are invalid");
+        }
+        contracts::FileRestorePreflight preflight;
+        preflight.preflight_token = payload.at("preflight_token").get<std::string>();
+        preflight.repository_connection_id =
+            optional_string(payload.at("repository_connection_id"));
+        preflight.recovery_point_id = payload.at("recovery_point_id").get<std::string>();
+        preflight.entry_count = unsigned_value<std::uint64_t>(payload, "entry_count");
+        preflight.logical_size_bytes = unsigned_value<std::uint64_t>(payload, "logical_size_bytes");
+        preflight.target_free_bytes = unsigned_value<std::uint64_t>(payload, "target_free_bytes");
+        preflight.conflict_policy = static_cast<contracts::FileConflictPolicy>(
+            unsigned_value<std::uint8_t>(payload, "conflict_policy"));
+        preflight.expires_utc_ms = unsigned_value<std::uint64_t>(payload, "expires_utc_ms");
+        preflight.restore_eligible = payload.at("restore_eligible").get<bool>();
+        preflight.message_code = payload.at("message_code").get<std::string>();
+        return preflight;
+    }
     default:
         throw std::invalid_argument("service query response kind is invalid");
     }

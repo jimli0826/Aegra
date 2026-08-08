@@ -62,7 +62,10 @@ base::Result<void> RestorePreflightStore::insert(const ports::RestorePreflightRe
     if (auto bound = stmt.bind_int64(11, static_cast<std::int64_t>(record.expires_utc_ms)); !bound)
         return bound;
     auto stepped = stmt.step();
-    return stepped ? base::Result<void>::success() : base::Result<void>::failure(stepped.error());
+    if (!stepped) {
+        return base::Result<void>::failure(stepped.error());
+    }
+    return replace_restore_preflight_entry_ids(state_.db, record.preflight_token, record.entry_ids);
 }
 
 base::Result<std::optional<ports::RestorePreflightRecord>>
@@ -91,10 +94,21 @@ RestorePreflightStore::get(const std::string_view preflight_token,
         return base::Result<std::optional<ports::RestorePreflightRecord>>::success(std::nullopt);
     }
     auto record = read_restore_preflight(statement.value().get());
-    return record ? base::Result<std::optional<ports::RestorePreflightRecord>>::success(
-                        std::move(record).value())
-                  : base::Result<std::optional<ports::RestorePreflightRecord>>::failure(
-                        record.error());
+    if (!record) {
+        return base::Result<std::optional<ports::RestorePreflightRecord>>::failure(record.error());
+    }
+    auto entry_ids = load_restore_preflight_entry_ids(state_.db, preflight_token);
+    if (!entry_ids) {
+        return base::Result<std::optional<ports::RestorePreflightRecord>>::failure(
+            entry_ids.error());
+    }
+    record.value().entry_ids = std::move(entry_ids).value();
+    // Re-validate after attaching entry_ids (file preflight requires them).
+    if (auto valid = validate_restore_preflight_record(record.value()); !valid) {
+        return base::Result<std::optional<ports::RestorePreflightRecord>>::failure(valid.error());
+    }
+    return base::Result<std::optional<ports::RestorePreflightRecord>>::success(
+        std::move(record).value());
 }
 
 } // namespace aegra::adapters::sqlite::detail

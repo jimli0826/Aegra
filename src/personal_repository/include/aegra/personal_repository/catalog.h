@@ -13,11 +13,14 @@ namespace aegra::personal_repository {
 
 inline constexpr std::uint32_t kRepositorySchemaVersion = 1;
 inline constexpr std::uint32_t kRepositoryLayoutVersion = 1;
-inline constexpr std::uint32_t kCatalogSchemaVersion = 1;
+inline constexpr std::uint32_t kCatalogSchemaVersion = 2;
 inline constexpr std::uint32_t kDeletionSchemaVersion = 1;
-inline constexpr std::uint32_t kPersonalArchiveFormatVersion = 6;
+inline constexpr std::uint32_t kPersonalArchiveFormatVersion = 7;
 inline constexpr std::uint32_t kMaximumSplitPartCount = 1'000;
 inline constexpr std::uint32_t kMaximumRepositoryKeyBytes = 1'024;
+
+inline constexpr std::string_view kCatalogContentKindVolumeSet = "volume_set";
+inline constexpr std::string_view kCatalogContentKindFileSet = "file_set";
 
 struct RepositoryDescriptor final {
     std::uint32_t schema_version{kRepositorySchemaVersion};
@@ -41,6 +44,7 @@ struct CatalogEntry final {
     std::string backup_set_uuid;
     std::optional<std::string> parent_uuid;
     format::BackupType backup_type{format::BackupType::kFull};
+    std::string content_kind{std::string(kCatalogContentKindVolumeSet)};
     std::string archive_main_key;
     std::uint32_t split_part_count{1};
     bool has_sidecar{false};
@@ -51,7 +55,10 @@ struct CatalogEntry final {
     std::uint32_t source_count{0};
     /// Ordered stable volume identities (canonical Volume GUID paths) matching the archive
     /// source order. Used for incremental parent selection without opening the parent archive.
+    /// Must be empty for file_set.
     std::vector<std::string> source_volume_ids;
+    std::uint64_t file_entry_count{0};
+    std::uint64_t file_stream_count{0};
     std::string structural_state{"complete"};
     std::uint64_t catalog_generation{1};
 
@@ -68,6 +75,7 @@ struct DeletionMember final {
 struct DeletionTarget final {
     std::string file_uuid;
     std::uint64_t catalog_generation{0};
+    std::string content_kind{std::string(kCatalogContentKindVolumeSet)};
     std::string archive_main_key;
     std::vector<DeletionMember> members;
 

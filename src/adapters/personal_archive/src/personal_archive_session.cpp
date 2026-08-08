@@ -254,9 +254,11 @@ make_header(const ArchiveCreateRequest& request, const std::uint64_t metadata_wi
         header.split_size_bytes = request.split_size_bytes;
     }
     header.cbor_size = metadata_wire_size;
-    header.first_chunk_offset = header.cbor_offset + header.cbor_size;
+    header.first_record_offset = header.cbor_offset + header.cbor_size;
     header.default_chunk_size = request.chunk_size;
     header.compression_method = archive::CompressionMethod::kZstandard;
+    header.content_kind = archive::kContentKindVolumeSet;
+    header.capability_flags = archive::kCapabilityVolumeSidecarOk;
     return header;
 }
 
@@ -360,11 +362,20 @@ create_payload_cipher(const ArchiveCreateRequest& request, const ArchivePreamble
 
 [[nodiscard]] base::Result<void> write_prepared_chunk(std::ofstream& output,
                                                       const detail::PreparedArchiveChunk& chunk) {
+    const auto body_size =
+        static_cast<std::uint64_t>(chunk.entries.size()) * archive::kBlockEntrySize +
+        chunk.payload.size();
+    auto prefix =
+        archive::encode_archive_record_prefix(archive::make_volume_chunk_record_prefix(body_size));
     auto header = archive::encode_chunk_header(chunk.header);
-    if (!header) {
-        return base::Result<void>::failure(header.error());
+    if (!prefix || !header) {
+        return base::Result<void>::failure(!prefix ? prefix.error() : header.error());
     }
-    auto written = write_bytes(output, header.value());
+    auto written = write_bytes(output, prefix.value());
+    if (!written) {
+        return written;
+    }
+    written = write_bytes(output, header.value());
     if (!written) {
         return written;
     }
@@ -406,7 +417,7 @@ create_payload_cipher(const ArchiveCreateRequest& request, const ArchivePreamble
 }
 
 [[nodiscard]] std::uint64_t chunk_wire_size(const detail::PreparedArchiveChunk& chunk) noexcept {
-    return archive::kChunkHeaderSize +
+    return archive::kVolumeChunkRecordHeaderSize +
            static_cast<std::uint64_t>(chunk.entries.size()) * archive::kBlockEntrySize +
            chunk.payload.size();
 }
@@ -469,6 +480,7 @@ struct PersonalArchiveSession::Impl final {
           encryption_enabled(archive_encryption_enabled) {}
 
     archive::BackupHeader primary_header;
+    archive::EncodedBackupHeader current_part_header{};
     std::filesystem::path destination;
     std::filesystem::path sidecar_destination;
     std::filesystem::path sidecar_partial;
@@ -485,6 +497,7 @@ struct PersonalArchiveSession::Impl final {
     std::uint64_t next_archive_chunk_index{0};
     std::uint64_t total_block_count{0};
     std::uint64_t total_payload_size{0};
+    std::uint64_t total_logical_bytes{0};
     std::uint64_t current_part_chunk_count{0};
     std::vector<SourceWriteState> sources;
     std::size_t next_source_position{0};
@@ -520,7 +533,7 @@ struct PersonalArchiveSession::Impl final {
         auto continuation = primary_header;
         continuation.split_part_index = part_index;
         continuation.cbor_size = 0;
-        continuation.first_chunk_offset = archive::kBackupHeaderSize;
+        continuation.first_record_offset = archive::kBackupHeaderSize;
         auto encoded = archive::encode_backup_header(continuation);
         if (!encoded) {
             return base::Result<void>::failure(encoded.error());
@@ -533,6 +546,7 @@ struct PersonalArchiveSession::Impl final {
             return base::Result<void>::failure(
                 error(base::ErrorCode::kIoFailure, "failed to create archive split part"));
         }
+        current_part_header = encoded.value();
         current_part_chunk_count = 0;
         return base::Result<void>::success();
     }
@@ -562,7 +576,8 @@ struct PersonalArchiveSession::Impl final {
                     return base::Result<void>::failure(
                         error(base::ErrorCode::kInternal, "payload cipher is missing"));
                 }
-                auto protected_payload = detail::protect_archive_chunk(chunk, *payload_cipher);
+                auto protected_payload =
+                    detail::protect_archive_chunk(chunk, current_part_header, *payload_cipher);
                 if (!protected_payload) {
                     return protected_payload;
                 }
@@ -628,6 +643,7 @@ PersonalArchiveSession::create(const ArchiveCreateRequest& request) {
     auto implementation = std::make_unique<Impl>(
         request.password, std::move(payload_cipher).value(), request.encryption_enabled);
     implementation->primary_header = preamble.value().logical_header;
+    implementation->current_part_header = preamble.value().header;
     implementation->destination = request.destination;
     implementation->sidecar_destination = sidecar_destination;
     implementation->sidecar_partial = sidecar_partial;
@@ -702,6 +718,7 @@ base::Result<void> PersonalArchiveSession::write_chunk(const ports::ChunkWriteRe
     ++source->next_input_chunk_index;
     source->next_logical_offset += request.descriptor.logical_size;
     implementation_->total_block_count += prepared.value().sidecar_records.size();
+    implementation_->total_logical_bytes += request.descriptor.logical_size;
     source->sidecar_records.insert(source->sidecar_records.end(),
                                    prepared.value().sidecar_records.begin(),
                                    prepared.value().sidecar_records.end());
@@ -727,10 +744,15 @@ base::Result<void> PersonalArchiveSession::commit(const base::CancellationToken 
             error(base::ErrorCode::kIoFailure, "failed to determine archive size"));
     }
     archive::BackupFooter footer;
-    footer.chunk_count = implementation_->next_archive_chunk_index;
-    footer.total_block_count = implementation_->total_block_count;
+    footer.volume_chunk_count = implementation_->next_archive_chunk_index;
+    footer.total_block_entry_count = implementation_->total_block_count;
     footer.total_payload_size = implementation_->total_payload_size;
-    footer.file_size = static_cast<std::uint64_t>(footer_offset) + archive::kBackupFooterSize;
+    footer.logical_bytes = implementation_->total_logical_bytes;
+    footer.part_file_size =
+        static_cast<std::uint64_t>(footer_offset) + archive::kBackupFooterSize;
+    footer.file_uuid = implementation_->file_uuid;
+    // stored_bytes is filled after all parts are sized; for single-part equals part_file_size.
+    footer.stored_bytes = footer.part_file_size;
     auto encoded = archive::encode_backup_footer(footer);
     if (!encoded) {
         return base::Result<void>::failure(encoded.error());

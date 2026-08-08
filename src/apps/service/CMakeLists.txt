@@ -2,6 +2,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 
 add_library(aegra_app_service STATIC
     src/backup_catalog_registrar.cpp
+    src/file_recovery_point_query.cpp
     src/mount_supervisor.cpp
     src/recovery_point_layout_service.cpp
     src/schedule_service.cpp
@@ -15,6 +16,7 @@ add_library(aegra_app_service STATIC
     src/windows_service_control_win32.cpp
     src/windows_service_scm_host.cpp
     src/worker_job_service.cpp
+    src/worker_job_service_file_restore.cpp
     src/worker_job_service_restore.cpp
     src/worker_supervisor.cpp
     src/supervisor_worker_protocol.cpp
@@ -39,6 +41,7 @@ target_link_libraries(
     PRIVATE
         Aegra::AdapterPersonalArchive
         Aegra::PersonalRepository
+        Aegra::AdapterWindowsFilesystem
         Aegra::AdapterWindowsSystem
         nlohmann_json::nlohmann_json
         Advapi32
@@ -56,7 +59,8 @@ target_compile_definitions(
 target_link_libraries(
     aegra_service
     PRIVATE Aegra::AppService Aegra::AdapterStorageLocal Aegra::AdapterWindowsIpc
-            Aegra::AdapterSqlite Aegra::AdapterWindowsDisk Aegra::AdapterWindowsProcess
-            Aegra::AdapterWindowsSystem Aegra::ThirdPartySpdlog Shell32
+            Aegra::AdapterSqlite Aegra::AdapterWindowsDisk Aegra::AdapterWindowsFilesystem
+            Aegra::AdapterWindowsProcess Aegra::AdapterWindowsSystem Aegra::ThirdPartySpdlog
+            Shell32
 )
 aegra_configure_target(aegra_service)

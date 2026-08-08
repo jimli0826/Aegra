@@ -13,6 +13,20 @@ Item {
     /// Request Main to switch to Home after a real backup job is accepted.
     signal navigateHomeRequested()
 
+    // File-tree row icons (icon before name; volume roots use disk glyph).
+    Component {
+        id: volumeIconComponent
+        DiskIcon { size: 16; variant: "hdd" }
+    }
+    Component {
+        id: folderIconComponent
+        FolderIcon { size: 16 }
+    }
+    Component {
+        id: fileIconComponent
+        FileDocIcon { size: 16 }
+    }
+
     // Add Schedule wizard (drawer)
     property bool wizardOpen: false
     property int wizardStep: 0
@@ -225,7 +239,13 @@ Item {
     function canGoNext() {
         // Require at least one backup source and an available destination connection.
         // Empty Locations list (screenshot) must keep Next disabled.
-        return selectedSources().length > 0 && selectedConnectionId().length > 0
+        if (selectedConnectionId().length === 0)
+            return false
+        if (root.backupMode === "files") {
+            var tree = serviceClient.fileBrowseSources
+            return !!(tree && tree.selectedCount > 0)
+        }
+        return selectedSources().length > 0
     }
 
     function freqLabel(f) {
@@ -260,6 +280,28 @@ Item {
         return rev * 10000 + active * 1000 + pct
     }
 
+    /// Match keys for JobModel.latestBackupStatus.
+    /// volume_set: schedule.sourceIds (volume identity codes).
+    /// file_set: selection_id values — Service stores them on JobSummary.source_ids.
+    function scheduleMatchIds(schedule) {
+        if (!schedule)
+            return []
+        var sources = schedule.sourceIds || []
+        if (sources && sources.length > 0)
+            return sources
+        var summaries = schedule.selectionSummaries || []
+        var ids = []
+        for (var i = 0; i < summaries.length; ++i) {
+            var item = summaries[i]
+            if (!item)
+                continue
+            var id = item.selectionId || item.selection_id || ""
+            if (id && id.length > 0)
+                ids.push(id)
+        }
+        return ids
+    }
+
     /// Resolve backup status for a schedule row (success / failed / running+%).
     /// Returns { statusKey, progressPercent, stateText }.
     function scheduleBackupStatus(schedule) {
@@ -269,7 +311,7 @@ Item {
         var jobs = serviceClient.jobs
         if (!jobs || typeof jobs.latestBackupStatus !== "function")
             return { statusKey: "none", progressPercent: 0, stateText: "" }
-        var sources = schedule.sourceIds || []
+        var sources = root.scheduleMatchIds(schedule)
         var conn = schedule.connectionId || ""
         var st = jobs.latestBackupStatus(sources, conn)
         if (!st)
@@ -285,11 +327,19 @@ Item {
     property var pendingCreatePayload: null
 
     function createScheduleFromWizard() {
-        var sources = selectedSources()
+        var filesMode = root.backupMode === "files"
+        var sources = filesMode ? [] : selectedSources()
         var connId = selectedConnectionId()
         if (connId.length === 0 && serviceClient.defaultConnectionId)
             connId = serviceClient.defaultConnectionId() || ""
-        if (sources.length === 0) {
+        if (filesMode) {
+            var tree = serviceClient.fileBrowseSources
+            if (!tree || tree.selectedCount <= 0) {
+                //% "Select at least one backup source"
+                serviceClient.showToast(qsTrId("aegra.backup.schedule.missing_source"))
+                return
+            }
+        } else if (sources.length === 0) {
             //% "Select at least one backup source"
             serviceClient.showToast(qsTrId("aegra.backup.schedule.missing_source"))
             return
@@ -318,6 +368,7 @@ Item {
         }
         // Ask whether to run the first Full backup immediately, then create.
         root.pendingCreatePayload = {
+            filesMode: filesMode,
             sources: sources,
             connId: connId,
             frequency: frequency,
@@ -334,9 +385,17 @@ Item {
         root.pendingCreatePayload = null
         if (!p)
             return
-        if (!serviceClient.createSchedule(p.sources, p.connId, p.frequency, p.timeOfDay,
-                                          p.excludePage, p.encryption, p.password,
-                                          !!startFirstBackup)) {
+        var ok = false
+        if (p.filesMode) {
+            ok = serviceClient.createFileSetSchedule(p.connId, p.frequency, p.timeOfDay,
+                                                     p.excludePage, p.encryption, p.password,
+                                                     !!startFirstBackup)
+        } else {
+            ok = serviceClient.createSchedule(p.sources, p.connId, p.frequency, p.timeOfDay,
+                                              p.excludePage, p.encryption, p.password,
+                                              !!startFirstBackup)
+        }
+        if (!ok) {
             //% "Could not save schedule"
             serviceClient.showToast(qsTrId("aegra.backup.schedule.save_failed"))
             return
@@ -1767,10 +1826,33 @@ Item {
                                     id: filesCardMouse
                                     anchors.fill: parent
                                     hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
+                                    enabled: serviceClient.fileBrowseAvailable === true
+                                    cursorShape: enabled ? Qt.PointingHandCursor
+                                                         : Qt.ForbiddenCursor
                                     onClicked: {
                                         root.backupMode = "files"
                                         root.wizardStep = 1
+                                        if (serviceClient.fileBrowseAvailable)
+                                            serviceClient.loadFileBrowseRoots()
+                                    }
+                                }
+                                // Dim when Service lacks file.browse.
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: 20
+                                    color: "#80000000"
+                                    visible: serviceClient.fileBrowseAvailable !== true
+                                    z: 5
+                                    Text {
+                                        anchors.centerIn: parent
+                                        width: parent.width - 32
+                                        horizontalAlignment: Text.AlignHCenter
+                                        wrapMode: Text.WordWrap
+                                        //% "File browse is not available on this Service"
+                                        text: qsTrId("aegra.backup.wizard.files_unavailable")
+                                        color: Theme.colorTextWhite
+                                        font.pixelSize: 12
+                                        font.family: Theme.fontFamily
                                     }
                                 }
 
@@ -1861,6 +1943,163 @@ Item {
                                 //% "SOURCE"
                                 title: qsTrId("aegra.backup.section.source_upper")
 
+                                // File-set selection summary (Service-backed tokens only).
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    anchors.topMargin: 50
+                                    anchors.leftMargin: 16
+                                    anchors.rightMargin: 16
+                                    visible: root.backupMode === "files"
+                                             && serviceClient.fileBrowseSources
+                                             && serviceClient.fileBrowseSources.selectedCount > 0
+                                    //% "Selected: %1"
+                                    text: qsTrId("aegra.file.browse.selected_label").arg(
+                                              serviceClient.fileBrowseSources
+                                              ? serviceClient.fileBrowseSources.selectionSummary
+                                              : "")
+                                    color: Theme.colorAccentBlue
+                                    font.pixelSize: 11
+                                    font.family: Theme.fontFamily
+                                    elide: Text.ElideMiddle
+                                    z: 2
+                                }
+
+                                ListView {
+                                    id: fileSourceList
+                                    anchors.fill: parent
+                                    anchors.topMargin: 50
+                                    anchors.margins: 16
+                                    clip: true
+                                    spacing: 2
+                                    visible: root.backupMode === "files"
+                                    model: serviceClient.fileBrowseSources
+                                    delegate: Rectangle {
+                                        required property int index
+                                        required property string nodeToken
+                                        required property string displayName
+                                        required property bool hasChildren
+                                        required property bool isDirectory
+                                        required property int depth
+                                        required property bool expanded
+                                        required property bool nodeLoading
+                                        required property int checkState
+                                        required property bool isSelectable
+                                        required property string disabledReason
+                                        width: fileSourceList.width
+                                        height: 36
+                                        radius: 4
+                                        color: fileRowHover.containsMouse
+                                               ? Theme.colorHover : Theme.colorListItem
+                                        opacity: isSelectable ? 1.0 : 0.55
+                                        RowLayout {
+                                            anchors.fill: parent
+                                            anchors.leftMargin: 8 + Math.max(0, depth) * 14
+                                            anchors.rightMargin: 8
+                                            spacing: 8
+                                            Text {
+                                                text: hasChildren
+                                                      ? (expanded ? "▾" : "▸")
+                                                      : " "
+                                                color: Theme.colorTextGrey
+                                                font.pixelSize: 12
+                                                Layout.preferredWidth: 14
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    enabled: hasChildren
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: serviceClient.fileBrowseSources
+                                                                   .toggleExpanded(nodeToken)
+                                                }
+                                            }
+                                            Rectangle {
+                                                width: 16
+                                                height: 16
+                                                radius: 3
+                                                visible: isSelectable
+                                                color: checkState === 2
+                                                       ? Theme.colorAccentBlue
+                                                       : (checkState === 1
+                                                          ? Theme.colorAccentBlue
+                                                          : "transparent")
+                                                opacity: checkState === 1 ? 0.45 : 1.0
+                                                border.width: 2
+                                                border.color: checkState > 0
+                                                              ? Theme.colorAccentBlue
+                                                              : Theme.colorTextGrey
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    text: checkState === 2 ? "\u2713"
+                                                          : (checkState === 1 ? "−" : "")
+                                                    color: "white"
+                                                    font.pixelSize: 11
+                                                    font.bold: true
+                                                }
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: serviceClient.fileBrowseSources
+                                                                   .toggleChecked(nodeToken)
+                                                }
+                                            }
+                                            // Icon before name: volume root vs folder vs file.
+                                            Loader {
+                                                Layout.preferredWidth: 16
+                                                Layout.preferredHeight: 16
+                                                Layout.alignment: Qt.AlignVCenter
+                                                sourceComponent: {
+                                                    if (depth === 0)
+                                                        return volumeIconComponent
+                                                    if (isDirectory)
+                                                        return folderIconComponent
+                                                    return fileIconComponent
+                                                }
+                                            }
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: displayName
+                                                      + (nodeLoading ? " …" : "")
+                                                      + (disabledReason
+                                                         ? ("  (" + disabledReason + ")")
+                                                         : "")
+                                                color: Theme.colorTextWhite
+                                                font.pixelSize: 12
+                                                font.family: Theme.fontFamily
+                                                elide: Text.ElideMiddle
+                                            }
+                                        }
+                                        MouseArea {
+                                            id: fileRowHover
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            acceptedButtons: Qt.NoButton
+                                            z: -1
+                                        }
+                                    }
+                                    Text {
+                                        anchors.centerIn: parent
+                                        width: parent.width - 24
+                                        horizontalAlignment: Text.AlignHCenter
+                                        wrapMode: Text.WordWrap
+                                        visible: fileSourceList.count === 0
+                                        text: {
+                                            if (serviceClient.fileBrowseSources
+                                                    && serviceClient.fileBrowseSources.loading)
+                                                //% "Loading folders..."
+                                                return qsTrId("aegra.file.browse.loading")
+                                            if (serviceClient.fileBrowseSources
+                                                    && serviceClient.fileBrowseSources.errorText)
+                                                return serviceClient.fileBrowseSources.errorText
+                                            //% "Expand a drive or folder to select files"
+                                            return qsTrId("aegra.file.browse.empty")
+                                        }
+                                        color: Theme.colorTextGrey
+                                        font.pixelSize: 12
+                                        font.family: Theme.fontFamily
+                                    }
+                                }
+
                                 ScrollView {
                                     id: sourceScroll
                                     anchors.fill: parent
@@ -1868,6 +2107,7 @@ Item {
                                     anchors.margins: 16
                                     clip: true
                                     contentWidth: availableWidth
+                                    visible: root.backupMode !== "files"
 
                                     Column {
                                         id: disksColumn

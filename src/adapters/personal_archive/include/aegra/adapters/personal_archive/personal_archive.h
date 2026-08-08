@@ -4,6 +4,8 @@
 #include "aegra/format/manifest.h"
 #include "aegra/format/personal_archive_sidecar.h"
 #include "aegra/ports/backup_session.h"
+#include "aegra/ports/file_backup_session.h"
+#include "aegra/ports/file_recovery_point.h"
 #include "aegra/ports/random_access.h"
 
 #include <array>
@@ -91,6 +93,90 @@ class PersonalArchiveSession final : public ports::IBackupSession {
   private:
     struct Impl;
     explicit PersonalArchiveSession(std::unique_ptr<Impl> implementation) noexcept;
+
+    std::unique_ptr<Impl> implementation_;
+};
+
+struct FileArchiveCreateRequest final {
+    std::filesystem::path destination;
+    std::filesystem::path index_spool_directory;
+    const format::Manifest& manifest;
+    std::string_view password;
+    bool encryption_enabled{true};
+    std::array<std::byte, 16> file_uuid{};
+    std::array<std::byte, 16> backup_set_uuid{};
+    std::uint32_t block_size{4096};
+    std::uint32_t chunk_size{4U * 1024U * 1024U};
+    std::uint64_t split_size_bytes{0};
+    ArchiveKdfParameters kdf_parameters;
+};
+
+/// V7 file_set Archive writer. Index entries are staged to a spool file under
+/// index_spool_directory; the full entry set is not retained as a single in-memory tree
+/// beyond finalize page assembly (bounded leaf pages).
+class PersonalFileArchiveSession final : public ports::IFileBackupSession {
+  public:
+    ~PersonalFileArchiveSession() override;
+    PersonalFileArchiveSession(const PersonalFileArchiveSession&) = delete;
+    PersonalFileArchiveSession& operator=(const PersonalFileArchiveSession&) = delete;
+    PersonalFileArchiveSession(PersonalFileArchiveSession&&) = delete;
+    PersonalFileArchiveSession& operator=(PersonalFileArchiveSession&&) = delete;
+
+    [[nodiscard]] static base::Result<std::unique_ptr<PersonalFileArchiveSession>>
+    create(const FileArchiveCreateRequest& request);
+
+    [[nodiscard]] base::Result<void>
+    write_entry(const contracts::FileEntryDesc& entry,
+                base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<void>
+    write_stream_chunk(const ports::FileChunkWriteRequest& request,
+                       base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<void> finalize(base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<void> commit(base::CancellationToken cancellation) override;
+    void abort() noexcept override;
+
+  private:
+    struct Impl;
+    explicit PersonalFileArchiveSession(std::unique_ptr<Impl> implementation) noexcept;
+
+    std::unique_ptr<Impl> implementation_;
+};
+
+/// V7 file_set Recovery Point reader (IFileRecoveryPointReader).
+/// Loads single-leaf roots and one-level multi-leaf trees (leaves + internal root).
+class PersonalFileArchiveReader final : public ports::IFileRecoveryPointReader {
+  public:
+    ~PersonalFileArchiveReader() override;
+    PersonalFileArchiveReader(const PersonalFileArchiveReader&) = delete;
+    PersonalFileArchiveReader& operator=(const PersonalFileArchiveReader&) = delete;
+    PersonalFileArchiveReader(PersonalFileArchiveReader&&) = delete;
+    PersonalFileArchiveReader& operator=(PersonalFileArchiveReader&&) = delete;
+
+    [[nodiscard]] static base::Result<std::unique_ptr<PersonalFileArchiveReader>>
+    open(const ArchiveOpenRequest& request);
+
+    [[nodiscard]] const format::Manifest& manifest() const noexcept;
+    [[nodiscard]] const ArchiveIdentity& identity() const noexcept;
+
+    [[nodiscard]] std::string index_root_digest() const override;
+    [[nodiscard]] std::uint64_t entry_count() const noexcept override;
+    [[nodiscard]] std::uint64_t stream_count() const noexcept override;
+
+    [[nodiscard]] base::Result<ports::FileEntryPage>
+    list_children(std::uint64_t parent_entry_id, std::uint32_t maximum_results,
+                  const std::optional<std::string>& continuation_token,
+                  base::CancellationToken cancellation) override;
+
+    [[nodiscard]] base::Result<contracts::FileEntryDesc>
+    describe_entry(std::uint64_t entry_id, base::CancellationToken cancellation) override;
+
+    [[nodiscard]] base::Result<std::size_t>
+    read_stream(const ports::FileStreamReadRequest& request, std::span<std::byte> destination,
+                base::CancellationToken cancellation) override;
+
+  private:
+    struct Impl;
+    explicit PersonalFileArchiveReader(std::unique_ptr<Impl> implementation) noexcept;
 
     std::unique_ptr<Impl> implementation_;
 };

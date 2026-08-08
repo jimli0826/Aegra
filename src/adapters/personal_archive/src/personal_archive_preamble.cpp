@@ -86,7 +86,7 @@ make_protected_metadata(const archive::MetadataEnvelopeHeader& envelope,
     const auto overhead = archive::kMetadataEnvelopeHeaderSize + crypto_sodium::kMetadataTagSize;
     const bool exceeds_limit = header.value().cbor_size > overhead &&
                                header.value().cbor_size - overhead > request.maximum_metadata_size;
-    if (exceeds_limit || header.value().first_chunk_offset > file_size) {
+    if (exceeds_limit || header.value().first_record_offset > file_size) {
         return base::Result<EncodedMetadata>::failure(
             corrupt("archive metadata range exceeds limits"));
     }

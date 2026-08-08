@@ -27,6 +27,11 @@ Windows 个人卷备份的首个 Worker Composition Root 见
 [Windows 个人卷备份 Composition Root](windows_personal_backup.md)。它只负责具体 Adapter 装配、Manifest
 输入映射和 Snapshot/Source/Archive 生命周期顺序；块处理仍由通用 Pipeline 执行。
 
+Windows 文件集 Full 备份 Composition Root 见
+[Windows 文件集备份 Composition Root](windows_file_set_backup.md)。Host 按 `content_kind` 分发到
+volume 或 file_set 任务入口；file_set 路径装配单一 VSS Snapshot Set、Filesystem Source、FileSet
+Pipeline 与 V7 File Archive Session。
+
 个人版 Worker 任务入口接收版本化 `JobRequest` 和受信任运行参数，通过 `ICredentialResolver`、
 `IRandomSource`、`IClock` 与 `IProgressSink` 注入运行期能力。Job 只携带 SecretRef；解析出的 Secret
 只覆盖同步备份调用周期。输入拒绝与已接受任务的失败必须区分，TaskResult 只能包含稳定、脱敏的代码。

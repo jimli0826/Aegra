@@ -621,6 +621,222 @@ Server: %1</source>
         <source>Choose Files backup →</source>
         <translation>選擇 Files 備份 →</translation>
     </message>
+    <message id="aegra.backup.wizard.files_unavailable">
+        <source>File browse is not available on this Service</source>
+        <translation>目前 Service 不支援檔案瀏覽</translation>
+    </message>
+    <message id="aegra.file.browse.loading">
+        <source>Loading folders...</source>
+        <translation>正在載入資料夾…</translation>
+    </message>
+    <message id="aegra.file.browse.empty">
+        <source>Expand a drive or folder to select files</source>
+        <translation>展開磁碟機或資料夾以選取檔案</translation>
+    </message>
+    <message id="aegra.file.browse.selected_label">
+        <source>Selected: %1</source>
+        <translation>已選：%1</translation>
+    </message>
+    <message id="aegra.file.browse.selection_more">
+        <source>%1 (+%2 more)</source>
+        <translation>%1（另有 %2 項）</translation>
+    </message>
+    <message id="aegra.file.browse.unsupported">
+        <source>Unsupported</source>
+        <translation>不支援</translation>
+    </message>
+    <message id="aegra.file.browse.unavailable">
+        <source>Unavailable</source>
+        <translation>無法使用</translation>
+    </message>
+    <message id="aegra.file.browse.not_selectable">
+        <source>Not selectable</source>
+        <translation>不可選取</translation>
+    </message>
+    <message id="aegra.error.file_browse.query_failed">
+        <source>Unable to browse local files</source>
+        <translation>無法瀏覽本機檔案</translation>
+    </message>
+    <message id="aegra.error.file_recover.query_failed">
+        <source>Unable to list files in this recovery point</source>
+        <translation>無法列出此還原點中的檔案</translation>
+    </message>
+    <message id="aegra.error.file_restore.preflight_failed">
+        <source>Could not verify this restore. Check the target folder and try again.</source>
+        <translation>無法完成還原預檢。請檢查目標資料夾後重試。</translation>
+    </message>
+    <message id="aegra.error.file_restore.command_failed">
+        <source>Unable to start file restore</source>
+        <translation>無法啟動檔案還原</translation>
+    </message>
+    <message id="aegra.error.file_restore.content_kind_mismatch">
+        <source>This recovery point is not a file backup</source>
+        <translation>此還原點不是檔案備份</translation>
+    </message>
+    <message id="aegra.error.file_restore.preflight_ok">
+        <source>Restore check completed</source>
+        <translation>還原預檢已完成</translation>
+    </message>
+    <message id="aegra.error.file_restore.preflight_expired">
+        <source>The restore check expired. Start restore again.</source>
+        <translation>還原預檢已過期，請重新開始還原。</translation>
+    </message>
+    <message id="aegra.error.file_restore.preflight_consumed">
+        <source>This restore was already started. Start a new restore if needed.</source>
+        <translation>此還原已啟動過。如需請重新開始還原。</translation>
+    </message>
+    <message id="aegra.error.file_restore.selection_limit">
+        <source>Too many files selected. Narrow the selection and try again.</source>
+        <translation>選取的檔案過多，請縮小選取範圍後重試。</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_capability_missing">
+        <source>The target folder does not support required features (for example ACL or alternate streams). Choose an NTFS folder.</source>
+        <translation>目標資料夾不支援所需功能（例如 ACL 或替代資料流）。請選擇 NTFS 資料夾。</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_not_directory">
+        <source>Select a folder as the restore destination.</source>
+        <translation>請選擇一個資料夾作為還原目標。</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_reparse_escape">
+        <source>The target path is not allowed (reparse or link escape).</source>
+        <translation>目標路徑不允許（重新解析點或連結逸出）。</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_collision">
+        <source>A file with the same name already exists. In Options, choose Replace or Rename, then try again.</source>
+        <translation>目標已有同名檔案。請在選項中選擇「取代」或「重新命名」後重試。</translation>
+    </message>
+    <message id="aegra.error.file_restore.rename_exhausted">
+        <source>Could not find a free name for renamed files. Clear old copies or choose Replace.</source>
+        <translation>無法為重新命名檔案找到可用名稱。請清理舊副本或選擇取代。</translation>
+    </message>
+    <message id="aegra.error.file_restore.target_full">
+        <source>Not enough free space on the target volume. Free up space or choose another folder.</source>
+        <translation>目標磁碟空間不足。請釋放空間或選擇其他資料夾。</translation>
+    </message>
+    <message id="aegra.error.file_restore.partial">
+        <source>Restore finished, but some items were skipped or failed.</source>
+        <translation>還原已完成，但部分項目被略過或失敗。</translation>
+    </message>
+    <message id="aegra.error.file_restore.failed_before_write">
+        <source>Restore failed before any files were written.</source>
+        <translation>在寫入任何檔案之前還原已失敗。</translation>
+    </message>
+    <message id="aegra.error.file_restore.original_location_unsupported">
+        <source>Restoring to the original location is not supported for this item.</source>
+        <translation>此項目不支援還原到原始位置。</translation>
+    </message>
+    <message id="aegra.error.file_restore.system_directory_unsupported">
+        <source>Cannot restore into a protected system folder. Choose another destination.</source>
+        <translation>無法還原到受保護的系統資料夾。請選擇其他目標。</translation>
+    </message>
+    <message id="aegra.error.file_restore.completed">
+        <source>File restore completed</source>
+        <translation>檔案還原已完成</translation>
+    </message>
+    <message id="aegra.error.file_recover.credential_required">
+        <source>Enter the archive password to list or restore files.</source>
+        <translation>請輸入封存密碼以列出或還原檔案。</translation>
+    </message>
+    <message id="aegra.error.file_recover.credential_failed">
+        <source>Incorrect archive password. Check the password and try again.</source>
+        <translation>封存密碼不正確，請核對後重試。</translation>
+    </message>
+    <message id="aegra.error.file_recover.corrupt">
+        <source>The archive is damaged or unreadable.</source>
+        <translation>封存已損毀或無法讀取。</translation>
+    </message>
+    <message id="aegra.error.file_recover.catalog_only">
+        <source>Only catalog information is available. Open the archive to browse files.</source>
+        <translation>目前僅有目錄資訊。請開啟封存以瀏覽檔案。</translation>
+    </message>
+    <message id="aegra.restore.mode_files">
+        <source>Files</source>
+        <translation>檔案</translation>
+    </message>
+    <message id="aegra.restore.file.capability_missing">
+        <source>Service does not support file restore</source>
+        <translation>Service 不支援檔案還原</translation>
+    </message>
+    <message id="aegra.restore.file.loading_entries">
+        <source>Loading archive files...</source>
+        <translation>正在載入封存檔案…</translation>
+    </message>
+    <message id="aegra.restore.file.select_entries">
+        <source>Select files or folders to restore</source>
+        <translation>請選取要還原的檔案或資料夾</translation>
+    </message>
+    <message id="aegra.restore.file.select_target">
+        <source>Select a target folder</source>
+        <translation>請選取目標資料夾</translation>
+    </message>
+    <message id="aegra.restore.file.selection_required">
+        <source>Select files to restore and a target folder</source>
+        <translation>請選取要還原的檔案與目標資料夾</translation>
+    </message>
+    <message id="aegra.restore.file.started">
+        <source>File restore started</source>
+        <translation>檔案還原已啟動</translation>
+    </message>
+    <message id="aegra.restore.file.source_title">
+        <source>Archive files</source>
+        <translation>封存檔案</translation>
+    </message>
+    <message id="aegra.restore.file.source_hint">
+        <source>(expand folders and check items to restore)</source>
+        <translation>（展開資料夾並勾選要還原的項目）</translation>
+    </message>
+    <message id="aegra.restore.file.empty_entries">
+        <source>No files in this recovery point</source>
+        <translation>此還原點中沒有檔案</translation>
+    </message>
+    <message id="aegra.restore.file.target_title">
+        <source>Target folder</source>
+        <translation>目標資料夾</translation>
+    </message>
+    <message id="aegra.restore.file.target_hint">
+        <source>(choose one directory on this PC)</source>
+        <translation>（在此電腦上選擇一個目錄）</translation>
+    </message>
+    <message id="aegra.restore.file.target_empty">
+        <source>Expand a drive and choose one target folder</source>
+        <translation>展開磁碟機並選擇一個目標資料夾</translation>
+    </message>
+    <message id="aegra.restore.file.restore_security">
+        <source>Restore security (ACL)</source>
+        <translation>還原安全性設定（ACL）</translation>
+    </message>
+    <message id="aegra.restore.file.restore_security_hint">
+        <source>Apply Owner, Group, DACL, and SACL from the archive. Uncheck to keep target default permissions (timestamps and attributes are still restored).</source>
+        <translation>從封存套用擁有者、群組、DACL 與 SACL。取消勾選則保留目標預設權限（仍會還原時間戳與屬性）。</translation>
+    </message>
+    <message id="aegra.restore.file.restore_ads">
+        <source>Restore alternate data streams</source>
+        <translation>還原替代資料流（ADS）</translation>
+    </message>
+    <message id="aegra.restore.file.restore_ads_hint">
+        <source>Restore NTFS alternate data streams (ADS) when present in the archive.</source>
+        <translation>當封存中存在時，還原 NTFS 替代資料流（ADS）。</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_policy">
+        <source>If a file already exists</source>
+        <translation>若檔案已存在</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_fail">
+        <source>Skip (fail on conflict)</source>
+        <translation>略過（衝突時失敗）</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_replace">
+        <source>Replace existing</source>
+        <translation>取代既有檔案</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_rename">
+        <source>Rename restored file</source>
+        <translation>重新命名還原的檔案</translation>
+    </message>
+    <message id="aegra.restore.file.conflict_policy_hint">
+        <source>Choose what happens when the target path already has a file with the same name.</source>
+        <translation>當目標路徑已有同名檔案時的處理方式。</translation>
+    </message>
     <message id="aegra.backup.column.destination">
         <source>Destination</source>
         <translation>目標</translation>

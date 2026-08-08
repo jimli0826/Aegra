@@ -2,6 +2,8 @@ add_library(aegra_pipeline STATIC
     src/backup_pipeline.cpp
     src/bounded_chunk_queue.cpp
     src/fixed_size_chunker.cpp
+    src/file_set_backup_pipeline.cpp
+    src/file_set_restore_pipeline.cpp
     src/restore_pipeline.cpp
     src/verify_pipeline.cpp
 )
@@ -18,6 +20,6 @@ target_include_directories(
 
 target_link_libraries(
     aegra_pipeline
-    PUBLIC Aegra::Base Aegra::Contracts Aegra::Ports
+    PUBLIC Aegra::Base Aegra::Contracts Aegra::Ports Aegra::Format
 )
 aegra_configure_target(aegra_pipeline)

@@ -26,8 +26,16 @@ namespace {
     return false;
 }
 
+[[nodiscard]] bool known_content_kind(const std::string& kind) noexcept {
+    return kind == kCatalogContentKindVolumeSet || kind == kCatalogContentKindFileSet;
+}
+
+[[nodiscard]] bool is_file_set(const CatalogEntry& entry) noexcept {
+    return entry.content_kind == kCatalogContentKindFileSet;
+}
+
 [[nodiscard]] bool valid_parent(const CatalogEntry& entry) noexcept {
-    if (entry.backup_type == format::BackupType::kFull) {
+    if (is_file_set(entry) || entry.backup_type == format::BackupType::kFull) {
         return !entry.parent_uuid.has_value();
     }
     return entry.parent_uuid.has_value() && detail::is_canonical_uuid(entry.parent_uuid.value()) &&
@@ -63,6 +71,9 @@ namespace {
     }
     std::size_t index = 0;
     if (target.members.front().key == target.archive_main_key + ".bhx") {
+        if (target.content_kind == kCatalogContentKindFileSet) {
+            return false;
+        }
         ++index;
     }
     std::uint32_t previous_part = 0;
@@ -102,7 +113,7 @@ base::Result<void> validate_catalog_entry(const CatalogEntry& entry) {
     if (entry.schema_version != kCatalogSchemaVersion ||
         entry.kind != "aegra_personal_recovery_point" ||
         entry.format_version != kPersonalArchiveFormatVersion ||
-        entry.structural_state != "complete") {
+        entry.structural_state != "complete" || !known_content_kind(entry.content_kind)) {
         return invalid("catalog entry version, kind, or state is invalid");
     }
     if (!detail::is_canonical_uuid(entry.repository_uuid) ||
@@ -117,7 +128,15 @@ base::Result<void> validate_catalog_entry(const CatalogEntry& entry) {
         entry.split_part_count > kMaximumSplitPartCount || entry.catalog_generation == 0) {
         return invalid("catalog entry chain or location is invalid");
     }
-    if (entry.source_volume_ids.size() != entry.source_count) {
+    if (is_file_set(entry)) {
+        if (entry.backup_type != format::BackupType::kFull || entry.has_sidecar ||
+            !entry.source_volume_ids.empty() || entry.source_count == 0) {
+            return invalid("file_set catalog entry fields are invalid");
+        }
+        return valid();
+    }
+    if (entry.source_volume_ids.size() != entry.source_count || entry.file_entry_count != 0 ||
+        entry.file_stream_count != 0) {
         return invalid("catalog entry source volume identity count is invalid");
     }
     std::set<std::string, std::less<>> unique_sources;
@@ -144,6 +163,7 @@ base::Result<void> validate_deletion_tombstone(const DeletionTombstone& tombston
     std::set<std::string, std::less<>> target_uuids;
     for (const auto& target : tombstone.targets) {
         if (!detail::is_canonical_uuid(target.file_uuid) || target.catalog_generation == 0 ||
+            !known_content_kind(target.content_kind) ||
             !detail::is_archive_main_key(target.archive_main_key, target.file_uuid) ||
             target.archive_main_key.size() > kMaximumRepositoryKeyBytes ||
             std::ranges::any_of(target.members,

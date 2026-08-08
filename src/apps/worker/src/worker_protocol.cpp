@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <exception>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -141,6 +142,116 @@ std::optional<contracts::RestoreOptions> optional_restore(const Json& root) {
     return result;
 }
 
+[[nodiscard]] std::vector<std::byte> required_byte_array(const Json& object, const char* key) {
+    const auto& value = object.at(key);
+    if (!value.is_array()) {
+        throw std::invalid_argument("worker request byte array is invalid");
+    }
+    std::vector<std::byte> bytes;
+    bytes.reserve(value.size());
+    for (const auto& item : value) {
+        if (!item.is_number_unsigned()) {
+            throw std::invalid_argument("worker request byte array element is invalid");
+        }
+        const auto octet = item.get<std::uint64_t>();
+        if (octet > 0xFFU) {
+            throw std::out_of_range("worker request byte array element is out of range");
+        }
+        bytes.push_back(static_cast<std::byte>(octet));
+    }
+    return bytes;
+}
+
+[[nodiscard]] contracts::EncodedName parse_encoded_name(const Json& object) {
+    if (!object.is_object()) {
+        throw std::invalid_argument("worker request encoded name must be an object");
+    }
+    const auto encoding = required_unsigned(object, "encoding");
+    if (encoding > std::numeric_limits<std::uint8_t>::max()) {
+        throw std::out_of_range("worker request name encoding is out of range");
+    }
+    contracts::EncodedName name;
+    name.encoding = static_cast<contracts::NameEncoding>(static_cast<std::uint8_t>(encoding));
+    name.bytes = required_byte_array(object, "bytes");
+    return name;
+}
+
+[[nodiscard]] std::vector<contracts::FileSourceRef> optional_file_source_refs(const Json& root) {
+    const auto iterator = root.find("file_source_refs");
+    if (iterator == root.end()) {
+        return {};
+    }
+    if (!iterator->is_array()) {
+        throw std::invalid_argument("worker request file_source_refs must be an array");
+    }
+    std::vector<contracts::FileSourceRef> refs;
+    refs.reserve(iterator->size());
+    for (const auto& item : *iterator) {
+        if (!item.is_object()) {
+            throw std::invalid_argument("worker request file_source_ref must be an object");
+        }
+        contracts::FileSourceRef ref;
+        ref.selection_id = required<std::string>(item, "selection_id");
+        ref.volume_identity = required<std::string>(item, "volume_identity");
+        const auto components = item.at("relative_components");
+        if (!components.is_array()) {
+            throw std::invalid_argument("worker request relative_components must be an array");
+        }
+        ref.relative_components.reserve(components.size());
+        for (const auto& component : components) {
+            ref.relative_components.push_back(parse_encoded_name(component));
+        }
+        const auto entry_kind = required_unsigned(item, "entry_kind");
+        const auto recursion = required_unsigned(item, "recursion");
+        const auto reparse = required_unsigned(item, "reparse_policy");
+        const auto unreadable = required_unsigned(item, "unreadable_policy");
+        if (entry_kind > std::numeric_limits<std::uint8_t>::max() ||
+            recursion > std::numeric_limits<std::uint8_t>::max() ||
+            reparse > std::numeric_limits<std::uint8_t>::max() ||
+            unreadable > std::numeric_limits<std::uint8_t>::max()) {
+            throw std::out_of_range("worker request file_source_ref enum is out of range");
+        }
+        ref.entry_kind = static_cast<contracts::FileEntryKind>(static_cast<std::uint8_t>(entry_kind));
+        ref.recursion = static_cast<contracts::FileRecursion>(static_cast<std::uint8_t>(recursion));
+        ref.reparse_policy =
+            static_cast<contracts::FileReparsePolicy>(static_cast<std::uint8_t>(reparse));
+        ref.unreadable_policy =
+            static_cast<contracts::FileUnreadablePolicy>(static_cast<std::uint8_t>(unreadable));
+        ref.display_label = required<std::string>(item, "display_label");
+        refs.push_back(std::move(ref));
+    }
+    return refs;
+}
+
+[[nodiscard]] std::optional<contracts::FileRestoreTarget>
+optional_file_restore_target(const Json& root) {
+    const auto iterator = root.find("file_restore_target");
+    if (iterator == root.end() || iterator->is_null()) {
+        return std::nullopt;
+    }
+    if (!iterator->is_object()) {
+        throw std::invalid_argument("worker request file_restore_target must be an object");
+    }
+    contracts::FileRestoreTarget target;
+    target.target_root_identity = required<std::string>(*iterator, "target_root_identity");
+    target.entry_ids = required<std::vector<std::string>>(*iterator, "entry_ids");
+    const auto conflict = required_unsigned(*iterator, "conflict_policy");
+    if (conflict > std::numeric_limits<std::uint8_t>::max()) {
+        throw std::out_of_range("worker request conflict_policy is out of range");
+    }
+    target.conflict_policy =
+        static_cast<contracts::FileConflictPolicy>(static_cast<std::uint8_t>(conflict));
+    const auto security = iterator->find("restore_security");
+    const auto ads = iterator->find("restore_ads");
+    if (security == iterator->end() || !security->is_boolean() || ads == iterator->end() ||
+        !ads->is_boolean()) {
+        throw std::invalid_argument("worker request file_restore_target flags are required");
+    }
+    target.restore_security = security->get<bool>();
+    target.restore_ads = ads->get<bool>();
+    return target;
+}
+
 contracts::JobRequest parse_job(const Json& root) {
     const auto schema_version = required_unsigned(root, "schema_version");
     const auto operation = required_unsigned(root, "operation");
@@ -153,7 +264,24 @@ contracts::JobRequest parse_job(const Json& root) {
     job.job_id = required<std::string>(root, "job_id");
     job.tenant_id = required<std::string>(root, "tenant_id");
     job.operation = static_cast<contracts::JobOperation>(operation);
+    const auto content_kind = root.find("content_kind");
+    if (content_kind != root.end()) {
+        if (!content_kind->is_number_unsigned()) {
+            throw std::invalid_argument("worker request content_kind must be unsigned");
+        }
+        const auto kind_value = content_kind->get<std::uint64_t>();
+        if (kind_value > std::numeric_limits<std::uint8_t>::max()) {
+            throw std::out_of_range("worker request content_kind is out of range");
+        }
+        job.content_kind = static_cast<contracts::ContentKind>(static_cast<std::uint8_t>(kind_value));
+    } else {
+        // Schema 4 requires content_kind; default volume_set only for incomplete frames that
+        // validators will still reject when other fields mismatch.
+        job.content_kind = contracts::ContentKind::kVolumeSet;
+    }
     job.source_refs = required<std::vector<std::string>>(root, "source_refs");
+    job.file_source_refs = optional_file_source_refs(root);
+    job.file_restore_target = optional_file_restore_target(root);
     const auto target = root.find("target_ref");
     if (target != root.end()) {
         if (!target->is_string()) {
@@ -185,7 +313,7 @@ bool contains_plaintext_credential_field(const Json& object) {
 }
 
 Json encode_task_result(const contracts::TaskResult& result) {
-    return Json{
+    Json encoded{
         {"schema_version", result.schema_version},
         {"job_id", result.job_id},
         {"trace_id", result.trace_id},
@@ -194,9 +322,21 @@ Json encode_task_result(const contracts::TaskResult& result) {
         {"logical_bytes", result.logical_bytes},
         {"stored_bytes", result.stored_bytes},
         {"chunk_count", result.chunk_count},
+        {"entry_count", result.entry_count},
+        {"stream_count", result.stream_count},
         {"message_code", result.message_code},
         {"warning_codes", result.warning_codes},
+        {"partial_restore", nullptr},
     };
+    if (result.partial_restore) {
+        encoded["partial_restore"] =
+            Json{{"entries_requested", result.partial_restore->entries_requested},
+                 {"entries_restored", result.partial_restore->entries_restored},
+                 {"entries_failed", result.partial_restore->entries_failed},
+                 {"bytes_restored", result.partial_restore->bytes_restored},
+                 {"stable_error_codes", result.partial_restore->stable_error_codes}};
+    }
+    return encoded;
 }
 
 Json encode_response_object(const contracts::WorkerResponse& response) {

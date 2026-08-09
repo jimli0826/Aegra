@@ -151,6 +151,26 @@ PayloadCipher::protect(const std::span<const std::byte> plaintext,
     return base::Result<ProtectedPayload>::success(std::move(result));
 }
 
+base::Result<PayloadTag>
+PayloadCipher::protect_in_place(const std::span<std::byte> payload,
+                                const std::span<const std::byte> authenticated_data,
+                                const PayloadNonce& nonce) const {
+    PayloadTag tag{};
+    std::byte empty_payload{};
+    const auto data = payload.empty() ? as_unsigned(&empty_payload)
+                                      : as_unsigned(payload.data());
+    unsigned long long tag_size = 0;
+    const auto status = crypto_aead_xchacha20poly1305_ietf_encrypt_detached(
+        data, as_unsigned(tag.data()), &tag_size, data, payload.size(),
+        as_unsigned(authenticated_data.data()), authenticated_data.size(), nullptr,
+        as_unsigned(nonce.data()), implementation_->key.data());
+    if (status != 0 || tag_size != tag.size()) {
+        return base::Result<PayloadTag>::failure(
+            error(base::ErrorCode::kInternal, "payload encryption failed"));
+    }
+    return base::Result<PayloadTag>::success(tag);
+}
+
 base::Result<std::vector<std::byte>>
 PayloadCipher::unprotect(const std::span<const std::byte> ciphertext,
                          const std::span<const std::byte> authenticated_data,
@@ -170,6 +190,23 @@ PayloadCipher::unprotect(const std::span<const std::byte> ciphertext,
             error(base::ErrorCode::kUnauthorized, "payload authentication failed"));
     }
     return base::Result<std::vector<std::byte>>::success(std::move(plaintext));
+}
+
+base::Result<void>
+PayloadCipher::unprotect_in_place(const std::span<std::byte> payload,
+                                  const std::span<const std::byte> authenticated_data,
+                                  const PayloadNonce& nonce, const PayloadTag& tag) const {
+    std::byte empty_payload{};
+    const auto data = payload.empty() ? as_unsigned(&empty_payload) : as_unsigned(payload.data());
+    const auto status = crypto_aead_xchacha20poly1305_ietf_decrypt_detached(
+        data, nullptr, data, payload.size(), as_unsigned(tag.data()),
+        as_unsigned(authenticated_data.data()), authenticated_data.size(),
+        as_unsigned(nonce.data()), implementation_->key.data());
+    if (status != 0) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kUnauthorized, "payload authentication failed"));
+    }
+    return base::Result<void>::success();
 }
 
 base::Result<PayloadNonce> create_payload_nonce() {

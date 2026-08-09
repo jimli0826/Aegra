@@ -453,8 +453,17 @@ base::Result<void> validate_job_record(const ports::JobRecord& record) {
          !valid_stable_value(*record.result_message_code, kMaximumMessageCodeBytes)) ||
         (record.result_effective_parent_uuid &&
          !valid_stable_value(*record.result_effective_parent_uuid, kMaximumIdentifierBytes)) ||
-        record.request_fingerprint.size() > kMaximumCommandFingerprintBytes) {
+        record.request_fingerprint.size() > kMaximumCommandFingerprintBytes ||
+        (!record.schedule_id.empty() &&
+         !valid_stable_value(record.schedule_id, kMaximumIdentifierBytes))) {
         return invalid("job record is invalid");
+    }
+    if (record.operation == contracts::JobOperation::kBackup) {
+        if (record.schedule_id.empty()) {
+            return invalid("backup job requires schedule_id");
+        }
+    } else if (!record.schedule_id.empty()) {
+        return invalid("non-backup job must not set schedule_id");
     }
     if (record.idempotency_key && record.request_fingerprint.empty()) {
         return invalid("job with idempotency key requires a request fingerprint");
@@ -498,6 +507,9 @@ base::Result<void> validate_schedule_record(const ports::ScheduleRecord& record)
             (record.backup_type != contracts::BackupType::kFull &&
              record.backup_type != contracts::BackupType::kIncremental)) {
             return invalid("file schedule sources are invalid");
+        }
+        if (record.deduplication_enabled) {
+            return invalid("file schedule cannot enable deduplication");
         }
         auto refs = contracts::validate_file_source_refs(record.file_selections);
         if (!refs) {
@@ -727,6 +739,7 @@ base::Result<ports::JobRecord> read_job(sqlite3_stmt* const stmt) {
         record.result_incremental_downgrade_reason =
             static_cast<std::uint8_t>(sqlite3_column_int64(stmt, 24));
     }
+    record.schedule_id = column_text_required(stmt, 25);
     auto valid = validate_job_record(record);
     if (!valid) {
         return base::Result<ports::JobRecord>::failure(valid.error());
@@ -754,12 +767,13 @@ base::Result<ports::ScheduleRecord> read_schedule(sqlite3_stmt* const stmt) {
     record.trigger.timezone_id = column_text_required(stmt, 11);
     record.next_run_utc_ms = column_uint64_optional(stmt, 12);
     record.exclude_page_and_hibernation_files = sqlite3_column_int(stmt, 13) != 0;
-    record.encryption_enabled = sqlite3_column_int(stmt, 14) != 0;
-    record.archive_password_protected = column_text_required(stmt, 15);
-    record.backup_set_uuid = column_text_required(stmt, 16);
-    record.last_recovery_point_id = column_text_optional(stmt, 17);
-    record.created_utc_ms = column_uint64(stmt, 18);
-    record.updated_utc_ms = column_uint64(stmt, 19);
+    record.deduplication_enabled = sqlite3_column_int(stmt, 14) != 0;
+    record.encryption_enabled = sqlite3_column_int(stmt, 15) != 0;
+    record.archive_password_protected = column_text_required(stmt, 16);
+    record.backup_set_uuid = column_text_required(stmt, 17);
+    record.last_recovery_point_id = column_text_optional(stmt, 18);
+    record.created_utc_ms = column_uint64(stmt, 19);
+    record.updated_utc_ms = column_uint64(stmt, 20);
     // file_selections loaded by schedule store after read when content_kind is file_set.
     auto valid = validate_schedule_record(record);
     if (!valid && record.content_kind == contracts::ContentKind::kFileSet &&
@@ -866,6 +880,9 @@ contracts::JobSummary to_job_summary(const ports::JobRecord& record) {
     summary.completed_utc_ms = record.completed_utc_ms;
     summary.message_code = record.message_code;
     summary.source_ids = record.source_ids;
+    if (!record.schedule_id.empty()) {
+        summary.schedule_id = record.schedule_id;
+    }
     summary.repository_connection_id = record.repository_connection_id;
     if (record.backup_type) {
         summary.requested_backup_type = static_cast<std::uint8_t>(*record.backup_type);
@@ -902,6 +919,7 @@ contracts::ScheduleSummary to_schedule_summary(const ports::ScheduleRecord& reco
     summary.trigger = record.trigger;
     summary.next_run_utc_ms = record.next_run_utc_ms;
     summary.exclude_page_and_hibernation_files = record.exclude_page_and_hibernation_files;
+    summary.deduplication_enabled = record.deduplication_enabled;
     summary.encryption_enabled = record.encryption_enabled;
     return summary;
 }

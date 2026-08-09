@@ -3985,7 +3985,7 @@ Item {
         } // restoreStep2
         } // restoreStepContainer
 
-        // Footer: Next on workspace; Restore while pending; Done after session ends.
+        // Footer: Back + Next on workspace; Back + Restore on summary step.
         RowLayout {
             Layout.fillWidth: true
             Layout.preferredHeight: 44
@@ -3993,6 +3993,15 @@ Item {
                      || (root.onSummaryStep && !root.restoreSessionRunning)
             spacing: 12
             Item { Layout.fillWidth: true }
+            AppButton {
+                id: backButton
+                Layout.preferredWidth: 100
+                Layout.preferredHeight: 40
+                //% "Back"
+                text: qsTrId("aegra.common.back")
+                enabled: !root.restoreSessionRunning && !serviceClient.restoreCommandBusy && !root.filePreflightPending
+                onClicked: root.stepBarBack()
+            }
             AppButton {
                 id: nextButton
                 Layout.preferredWidth: 140

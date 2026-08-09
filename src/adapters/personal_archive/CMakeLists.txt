@@ -1,4 +1,5 @@
 add_library(aegra_adapter_personal_archive STATIC
+    src/personal_archive_block_worker_pool.cpp
     src/personal_archive_chunk_builder.cpp
     src/personal_archive_chain_reader.cpp
     src/personal_archive_reader.cpp

@@ -128,8 +128,8 @@ struct WindowsVolumeInfo final {
 [[nodiscard]] bool supports_vss_snapshot(const WindowsVolumeInfo& volume) noexcept;
 
 /// Free-cluster skip plan built from FSCTL_GET_VOLUME_BITMAP (old BackupEngine free-skip).
-/// free_ranges are sorted, non-overlapping [start, end) byte ranges that may be synthesized as
-/// zeros without reading the underlying device.
+/// free_ranges are sorted, non-overlapping [start, end) byte ranges that are classified as FREE
+/// without reading the underlying device.
 struct FreeSkipPlan final {
     std::vector<std::pair<std::uint64_t, std::uint64_t>> free_ranges;
     std::uint64_t free_bytes{0};
@@ -160,7 +160,11 @@ merge_page_and_hibernation_exclusions(FreeSkipPlan& plan,
                                       const std::filesystem::path& read_device_path,
                                       std::uint32_t cluster_size_bytes);
 
-/// IBlockSource that zero-fills free ranges without I/O and forwards used ranges to an inner source.
+/// Shrinks FREE ranges inward to archive block boundaries. A final range may end at the logical
+/// volume size when the last archive block is partial. Mixed DATA/FREE archive blocks remain DATA.
+void align_free_skip_plan(FreeSkipPlan& plan, std::uint32_t archive_block_size_bytes);
+
+/// IBlockSource that reports FREE extents and forwards DATA reads to an inner source.
 class FreeSkipBlockSource final : public ports::IBlockSource {
   public:
     ~FreeSkipBlockSource() override;
@@ -173,6 +177,9 @@ class FreeSkipBlockSource final : public ports::IBlockSource {
     wrap(std::unique_ptr<ports::IBlockSource> inner, FreeSkipPlan plan);
 
     [[nodiscard]] std::uint64_t size_bytes() const noexcept override;
+    [[nodiscard]] base::Result<ports::BlockExtent>
+    describe_extent(std::uint64_t logical_offset, std::uint64_t maximum_size,
+                    base::CancellationToken cancellation) const override;
     [[nodiscard]] base::Result<std::size_t> read(std::uint64_t offset,
                                                  std::span<std::byte> destination,
                                                  base::CancellationToken cancellation) override;

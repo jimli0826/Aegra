@@ -46,6 +46,8 @@ map_recovery_point(const personal_repository::CatalogRecoveryPoint& point) {
         .created_utc_ms = entry.created_utc_ms,
         .logical_size_bytes = entry.logical_size_bytes,
         .stored_size_bytes = entry.stored_size_bytes,
+        .deduplicated_block_count = entry.deduplicated_block_count,
+        .deduplicated_logical_bytes = entry.deduplicated_logical_bytes,
         .source_count = entry.source_count,
         .has_sidecar = entry.has_sidecar,
     };

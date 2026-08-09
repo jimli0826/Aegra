@@ -308,7 +308,7 @@ SqliteControlPlaneDatabase::get_job_by_idempotency_key(const std::string_view id
         "result_error_code, result_outcome, result_message_code, "
         "exclude_page_and_hibernation_files, request_fingerprint, "
         "result_requested_backup_type, result_effective_backup_type, "
-        "result_effective_parent_uuid, result_incremental_downgrade_reason FROM jobs "
+        "result_effective_parent_uuid, result_incremental_downgrade_reason, schedule_id FROM jobs "
         "WHERE idempotency_key = ?");
     if (!statement) {
         return base::Result<std::optional<ports::JobRecord>>::failure(statement.error());
@@ -344,7 +344,7 @@ SqliteControlPlaneDatabase::get_job_by_preflight_token(const std::string_view pr
         "result_error_code, result_outcome, result_message_code, "
         "exclude_page_and_hibernation_files, request_fingerprint, "
         "result_requested_backup_type, result_effective_backup_type, "
-        "result_effective_parent_uuid, result_incremental_downgrade_reason FROM jobs "
+        "result_effective_parent_uuid, result_incremental_downgrade_reason, schedule_id FROM jobs "
         "WHERE preflight_token = ?");
     if (!statement) {
         return base::Result<std::optional<ports::JobRecord>>::failure(statement.error());

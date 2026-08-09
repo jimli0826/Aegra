@@ -47,17 +47,22 @@ F2（Personal Archive V7 + Catalog V2）已实现：
   `first_record_offset`；拒绝非 V7 与未知 capability bit；
 - 统一 `ArchiveRecordPrefix`（`MYBKREC`）包装 volume chunk、file stream chunk、index page 与 Footer；
 - Volume chunk 仍为 96 字节 kind 头；AAD = Header ‖ RecordPrefix ‖ ChunkHeader(tag=0) ‖ BlockEntry[]；
+- Volume BlockEntry 区分 ZERO 与 FREE：ZERO 恢复写零；FREE 表示空闲簇或显式系统文件排除区，
+  不含 payload，恢复端跳过写盘；Sidecar 使用 DATA/ZERO/FREE 精确状态；
+- ADR-0022 冻结 volume_set 单 `VolumeChunk` DEDUP：只后向引用同 record 的 RAW/COMPRESSED canonical，
+  禁止跨 chunk/part/source/archive；Footer 记录 DEDUP block/bytes；
 - Footer 为 512 字节完整 record（prefix + body），含 file/index 统计与 index root 定位；
 - File Index page header codec 与 leaf/internal CBOR body codec（`file_index.h`）；
 - Manifest CBOR schema 1，根字段 `content_kind`；file_set 禁止 disks/volumes；
 - AEAD HKDF info 升级为 `MYBACKUP-V7-*`；
-- Catalog Entry schema 2：`content_kind`、`file_entry_count`、`file_stream_count`、`format_version=7`。
+- Catalog Entry schema 2：`content_kind`、文件统计、volume dedup 统计与 `format_version=7`。
 
 Adapter 侧 volume session/reader 已按 V7 record 边界写读；`PersonalFileArchiveSession` 支持
 多层 B+tree Index 写入（Namespace + Entry ID / Stream / Chunk 二级索引，ADR-0019）；
 `PersonalFileArchiveReader` 按 L31/ADR-0019 以 Footer root 认证 + 有界 LRU page cache 打开
 （O(1) 页 I/O），二级 B+tree 分页 `list_children` / `describe_entry` / stream 范围读取。
-DEDUP 写入与多目标 Restore 仍是后续工作。
+DEDUP 的格式与拒绝规则已冻结，Writer/Reader 实施状态以
+[Volume Set 去重设计](../architecture/VOLUME_SET_DEDUPLICATION.md) 的工作范围为准；多目标 Restore 仍是后续工作。
 
 ## 完成标准
 

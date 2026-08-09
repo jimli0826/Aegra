@@ -22,6 +22,8 @@ struct RecoveryPointRow final {
     std::int64_t created_utc_ms{0};
     std::int64_t logical_size_bytes{0};
     std::int64_t stored_size_bytes{0};
+    std::int64_t deduplicated_block_count{0};
+    std::int64_t deduplicated_logical_bytes{0};
     std::int64_t source_count{0};
     bool has_sidecar{false};
 };
@@ -49,6 +51,9 @@ class RecoveryPointModel final : public QAbstractListModel {
         LogicalSizeTextRole,
         StoredSizeBytesRole,
         StoredSizeTextRole,
+        DeduplicatedBlockCountRole,
+        DeduplicatedLogicalBytesRole,
+        DeduplicatedLogicalBytesTextRole,
         SourceCountRole,
         HasSidecarRole,
         IsBaselineRole,

@@ -121,8 +121,9 @@ constexpr qsizetype kMaximumStableCodeCharacters = 128;
     const auto object = value.toObject();
     if (!has_exact_keys(object, {"file_uuid", "backup_set_uuid", "parent_uuid", "backup_type",
                                  "content_kind", "chain_state", "created_utc_ms",
-                                 "logical_size_bytes", "stored_size_bytes", "source_count",
-                                 "has_sidecar"})) {
+                                 "logical_size_bytes", "stored_size_bytes",
+                                 "deduplicated_block_count", "deduplicated_logical_bytes",
+                                 "source_count", "has_sidecar"})) {
         return false;
     }
     const auto file_uuid = object.value(QStringLiteral("file_uuid")).toString();
@@ -135,6 +136,8 @@ constexpr qsizetype kMaximumStableCodeCharacters = 128;
     qint64 created_utc_ms = 0;
     qint64 logical_size_bytes = 0;
     qint64 stored_size_bytes = 0;
+    qint64 deduplicated_block_count = 0;
+    qint64 deduplicated_logical_bytes = 0;
     qint64 source_count = 0;
     if (!canonical_uuid(file_uuid) || !canonical_uuid(backup_set_uuid) ||
         !optional_uuid(object.value(QStringLiteral("parent_uuid")), parent_uuid, has_parent) ||
@@ -147,6 +150,10 @@ constexpr qsizetype kMaximumStableCodeCharacters = 128;
                           (std::numeric_limits<qint64>::max)(), logical_size_bytes) ||
         !integer_in_range(object.value(QStringLiteral("stored_size_bytes")), 0,
                           (std::numeric_limits<qint64>::max)(), stored_size_bytes) ||
+        !integer_in_range(object.value(QStringLiteral("deduplicated_block_count")), 0,
+                          (std::numeric_limits<qint64>::max)(), deduplicated_block_count) ||
+        !integer_in_range(object.value(QStringLiteral("deduplicated_logical_bytes")), 0,
+                          (std::numeric_limits<qint64>::max)(), deduplicated_logical_bytes) ||
         !integer_in_range(object.value(QStringLiteral("source_count")), 0,
                           (std::numeric_limits<quint32>::max)(), source_count) ||
         !object.value(QStringLiteral("has_sidecar")).isBool()) {
@@ -159,9 +166,13 @@ constexpr qsizetype kMaximumStableCodeCharacters = 128;
     if (backup_type == 1 && chain_state != 1) {
         return false;
     }
-    // file_set: Full or Incremental only; never Differential, never volume sidecar.
+    // file_set: Full or Incremental only; never Differential, never volume sidecar; no dedup metrics.
     if (content_kind == 2 &&
-        (backup_type == 3 || object.value(QStringLiteral("has_sidecar")).toBool())) {
+        (backup_type == 3 || object.value(QStringLiteral("has_sidecar")).toBool() ||
+         deduplicated_block_count != 0 || deduplicated_logical_bytes != 0)) {
+        return false;
+    }
+    if ((deduplicated_block_count == 0) != (deduplicated_logical_bytes == 0)) {
         return false;
     }
     result = {{QStringLiteral("fileUuid"), file_uuid},
@@ -173,6 +184,8 @@ constexpr qsizetype kMaximumStableCodeCharacters = 128;
               {QStringLiteral("createdUtcMs"), created_utc_ms},
               {QStringLiteral("logicalSizeBytes"), logical_size_bytes},
               {QStringLiteral("storedSizeBytes"), stored_size_bytes},
+              {QStringLiteral("deduplicatedBlockCount"), deduplicated_block_count},
+              {QStringLiteral("deduplicatedLogicalBytes"), deduplicated_logical_bytes},
               {QStringLiteral("sourceCount"), source_count},
               {QStringLiteral("hasSidecar"), object.value(QStringLiteral("has_sidecar")).toBool()}};
     return true;
@@ -720,8 +733,8 @@ namespace {
     if (!has_exact_keys(object,
                         {"job_id", "trace_id", "operation", "state", "content_kind", "created_utc_ms",
                          "started_utc_ms", "completed_utc_ms", "progress", "message_code",
-                         "source_ids", "repository_connection_id", "requested_backup_type",
-                         "effective_backup_type", "effective_parent_uuid",
+                         "source_ids", "schedule_id", "repository_connection_id",
+                         "requested_backup_type", "effective_backup_type", "effective_parent_uuid",
                          "incremental_downgrade_reason"})) {
         return false;
     }
@@ -750,6 +763,7 @@ namespace {
     QVariantList source_ids;
     QSet<QString> seen_source_ids;
     QString connection_id;
+    QString schedule_id;
     const auto source_value = object.value(QStringLiteral("source_ids"));
     if (!source_value.isArray() || source_value.toArray().size() > 100) {
         return false;
@@ -762,6 +776,19 @@ namespace {
         }
         seen_source_ids.insert(source_id);
         source_ids.push_back(source_id);
+    }
+    const auto schedule_value = object.value(QStringLiteral("schedule_id"));
+    if (!schedule_value.isNull()) {
+        if (!schedule_value.isString() || !stable_code(schedule_value.toString(), 128)) {
+            return false;
+        }
+        schedule_id = schedule_value.toString();
+    }
+    if (operation == 1 && schedule_id.isEmpty()) {
+        return false; // backup jobs must own a schedule
+    }
+    if (operation != 1 && !schedule_id.isEmpty()) {
+        return false;
     }
     const auto connection_value = object.value(QStringLiteral("repository_connection_id"));
     if (!connection_value.isNull()) {
@@ -800,6 +827,7 @@ namespace {
         {QStringLiteral("createdUtcMs"), created_utc_ms},
         {QStringLiteral("messageCode"), object.value(QStringLiteral("message_code")).toString()},
         {QStringLiteral("sourceIds"), source_ids},
+        {QStringLiteral("scheduleId"), schedule_id},
         {QStringLiteral("connectionId"), connection_id}};
     if (content_kind) {
         map.insert(QStringLiteral("contentKind"), *content_kind);

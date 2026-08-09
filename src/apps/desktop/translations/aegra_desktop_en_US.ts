@@ -1058,8 +1058,16 @@ Server: %1</translation>
         <translation>Sun</translation>
     </message>
     <message id="aegra.backup.opt.dedup">
-        <source>Enable deduplication</source>
-        <translation>Enable deduplication</translation>
+        <source>Enable volume chunk deduplication</source>
+        <translation>Enable volume chunk deduplication</translation>
+    </message>
+    <message id="aegra.backup.opt.dedup_hint">
+        <source>Same-chunk only within each volume backup; not global or cross-backup</source>
+        <translation>Same-chunk only within each volume backup; not global or cross-backup</translation>
+    </message>
+    <message id="aegra.repository.dedup.bytes">
+        <source>Deduplicated</source>
+        <translation>Deduplicated</translation>
     </message>
     <message id="aegra.backup.opt.exclude_page">
         <source>Exclude pagefile / hiberfil / swapfile</source>

@@ -19,13 +19,15 @@ V6 草案使用 MD5 并明文保存 `.bhx` 块散列。块散列可用于识别�
    清零后的完整 96 字节作为 AAD。
 3. Sidecar 密钥由对应 `.bkf` metadata envelope 的 Argon2id 参数和 salt 派生，但使用独立的
    `MYBACKUP-V6-SIDECAR` HKDF context，与 metadata key 分离。每个 Sidecar 使用独立随机 nonce。
-4. DATA 块使用 SHA-256；ZERO 和 SKIP 的 hash 字段必须全零。V1 写入器不写 MD5，也不接受其它
+4. DATA 块使用 SHA-256；ZERO 和 FREE 的 hash 字段必须全零。V1 写入器不写 MD5，也不接受其它
    hash 算法。
 5. `.bhx` 不是恢复依赖。Reader 打开和恢复 `.bkf` 时不要求 Sidecar 存在；增量比较显式加载并认证
    Sidecar。
 6. 写入器为每个逻辑块生成一条 Sidecar record。连续 ZERO 块在同一 chunk 内合并为一个
    `BlockEntry`，`logical_size` 保存 run-length；Footer 块计数按 run 展开。
-7. `.bkf.partial` 和 `.bkf.bhx.partial` 均完成后才发布。若第二个 rename 失败，写入器删除本次刚发布
+7. 文件系统空闲簇及显式排除的 pagefile/hiberfil/swapfile extent 使用 FREE 状态，不能降级为 ZERO。
+   FREE 不读取、不散列、不保存 payload；连续 FREE 块编码为独立 FREE run，恢复时跳过对应目标写入。
+8. `.bkf.partial` 和 `.bkf.bhx.partial` 均完成后才发布。若第二个 rename 失败，写入器删除本次刚发布
    的 `.bkf`，避免向调用者报告一个缺少承诺产物的成功提交。
 
 ## 备选方案
@@ -40,7 +42,7 @@ V6 草案使用 MD5 并明文保存 `.bhx` 块散列。块散列可用于识别�
 - 加载 Sidecar 需要对应 `.bkf`、口令以及其 metadata envelope 中的 KDF 参数。
 - Sidecar 内容篡改、头字段篡改和错误口令在解析 record 前被 AEAD 拒绝。
 - 当前实现为一个 volume 生成 Sidecar；线格式保留多个 volume 的 payload 表。
-- ZERO run 只在 chunk 内合并，不跨 chunk 建立隐式状态，保持 chunk 独立可读。
+- ZERO/FREE run 只在 chunk 内合并，不跨 chunk 建立隐式状态，保持 chunk 独立可读。
 
 ## 验证
 

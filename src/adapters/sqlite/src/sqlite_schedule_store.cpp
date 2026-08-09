@@ -46,9 +46,9 @@ base::Result<void> ScheduleStore::upsert(const ports::ScheduleRecord& record,
         "INSERT INTO schedules(schedule_id, display_name, enabled, content_kind, source_ids, "
         "owner_sid, repository_connection_id, backup_type, trigger_kind, local_minute_of_day, "
         "weekday_mask, timezone_id, next_run_utc_ms, exclude_page_and_hibernation_files, "
-        "encryption_enabled, archive_password_protected, backup_set_uuid, last_recovery_point_id, "
-        "created_utc_ms, updated_utc_ms) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+        "deduplication_enabled, encryption_enabled, archive_password_protected, backup_set_uuid, "
+        "last_recovery_point_id, created_utc_ms, updated_utc_ms) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(schedule_id) DO UPDATE SET "
         "display_name=excluded.display_name, enabled=excluded.enabled, "
         "content_kind=excluded.content_kind, source_ids=excluded.source_ids, "
@@ -58,6 +58,7 @@ base::Result<void> ScheduleStore::upsert(const ports::ScheduleRecord& record,
         "local_minute_of_day=excluded.local_minute_of_day, weekday_mask=excluded.weekday_mask, "
         "timezone_id=excluded.timezone_id, next_run_utc_ms=excluded.next_run_utc_ms, "
         "exclude_page_and_hibernation_files=excluded.exclude_page_and_hibernation_files, "
+        "deduplication_enabled=excluded.deduplication_enabled, "
         "encryption_enabled=excluded.encryption_enabled, "
         "archive_password_protected=excluded.archive_password_protected, "
         "backup_set_uuid=excluded.backup_set_uuid, "
@@ -110,22 +111,25 @@ base::Result<void> ScheduleStore::upsert(const ports::ScheduleRecord& record,
             stmt.bind_int64(14, record.exclude_page_and_hibernation_files ? 1 : 0); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_int64(15, record.encryption_enabled ? 1 : 0); !bound) {
+    if (auto bound = stmt.bind_int64(15, record.deduplication_enabled ? 1 : 0); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_text(16, record.archive_password_protected); !bound) {
+    if (auto bound = stmt.bind_int64(16, record.encryption_enabled ? 1 : 0); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_text(17, record.backup_set_uuid); !bound) {
+    if (auto bound = stmt.bind_text(17, record.archive_password_protected); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_text_nullable(18, record.last_recovery_point_id); !bound) {
+    if (auto bound = stmt.bind_text(18, record.backup_set_uuid); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_int64(19, static_cast<std::int64_t>(record.created_utc_ms)); !bound) {
+    if (auto bound = stmt.bind_text_nullable(19, record.last_recovery_point_id); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_int64(20, static_cast<std::int64_t>(record.updated_utc_ms)); !bound) {
+    if (auto bound = stmt.bind_int64(20, static_cast<std::int64_t>(record.created_utc_ms)); !bound) {
+        return bound;
+    }
+    if (auto bound = stmt.bind_int64(21, static_cast<std::int64_t>(record.updated_utc_ms)); !bound) {
         return bound;
     }
     auto stepped = stmt.step();
@@ -204,9 +208,9 @@ ScheduleStore::list(const contracts::ScheduleListRequest& request,
     std::string sql =
         "SELECT schedule_id, display_name, enabled, content_kind, source_ids, owner_sid, "
         "repository_connection_id, backup_type, trigger_kind, local_minute_of_day, weekday_mask, "
-        "timezone_id, next_run_utc_ms, exclude_page_and_hibernation_files, encryption_enabled, "
-        "archive_password_protected, backup_set_uuid, last_recovery_point_id, created_utc_ms, "
-        "updated_utc_ms FROM schedules WHERE 1=1";
+        "timezone_id, next_run_utc_ms, exclude_page_and_hibernation_files, deduplication_enabled, "
+        "encryption_enabled, archive_password_protected, backup_set_uuid, last_recovery_point_id, "
+        "created_utc_ms, updated_utc_ms FROM schedules WHERE 1=1";
     if (request.enabled) {
         sql += " AND enabled = ?";
     }

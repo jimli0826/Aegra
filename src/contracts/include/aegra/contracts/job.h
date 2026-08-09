@@ -43,6 +43,9 @@ struct BackupOptions final {
     /// When true (default), pagefile.sys / hiberfil.sys / swapfile.sys extents are zero-filled
     /// without reading (volume_set only; ignored for file_set).
     bool exclude_page_and_hibernation_files{true};
+    /// volume_set: enable single-chunk DEDUP (ADR-0022); default true, frozen on schedule create.
+    /// file_set: must be false.
+    bool deduplication_enabled{true};
     /// When true, archive metadata/payload use AEAD with credential_refs password.
     /// When false, archive is written unencrypted and password must be empty.
     bool encryption_enabled{false};

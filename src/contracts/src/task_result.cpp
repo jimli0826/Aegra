@@ -78,8 +78,14 @@ base::Result<void> validate_task_result(const TaskResult& result) {
     }
     if (result.logical_bytes > kMaximumWireInteger || result.stored_bytes > kMaximumWireInteger ||
         result.chunk_count > kMaximumWireInteger || result.entry_count > kMaximumWireInteger ||
-        result.stream_count > kMaximumWireInteger) {
+        result.stream_count > kMaximumWireInteger ||
+        result.deduplicated_block_count > kMaximumWireInteger ||
+        result.deduplicated_logical_bytes > kMaximumWireInteger) {
         return invalid("task result integer exceeds wire range");
+    }
+    // Both zero (no DEDUP / file_set) or both positive; mixed is corrupt wire.
+    if ((result.deduplicated_block_count == 0) != (result.deduplicated_logical_bytes == 0)) {
+        return invalid("task result dedup counters are inconsistent");
     }
     const bool has_type_pair =
         result.requested_backup_type.has_value() || result.effective_backup_type.has_value() ||

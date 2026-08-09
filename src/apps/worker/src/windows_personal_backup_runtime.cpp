@@ -145,10 +145,9 @@ void log_free_skip(const windows_disk::FreeSkipPlan& plan, const bool applied) {
     log->field_bytes("protected_prefix", plan.protected_prefix_bytes);
 }
 
-base::Result<std::unique_ptr<ports::IBlockSource>>
-open_volume_source(const windows_disk::WindowsVolumeInfo& volume,
-                   const windows_vss::WindowsVssSnapshot* snapshot,
-                   const bool exclude_page_and_hibernation_files) {
+base::Result<std::unique_ptr<ports::IBlockSource>> open_volume_source(
+    const windows_disk::WindowsVolumeInfo& volume, const windows_vss::WindowsVssSnapshot* snapshot,
+    const bool exclude_page_and_hibernation_files, const std::uint32_t archive_block_size_bytes) {
     const bool use_vss = snapshot != nullptr;
     const auto path = use_vss ? snapshot->snapshot_device_path : volume.volume_guid_path;
     const auto kind = use_vss ? windows_disk::WindowsBlockSourceKind::kVssSnapshot
@@ -162,15 +161,15 @@ open_volume_source(const windows_disk::WindowsVolumeInfo& volume,
 
     // Free-cluster skip + pagefile/hiber/swap exclusion on the **same** device path used for
     // reads (AipCopy: ExcludeJunkFiles on swStaticVolume — live GUID or VSS snapshot root).
-    auto free_plan =
-        windows_disk::build_free_skip_plan(path, volume.filesystem, size, volume.cluster_size_bytes);
+    auto free_plan = windows_disk::build_free_skip_plan(path, volume.filesystem, size,
+                                                        volume.cluster_size_bytes);
     free_plan.total_bytes = size;
     if (exclude_page_and_hibernation_files) {
         const auto excluded = windows_disk::merge_page_and_hibernation_exclusions(
             free_plan, path, volume.cluster_size_bytes);
         if (auto* log = WorkerTaskLog::active(); log != nullptr) {
             if (excluded > 0) {
-                log->field_bytes("excluded_page_hiber_swap", excluded);
+                log->field_bytes("excluded_page_hiber_swap_candidate_bytes", excluded);
                 log->field("exclusion_root", utf8_or_empty(path));
                 log->field("exclusion_mode", use_vss ? "vss_snapshot" : "live_volume");
             } else if (use_vss) {
@@ -179,6 +178,7 @@ open_volume_source(const windows_disk::WindowsVolumeInfo& volume,
             }
         }
     }
+    windows_disk::align_free_skip_plan(free_plan, archive_block_size_bytes);
     if (free_plan.applied && !free_plan.free_ranges.empty()) {
         auto wrapped =
             windows_disk::FreeSkipBlockSource::wrap(std::move(result), std::move(free_plan));
@@ -196,6 +196,7 @@ open_volume_source(const windows_disk::WindowsVolumeInfo& volume,
 base::Result<PreparedVolumeSources>
 prepare_volume_sources(const std::vector<windows_disk::WindowsVolumeInfo>& volumes,
                        const bool exclude_page_and_hibernation_files,
+                       const std::uint32_t archive_block_size_bytes,
                        const base::CancellationToken& cancellation) {
     auto vss_indices = vss_volume_indices(volumes);
     if (!vss_indices) {
@@ -221,8 +222,8 @@ prepare_volume_sources(const std::vector<windows_disk::WindowsVolumeInfo>& volum
     result.sources.resize(volumes.size());
     for (std::size_t index = 0; index < volumes.size(); ++index) {
         const auto* snapshot = snapshot_by_volume[index];
-        auto source =
-            open_volume_source(volumes[index], snapshot, exclude_page_and_hibernation_files);
+        auto source = open_volume_source(
+            volumes[index], snapshot, exclude_page_and_hibernation_files, archive_block_size_bytes);
         if (!source) {
             return base::Result<PreparedVolumeSources>::failure(source.error());
         }
@@ -240,6 +241,7 @@ class WindowsPersonalBackupRuntime final : public IWindowsPersonalBackupRuntime 
     [[nodiscard]] base::Result<PreparedVolumeSources>
     prepare_sources(const std::vector<std::filesystem::path>& volume_guid_paths,
                     const bool exclude_page_and_hibernation_files,
+                    const std::uint32_t archive_block_size_bytes,
                     const base::CancellationToken& cancellation) override {
         std::vector<windows_disk::WindowsVolumeInfo> volumes;
         volumes.reserve(volume_guid_paths.size());
@@ -250,7 +252,8 @@ class WindowsPersonalBackupRuntime final : public IWindowsPersonalBackupRuntime 
             }
             volumes.push_back(std::move(volume).value());
         }
-        return prepare_volume_sources(volumes, exclude_page_and_hibernation_files, cancellation);
+        return prepare_volume_sources(volumes, exclude_page_and_hibernation_files,
+                                      archive_block_size_bytes, cancellation);
     }
 
     [[nodiscard]] base::Result<std::unique_ptr<ports::IBackupSession>>
@@ -270,6 +273,7 @@ class WindowsPersonalBackupRuntime final : public IWindowsPersonalBackupRuntime 
         archive_request.kdf_parameters = {request.kdf_opslimit, request.kdf_memlimit_bytes};
         archive_request.parent_source = request.parent_source;
         archive_request.parent_password = request.parent_password;
+        archive_request.deduplication_enabled = request.deduplication_enabled;
         auto session = personal_archive::PersonalArchiveSession::create(archive_request);
         if (!session) {
             return base::Result<std::unique_ptr<ports::IBackupSession>>::failure(session.error());

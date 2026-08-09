@@ -10,7 +10,7 @@
 
 权威决策见 [ADR-0010](../adr/0010-personal-repository-authority-and-catalog.md)，持久化 schema 见
 [个人版 Repository V2](../format/PERSONAL_REPOSITORY_FORMAT_V2.md)（Catalog Entry `schema_version=2`，
-含 `content_kind` / `file_entry_count` / `file_stream_count`）。
+含 `content_kind`、文件统计与 Volume DEDUP 统计）。
 
 ## 依赖与 Target
 
@@ -265,8 +265,9 @@ S5 已增加 `delete_plan`：descendant-first 计划、带 Storage generation �
 （sidecar → 续卷 → 主卷）、strict revalidation、Tombstone 发布与条件/幂等成员及 Catalog 删除执行。
 Catalog Reconcile（从 Archive 结构补建 Entry）仍属后续工作。
 
-F2 已将 Catalog Entry 升至 schema 2：`content_kind`（`volume_set`|`file_set`）、文件统计字段与
-`format_version=7` 校验；`file_set` 禁止 sidecar/source_volume_ids。
+F2 已将 Catalog Entry 升至 schema 2：`content_kind`（`volume_set`|`file_set`）、文件统计字段、
+ADR-0022 的 volume dedup 计数与 `format_version=7` 校验；`file_set` 禁止 sidecar/source_volume_ids
+且 dedup 计数必须为 0。Catalog 不保存逐块哈希或 canonical locator。
 
 **FI6** 已实现 file chain 生命周期核心：
 

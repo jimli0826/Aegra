@@ -52,10 +52,12 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
 
 ## Schema 与不变量
 
-- `schema_meta.version` 当前为 `13`（`ports::kControlPlaneSchemaVersion`）。产品未发布：
-  - 新库 `CREATE IF NOT EXISTS` 即为当前完整表结构，再写入 version=13；
+- `schema_meta.version` 当前为 `15`（`ports::kControlPlaneSchemaVersion`）。产品未发布：
+  - 新库 `CREATE IF NOT EXISTS` 即为当前完整表结构，再写入 version=15；
   - **不提供** 历史 schema 的 `ALTER` 迁移或兼容读取；旧开发库必须删除后重建；
   - 非 0 且非当前版本 → `kUnsupportedVersion`。
+- `jobs.schedule_id`：backup Job 必填（拥有方 Schedule）；restore/verify 等为空串。ListJobs 投影到
+  JobSummary.schedule_id，供 Desktop 按 schedule 绑定运行状态（同源 Schedule 互不串台）。
 - `restore_preflight_entry_ids`（schema 12+）：file_set 选择性恢复 preflight 的 entry_id 列表
   （`preflight_token`、`ordinal`、`entry_id`）；volume preflight 无行。`RestorePreflightRecord.entry_ids`
   在 insert/get 时与主表同事务写入/附加。file 指纹 `chain_fingerprint` 以 `filec|` 前缀区分。
@@ -65,6 +67,7 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
 - `jobs.request_fingerprint`：幂等键对应的规范化请求指纹。StartBackup 指纹覆盖
   `schedule_id`、**请求的** `backup_type`（非降级后的 effective 类型）、`content_kind`、
   volume `source_ids` 或 file `selection_id` 列表、`repository_connection_id`、exclude、encryption；
+  volume 还必须覆盖 `deduplication_enabled`；
   重放时只比指纹，不从 effective Job 状态猜 demote。有 `idempotency_key` 时指纹不得为空。
 - `jobs` FI7 结果投影（schema 13）：`result_requested_backup_type`、`result_effective_backup_type`、
   `result_effective_parent_uuid`、`result_incremental_downgrade_reason`。终端 transition 从 TaskResult
@@ -72,19 +75,20 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
 - `schedules.content_kind` + `schedules.owner_sid`：创建时写入；`content_kind` 终身不可改。
 - `schedule_file_selections`：file_set 专用子表（`selection_id`、`volume_identity`、相对路径 blob、
   entry/recursion/reparse/unreadable policy、display_label）；volume_set 时为空。
-- `schedules.exclude_page_and_hibernation_files` 必填；upsert command 的 idempotency fingerprint
+- `schedules.exclude_page_and_hibernation_files` 与 `schedules.deduplication_enabled` 必填；后者对 file_set
+  固定 false。upsert command 的 idempotency fingerprint
   必须包含该选项与 `archive_password` 的不可逆摘要（不存明文）。
 - `schedules.archive_password_protected`：加密 Schedule 为 `dpapi-lm:<schedule_id>:<base64>`
   （DPAPI `CRYPTPROTECT_LOCAL_MACHINE`，`pOptionalEntropy` = UTF-8 `schedule_id`）；未加密必须为空串。
   **不**返回给 Desktop `ScheduleSummary`。
 - **Schedule 更新不变量**（`UpsertSchedule` 在已有 `schedule_id` 上强制）：
   - **创建后不可变**：`content_kind`、有序 volume `source_ids[]` 或 file selections、`backup_type`、
-    `exclude_page_and_hibernation_files`、`encryption_enabled`；加密时 `archive_password_protected`
+    `exclude_page_and_hibernation_files`、`deduplication_enabled`、`encryption_enabled`；加密时 `archive_password_protected`
     创建后不可改、不可清空、不可关闭加密。file_set 更新不得携带新 `file_selections`。
   - **可修改**：`display_name`、`enabled`、`repository_connection_id`（可换其它 Repository connection）、
     `trigger`（频率/时间/星期等 Schedule settings）。
-  - **Backup options**：除未来的 “完成后关机”（shutdown）外，其它选项均为创建时固定；当前持久化选项仅
-    `exclude_page_and_hibernation_files` 与 `encryption_enabled`，更新时不得变更。
+  - **Backup options**：除未来的 “完成后关机”（shutdown）外，其它选项均为创建时固定；当前持久化选项为
+    `exclude_page_and_hibernation_files`、`deduplication_enabled` 与 `encryption_enabled`，更新时不得变更。
   - 更新请求不得携带 `archive_password`；加密口令只在创建时 DPAPI 保护后写入 SQLite。
 - `schedules.backup_set_uuid` 必填、canonical UUID；创建 Schedule 时分配并终身固定。同一 Schedule 的
   全量与增量共享该 set（含 Full→Inc→…→Full→Inc 序列：后继 Full 仍用同一 set，V6 下 Full 的

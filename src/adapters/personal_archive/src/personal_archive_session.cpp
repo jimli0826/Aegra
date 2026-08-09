@@ -1,5 +1,6 @@
 #include "aegra/adapters/personal_archive/personal_archive.h"
 
+#include "personal_archive_block_worker_pool.h"
 #include "personal_archive_chunk_builder.h"
 #include "personal_archive_payload.h"
 #include "personal_archive_sidecar_io.h"
@@ -154,6 +155,24 @@ struct SourceWriteState final {
     return 1 + (logical_size - 1) / block_size;
 }
 
+[[nodiscard]] bool valid_free_ranges(const ports::ChunkDescriptor& descriptor,
+                                     const std::uint32_t block_size) noexcept {
+    std::uint64_t previous_end = 0;
+    for (const auto& range : descriptor.free_ranges) {
+        if (range.size == 0 || range.offset < previous_end || range.offset % block_size != 0 ||
+            range.offset > descriptor.logical_size ||
+            range.size > descriptor.logical_size - range.offset) {
+            return false;
+        }
+        const auto end = range.offset + range.size;
+        if (end != descriptor.logical_size && end % block_size != 0) {
+            return false;
+        }
+        previous_end = end;
+    }
+    return true;
+}
+
 [[nodiscard]] bool is_zero_uuid(const std::array<std::byte, 16>& value) noexcept {
     return std::all_of(value.begin(), value.end(),
                        [](const std::byte item) { return item == std::byte{0}; });
@@ -248,6 +267,10 @@ make_header(const ArchiveCreateRequest& request, const std::uint64_t metadata_wi
         header.encryption_method = archive::PayloadEncryptionMethod::kXChaCha20Poly1305;
     } else {
         header.encryption_method = archive::PayloadEncryptionMethod::kNone;
+    }
+    // Strategy flag: set when enabled even if this Archive produces zero DEDUP entries.
+    if (request.deduplication_enabled) {
+        header.flags |= archive::kBackupFlagDedup;
     }
     if (request.split_size_bytes != 0) {
         header.flags |= archive::kBackupFlagSplit;
@@ -477,7 +500,8 @@ struct PersonalArchiveSession::Impl final {
          std::unique_ptr<crypto_sodium::PayloadCipher> archive_payload_cipher,
          const bool archive_encryption_enabled)
         : password(archive_password), payload_cipher(std::move(archive_payload_cipher)),
-          encryption_enabled(archive_encryption_enabled) {}
+          encryption_enabled(archive_encryption_enabled),
+          block_workers(detail::default_block_worker_count()) {}
 
     archive::BackupHeader primary_header;
     archive::EncodedBackupHeader current_part_header{};
@@ -489,6 +513,7 @@ struct PersonalArchiveSession::Impl final {
     crypto_sodium::SecureString password;
     std::unique_ptr<crypto_sodium::PayloadCipher> payload_cipher;
     bool encryption_enabled{false};
+    bool deduplication_enabled{false};
     std::array<std::byte, 16> file_uuid{};
     crypto_sodium::KdfParameters kdf;
     std::array<std::byte, crypto_sodium::kMetadataSaltSize> salt{};
@@ -498,11 +523,15 @@ struct PersonalArchiveSession::Impl final {
     std::uint64_t total_block_count{0};
     std::uint64_t total_payload_size{0};
     std::uint64_t total_logical_bytes{0};
+    std::uint64_t deduplicated_block_count{0};
+    std::uint64_t deduplicated_logical_bytes{0};
     std::uint64_t current_part_chunk_count{0};
     std::vector<SourceWriteState> sources;
     std::size_t next_source_position{0};
     bool incremental{false};
     bool complete{false};
+    /// Persistent hash/zstd workers for the session lifetime (not per physical chunk).
+    detail::BlockWorkerPool block_workers;
 
     [[nodiscard]] SourceWriteState* current_source(const std::uint32_t source_index) noexcept {
         while (next_source_position < sources.size() &&
@@ -652,6 +681,7 @@ PersonalArchiveSession::create(const ArchiveCreateRequest& request) {
     implementation->salt = preamble.value().metadata.salt;
     implementation->block_size = request.block_size;
     implementation->split_size_bytes = request.split_size_bytes;
+    implementation->deduplication_enabled = request.deduplication_enabled;
     implementation->incremental = baseline_value.has_value();
     implementation->sources.reserve(request.manifest.volumes.size());
     for (std::size_t index = 0; index < request.manifest.volumes.size(); ++index) {
@@ -688,11 +718,11 @@ base::Result<void> PersonalArchiveSession::write_chunk(const ports::ChunkWriteRe
             error(base::ErrorCode::kInvalidArgument, "archive chunk descriptor is invalid"));
     }
     auto* source = implementation_->current_source(request.descriptor.source_index);
-    if (source == nullptr ||
-        request.descriptor.chunk_index != source->next_input_chunk_index ||
+    if (source == nullptr || request.descriptor.chunk_index != source->next_input_chunk_index ||
         request.descriptor.logical_offset != source->next_logical_offset ||
         request.descriptor.logical_offset % implementation_->block_size != 0 ||
         request.descriptor.logical_size != request.payload.size() ||
+        !valid_free_ranges(request.descriptor, implementation_->block_size) ||
         request.descriptor.logical_offset > source->logical_size ||
         request.descriptor.logical_size >
             source->logical_size - request.descriptor.logical_offset) {
@@ -706,6 +736,8 @@ base::Result<void> PersonalArchiveSession::write_chunk(const ports::ChunkWriteRe
         source->source_index,
         implementation_->next_archive_chunk_index,
         implementation_->incremental,
+        implementation_->deduplication_enabled,
+        &implementation_->block_workers,
     };
     auto prepared = detail::prepare_archive_chunks(preparation);
     if (!prepared) {
@@ -719,6 +751,17 @@ base::Result<void> PersonalArchiveSession::write_chunk(const ports::ChunkWriteRe
     source->next_logical_offset += request.descriptor.logical_size;
     implementation_->total_block_count += prepared.value().sidecar_records.size();
     implementation_->total_logical_bytes += request.descriptor.logical_size;
+    if (implementation_->deduplicated_block_count >
+            (std::numeric_limits<std::uint64_t>::max)() -
+                prepared.value().deduplicated_block_count ||
+        implementation_->deduplicated_logical_bytes >
+            (std::numeric_limits<std::uint64_t>::max)() -
+                prepared.value().deduplicated_logical_bytes) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kInvalidArgument, "archive dedup metrics overflow"));
+    }
+    implementation_->deduplicated_block_count += prepared.value().deduplicated_block_count;
+    implementation_->deduplicated_logical_bytes += prepared.value().deduplicated_logical_bytes;
     source->sidecar_records.insert(source->sidecar_records.end(),
                                    prepared.value().sidecar_records.begin(),
                                    prepared.value().sidecar_records.end());
@@ -748,6 +791,8 @@ base::Result<void> PersonalArchiveSession::commit(const base::CancellationToken 
     footer.total_block_entry_count = implementation_->total_block_count;
     footer.total_payload_size = implementation_->total_payload_size;
     footer.logical_bytes = implementation_->total_logical_bytes;
+    footer.deduplicated_block_count = implementation_->deduplicated_block_count;
+    footer.deduplicated_logical_bytes = implementation_->deduplicated_logical_bytes;
     footer.part_file_size =
         static_cast<std::uint64_t>(footer_offset) + archive::kBackupFooterSize;
     footer.file_uuid = implementation_->file_uuid;

@@ -146,6 +146,9 @@ Recovery Point -> Manifest Validation -> Chunk Resolver
                -> Fetch/Decrypt/Decompress -> Logical Stream -> Block Sink
 ```
 
+该图是逻辑顺序。个人版 Volume Set 的 Hash/Dedup 在 Personal Archive Session 内按 ADR-0022 限制为单
+`VolumeChunk`；通用 Pipeline 不依赖其 BlockEntry 编码。企业版跨 Recovery Point 去重仍属于 CAS Repository。
+
 Pipeline 负责并发、背压、块映射、转换、校验、进度、取消和提交协议；不创建云客户端、数据库连接、VSS Snapshot 或 VMware Session。
 
 ## 7. 个人版格式

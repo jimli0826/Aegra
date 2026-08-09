@@ -28,6 +28,23 @@ staging key。发布支持 create-only rename 与 generation 条件替换，删�
 
 个人版 Archive Adapter 组合 `format`、`IBackupSession`、`IRecoveryPointReader`、libsodium 和 Zstandard。当前全量数据面支持一个 Archive 包含多个 volume，并可在完整 chunk 边界透明分卷；每个 chunk 通过 `source_index` 归属一个 Manifest Volume，Sidecar 为每个 Volume 保存独立块表。写入期间所有分卷与 Sidecar 使用 partial 路径，全部 Volume 完整写入且 Footer 和加密 Sidecar 均写完后，先发布 Sidecar/续卷，最后发布首卷；任一 Volume 失败时 Abort 和析构清理本次创建的 partial 文件。Reader 在解析 CBOR 前必须完成 Header/Envelope 范围校验和 AEAD 认证，随后发现并验证连续分卷和每个 Volume 的完整覆盖。普通恢复不依赖 `.bhx`；增量比较通过显式 API 加载并认证 Sidecar。
 
+ADR-0022 为 volume_set 冻结单物理 `VolumeChunk` 去重。Archive Session 在逻辑序组装阶段维护当前 Chunk
+SHA-256 候选表，命中后逐字节确认，并只回指更早的 RAW/COMPRESSED canonical；Chunk/part/source 切换时
+清空窗口。FREE、ZERO 与 Incremental parent omission 先处理，canonical 后执行 zstd 与 AEAD。FREE
+来自文件系统空闲簇或 pagefile/hiberfil/swapfile 排除 extent，不读取、不散列、不保存 payload；Reader
+认证后将 FREE range 交给 Restore Pipeline 跳写。Reader/Verify 在
+认证当前 record 后解析 DEDUP，拒绝前向、越界、链式和长度不匹配引用。哈希不进入 Archive、Sidecar 或日志。
+
+`PersonalArchiveSession` 拥有持久 `BlockWorkerPool`：session 生命周期内固定 worker 线程，跨物理
+Chunk 复用；每个 worker 持有 `ZstdCompressor`（`ZSTD_CCtx` + scratch），避免 per-chunk 线程创建与
+per-block `ZSTD_compress` 临时上下文。VolumeChunk 使用 detached XChaCha20-Poly1305 原地加密 payload，
+避免同时保留等长 plaintext/ciphertext 缓冲；nonce、AAD、tag 和线格式不变。Session 仍是单 writer；
+pool 同时只服务一次 `parallel_for`。`PersonalArchiveReader` 同样在 reader 生命周期复用该 pool，Archive
+chain 的所有底层 Reader 共享一个 pool，线程数不随链深增长；每个 worker 持有 `ZstdDecompressor`
+（`ZSTD_DCtx`）。Reader 先完整认证并原地解密 VolumeChunk payload，
+再把独立 RAW/COMPRESSED canonical 并行写入最终逻辑 Chunk 的预验证、不重叠范围，最后顺序展开 DEDUP；
+不再为每个压缩 block 分配临时输出或复制到最终 Chunk。nonce、AAD、tag 与恢复输出语义不变。
+
 V7 `file_set` 由 `PersonalFileArchiveSession`（`IFileBackupSession`）与 `PersonalFileArchiveReader`
 （`IFileRecoveryPointReader`）实现：entry 先写入 index spool，finalize 时写出 leaf index page 与 Footer；
 Index page 使用独立 HKDF info `MYBACKUP-V7-FILE-INDEX-PAGE`。File stream chunk 默认
@@ -65,7 +82,8 @@ SMB、S3 和 Azure Storage Adapter 还必须实现个人版 Repository 所需的
 一致性 capability；不得把 URI 判断、临时发布或删除重试逻辑泄漏到 Application。具体契约见
 [个人版 Repository 模块](personal_repository.md)。
 
-Archive Reader 分别限制 metadata、chunk stored payload 和展开后的 chunk logical size。ZERO run、压缩块和其它稀疏表示在分配恢复缓冲区前都必须通过 logical size 上限检查。
+Archive Reader 分别限制 metadata、chunk stored payload 和展开后的 chunk logical size。ZERO/FREE run、压缩块、
+DEDUP 引用和其它稀疏表示在分配恢复缓冲区前都必须通过 logical size 与引用图上限检查。
 
 密码 Adapter 使用 Argon2id v1.3 派生 master key、HKDF-SHA256 分离 metadata、Chunk Payload、File Index
 page 和 Sidecar key，并使用 XChaCha20-Poly1305 detached tag；内容散列使用 SHA-256。每个 Chunk 使用独立

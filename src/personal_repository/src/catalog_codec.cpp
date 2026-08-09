@@ -17,7 +17,7 @@ constexpr std::array<std::string_view, 9> kDescriptorKeys = {
     "schema_version",  "kind",           "repository_uuid",
     "created_utc_ms",  "archive_prefix", "catalog_prefix",
     "deletion_prefix", "staging_prefix", "layout_version"};
-constexpr std::array<std::string_view, 23> kCatalogKeys = {
+constexpr std::array<std::string_view, 25> kCatalogKeys = {
     "schema_version",     "kind",
     "repository_uuid",    "file_uuid",
     "backup_set_uuid",    "parent_uuid",
@@ -25,7 +25,8 @@ constexpr std::array<std::string_view, 23> kCatalogKeys = {
     "archive_main_key",   "split_part_count",
     "has_sidecar",        "format_version",
     "created_utc_ms",     "logical_size_bytes",
-    "stored_size_bytes",  "source_count",
+    "stored_size_bytes",  "deduplicated_block_count",
+    "deduplicated_logical_bytes", "source_count",
     "source_volume_ids",  "file_entry_count",
     "file_stream_count",  "structural_state",
     "catalog_generation", "file_selection_fingerprint",
@@ -89,12 +90,15 @@ constexpr std::array<std::string_view, 23> kCatalogKeys = {
     auto created = detail::get_unsigned<std::uint64_t>(root, "created_utc_ms");
     auto logical = detail::get_unsigned<std::uint64_t>(root, "logical_size_bytes");
     auto stored = detail::get_unsigned<std::uint64_t>(root, "stored_size_bytes");
+    auto dedup_blocks = detail::get_unsigned<std::uint64_t>(root, "deduplicated_block_count");
+    auto dedup_bytes = detail::get_unsigned<std::uint64_t>(root, "deduplicated_logical_bytes");
     auto source_count = detail::get_unsigned<std::uint32_t>(root, "source_count");
     auto file_entry_count = detail::get_unsigned<std::uint64_t>(root, "file_entry_count");
     auto file_stream_count = detail::get_unsigned<std::uint64_t>(root, "file_stream_count");
     auto generation = detail::get_unsigned<std::uint64_t>(root, "catalog_generation");
     if (!schema || !part_count || !format_version || !created || !logical || !stored ||
-        !source_count || !file_entry_count || !file_stream_count || !generation) {
+        !dedup_blocks || !dedup_bytes || !source_count || !file_entry_count || !file_stream_count ||
+        !generation) {
         return base::Result<CatalogEntry>::failure(
             detail::corrupt("catalog entry unsigned field is invalid"));
     }
@@ -115,6 +119,8 @@ constexpr std::array<std::string_view, 23> kCatalogKeys = {
         result.created_utc_ms = created.value();
         result.logical_size_bytes = logical.value();
         result.stored_size_bytes = stored.value();
+        result.deduplicated_block_count = dedup_blocks.value();
+        result.deduplicated_logical_bytes = dedup_bytes.value();
         result.source_count = source_count.value();
         result.source_volume_ids = root.at("source_volume_ids").get<std::vector<std::string>>();
         result.file_entry_count = file_entry_count.value();
@@ -188,6 +194,8 @@ base::Result<std::string> encode_catalog_entry_json(const CatalogEntry& entry) {
         {"created_utc_ms", entry.created_utc_ms},
         {"logical_size_bytes", entry.logical_size_bytes},
         {"stored_size_bytes", entry.stored_size_bytes},
+        {"deduplicated_block_count", entry.deduplicated_block_count},
+        {"deduplicated_logical_bytes", entry.deduplicated_logical_bytes},
         {"source_count", entry.source_count},
         {"source_volume_ids", entry.source_volume_ids},
         {"file_entry_count", entry.file_entry_count},

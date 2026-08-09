@@ -97,6 +97,7 @@ encode_supervisor_job_request(const contracts::JobRequest& request) {
             backup["exclude_page_and_hibernation_files"] =
                 request.backup->exclude_page_and_hibernation_files;
             backup["encryption_enabled"] = request.backup->encryption_enabled;
+            backup["deduplication_enabled"] = request.backup->deduplication_enabled;
             if (!request.backup->candidate_parent_uuid.empty()) {
                 backup["candidate_parent_uuid"] = request.backup->candidate_parent_uuid;
             }
@@ -209,6 +210,10 @@ decode_supervisor_worker_event(std::string_view json_text) {
                 if (t.contains("stream_count")) {
                     tr.stream_count = t.at("stream_count").get<std::uint64_t>();
                 }
+                // Worker schema 4 requires explicit ADR-0022 metrics (no default/fallback).
+                tr.deduplicated_block_count = t.at("deduplicated_block_count").get<std::uint64_t>();
+                tr.deduplicated_logical_bytes =
+                    t.at("deduplicated_logical_bytes").get<std::uint64_t>();
                 tr.message_code = t.at("message_code").get<std::string>();
                 tr.warning_codes = t.at("warning_codes").get<std::vector<std::string>>();
                 if (t.contains("partial_restore") && !t.at("partial_restore").is_null()) {

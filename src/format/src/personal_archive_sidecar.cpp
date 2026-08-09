@@ -62,7 +62,7 @@ template <std::size_t Size>
     if (record.state == SidecarBlockState::kData) {
         return true;
     }
-    if (record.state != SidecarBlockState::kZero && record.state != SidecarBlockState::kSkip) {
+    if (record.state != SidecarBlockState::kZero && record.state != SidecarBlockState::kFree) {
         return false;
     }
     return std::all_of(record.hash.begin(), record.hash.end(),

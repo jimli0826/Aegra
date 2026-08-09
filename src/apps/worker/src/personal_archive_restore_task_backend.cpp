@@ -328,6 +328,9 @@ restore_disk_volumes_stage(ports::IRecoveryPointReader& reader, const format::Ma
             return fail_restore(stage, volume_summary.error(), "pipeline_volume");
         }
         summary.restored_bytes += volume_summary.value().restored_bytes;
+        summary.disk_written_bytes += volume_summary.value().disk_written_bytes;
+        summary.free_skipped_bytes += volume_summary.value().free_skipped_bytes;
+        summary.free_range_count += volume_summary.value().free_range_count;
         summary.chunk_count += volume_summary.value().chunk_count;
         summary.peak_buffered_bytes =
             (std::max)(summary.peak_buffered_bytes, volume_summary.value().peak_buffered_bytes);
@@ -337,6 +340,9 @@ restore_disk_volumes_stage(ports::IRecoveryPointReader& reader, const format::Ma
         return fail_restore(stage, flushed.error(), "flush");
     }
     stage.note_bytes("restored_bytes", summary.restored_bytes);
+    stage.note_bytes("disk_written_bytes", summary.disk_written_bytes);
+    stage.note_bytes("free_skipped_bytes", summary.free_skipped_bytes);
+    stage.note_u64("free_ranges", summary.free_range_count);
     stage.note_u64("chunks", summary.chunk_count);
     return base::Result<pipeline::RestoreSummary>::success(summary);
 }
@@ -454,6 +460,9 @@ class PersonalArchiveRestoreTaskBackend final : public IPersonalArchiveRestoreTa
                 return fail_restore(stage, summary.error(), "pipeline_run");
             }
             stage.note_bytes("restored_bytes", summary.value().restored_bytes);
+            stage.note_bytes("disk_written_bytes", summary.value().disk_written_bytes);
+            stage.note_bytes("free_skipped_bytes", summary.value().free_skipped_bytes);
+            stage.note_u64("free_ranges", summary.value().free_range_count);
             stage.note_u64("chunks", summary.value().chunk_count);
             stage.note_bytes("peak_buffer", summary.value().peak_buffered_bytes);
             return summary;

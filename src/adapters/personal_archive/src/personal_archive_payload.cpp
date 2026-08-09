@@ -59,34 +59,32 @@ base::Result<void> protect_archive_chunk(PreparedArchiveChunk& chunk,
     if (!authenticated_data) {
         return base::Result<void>::failure(authenticated_data.error());
     }
-    auto protected_payload =
-        payload_cipher.protect(chunk.payload, authenticated_data.value(), nonce.value());
-    if (!protected_payload) {
-        return base::Result<void>::failure(protected_payload.error());
+    auto tag = payload_cipher.protect_in_place(chunk.payload, authenticated_data.value(),
+                                               nonce.value());
+    if (!tag) {
+        return base::Result<void>::failure(tag.error());
     }
-    auto protected_value = std::move(protected_payload).value();
-    chunk.payload = std::move(protected_value.ciphertext);
-    chunk.header.payload_authentication_tag = protected_value.tag;
+    chunk.header.payload_authentication_tag = tag.value();
     return base::Result<void>::success();
 }
 
-base::Result<std::vector<std::byte>>
+base::Result<void>
 unprotect_archive_chunk(const archive::EncodedBackupHeader& part_header,
                         const archive::ChunkHeader& header,
                         const std::span<const archive::BlockEntry> entries,
-                        const std::span<const std::byte> ciphertext,
+                        const std::span<std::byte> payload,
                         const crypto_sodium::PayloadCipher* payload_cipher) {
     if (payload_cipher == nullptr) {
-        return base::Result<std::vector<std::byte>>::success(
-            std::vector<std::byte>(ciphertext.begin(), ciphertext.end()));
+        return base::Result<void>::success();
     }
     auto authenticated_data =
         make_authenticated_data(part_header, chunk_body_size(header), header, entries);
     if (!authenticated_data) {
-        return base::Result<std::vector<std::byte>>::failure(authenticated_data.error());
+        return base::Result<void>::failure(authenticated_data.error());
     }
-    return payload_cipher->unprotect(ciphertext, authenticated_data.value(), header.payload_nonce,
-                                     header.payload_authentication_tag);
+    return payload_cipher->unprotect_in_place(payload, authenticated_data.value(),
+                                              header.payload_nonce,
+                                              header.payload_authentication_tag);
 }
 
 } // namespace aegra::adapters::personal_archive::detail

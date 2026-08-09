@@ -63,6 +63,8 @@ Json encode_task_result(const contracts::TaskResult& result) {
         {"chunk_count", result.chunk_count},
         {"entry_count", result.entry_count},
         {"stream_count", result.stream_count},
+        {"deduplicated_block_count", result.deduplicated_block_count},
+        {"deduplicated_logical_bytes", result.deduplicated_logical_bytes},
         {"message_code", result.message_code},
         {"warning_codes", result.warning_codes},
         {"partial_restore", nullptr},

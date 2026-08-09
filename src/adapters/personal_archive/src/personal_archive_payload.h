@@ -16,11 +16,11 @@ protect_archive_chunk(PreparedArchiveChunk& chunk,
                       const format::personal_archive::EncodedBackupHeader& part_header,
                       const crypto_sodium::PayloadCipher& payload_cipher);
 
-[[nodiscard]] base::Result<std::vector<std::byte>>
+[[nodiscard]] base::Result<void>
 unprotect_archive_chunk(const format::personal_archive::EncodedBackupHeader& part_header,
                         const format::personal_archive::ChunkHeader& header,
                         std::span<const format::personal_archive::BlockEntry> entries,
-                        std::span<const std::byte> ciphertext,
+                        std::span<std::byte> payload,
                         const crypto_sodium::PayloadCipher* payload_cipher);
 
 } // namespace aegra::adapters::personal_archive::detail

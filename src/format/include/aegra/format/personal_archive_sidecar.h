@@ -32,7 +32,7 @@ enum class SidecarEncryptionMethod : std::uint8_t {
 enum class SidecarBlockState : std::uint8_t {
     kData = 0,
     kZero = 1,
-    kSkip = 2,
+    kFree = 2,
 };
 
 struct SidecarHeader final {

@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     result_incremental_downgrade_reason INTEGER
         CHECK (result_incremental_downgrade_reason IS NULL
                OR result_incremental_downgrade_reason BETWEEN 0 AND 9),
+    schedule_id TEXT NOT NULL DEFAULT '',
     FOREIGN KEY (repository_connection_id)
         REFERENCES repository_connections(connection_id) ON DELETE SET NULL
 );
@@ -83,6 +84,8 @@ CREATE TABLE IF NOT EXISTS schedules (
     next_run_utc_ms INTEGER CHECK (next_run_utc_ms IS NULL OR next_run_utc_ms >= 0),
     exclude_page_and_hibernation_files INTEGER NOT NULL DEFAULT 1
         CHECK (exclude_page_and_hibernation_files IN (0, 1)),
+    deduplication_enabled INTEGER NOT NULL DEFAULT 1
+        CHECK (deduplication_enabled IN (0, 1)),
     encryption_enabled INTEGER NOT NULL DEFAULT 0
         CHECK (encryption_enabled IN (0, 1)),
     archive_password_protected TEXT NOT NULL DEFAULT '',

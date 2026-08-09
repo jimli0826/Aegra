@@ -1,5 +1,7 @@
 #include "aegra/adapters/personal_archive/personal_archive.h"
 
+#include "personal_archive_block_worker_pool.h"
+
 #include "aegra/base/error.h"
 
 #include <algorithm>
@@ -23,6 +25,57 @@ struct ChainRecord final {
     ports::ChunkDescriptor descriptor;
     std::vector<OverlaySlice> overlays;
 };
+
+void remove_free_range(std::vector<ports::ChunkFreeRange>& ranges, const std::uint64_t offset,
+                       const std::uint64_t size) {
+    const auto end = offset + size;
+    std::vector<ports::ChunkFreeRange> result;
+    result.reserve(ranges.size() + 1);
+    for (const auto& range : ranges) {
+        const auto range_end = range.offset + range.size;
+        if (range_end <= offset || range.offset >= end) {
+            result.push_back(range);
+            continue;
+        }
+        if (range.offset < offset) {
+            result.push_back({range.offset, offset - range.offset});
+        }
+        if (range_end > end) {
+            result.push_back({end, range_end - end});
+        }
+    }
+    ranges = std::move(result);
+}
+
+void add_free_range(std::vector<ports::ChunkFreeRange>& ranges, ports::ChunkFreeRange added) {
+    ranges.push_back(added);
+    std::ranges::sort(ranges, {}, &ports::ChunkFreeRange::offset);
+    std::vector<ports::ChunkFreeRange> merged;
+    merged.reserve(ranges.size());
+    for (const auto& range : ranges) {
+        if (!merged.empty() && merged.back().offset + merged.back().size == range.offset) {
+            merged.back().size += range.size;
+        } else {
+            merged.push_back(range);
+        }
+    }
+    ranges = std::move(merged);
+}
+
+void apply_free_overlay(ChainRecord& record, const ports::ChunkDescriptor& overlay,
+                        const OverlaySlice& slice) {
+    remove_free_range(record.descriptor.free_ranges, slice.target_offset, slice.size);
+    const auto source_end = slice.source_offset + slice.size;
+    for (const auto& range : overlay.free_ranges) {
+        const auto range_end = range.offset + range.size;
+        const auto start = (std::max)(range.offset, slice.source_offset);
+        const auto end = (std::min)(range_end, source_end);
+        if (start < end) {
+            add_free_range(record.descriptor.free_ranges,
+                           {slice.target_offset + start - slice.source_offset, end - start});
+        }
+    }
+}
 
 [[nodiscard]] base::Error error(base::ErrorCode code, std::string message) {
     return {code, std::move(message)};
@@ -63,27 +116,6 @@ struct ChainRecord final {
             error(base::ErrorCode::kConflict, "archive chain source geometry changed"));
     }
     return base::Result<void>::success();
-}
-
-[[nodiscard]] base::Result<std::vector<std::unique_ptr<PersonalArchiveReader>>>
-open_layers(const ArchiveChainOpenRequest& request) {
-    if (request.layers.empty() || request.maximum_chain_depth == 0 ||
-        request.layers.size() > request.maximum_chain_depth) {
-        return base::Result<std::vector<std::unique_ptr<PersonalArchiveReader>>>::failure(
-            error(base::ErrorCode::kInvalidArgument, "archive chain request is invalid"));
-    }
-    std::vector<std::unique_ptr<PersonalArchiveReader>> result;
-    result.reserve(request.layers.size());
-    for (const auto& layer_request : request.layers) {
-        auto layer = PersonalArchiveReader::open(layer_request);
-        if (!layer) {
-            return base::Result<std::vector<std::unique_ptr<PersonalArchiveReader>>>::failure(
-                layer.error());
-        }
-        result.push_back(std::move(layer).value());
-    }
-    return base::Result<std::vector<std::unique_ptr<PersonalArchiveReader>>>::success(
-        std::move(result));
 }
 
 [[nodiscard]] base::Result<void>
@@ -143,8 +175,10 @@ void append_overlay(std::vector<ChainRecord>& records, const std::size_t layer_i
         }
         const auto start = (std::max)(base_start, overlay.logical_offset);
         const auto end = (std::min)(base_end, overlay_end);
-        record.overlays.push_back({layer_index, overlay.chunk_index, start - overlay.logical_offset,
-                                   start - base_start, end - start});
+        OverlaySlice slice{layer_index, overlay.chunk_index, start - overlay.logical_offset,
+                           start - base_start, end - start};
+        record.overlays.push_back(slice);
+        apply_free_overlay(record, overlay, slice);
     }
 }
 
@@ -186,6 +220,29 @@ apply_overlay(const OverlaySlice& overlay,
 
 } // namespace
 
+base::Result<std::vector<std::unique_ptr<PersonalArchiveReader>>>
+PersonalArchiveChainReader::open_layers(
+    const ArchiveChainOpenRequest& request,
+    const std::shared_ptr<detail::BlockWorkerPool>& block_workers) {
+    if (request.layers.empty() || request.maximum_chain_depth == 0 ||
+        request.layers.size() > request.maximum_chain_depth) {
+        return base::Result<std::vector<std::unique_ptr<PersonalArchiveReader>>>::failure(
+            error(base::ErrorCode::kInvalidArgument, "archive chain request is invalid"));
+    }
+    std::vector<std::unique_ptr<PersonalArchiveReader>> result;
+    result.reserve(request.layers.size());
+    for (const auto& layer_request : request.layers) {
+        auto layer = PersonalArchiveReader::open_with_workers(layer_request, block_workers);
+        if (!layer) {
+            return base::Result<std::vector<std::unique_ptr<PersonalArchiveReader>>>::failure(
+                layer.error());
+        }
+        result.push_back(std::move(layer).value());
+    }
+    return base::Result<std::vector<std::unique_ptr<PersonalArchiveReader>>>::success(
+        std::move(result));
+}
+
 struct PersonalArchiveChainReader::Impl final {
     format::Manifest manifest;
     std::vector<std::unique_ptr<PersonalArchiveReader>> layers;
@@ -200,7 +257,9 @@ PersonalArchiveChainReader::~PersonalArchiveChainReader() = default;
 
 base::Result<std::unique_ptr<PersonalArchiveChainReader>>
 PersonalArchiveChainReader::open(const ArchiveChainOpenRequest& request) {
-    auto layers = open_layers(request);
+    auto block_workers =
+        std::make_shared<detail::BlockWorkerPool>(detail::default_block_worker_count());
+    auto layers = open_layers(request, block_workers);
     if (!layers) {
         return base::Result<std::unique_ptr<PersonalArchiveChainReader>>::failure(layers.error());
     }

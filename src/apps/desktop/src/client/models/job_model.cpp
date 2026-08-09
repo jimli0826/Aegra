@@ -134,20 +134,6 @@ namespace {
 
 constexpr std::int64_t kOperationBackup = 1;
 
-[[nodiscard]] bool source_ids_overlap(const QStringList& job_sources,
-                                      const QVariantList& schedule_sources) {
-    if (job_sources.isEmpty() || schedule_sources.isEmpty()) {
-        return false;
-    }
-    for (const auto& schedule_source : schedule_sources) {
-        const auto id = schedule_source.toString();
-        if (!id.isEmpty() && job_sources.contains(id)) {
-            return true;
-        }
-    }
-    return false;
-}
-
 [[nodiscard]] QString status_key_for_state(const std::int64_t state) noexcept {
     if (state == kStateQueued || state == kStateRunning || state == kStateCancelling) {
         return QStringLiteral("running");
@@ -163,23 +149,19 @@ constexpr std::int64_t kOperationBackup = 1;
 
 } // namespace
 
-QVariantMap JobModel::latestBackupStatus(const QVariantList& source_ids,
-                                         const QString& connection_id) const {
+QVariantMap JobModel::latestBackupStatus(const QString& schedule_id) const {
     QVariantMap empty{{QStringLiteral("statusKey"), QStringLiteral("none")},
                       {QStringLiteral("progressPercent"), 0},
                       {QStringLiteral("stateText"), QString{}},
                       {QStringLiteral("stateValue"), 0}};
-    if (connection_id.isEmpty() || source_ids.isEmpty()) {
+    if (schedule_id.isEmpty()) {
         return empty;
     }
 
     const JobRow* best_active = nullptr;
     const JobRow* best_terminal = nullptr;
     for (const auto& row : rows_) {
-        if (row.operation != kOperationBackup || row.connection_id != connection_id) {
-            continue;
-        }
-        if (!source_ids_overlap(row.source_ids, source_ids)) {
+        if (row.operation != kOperationBackup || row.schedule_id != schedule_id) {
             continue;
         }
         if (is_active_state(row.state)) {
@@ -593,6 +575,7 @@ QVector<JobRow> jobs_from_variant_list(const QVariantList& items) {
         for (const auto& source_id : map.value(QStringLiteral("sourceIds")).toList()) {
             row.source_ids.push_back(source_id.toString());
         }
+        row.schedule_id = map.value(QStringLiteral("scheduleId")).toString();
         row.connection_id = map.value(QStringLiteral("connectionId")).toString();
         row.source_name = map.value(QStringLiteral("sourceName")).toString();
         row.destination_name = map.value(QStringLiteral("destinationName")).toString();

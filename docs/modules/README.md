@@ -33,6 +33,7 @@
 | 文件集增量开发计划 | [../development/FILE_SET_INCREMENTAL_DEVELOPMENT_PLAN.md](../development/FILE_SET_INCREMENTAL_DEVELOPMENT_PLAN.md) | FI0-FI10 历史工作包与 metadata signature 改造计划入口 |
 | Metadata signature 改造计划 | [../development/FILE_SET_METADATA_SIGNATURE_DEVELOPMENT_PLAN.md](../development/FILE_SET_METADATA_SIGNATURE_DEVELOPMENT_PLAN.md) | ADR-0020 的 agent 工作包、文件所有权、构建与人工验收 |
 | 文件集产品上限与稳定码 | [../development/FILE_SET_PRODUCT_LIMITS_AND_CODES.md](../development/FILE_SET_PRODUCT_LIMITS_AND_CODES.md) | 上限、message_code、人工损坏/失败矩阵 |
+| Volume Set 去重设计 | [../architecture/VOLUME_SET_DEDUPLICATION.md](../architecture/VOLUME_SET_DEDUPLICATION.md) | 单 VolumeChunk 固定块去重、增量协作、恢复与指标 |
 | 个人版 `.bkf` V7 | [../format/PERSONAL_BACKUP_FORMAT_V7.md](../format/PERSONAL_BACKUP_FORMAT_V7.md) | volume_set/file_set Archive 字节布局与 File Index |
 | Repository Catalog V2 | [../format/PERSONAL_REPOSITORY_FORMAT_V2.md](../format/PERSONAL_REPOSITORY_FORMAT_V2.md) | content_kind 与文件统计可重建摘要 |
 
@@ -51,4 +52,4 @@
 
 ## 当前阶段
 
-阶段 1 至阶段 13 已建立核心模块、个人版 Archive/Repository、Windows 数据源与 Worker、Service IPC、SQLite 控制面和 Qt Desktop 的主要纵向切片。当前 S4 已完成 Inventory、Repository connection 和多连接 Recovery Point API 并接入 Service composition root。file_set 首版工作包 **F0–F10 已完成**（V7 Archive、Catalog V2、Service V4、Worker Full 备份/Verify/选择性恢复、Desktop UX、发布门禁）；文件 Incremental 已按 ADR-0020 切换为 metadata signature（同路径 `write_time + logical_size`），历史 USN 合同、Port 和 Windows reader 已删除。ADR-0021/FS1-FS5 已增加 FAT32 VSS snapshot source 与能力降级恢复目标；FAT32 不保存 stable File ID/ACL，目标单文件上限为 4 GiB - 1。本期仍不支持 reparse、hard link、sparse 或 ADS。仓库不维护测试用例，阶段验收使用生产 Target 构建、静态/架构检查和必要的人工运行或 UI 验证。
+阶段 1 至阶段 13 已建立核心模块、个人版 Archive/Repository、Windows 数据源与 Worker、Service IPC、SQLite 控制面和 Qt Desktop 的主要纵向切片。当前 S4 已完成 Inventory、Repository connection 和多连接 Recovery Point API 并接入 Service composition root。file_set 首版工作包 **F0–F10 已完成**（V7 Archive、Catalog V2、Service V4、Worker Full 备份/Verify/选择性恢复、Desktop UX、发布门禁）；文件 Incremental 已按 ADR-0020 切换为 metadata signature（同路径 `write_time + logical_size`），历史 USN 合同、Port 和 Windows reader 已删除。ADR-0021/FS1-FS5 已增加 FAT32 VSS snapshot source 与能力降级恢复目标；FAT32 不保存 stable File ID/ACL，目标单文件上限为 4 GiB - 1。ADR-0022 已冻结 Volume Set 单 Chunk 去重设计，生产实现尚未开始。本期仍不支持 reparse、hard link、sparse 或 ADS。仓库不维护测试用例，阶段验收使用生产 Target 构建、静态/架构检查和必要的人工运行或 UI 验证。

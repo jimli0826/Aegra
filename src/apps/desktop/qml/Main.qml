@@ -169,7 +169,11 @@ Window {
 
                 Item {
                     id: pageContainer
-                    anchors.fill: parent
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.top: parent.top
+                    anchors.topMargin: 50
                     clip: true
                     property int currentIndex: 0
                     property int previousIndex: 0
@@ -317,7 +321,7 @@ Window {
             MouseArea {
                 anchors.fill: parent
                 anchors.topMargin: window.canResize ? window.resizeBorder : 0
-                anchors.rightMargin: 128
+                anchors.rightMargin: 200
                 onPressed: window.startSystemMove()
                 onDoubleClicked: {
                     if (window.visibility === Window.Maximized)
@@ -332,6 +336,46 @@ Window {
                 anchors.rightMargin: 10
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 4
+
+                // Global Notification Bell Button (immediately to the left of minimize button)
+                Rectangle {
+                    id: globalNotifBtn
+                    width: 32
+                    height: 28
+                    radius: 8
+                    color: globalNotifMouse.pressed ? Theme.colorButtonHover : (globalNotifMouse.containsMouse ? Theme.colorHover : "transparent")
+                    border.width: 0
+
+                    NavIcon {
+                        anchors.centerIn: parent
+                        width: 16
+                        height: 16
+                        name: "bell"
+                        color: globalNotifMouse.containsMouse ? Theme.colorAccentBlue : Theme.colorTextGrey
+                    }
+
+                    Rectangle {
+                        width: 7
+                        height: 7
+                        radius: 3.5
+                        color: "#EE6476"
+                        anchors.top: parent.top
+                        anchors.right: parent.right
+                        anchors.topMargin: 3
+                        anchors.rightMargin: 3
+                    }
+
+                    MouseArea {
+                        id: globalNotifMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            pageContainer.switchPage(5)
+                        }
+                    }
+                }
+
                 WindowButton {
                     role: "minimize"
                     onClicked: window.showMinimized()

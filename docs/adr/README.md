@@ -38,6 +38,9 @@ File Index 持久化二级索引（Entry ID / Stream / Chunk）、internal child
 FAT32 文件集 VSS 源、nullable stable identity 与能力降级恢复目标见
 [ADR-0021](0021-fat32-file-set-source-and-restore.md)。
 
+个人版 Volume Set 单物理 Chunk 固定块去重、引用域与安全边界见
+[ADR-0022](0022-volume-set-chunk-local-deduplication.md)。
+
 ## 状态
 
 - `Proposed`：讨论中，不构成实现依据。

@@ -1,5 +1,6 @@
 #include "aegra/adapters/personal_archive/personal_archive.h"
 
+#include "personal_archive_block_worker_pool.h"
 #include "personal_archive_payload.h"
 #include "personal_archive_preamble.h"
 #include "personal_archive_shape_validation.h"
@@ -10,6 +11,7 @@
 #include "aegra/format/personal_archive.h"
 
 #include <algorithm>
+#include <cstring>
 #include <fstream>
 #include <iomanip>
 #include <limits>
@@ -56,6 +58,8 @@ struct EntryLogicalRange final {
 
 struct ScanStatistics final {
     std::uint64_t payload_size{0};
+    std::uint64_t deduplicated_block_count{0};
+    std::uint64_t deduplicated_logical_bytes{0};
 };
 
 struct PartReadRange final {
@@ -73,6 +77,11 @@ struct ArchiveScanState final {
 struct ScannedPart final {
     bool has_footer{false};
     archive::BackupFooter footer;
+};
+
+struct EntryOutputRange final {
+    std::size_t offset{0};
+    std::size_t size{0};
 };
 
 [[nodiscard]] base::Error error(base::ErrorCode code, std::string message) {
@@ -214,10 +223,12 @@ read_entries(std::ifstream& input, const std::uint64_t offset, const std::uint32
         return base::Result<void>::failure(
             error(base::ErrorCode::kCorruptData, "archive block index is not sequential"));
     }
-    if (entry.flags == archive::kBlockFlagZero) {
-        if (entry.data_offset_or_reference != 0) {
-            return base::Result<void>::failure(
-                error(base::ErrorCode::kCorruptData, "zero block contains a payload offset"));
+    if (entry.flags == archive::kBlockFlagZero || entry.flags == archive::kBlockFlagFree ||
+        entry.flags == archive::kBlockFlagDedup) {
+        // ZERO/FREE/DEDUP carry no payload; DEDUP ref_index is validated separately.
+        if (entry.flags != archive::kBlockFlagDedup && entry.data_offset_or_reference != 0) {
+            return base::Result<void>::failure(error(
+                base::ErrorCode::kCorruptData, "zero or free block contains a payload offset"));
         }
         return base::Result<void>::success();
     }
@@ -233,7 +244,9 @@ read_entries(std::ifstream& input, const std::uint64_t offset, const std::uint32
 }
 
 [[nodiscard]] std::uint64_t entry_block_count(const archive::BlockEntry& entry) noexcept {
-    return entry.flags == archive::kBlockFlagZero ? entry.logical_size : 1;
+    return entry.flags == archive::kBlockFlagZero || entry.flags == archive::kBlockFlagFree
+               ? entry.logical_size
+               : 1;
 }
 
 [[nodiscard]] base::Result<EntryLogicalRange>
@@ -270,22 +283,70 @@ validate_stored_entry_size(const archive::BlockEntry& entry, const std::uint64_t
         error(base::ErrorCode::kCorruptData, "compressed archive block size is invalid"));
 }
 
-[[nodiscard]] base::Result<std::uint64_t> validate_entry_size(const archive::BlockEntry& entry,
-                                                              const std::uint32_t block_size,
-                                                              const std::uint64_t volume_size) {
+[[nodiscard]] base::Result<std::uint64_t> geometric_entry_bytes(const archive::BlockEntry& entry,
+                                                                const std::uint32_t block_size,
+                                                                const std::uint64_t volume_size) {
     auto range = validate_entry_range(entry, block_size, volume_size);
     if (!range) {
         return base::Result<std::uint64_t>::failure(range.error());
     }
-    if (entry.flags == archive::kBlockFlagZero) {
+    if (entry.flags == archive::kBlockFlagZero || entry.flags == archive::kBlockFlagFree) {
         const auto end_block = entry.logical_block_index + range.value().block_count;
         const auto logical_end =
             end_block == range.value().total_blocks ? volume_size : end_block * block_size;
         return base::Result<std::uint64_t>::success(logical_end - range.value().offset);
     }
-    const auto logical_size =
-        (std::min)(static_cast<std::uint64_t>(block_size), volume_size - range.value().offset);
-    return validate_stored_entry_size(entry, logical_size);
+    return base::Result<std::uint64_t>::success(
+        (std::min)(static_cast<std::uint64_t>(block_size), volume_size - range.value().offset));
+}
+
+[[nodiscard]] base::Result<std::uint64_t> validate_entry_size(const archive::BlockEntry& entry,
+                                                              const std::uint32_t block_size,
+                                                              const std::uint64_t volume_size) {
+    auto logical_size = geometric_entry_bytes(entry, block_size, volume_size);
+    if (!logical_size) {
+        return logical_size;
+    }
+    if (entry.flags == archive::kBlockFlagZero || entry.flags == archive::kBlockFlagFree ||
+        entry.flags == archive::kBlockFlagDedup) {
+        return logical_size;
+    }
+    return validate_stored_entry_size(entry, logical_size.value());
+}
+
+[[nodiscard]] base::Result<void>
+validate_dedup_reference(const std::vector<archive::BlockEntry>& entries,
+                         const std::size_t entry_index, const std::uint32_t block_size,
+                         const std::uint64_t volume_size, const bool header_dedup_enabled) {
+    const auto& entry = entries[entry_index];
+    if (!header_dedup_enabled) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kCorruptData, "dedup entry without header dedup flag"));
+    }
+    const auto ref_index = entry.data_offset_or_reference;
+    if (ref_index >= entry_index) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kCorruptData, "dedup forward or self reference"));
+    }
+    if (ref_index >= entries.size()) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kCorruptData, "dedup reference out of range"));
+    }
+    const auto& target = entries[static_cast<std::size_t>(ref_index)];
+    if (!archive::is_canonical_dedup_target(target)) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kCorruptData, "dedup target is not raw or compressed"));
+    }
+    auto self_size = geometric_entry_bytes(entry, block_size, volume_size);
+    auto target_size = geometric_entry_bytes(target, block_size, volume_size);
+    if (!self_size || !target_size) {
+        return base::Result<void>::failure(!self_size ? self_size.error() : target_size.error());
+    }
+    if (self_size.value() != target_size.value()) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kCorruptData, "dedup target length mismatch"));
+    }
+    return base::Result<void>::success();
 }
 
 [[nodiscard]] base::Result<void>
@@ -360,6 +421,17 @@ validate_chunk_sequence(const ChunkRecord& record, const ScanResult& scan, const
         return base::Result<void>::failure(
             error(base::ErrorCode::kCorruptData, "archive statistics do not match footer"));
     }
+    const bool header_dedup = (preamble.header.flags & archive::kBackupFlagDedup) != 0;
+    if (!header_dedup &&
+        (footer.deduplicated_block_count != 0 || footer.deduplicated_logical_bytes != 0)) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kCorruptData, "footer dedup metrics without header flag"));
+    }
+    if (statistics.deduplicated_block_count != footer.deduplicated_block_count ||
+        statistics.deduplicated_logical_bytes != footer.deduplicated_logical_bytes) {
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kCorruptData, "archive dedup metrics do not match footer"));
+    }
     if (footer.file_uuid != preamble.header.file_uuid) {
         return base::Result<void>::failure(
             error(base::ErrorCode::kCorruptData, "archive footer file UUID does not match"));
@@ -369,11 +441,14 @@ validate_chunk_sequence(const ChunkRecord& record, const ScanResult& scan, const
 
 [[nodiscard]] base::Result<ports::ChunkDescriptor>
 validate_entries(const std::vector<archive::BlockEntry>& entries, const archive::ChunkHeader& chunk,
-                 const std::uint32_t block_size, const std::uint64_t volume_size) {
+                 const std::uint32_t block_size, const std::uint64_t volume_size,
+                 const bool header_dedup_enabled, ScanStatistics& statistics) {
     std::uint64_t logical_size = 0;
     std::uint64_t stored_size = 0;
+    std::vector<ports::ChunkFreeRange> free_ranges;
     std::uint64_t expected_block = entries.front().logical_block_index;
-    for (const auto& entry : entries) {
+    for (std::size_t index = 0; index < entries.size(); ++index) {
+        const auto& entry = entries[index];
         auto mapping =
             validate_entry_mapping(entry, expected_block, stored_size, chunk.payload_size);
         auto entry_size = validate_entry_size(entry, block_size, volume_size);
@@ -381,9 +456,28 @@ validate_entries(const std::vector<archive::BlockEntry>& entries, const archive:
             return base::Result<ports::ChunkDescriptor>::failure(!mapping ? mapping.error()
                                                                           : entry_size.error());
         }
+        if (entry.flags == archive::kBlockFlagDedup) {
+            auto dedup = validate_dedup_reference(entries, index, block_size, volume_size,
+                                                  header_dedup_enabled);
+            if (!dedup) {
+                return base::Result<ports::ChunkDescriptor>::failure(dedup.error());
+            }
+            if (statistics.deduplicated_block_count ==
+                    (std::numeric_limits<std::uint64_t>::max)() ||
+                statistics.deduplicated_logical_bytes >
+                    (std::numeric_limits<std::uint64_t>::max)() - entry_size.value()) {
+                return base::Result<ports::ChunkDescriptor>::failure(
+                    error(base::ErrorCode::kCorruptData, "archive dedup metrics overflow"));
+            }
+            ++statistics.deduplicated_block_count;
+            statistics.deduplicated_logical_bytes += entry_size.value();
+        }
         if (entry_size.value() > (std::numeric_limits<std::uint64_t>::max)() - logical_size) {
             return base::Result<ports::ChunkDescriptor>::failure(
                 error(base::ErrorCode::kCorruptData, "archive chunk logical size overflows"));
+        }
+        if (entry.flags == archive::kBlockFlagFree) {
+            free_ranges.push_back({logical_size, entry_size.value()});
         }
         logical_size += entry_size.value();
         stored_size += entry.stored_size;
@@ -395,13 +489,14 @@ validate_entries(const std::vector<archive::BlockEntry>& entries, const archive:
     }
     return base::Result<ports::ChunkDescriptor>::success(
         {chunk.chunk_index, entries.front().logical_block_index * block_size, logical_size,
-         logical_size});
+         logical_size, 0, std::move(free_ranges)});
 }
 
 [[nodiscard]] base::Result<ChunkRecord>
 read_chunk_record(std::ifstream& input, const std::uint64_t offset,
                   const archive::EncodedBackupHeader& part_header, const ParsedPreamble& preamble,
-                  const PartReadRange& part, const ArchiveReadLimits& limits) {
+                  const PartReadRange& part, const ArchiveReadLimits& limits,
+                  ScanStatistics& statistics) {
     auto prefix_bytes = read_exact(input, offset, archive::kArchiveRecordPrefixSize);
     if (!prefix_bytes) {
         return base::Result<ChunkRecord>::failure(prefix_bytes.error());
@@ -456,8 +551,10 @@ read_chunk_record(std::ifstream& input, const std::uint64_t offset,
         return base::Result<ChunkRecord>::failure(
             error(base::ErrorCode::kCorruptData, "archive chunk extends beyond footer"));
     }
-    auto descriptor = validate_entries(entries.value(), chunk.value(), preamble.header.block_size,
-                                       volume->total_size);
+    const bool header_dedup = (preamble.header.flags & archive::kBackupFlagDedup) != 0;
+    auto descriptor =
+        validate_entries(entries.value(), chunk.value(), preamble.header.block_size,
+                         volume->total_size, header_dedup, statistics);
     if (!descriptor) {
         return base::Result<ChunkRecord>::failure(descriptor.error());
     }
@@ -475,7 +572,8 @@ read_chunk_record(std::ifstream& input, const std::uint64_t offset,
 append_chunk(std::ifstream& input, const std::uint64_t offset,
              const archive::EncodedBackupHeader& part_header, const PartReadRange& part,
              ArchiveScanState& state) {
-    auto record = read_chunk_record(input, offset, part_header, state.preamble, part, state.limits);
+    auto record = read_chunk_record(input, offset, part_header, state.preamble, part, state.limits,
+                                    state.statistics);
     if (!record) {
         return base::Result<std::uint64_t>::failure(record.error());
     }
@@ -652,62 +750,139 @@ append_chunk(std::ifstream& input, const std::uint64_t offset,
         error(base::ErrorCode::kCorruptData, "archive exceeds the split part limit"));
 }
 
-[[nodiscard]] base::Result<std::vector<std::byte>>
-read_entry_payload(const std::span<const std::byte> chunk_payload, const archive::BlockEntry& entry,
-                   const std::uint32_t block_size, const std::uint64_t logical_size) {
-    auto entry_size = validate_entry_size(entry, block_size, logical_size);
-    if (!entry_size) {
-        return base::Result<std::vector<std::byte>>::failure(entry_size.error());
+[[nodiscard]] base::Result<std::vector<EntryOutputRange>>
+make_output_ranges(const ChunkRecord& record, const std::uint32_t block_size,
+                   const std::uint64_t volume_size) {
+    std::vector<EntryOutputRange> ranges;
+    ranges.reserve(record.entries.size());
+    std::size_t output_offset = 0;
+    for (const auto& entry : record.entries) {
+        auto entry_size = validate_entry_size(entry, block_size, volume_size);
+        if (!entry_size) {
+            return base::Result<std::vector<EntryOutputRange>>::failure(entry_size.error());
+        }
+        if (entry_size.value() > (std::numeric_limits<std::size_t>::max)() - output_offset) {
+            return base::Result<std::vector<EntryOutputRange>>::failure(
+                error(base::ErrorCode::kCorruptData, "archive chunk expanded size overflows"));
+        }
+        const auto size = static_cast<std::size_t>(entry_size.value());
+        ranges.push_back({output_offset, size});
+        output_offset += size;
     }
-    if (entry.flags == archive::kBlockFlagZero) {
-        return base::Result<std::vector<std::byte>>::success(
-            std::vector<std::byte>(static_cast<std::size_t>(entry_size.value()), std::byte{0}));
+    if (output_offset != record.descriptor.logical_size) {
+        return base::Result<std::vector<EntryOutputRange>>::failure(
+            error(base::ErrorCode::kCorruptData, "archive chunk expanded size is invalid"));
     }
-    const auto stored = chunk_payload.subspan(
-        static_cast<std::size_t>(entry.data_offset_or_reference), entry.stored_size);
-    if (entry.flags == archive::kBlockFlagRaw) {
-        return base::Result<std::vector<std::byte>>::success(
-            std::vector<std::byte>(stored.begin(), stored.end()));
-    }
-    return compression_zstd::decompress(stored, static_cast<std::size_t>(entry_size.value()),
-                                        block_size);
+    return base::Result<std::vector<EntryOutputRange>>::success(std::move(ranges));
 }
 
 [[nodiscard]] base::Result<std::vector<std::byte>>
-read_record_payload(const ChunkRecord& record, const std::uint32_t block_size,
-                    const std::uint64_t logical_size, const base::CancellationToken& cancellation,
-                    const crypto_sodium::PayloadCipher* payload_cipher) {
+read_authenticated_payload(const ChunkRecord& record,
+                           const crypto_sodium::PayloadCipher* payload_cipher) {
     std::ifstream input(record.part_path, std::ios::binary);
     if (!input) {
         return base::Result<std::vector<std::byte>>::failure(
             error(base::ErrorCode::kIoFailure, "failed to reopen personal archive"));
-    }
-    if (cancellation.stop_requested()) {
-        return base::Result<std::vector<std::byte>>::failure(
-            error(base::ErrorCode::kCancelled, "restore cancelled"));
     }
     auto ciphertext = read_exact(input, record.payload_offset,
                                  static_cast<std::size_t>(record.stored_payload_size));
     if (!ciphertext) {
         return base::Result<std::vector<std::byte>>::failure(ciphertext.error());
     }
-    auto plaintext = detail::unprotect_archive_chunk(
-        record.part_header, record.header, record.entries, ciphertext.value(), payload_cipher);
+    if (payload_cipher == nullptr) {
+        return base::Result<std::vector<std::byte>>::success(std::move(ciphertext).value());
+    }
+    auto decrypted = detail::unprotect_archive_chunk(record.part_header, record.header,
+                                                      record.entries, ciphertext.value(),
+                                                      payload_cipher);
+    if (!decrypted) {
+        return base::Result<std::vector<std::byte>>::failure(decrypted.error());
+    }
+    return base::Result<std::vector<std::byte>>::success(std::move(ciphertext).value());
+}
+
+[[nodiscard]] base::Result<void>
+expand_canonical_entries(const ChunkRecord& record, const std::span<const std::byte> plaintext,
+                         const std::span<const EntryOutputRange> ranges,
+                         const std::uint32_t block_size, std::vector<std::byte>& result,
+                         detail::BlockWorkerPool& workers,
+                         const base::CancellationToken& cancellation) {
+    return workers.parallel_for(
+        record.entries.size(),
+        [&](const std::size_t index, detail::BlockWorkerLocal& local) -> base::Result<void> {
+            if (cancellation.stop_requested()) {
+                return base::Result<void>::failure(
+                    error(base::ErrorCode::kCancelled, "restore cancelled"));
+            }
+            const auto& entry = record.entries[index];
+            if (entry.flags == archive::kBlockFlagZero || entry.flags == archive::kBlockFlagFree ||
+                entry.flags == archive::kBlockFlagDedup) {
+                return base::Result<void>::success();
+            }
+            const auto stored = plaintext.subspan(
+                static_cast<std::size_t>(entry.data_offset_or_reference), entry.stored_size);
+            const auto output =
+                std::span<std::byte>(result).subspan(ranges[index].offset, ranges[index].size);
+            if (entry.flags == archive::kBlockFlagRaw) {
+                std::memcpy(output.data(), stored.data(), output.size());
+                return base::Result<void>::success();
+            }
+            return local.decompressor.decompress_into(stored, output, block_size);
+        });
+}
+
+[[nodiscard]] base::Result<void>
+expand_dedup_entries(const ChunkRecord& record, const std::span<const EntryOutputRange> ranges,
+                     std::vector<std::byte>& result) {
+    for (std::size_t index = 0; index < record.entries.size(); ++index) {
+        const auto& entry = record.entries[index];
+        if (entry.flags != archive::kBlockFlagDedup) {
+            continue;
+        }
+        const auto ref = static_cast<std::size_t>(entry.data_offset_or_reference);
+        if (ref >= index || (record.entries[ref].flags != archive::kBlockFlagRaw &&
+                             record.entries[ref].flags != archive::kBlockFlagCompressed) ||
+            ranges[ref].size != ranges[index].size) {
+            return base::Result<void>::failure(
+                error(base::ErrorCode::kCorruptData, "dedup canonical is unavailable"));
+        }
+        std::memcpy(result.data() + ranges[index].offset, result.data() + ranges[ref].offset,
+                    ranges[index].size);
+    }
+    return base::Result<void>::success();
+}
+
+[[nodiscard]] base::Result<std::vector<std::byte>>
+read_record_payload(const ChunkRecord& record, const std::uint32_t block_size,
+                    const std::uint64_t volume_size, const base::CancellationToken& cancellation,
+                    const crypto_sodium::PayloadCipher* payload_cipher,
+                    detail::BlockWorkerPool& workers) {
+    if (cancellation.stop_requested()) {
+        return base::Result<std::vector<std::byte>>::failure(
+            error(base::ErrorCode::kCancelled, "restore cancelled"));
+    }
+    // Authenticate AEAD before releasing any current-chunk data to the sink.
+    auto plaintext = read_authenticated_payload(record, payload_cipher);
     if (!plaintext) {
         return base::Result<std::vector<std::byte>>::failure(plaintext.error());
     }
-    std::vector<std::byte> result;
-    result.reserve(static_cast<std::size_t>(record.descriptor.logical_size));
-    for (const auto& entry : record.entries) {
-        if (cancellation.stop_requested()) {
-            return base::Result<std::vector<std::byte>>::failure(
-                error(base::ErrorCode::kCancelled, "restore cancelled"));
-        }
-        auto payload = read_entry_payload(plaintext.value(), entry, block_size, logical_size);
-        if (!payload) {
-            return base::Result<std::vector<std::byte>>::failure(payload.error());
-        }
-        result.insert(result.end(), payload.value().begin(), payload.value().end());
+    if (record.descriptor.logical_size > (std::numeric_limits<std::size_t>::max)()) {
+        return base::Result<std::vector<std::byte>>::failure(
+            error(base::ErrorCode::kCorruptData, "archive chunk logical size exceeds process limit"));
+    }
+    auto ranges = make_output_ranges(record, block_size, volume_size);
+    if (!ranges) {
+        return base::Result<std::vector<std::byte>>::failure(ranges.error());
+    }
+    std::vector<std::byte> result(static_cast<std::size_t>(record.descriptor.logical_size));
+    auto canonicals = expand_canonical_entries(record, plaintext.value(), ranges.value(),
+                                               block_size, result, workers, cancellation);
+    if (!canonicals) {
+        return base::Result<std::vector<std::byte>>::failure(canonicals.error());
+    }
+    auto deduplicated = expand_dedup_entries(record, ranges.value(), result);
+    if (!deduplicated) {
+        return base::Result<std::vector<std::byte>>::failure(deduplicated.error());
     }
     return base::Result<std::vector<std::byte>>::success(std::move(result));
 }
@@ -715,12 +890,16 @@ read_record_payload(const ChunkRecord& record, const std::uint32_t block_size,
 } // namespace
 
 struct PersonalArchiveReader::Impl final {
+    explicit Impl(std::shared_ptr<detail::BlockWorkerPool> workers)
+        : block_workers(std::move(workers)) {}
+
     format::Manifest manifest;
     ArchiveIdentity identity;
     std::uint32_t block_size{0};
     std::uint64_t logical_size{0};
     std::vector<ChunkRecord> records;
     std::unique_ptr<crypto_sodium::PayloadCipher> payload_cipher;
+    std::shared_ptr<detail::BlockWorkerPool> block_workers;
 };
 
 PersonalArchiveReader::PersonalArchiveReader(std::unique_ptr<Impl> implementation) noexcept
@@ -730,8 +909,17 @@ PersonalArchiveReader::~PersonalArchiveReader() = default;
 
 base::Result<std::unique_ptr<PersonalArchiveReader>>
 PersonalArchiveReader::open(const ArchiveOpenRequest& request) {
+    return open_with_workers(
+        request,
+        std::make_shared<detail::BlockWorkerPool>(detail::default_block_worker_count()));
+}
+
+base::Result<std::unique_ptr<PersonalArchiveReader>>
+PersonalArchiveReader::open_with_workers(
+    const ArchiveOpenRequest& request,
+    std::shared_ptr<detail::BlockWorkerPool> block_workers) {
     constexpr std::uint32_t maximum_supported_split_parts = 100'000;
-    if (request.source.empty() || request.maximum_metadata_size == 0 ||
+    if (block_workers == nullptr || request.source.empty() || request.maximum_metadata_size == 0 ||
         request.maximum_chunk_payload_size == 0 || request.maximum_chunk_logical_size == 0 ||
         request.maximum_split_parts == 0 ||
         request.maximum_split_parts > maximum_supported_split_parts) {
@@ -784,7 +972,7 @@ PersonalArchiveReader::open(const ArchiveOpenRequest& request) {
     }
     auto parsed = std::move(preamble).value();
     auto scanned = std::move(scan).value();
-    auto implementation = std::make_unique<Impl>();
+    auto implementation = std::make_unique<Impl>(std::move(block_workers));
     implementation->manifest = std::move(parsed.manifest);
     implementation->identity = {parsed.header.file_uuid, parsed.header.backup_set_uuid,
                                 parsed.header.parent_uuid, archive_backup_type(parsed.header),
@@ -846,7 +1034,8 @@ PersonalArchiveReader::read_chunk(const std::uint64_t chunk_index,
     }
     auto payload =
         read_record_payload(record, implementation_->block_size, volume->total_size, cancellation,
-                            implementation_->payload_cipher.get());
+                            implementation_->payload_cipher.get(),
+                            *implementation_->block_workers);
     if (!payload) {
         return base::Result<ports::ChunkData>::failure(payload.error());
     }

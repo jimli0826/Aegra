@@ -561,6 +561,12 @@ read_required_footer(std::ifstream& input, const std::uint64_t file_size) {
         return base::Result<archive::BackupFooter>::failure(
             error(base::ErrorCode::kCorruptData, "file archive footer size mismatch"));
     }
+    if (footer.value().deduplicated_block_count != 0 ||
+        footer.value().deduplicated_logical_bytes != 0) {
+        return base::Result<archive::BackupFooter>::failure(
+            error(base::ErrorCode::kCorruptData,
+                  "file archive footer contains volume dedup metrics"));
+    }
     return base::Result<archive::BackupFooter>::success(std::move(footer).value());
 }
 

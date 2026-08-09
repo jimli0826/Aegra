@@ -107,6 +107,10 @@ template <std::size_t Size>
     namespace_root.page_id = footer.index_root_page_id;
     namespace_root.offset = footer.index_root_offset;
     namespace_root.digest = footer.index_root_digest;
+    // Both zero (no DEDUP hits / file_set) or both positive; mixed is corrupt.
+    if ((footer.deduplicated_block_count == 0) != (footer.deduplicated_logical_bytes == 0)) {
+        return base::Result<void>::failure(corrupt("footer dedup counters are inconsistent"));
+    }
     if (footer.entry_count == 0) {
         if (footer.stream_count != 0 || footer.file_stream_chunk_count != 0 ||
             footer.index_page_count != 0 || !root_is_absent(namespace_root) ||
@@ -115,6 +119,10 @@ template <std::size_t Size>
             return base::Result<void>::failure(corrupt("volume footer index fields are invalid"));
         }
         return base::Result<void>::success();
+    }
+    // file_set: volume DEDUP metrics must stay zero.
+    if (footer.deduplicated_block_count != 0 || footer.deduplicated_logical_bytes != 0) {
+        return base::Result<void>::failure(corrupt("file footer must not report volume dedup"));
     }
     if (footer.volume_chunk_count != 0 || footer.index_page_count < 2 ||
         !root_is_present(namespace_root) || !root_is_present(footer.entry_id_root) ||
@@ -164,7 +172,8 @@ template <std::size_t Size>
     if (header.content_kind == kContentKindFileSet) {
         const auto backup_type =
             header.flags & (kBackupFlagFull | kBackupFlagIncremental | kBackupFlagDifferential);
-        if ((header.capability_flags & kCapabilityHasFileIndex) == 0 ||
+        if ((header.flags & kBackupFlagDedup) != 0 ||
+            (header.capability_flags & kCapabilityHasFileIndex) == 0 ||
             (header.capability_flags & kCapabilityVolumeSidecarOk) != 0 ||
             backup_type == kBackupFlagDifferential) {
             return base::Result<void>::failure(corrupt("file_set header flags are invalid"));
@@ -306,8 +315,15 @@ template <std::size_t Size>
         }
         break;
     case kBlockFlagZero:
-        if (entry.stored_size != 0 || entry.logical_size == 0) {
+        if (entry.data_offset_or_reference != 0 || entry.stored_size != 0 ||
+            entry.logical_size == 0) {
             return base::Result<void>::failure(corrupt("zero block entry has invalid size"));
+        }
+        break;
+    case kBlockFlagFree:
+        if (entry.data_offset_or_reference != 0 || entry.stored_size != 0 ||
+            entry.logical_size == 0) {
+            return base::Result<void>::failure(corrupt("free block entry has invalid size"));
         }
         break;
     case kBlockFlagDedup:
@@ -796,7 +812,10 @@ base::Result<EncodedBackupFooter> encode_backup_footer(const BackupFooter& foote
     write_integer(output, 296, footer.chunk_root.page_id);
     write_integer(output, 304, footer.chunk_root.offset);
     write_bytes(output, 312, footer.chunk_root.digest);
-    // reserved body tail (absolute 344..) remains zero-initialized
+    // body offset 312 (absolute 344): volume dedup metrics (ADR-0022)
+    write_integer(output, 344, footer.deduplicated_block_count);
+    write_integer(output, 352, footer.deduplicated_logical_bytes);
+    // reserved body tail (absolute 360..511) remains zero-initialized
     return base::Result<EncodedBackupFooter>::success(output);
 }
 
@@ -820,8 +839,8 @@ base::Result<BackupFooter> decode_backup_footer(std::span<const std::byte> bytes
     if (read_integer<std::uint32_t>(body, 12) != kBackupFooterSize) {
         return base::Result<BackupFooter>::failure(corrupt("footer size is invalid"));
     }
-    // body 168..311: secondary roots; body 312..479 (168 B) must remain zero.
-    if (read_integer<std::uint32_t>(body, 92) != 0 || !is_zero_span(body.subspan(312, 168))) {
+    // body 168..311: secondary roots; 312..327: dedup metrics; 328..479 (152 B) reserved zero.
+    if (read_integer<std::uint32_t>(body, 92) != 0 || !is_zero_span(body.subspan(328, 152))) {
         return base::Result<BackupFooter>::failure(corrupt("footer reserved fields are set"));
     }
     BackupFooter result;
@@ -849,6 +868,8 @@ base::Result<BackupFooter> decode_backup_footer(std::span<const std::byte> bytes
     result.chunk_root.page_id = read_integer<std::uint64_t>(body, 264);
     result.chunk_root.offset = read_integer<std::uint64_t>(body, 272);
     result.chunk_root.digest = read_bytes<32>(body, 280);
+    result.deduplicated_block_count = read_integer<std::uint64_t>(body, 312);
+    result.deduplicated_logical_bytes = read_integer<std::uint64_t>(body, 320);
     if (result.part_file_size < kBackupFooterSize) {
         return base::Result<BackupFooter>::failure(corrupt("footer file size is invalid"));
     }

@@ -4,6 +4,9 @@
 > metadata signature（`write_time + logical_size`）。current V4 的 Schedule/Job/Recovery Point 字段直接承载
 > Full/Incremental，不增加 V5 或 V4 兼容分支；目标控制面语义见
 > [增量设计](../architecture/FILE_SET_INCREMENTAL_BACKUP_RESTORE.md) §4。
+>
+> [ADR-0022](../adr/0022-volume-set-chunk-local-deduplication.md) 在 current V4 Schedule/TaskResult 中
+> 增加 volume_set 单 Chunk 去重选项与统计；同样不增加协议兼容分支。
 
 | 属性 | 内容 |
 | --- | --- |
@@ -259,26 +262,30 @@
 
 ### 4.9 RecoveryPointSummary V4
 
-exact keys（11）：
+exact keys（13）：
 
 `file_uuid`, `backup_set_uuid`, `parent_uuid`, `backup_type`, `content_kind`, `chain_state`,
-`created_utc_ms`, `logical_size_bytes`, `stored_size_bytes`, `source_count`, `has_sidecar`
+`created_utc_ms`, `logical_size_bytes`, `stored_size_bytes`, `deduplicated_block_count`,
+`deduplicated_logical_bytes`, `source_count`, `has_sidecar`
 
 - `content_kind`：1 或 2；
+- 两个 dedup 字段来自 Catalog V2；file_set 固定 0；
 - file_set：`has_sidecar` false；`backup_type` 为 Full(1) 或 Incremental(2)；Incremental 时
   `parent_uuid` 为直接父层 file_uuid，Full 时 `parent_uuid` null。
 
 ### 4.9a JobSummary V4（FI7）
 
-exact keys（16）：
+exact keys（17）：
 
 `job_id`, `trace_id`, `operation`, `state`, `content_kind`, `created_utc_ms`, `started_utc_ms`,
-`completed_utc_ms`, `progress`, `message_code`, `source_ids`, `repository_connection_id`,
-`requested_backup_type` (u8|null), `effective_backup_type` (u8|null),
+`completed_utc_ms`, `progress`, `message_code`, `source_ids`, `schedule_id` (string|null),
+`repository_connection_id`, `requested_backup_type` (u8|null), `effective_backup_type` (u8|null),
 `effective_parent_uuid` (string|null), `incremental_downgrade_reason` (u8|null)
 
-- 备份 Job：`requested_backup_type` 为创建时请求类型；终端成功后 `effective_*` 来自 TaskResult；
-- 非备份或未完成：后四字段可为 null；volume 备份通常无 `incremental_downgrade_reason`。
+- 备份 Job：`schedule_id` 必填（拥有该 Job 的 Schedule）；`requested_backup_type` 为创建时请求类型；
+  终端成功后 `effective_*` 来自 TaskResult；
+- 非备份：`schedule_id` 必须为 null；后四字段可为 null；volume 备份通常无 `incremental_downgrade_reason`。
+- Desktop 以 `schedule_id` 将 Job 状态绑定到 Schedule 行；不得仅用 source 重叠推断。
 
 ### 4.10 TaskProgress / TaskResult
 
@@ -295,12 +302,14 @@ exact keys（16）：
 **TaskResult** exact keys：
 
 `schema_version`(=4), `job_id`, `trace_id`, `outcome`, `error_code`, `logical_bytes`,
-`stored_bytes`, `chunk_count`, `entry_count`, `stream_count`, `message_code`, `warning_codes`,
+`stored_bytes`, `chunk_count`, `entry_count`, `stream_count`, `deduplicated_block_count`,
+`deduplicated_logical_bytes`, `message_code`, `warning_codes`,
 `partial_restore` (object|null), `requested_backup_type` (u8|null), `effective_backup_type`
 (u8|null), `effective_parent_uuid` (string|null), `incremental_downgrade_reason` (u8|null)
 
-file_set backup 成功时 `requested_backup_type` / `effective_backup_type` 为 1=full 或 2=incremental；
-volume 任务与非 backup 结果四字段均为 null。
+`deduplicated_block_count` / `deduplicated_logical_bytes` 为非负整数；volume_set backup 成功时来自已提交
+Footer，其它任务为 0。file_set backup 成功时 `requested_backup_type` / `effective_backup_type` 为
+1=full 或 2=incremental；volume 任务与非 backup 结果四个 incremental 投影字段均为 null。
 
 `partial_restore`（仅文件恢复 partial）：
 
@@ -524,14 +533,16 @@ payload 保持 repository/schedule/job 引用形状；若 Schedule 为 file_set�
 | `trigger` | ScheduleTrigger |
 | `repository_connection_id` | string \| null |
 | `backup_type` | number | file_set 允许 Full(1) 或 Incremental(2)，禁止 Differential |
+| `deduplication_enabled` | bool | volume_set 创建默认 true 且创建后冻结；file_set 必须 false |
 | `protection` | ProtectionSpec | §4.8 |
 | `encryption` | object \| null | 既有形状 |
 
 创建 file_set：解析 token → durable selection；规范化/去重；事务写入。  
-更新：保护源冻结；改变 `protection` 选择 → Conflict `schedule.source_frozen`。
+更新：保护源冻结；改变 `protection` 选择 → Conflict `schedule.source_frozen`。volume_set 更新不得改变
+`deduplication_enabled`；该字段必须进入幂等请求指纹。
 
-**列表 ScheduleSummary** 增加：`content_kind`, `selection_summaries`（`selection_id`,
-`display_label`, `entry_kind`, `recursion` only）。
+**列表 ScheduleSummary** 增加：`content_kind`, `deduplication_enabled`, `selection_summaries`（`selection_id`,
+`display_label`, `entry_kind`, `recursion` only）。file_set 的 `deduplication_enabled` 固定 false。
 
 ### 7.3 kind 48 — StartFileRestore
 

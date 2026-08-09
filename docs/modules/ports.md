@@ -39,6 +39,9 @@
 - 空 buffer 成功返回 0。
 - 实现必须检查 `offset + size` 溢出并响应取消。
 - 并发读取能力通过显式 capability 表达，不由调用方猜测。
+- `describe_extent()` 从请求 offset 返回有界的连续 DATA/FREE extent；默认实现全部为 DATA。
+  Backup Pipeline 对 FREE extent 不调用 `read()`。`ChunkDescriptor.free_ranges` 使用 chunk 相对偏移，
+  必须有序、不重叠且在逻辑范围内；Recovery Point Reader 认证格式后才可暴露这些范围。
 
 ## `IBlockSink` 语义
 
@@ -46,6 +49,7 @@
 - 成功写入必须覆盖完整输入；不允许无提示短写。
 - `flush()` 只保证本端口定义的持久性边界，具体 durability 写入接口文档。
 - 重试安全性和幂等键由更高层 Session 定义。
+- Restore Pipeline 不会向 `ChunkDescriptor.free_ranges` 写入 Sink；其它逻辑范围仍要求完整写入。
 
 ## 接口设计规则
 

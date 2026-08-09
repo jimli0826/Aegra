@@ -230,6 +230,7 @@ QByteArray encode_upsert_schedule_request(const QString& request_id, const QStri
                                           const int local_minute_of_day, const int weekday_mask,
                                           const QString& timezone_id,
                                           const bool exclude_page_and_hibernation_files,
+                                          const bool deduplication_enabled,
                                           const bool encryption_enabled,
                                           const QString& archive_password) {
     const QJsonObject trigger{{QStringLiteral("kind"), trigger_kind},
@@ -251,6 +252,7 @@ QByteArray encode_upsert_schedule_request(const QString& request_id, const QStri
         {QStringLiteral("backup_type"), backup_type},
         {QStringLiteral("trigger"), trigger},
         {QStringLiteral("exclude_page_and_hibernation_files"), exclude_page_and_hibernation_files},
+        {QStringLiteral("deduplication_enabled"), deduplication_enabled},
         {QStringLiteral("encryption_enabled"), encryption_enabled},
         {QStringLiteral("archive_password"), archive_password}};
     return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
@@ -478,7 +480,8 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
     if (!has_exact_keys(object, {"schedule_id", "display_name", "enabled", "content_kind",
                                  "source_ids", "selection_summaries", "repository_connection_id",
                                  "backup_type", "trigger", "next_run_utc_ms",
-                                 "exclude_page_and_hibernation_files", "encryption_enabled"})) {
+                                 "exclude_page_and_hibernation_files", "deduplication_enabled",
+                                 "encryption_enabled"})) {
         return false;
     }
     const auto schedule_id = object.value(QStringLiteral("schedule_id")).toString();
@@ -515,7 +518,10 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
         (content_kind == 2 && backup_type != 1 && backup_type != 2) ||
         !object.value(QStringLiteral("trigger")).isObject() ||
         !object.value(QStringLiteral("exclude_page_and_hibernation_files")).isBool() ||
-        !object.value(QStringLiteral("encryption_enabled")).isBool()) {
+        !object.value(QStringLiteral("deduplication_enabled")).isBool() ||
+        !object.value(QStringLiteral("encryption_enabled")).isBool() ||
+        (content_kind == 2 &&
+         object.value(QStringLiteral("deduplication_enabled")).toBool())) {
         return false;
     }
     QVariantList selection_summaries;
@@ -596,6 +602,8 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
               {QStringLiteral("nextRunUtcMs"), has_next ? next_run : QVariant{}},
               {QStringLiteral("excludePageAndHibernation"),
                object.value(QStringLiteral("exclude_page_and_hibernation_files")).toBool()},
+              {QStringLiteral("deduplicationEnabled"),
+               object.value(QStringLiteral("deduplication_enabled")).toBool()},
               {QStringLiteral("encryptionEnabled"),
                object.value(QStringLiteral("encryption_enabled")).toBool()},
               {QStringLiteral("lastRun"), QString{}},

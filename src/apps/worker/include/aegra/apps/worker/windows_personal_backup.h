@@ -45,10 +45,19 @@ struct WindowsPersonalBackupRequest final {
     std::string hostname;
     /// When true, pagefile.sys / hiberfil.sys / swapfile.sys extents are zero-filled without I/O.
     bool exclude_page_and_hibernation_files{true};
+    /// volume_set single-chunk DEDUP (ADR-0022); default true.
+    bool deduplication_enabled{true};
 };
 
 struct WindowsPersonalBackupResult final {
     pipeline::BackupSummary backup;
+    /// Sum of committed .bkf part file sizes (wire). Overwrites pipeline chunker stored_bytes.
+    std::uint64_t archive_file_bytes{0};
+    /// Footer total_payload_size: compressed/raw chunk payloads only (no headers/footer).
+    std::uint64_t total_payload_bytes{0};
+    /// From committed V7 Footer (ADR-0022); 0 when disabled or no DEDUP entries.
+    std::uint64_t deduplicated_block_count{0};
+    std::uint64_t deduplicated_logical_bytes{0};
     std::optional<base::Error> snapshot_cleanup_error;
 };
 

@@ -273,7 +273,7 @@ bool ServiceClient::createFileSetSchedule(const QString& connection_id, const QS
     const auto body = encode_upsert_file_set_schedule_request(
         request_id, idempotency_key, {}, display_name, true, selections, connection_id,
         backup_type, trigger_kind, local_minute, 0, QStringLiteral("UTC"),
-        exclude_page_and_hibernation_files, encryption_enabled, archive_password);
+        exclude_page_and_hibernation_files, false, encryption_enabled, archive_password);
     const auto started =
         coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
             return handle_schedule_command_frame(frame_body);

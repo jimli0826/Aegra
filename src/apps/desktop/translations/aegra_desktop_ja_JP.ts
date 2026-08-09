@@ -1058,8 +1058,16 @@ Server: %1</source>
         <translation>日</translation>
     </message>
     <message id="aegra.backup.opt.dedup">
-        <source>Enable deduplication</source>
-        <translation>重複排除を有効にする</translation>
+        <source>Enable volume chunk deduplication</source>
+        <translation>ボリューム チャンク重複排除を有効にする</translation>
+    </message>
+    <message id="aegra.backup.opt.dedup_hint">
+        <source>Same-chunk only within each volume backup; not global or cross-backup</source>
+        <translation>各ボリューム バックアップ内の同一チャンクのみ。グローバル／バックアップ横断ではありません</translation>
+    </message>
+    <message id="aegra.repository.dedup.bytes">
+        <source>Deduplicated</source>
+        <translation>重複排除済み</translation>
     </message>
     <message id="aegra.backup.opt.exclude_page">
         <source>Exclude pagefile / hiberfil / swapfile</source>

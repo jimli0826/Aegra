@@ -19,6 +19,10 @@
 
 namespace aegra::adapters::personal_archive {
 
+namespace detail {
+class BlockWorkerPool;
+}
+
 struct ArchiveKdfParameters final {
     std::uint64_t opslimit{3};
     std::uint64_t memlimit_bytes{256ULL * 1024ULL * 1024ULL};
@@ -40,6 +44,8 @@ struct ArchiveCreateRequest final {
     std::filesystem::path parent_source;
     // Views are consumed by create(); the session copies only its own password into secure memory.
     std::string_view parent_password;
+    /// volume_set: enable same-chunk DEDUP (ADR-0022). Default true; frozen by Schedule.
+    bool deduplication_enabled{true};
 };
 
 /// When to authenticate Index roots after Header/Footer (L31 / ADR-0019 / M6).
@@ -312,8 +318,14 @@ class PersonalArchiveReader final : public ports::IRecoveryPointReader {
     read_chunk(std::uint64_t chunk_index, base::CancellationToken cancellation) override;
 
   private:
+    friend class PersonalArchiveChainReader;
+
     struct Impl;
     explicit PersonalArchiveReader(std::unique_ptr<Impl> implementation) noexcept;
+
+    [[nodiscard]] static base::Result<std::unique_ptr<PersonalArchiveReader>>
+    open_with_workers(const ArchiveOpenRequest& request,
+                      std::shared_ptr<detail::BlockWorkerPool> block_workers);
 
     std::unique_ptr<Impl> implementation_;
 };
@@ -340,6 +352,10 @@ class PersonalArchiveChainReader final : public ports::IRecoveryPointReader {
   private:
     struct Impl;
     explicit PersonalArchiveChainReader(std::unique_ptr<Impl> implementation) noexcept;
+
+    [[nodiscard]] static base::Result<std::vector<std::unique_ptr<PersonalArchiveReader>>>
+    open_layers(const ArchiveChainOpenRequest& request,
+                const std::shared_ptr<detail::BlockWorkerPool>& block_workers);
 
     std::unique_ptr<Impl> implementation_;
 };

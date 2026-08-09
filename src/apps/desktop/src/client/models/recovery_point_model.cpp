@@ -91,6 +91,13 @@ QVariant RecoveryPointModel::data(const QModelIndex& index, const int role) cons
         return static_cast<qint64>(row.stored_size_bytes);
     case StoredSizeTextRole:
         return format_ != nullptr ? format_->format_bytes(row.stored_size_bytes) : QString{};
+    case DeduplicatedBlockCountRole:
+        return static_cast<qint64>(row.deduplicated_block_count);
+    case DeduplicatedLogicalBytesRole:
+        return static_cast<qint64>(row.deduplicated_logical_bytes);
+    case DeduplicatedLogicalBytesTextRole:
+        return format_ != nullptr ? format_->format_bytes(row.deduplicated_logical_bytes)
+                                  : QString{};
     case SourceCountRole:
         return static_cast<qint64>(row.source_count);
     case HasSidecarRole:
@@ -119,6 +126,9 @@ QHash<int, QByteArray> RecoveryPointModel::roleNames() const {
         {LogicalSizeTextRole, "logicalSizeText"},
         {StoredSizeBytesRole, "storedSizeBytes"},
         {StoredSizeTextRole, "storedSizeText"},
+        {DeduplicatedBlockCountRole, "deduplicatedBlockCount"},
+        {DeduplicatedLogicalBytesRole, "deduplicatedLogicalBytes"},
+        {DeduplicatedLogicalBytesTextRole, "deduplicatedLogicalBytesText"},
         {SourceCountRole, "sourceCount"},
         {HasSidecarRole, "hasSidecar"},
         {IsBaselineRole, "isBaseline"},
@@ -221,6 +231,11 @@ QVariantMap RecoveryPointModel::recoveryPointDetails(const QString& file_uuid) c
              format_ != nullptr ? format_->format_bytes(row->logical_size_bytes) : QString{}},
             {QStringLiteral("storedSizeText"),
              format_ != nullptr ? format_->format_bytes(row->stored_size_bytes) : QString{}},
+            {QStringLiteral("deduplicatedBlockCount"),
+             static_cast<qint64>(row->deduplicated_block_count)},
+            {QStringLiteral("deduplicatedLogicalBytesText"),
+             format_ != nullptr ? format_->format_bytes(row->deduplicated_logical_bytes)
+                                : QString{}},
             {QStringLiteral("chainComplete"), row->chain_state == 1},
             {QStringLiteral("chainStateText"), chain_state_text(row->chain_state)},
             {QStringLiteral("chainDepth"), chain_depth_for(*row)},
@@ -315,6 +330,10 @@ QVector<RecoveryPointRow> recovery_points_from_variant_list(const QVariantList& 
         row.created_utc_ms = map.value(QStringLiteral("createdUtcMs")).toLongLong();
         row.logical_size_bytes = map.value(QStringLiteral("logicalSizeBytes")).toLongLong();
         row.stored_size_bytes = map.value(QStringLiteral("storedSizeBytes")).toLongLong();
+        row.deduplicated_block_count =
+            map.value(QStringLiteral("deduplicatedBlockCount")).toLongLong();
+        row.deduplicated_logical_bytes =
+            map.value(QStringLiteral("deduplicatedLogicalBytes")).toLongLong();
         row.source_count = map.value(QStringLiteral("sourceCount")).toLongLong();
         row.has_sidecar = map.value(QStringLiteral("hasSidecar")).toBool();
         rows.push_back(std::move(row));

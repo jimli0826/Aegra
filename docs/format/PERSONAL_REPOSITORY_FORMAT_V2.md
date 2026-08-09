@@ -4,6 +4,9 @@
 > 变化判断改为 metadata signature（`write_time + logical_size`）；[ADR-0018](../adr/0018-file-set-incremental-usn-and-chain.md)
 > 的 USN baseline 规则已被替代。旧开发 Catalog 不双读、不迁移。
 > 目标字段和父链规则以[增量设计](../architecture/FILE_SET_INCREMENTAL_BACKUP_RESTORE.md) §10 为准。
+>
+> [ADR-0022](../adr/0022-volume-set-chunk-local-deduplication.md) 增加从 V7 Footer 重建的 volume_set
+> 单 Chunk 去重统计；Catalog 仍不保存哈希、Chunk Index 或全局去重索引。
 
 | 属性 | 内容 |
 | --- | --- |
@@ -80,6 +83,8 @@ Descriptor 不保存显示名称、Storage URI、凭据、Archive 口令或 UI �
   "created_utc_ms": 1785600000000,
   "logical_size_bytes": 107374182400,
   "stored_size_bytes": 42949672960,
+  "deduplicated_block_count": 1024,
+  "deduplicated_logical_bytes": 67108864,
   "source_count": 1,
   "source_volume_ids": [
     "\\\\?\\Volume{11111111-2222-4333-8444-555555555555}\\"
@@ -117,6 +122,8 @@ Descriptor 不保存显示名称、Storage URI、凭据、Archive 口令或 UI �
 | `created_utc_ms` | 认证 Manifest；未认证扫描为 0 |
 | `logical_size_bytes` | 认证后；未知 0 |
 | `stored_size_bytes` | 各分卷对象大小之和；未知 0 |
+| `deduplicated_block_count` | V7 Footer DEDUP entry 数；file_set/未知为 0 |
+| `deduplicated_logical_bytes` | V7 Footer DEDUP 展开逻辑字节；file_set/未知为 0 |
 | `source_count` | volume：有序 volume 数；file_set：selection root 数；未认证扫描可为 0 |
 | `source_volume_ids` | **仅 volume_set**：有序 canonical Volume GUID Path，长度=`source_count` 且唯一；**file_set 必须为 `[]`** |
 | `file_entry_count` | file_set 认证后 entry 总数；volume_set 必须 0；未认证 0 |
@@ -215,6 +222,9 @@ Catalog **不得**保存：
 7. 仅在调用方提供 Credential 并成功后认证 Manifest/Index，补全 `logical_size_bytes`、
    `file_entry_count`、`file_stream_count`、`source_volume_ids`（volume）等。
 
+V7 Footer 可在结构检查后补全两个 dedup 计数；完整 Verify 必须重算每个 Chunk 的 DEDUP entry/展开长度并与
+Footer 一致。Catalog 不保存候选 SHA-256 或 canonical 位置。
+
 ## 8. 删除协议
 
 与 ADR-0010 相同顺序：tombstone → sidecar → 续卷 → 首卷 → Catalog Entry → tombstone。计划外后代、
@@ -230,6 +240,7 @@ generation 变化或 UUID 冲突时拒绝。
 | `has_sidecar` | 按实现 | 必须 false |
 | `source_volume_ids` | 几何匹配必填（认证后） | `[]` |
 | `file_entry_count` | 0 | 认证后 ≥ 0 |
+| `deduplicated_*` | 来自 Footer，可为 0 | 必须 0 |
 | `file_selection_fingerprint` | `""` | hex 或空 |
 | `file_baseline_available` | false | true 当 baseline 可用 |
 | 增量选父 | 使用 volume 几何 + sidecar | fingerprint + metadata baseline + chain |
@@ -243,6 +254,7 @@ generation 变化或 UUID 冲突时拒绝。
 - file_set 且 `file_baseline_available==true` 但 fingerprint 为空；
 - volume_set 且（非空 fingerprint 或 `file_baseline_available`）；
 - volume_set 且认证后 `source_volume_ids.length != source_count`；
+- file_set 且任一 `deduplicated_*` 非 0；两个 dedup 计数必须同时为 0 或同时大于 0；
 - 字符串超长（UUID 字段固定；`archive_main_key` ≤ 512 字节；path 段规则见 §5）；
 - 额外未知关键字段：V2 exact_keys 模式下拒绝未列出字段。
 
@@ -251,7 +263,8 @@ V2 Entry exact key 集合：
 ```text
 schema_version, kind, repository_uuid, file_uuid, backup_set_uuid, parent_uuid,
 backup_type, content_kind, archive_main_key, split_part_count, has_sidecar,
-format_version, created_utc_ms, logical_size_bytes, stored_size_bytes, source_count,
+format_version, created_utc_ms, logical_size_bytes, stored_size_bytes,
+deduplicated_block_count, deduplicated_logical_bytes, source_count,
 source_volume_ids, file_entry_count, file_stream_count, structural_state,
 catalog_generation, file_selection_fingerprint, file_baseline_available
 ```

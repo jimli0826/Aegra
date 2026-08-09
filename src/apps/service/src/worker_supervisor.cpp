@@ -522,6 +522,7 @@ base::Result<void> WorkerSupervisor::Impl::launch_worker(
     record.content_kind = worker_request.content_kind;
     record.created_utc_ms = utc_now_ms(clock);
     record.source_ids = request.source_ids;
+    record.schedule_id = request.schedule_id;
     record.repository_connection_id = request.repository_connection_id;
     record.target_source_id = request.target_source_id;
     record.backup_type =

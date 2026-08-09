@@ -449,12 +449,13 @@ encode_mount_recovery_point(const contracts::MountRecoveryPointCommand& command)
                 {"backup_type", static_cast<std::uint8_t>(command.backup_type)},
                 {"trigger", encode_schedule_trigger(command.trigger)},
                 {"exclude_page_and_hibernation_files", command.exclude_page_and_hibernation_files},
+                {"deduplication_enabled", command.deduplication_enabled},
                 {"encryption_enabled", command.encryption_enabled},
                 {"archive_password", command.archive_password}};
 }
 
 [[nodiscard]] contracts::UpsertScheduleCommand parse_upsert_schedule(const Json& payload) {
-    constexpr std::array<std::string_view, 10> keys{
+    constexpr std::array<std::string_view, 11> keys{
         "schedule_id",
         "display_name",
         "enabled",
@@ -463,6 +464,7 @@ encode_mount_recovery_point(const contracts::MountRecoveryPointCommand& command)
         "backup_type",
         "trigger",
         "exclude_page_and_hibernation_files",
+        "deduplication_enabled",
         "encryption_enabled",
         "archive_password"};
     if (!exact_keys(payload, keys)) {
@@ -479,6 +481,7 @@ encode_mount_recovery_point(const contracts::MountRecoveryPointCommand& command)
     command.trigger = parse_schedule_trigger(payload.at("trigger"));
     command.exclude_page_and_hibernation_files =
         payload.at("exclude_page_and_hibernation_files").get<bool>();
+    command.deduplication_enabled = payload.at("deduplication_enabled").get<bool>();
     command.encryption_enabled = payload.at("encryption_enabled").get<bool>();
     command.archive_password = payload.at("archive_password").get<std::string>();
     return command;

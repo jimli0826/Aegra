@@ -892,6 +892,34 @@ std::uint64_t merge_page_and_hibernation_exclusions(FreeSkipPlan& plan,
     return added_reported;
 }
 
+void align_free_skip_plan(FreeSkipPlan& plan, const std::uint32_t archive_block_size_bytes) {
+    if (archive_block_size_bytes == 0 || plan.free_ranges.empty()) {
+        return;
+    }
+    const auto alignment = static_cast<std::uint64_t>(archive_block_size_bytes);
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> aligned;
+    aligned.reserve(plan.free_ranges.size());
+    for (const auto& [range_start, range_end] : plan.free_ranges) {
+        if (range_start >= range_end || range_end > plan.total_bytes) {
+            continue;
+        }
+        const auto remainder = range_start % alignment;
+        const auto adjustment = remainder == 0 ? 0 : alignment - remainder;
+        if (adjustment > range_end - range_start) {
+            continue;
+        }
+        const auto start = range_start + adjustment;
+        const auto end =
+            range_end == plan.total_bytes ? range_end : range_end - range_end % alignment;
+        if (start < end) {
+            aligned.emplace_back(start, end);
+        }
+    }
+    plan.free_ranges = std::move(aligned);
+    plan.free_bytes = range_total_bytes(plan.free_ranges);
+    plan.applied = !plan.free_ranges.empty();
+}
+
 FreeSkipPlan build_free_skip_plan(const std::filesystem::path& device_path,
                                   const std::string_view filesystem,
                                   const std::uint64_t total_size_bytes,
@@ -978,6 +1006,34 @@ std::uint64_t FreeSkipBlockSource::size_bytes() const noexcept {
 }
 
 const FreeSkipPlan& FreeSkipBlockSource::plan() const noexcept { return impl_->plan; }
+
+base::Result<ports::BlockExtent>
+FreeSkipBlockSource::describe_extent(const std::uint64_t logical_offset,
+                                     const std::uint64_t maximum_size,
+                                     const base::CancellationToken cancellation) const {
+    if (cancellation.stop_requested()) {
+        return base::Result<ports::BlockExtent>::failure(
+            {base::ErrorCode::kCancelled, "block extent query cancelled"});
+    }
+    const auto size = size_bytes();
+    if (maximum_size == 0 || logical_offset >= size) {
+        return base::Result<ports::BlockExtent>::failure(
+            {base::ErrorCode::kInvalidArgument, "block extent query is out of range"});
+    }
+    const auto request = (std::min)(maximum_size, size - logical_offset);
+    const auto free_size = free_length_at(impl_->plan.free_ranges, logical_offset, request);
+    if (free_size > 0) {
+        return base::Result<ports::BlockExtent>::success(
+            {logical_offset, free_size, ports::BlockExtentState::kFree});
+    }
+    const auto data_size = used_length_at(impl_->plan.free_ranges, logical_offset, request);
+    if (data_size == 0) {
+        return base::Result<ports::BlockExtent>::failure(
+            {base::ErrorCode::kInternal, "free-skip map produced an empty data range"});
+    }
+    return base::Result<ports::BlockExtent>::success(
+        {logical_offset, data_size, ports::BlockExtentState::kData});
+}
 
 base::Result<std::size_t> FreeSkipBlockSource::read(const std::uint64_t offset,
                                                     const std::span<std::byte> destination,

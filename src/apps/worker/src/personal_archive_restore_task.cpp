@@ -283,6 +283,9 @@ void log_restore_success(WorkerTaskLog* log, const contracts::TaskResult& result
     log->field("outcome", "succeeded");
     log->field("message_code", result.message_code);
     log->field_bytes("restored_bytes", summary.restored_bytes);
+    log->field_bytes("disk_written_bytes", summary.disk_written_bytes);
+    log->field_bytes("free_skipped_bytes", summary.free_skipped_bytes);
+    log->field_u64("free_ranges", summary.free_range_count);
     log->field_u64("chunks", summary.chunk_count);
     log->field_bytes("peak_buffer", summary.peak_buffered_bytes);
     if (elapsed.count() > 0 && summary.restored_bytes > 0) {
@@ -290,6 +293,12 @@ void log_restore_success(WorkerTaskLog* log, const contracts::TaskResult& result
             (static_cast<double>(summary.restored_bytes) * 1000.0) /
             static_cast<double>(elapsed.count()));
         log->field_bytes("throughput", bps);
+    }
+    if (elapsed.count() > 0 && summary.disk_written_bytes > 0) {
+        const auto bps = static_cast<std::uint64_t>(
+            (static_cast<double>(summary.disk_written_bytes) * 1000.0) /
+            static_cast<double>(elapsed.count()));
+        log->field_bytes("disk_write_throughput", bps);
     }
     log->field("elapsed", format_duration_ms(elapsed));
 }

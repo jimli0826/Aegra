@@ -383,6 +383,7 @@ RequestDisposition ServiceClient::handle_start_backup_frame(const QByteArray& bo
         optimistic.state = 1;      // queued
         optimistic.created_utc_ms = QDateTime::currentMSecsSinceEpoch();
         optimistic.source_ids = pending_backup_source_ids_;
+        optimistic.schedule_id = pending_backup_schedule_id_;
         optimistic.connection_id = pending_backup_connection_id_;
         enrich_job_row(optimistic);
         jobs_.upsert_job(std::move(optimistic));

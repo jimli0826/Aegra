@@ -28,6 +28,8 @@ struct JobRow final {
     std::optional<std::int64_t> progress_stored_bytes;
     QString message_code;
     QStringList source_ids;
+    /// Owning schedule for backup jobs; empty for other operations.
+    QString schedule_id;
     QString connection_id;
     QString source_name;
     QString destination_name;
@@ -92,10 +94,9 @@ class JobModel final : public QAbstractListModel {
     [[nodiscard]] bool has_active_jobs() const noexcept;
     [[nodiscard]] std::optional<JobRow> find_job(const QString& job_id) const;
 
-    /// Latest backup job matching schedule sources + repository connection.
+    /// Latest backup job for a schedule (matched by schedule_id).
     /// Keys: statusKey (none|running|success|failed), progressPercent, stateText, stateValue.
-    Q_INVOKABLE [[nodiscard]] QVariantMap latestBackupStatus(const QVariantList& source_ids,
-                                                             const QString& connection_id) const;
+    Q_INVOKABLE [[nodiscard]] QVariantMap latestBackupStatus(const QString& schedule_id) const;
 
     /// Aggregate restore jobs (operation=2) created at/after sinceUtcMs (0 = all restore jobs).
     /// Keys: jobCount, activeCount, progressPercent, stateText, messageText, sourceName,

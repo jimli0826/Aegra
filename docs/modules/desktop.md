@@ -75,10 +75,9 @@ ServiceClient (QML 门面)
 - 每个请求有唯一 correlation ID 与 deadline；协议损坏、超时断开并重连。
 - 重连后只重新握手并恢复幂等 query（当前为 Repository catalog 分页查询）。
 - 模型只暴露拥有生命周期的数据与展示用角色；QML 不解析 JSON、Service 枚举数值或 message code。
-- Backup 列表 STATUS 通过 `JobModel.latestBackupStatus(matchIds, connectionId)` 关联 Job：
-  `volume_set` 用 `source_ids`；`file_set` 用 `selection_summaries[].selection_id`（与 Job
-  上 Service 写入的 `source_ids=selection_id[]` 对齐）。不得因 file_set 的 `source_ids` 为空
-  而永远显示 N/A。
+- Backup 列表 STATUS 通过 `JobModel.latestBackupStatus(scheduleId)` 关联 Job：
+  按 Job 的 `schedule_id` 精确匹配，相同 source 的多个 Schedule 互不共享状态。
+  备份 Job 必须带 `schedule_id`（Service / SQLite schema 15 持久化并在 ListJobs 回传）。
 - file_set Schedule 可配置 Full|Incremental（不提供 Differential）。向导说明选择范围变化会建立新 Full
   基线。Job 列表与 schedule 状态展示 Service 投影的 requested/effective type 与
   `incremental_downgrade_reason` 本地化文案；Desktop 不自行推断降级原因。
@@ -175,6 +174,8 @@ Password 在 Service 没有对应能力时不显示。布局必须在 900x600、
   - Schedule settings（频率、时间、星期等）可修改；`enabled` 可切换。
   - Backup options 中除 “完成后关机”（shutdown）可改外，其余（含 exclude pagefile、加密、去重/分卷/压缩
     等向导选项）创建后不可改；Desktop 更新路径必须回传已有冻结字段，不得静默改写加密标志。
+  - ADR-0022 的 `deduplication_enabled` 只在 Volume Set 创建流程显示，默认开启并进入 UpsertSchedule；
+    file_set 固定 false。Recovery Point 详情可显示 Catalog 的去重 blocks/bytes，但不得与压缩率混算。
   Backup list、Add、slide-in wizard、真实 Service/SQLite Job、Schedule、多 Volume 单 Archive、取消和聚合进度
   均已具备生产功能。
 - Restore Source Disks：选中 checkpoint 后调用 Service V3 `GetRecoveryPointLayout`（kind 12）。payload 为

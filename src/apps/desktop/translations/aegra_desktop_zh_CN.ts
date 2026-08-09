@@ -1058,8 +1058,16 @@ Server: %1</source>
         <translation>日</translation>
     </message>
     <message id="aegra.backup.opt.dedup">
-        <source>Enable deduplication</source>
-        <translation>启用重复数据删除</translation>
+        <source>Enable volume chunk deduplication</source>
+        <translation>启用卷块去重</translation>
+    </message>
+    <message id="aegra.backup.opt.dedup_hint">
+        <source>Same-chunk only within each volume backup; not global or cross-backup</source>
+        <translation>仅在每次卷备份的同一物理块内去重；非全局、非跨备份</translation>
+    </message>
+    <message id="aegra.repository.dedup.bytes">
+        <source>Deduplicated</source>
+        <translation>已去重</translation>
     </message>
     <message id="aegra.backup.opt.exclude_page">
         <source>Exclude pagefile / hiberfil / swapfile</source>

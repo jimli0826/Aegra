@@ -19,7 +19,7 @@ namespace aegra::ports {
 // Not Recovery Point / Archive / Chunk Index authority.
 // v11: content_kind on jobs/schedules + schedule_file_selections (file_set).
 // v12: restore_preflight_entry_ids for file_set selective restore preflight.
-inline constexpr std::uint32_t kControlPlaneSchemaVersion = 13;
+inline constexpr std::uint32_t kControlPlaneSchemaVersion = 15;
 
 // ---- Durable records (control-plane only; no plaintext secrets, no RP authority) ----
 
@@ -47,6 +47,8 @@ struct JobRecord final {
     std::optional<std::uint64_t> completed_utc_ms;
     /// volume_set: inventory source ids. file_set: opaque selection ids (never paths).
     std::vector<std::string> source_ids;
+    /// Owning schedule for backup jobs; empty for restore/verify/cancel.
+    std::string schedule_id;
     std::optional<std::string> repository_connection_id;
     std::optional<std::string> target_source_id;
     std::optional<contracts::BackupType> backup_type;
@@ -86,6 +88,8 @@ struct ScheduleRecord final {
     contracts::ScheduleTrigger trigger;
     std::optional<std::uint64_t> next_run_utc_ms;
     bool exclude_page_and_hibernation_files{true};
+    /// volume_set: frozen at create (default true); file_set always false.
+    bool deduplication_enabled{true};
     bool encryption_enabled{false};
     /// When encryption_enabled: dpapi-lm:<schedule_id>:<base64> (CRYPTPROTECT_LOCAL_MACHINE,
     /// pOptionalEntropy = UTF-8 schedule_id). Empty when encryption is off. Never log.

@@ -10,12 +10,23 @@
 
 namespace aegra::ports {
 
+struct ChunkFreeRange final {
+    /// Byte offset relative to the containing chunk.
+    std::uint64_t offset{0};
+    std::uint64_t size{0};
+
+    [[nodiscard]] bool operator==(const ChunkFreeRange&) const noexcept = default;
+};
+
 struct ChunkDescriptor final {
     std::uint64_t chunk_index{0};
     std::uint64_t logical_offset{0};
     std::uint64_t logical_size{0};
     std::uint64_t stored_size{0};
     std::uint32_t source_index{0};
+    /// Sorted, non-overlapping FREE ranges relative to this chunk. Readers expose these ranges
+    /// after archive authentication; restore pipelines skip them instead of writing the sink.
+    std::vector<ChunkFreeRange> free_ranges;
 
     [[nodiscard]] bool operator==(const ChunkDescriptor&) const noexcept = default;
 };

@@ -93,6 +93,8 @@ struct ArchiveInspection final {
     std::uint32_t split_part_count{1};
     bool has_sidecar{false};
     std::uint64_t stored_size_bytes{0};
+    std::uint64_t deduplicated_block_count{0};
+    std::uint64_t deduplicated_logical_bytes{0};
 };
 
 [[nodiscard]] std::uint32_t backup_type_flag(const contracts::BackupType type) noexcept {
@@ -119,30 +121,38 @@ validate_part(const archive::BackupHeader& header, const base::UuidBytes& file_u
     return base::Result<void>::success();
 }
 
-[[nodiscard]] base::Result<void>
-validate_final_footer(ports::IObjectReader& reader, const std::string_view key,
-                      const std::uint64_t size_bytes,
-                      const base::CancellationToken cancellation) {
+struct FooterMetrics final {
+    std::uint64_t deduplicated_block_count{0};
+    std::uint64_t deduplicated_logical_bytes{0};
+};
+
+[[nodiscard]] base::Result<FooterMetrics>
+read_final_footer_metrics(ports::IObjectReader& reader, const std::string_view key,
+                          const std::uint64_t size_bytes,
+                          const base::CancellationToken cancellation) {
     if (size_bytes < archive::kBackupFooterSize) {
-        return base::Result<void>::failure(
+        return base::Result<FooterMetrics>::failure(
             registration_error(base::ErrorCode::kCorruptData, "archive footer is missing"));
     }
     std::array<std::byte, archive::kBackupFooterSize> bytes{};
     auto read = reader.read_range(key, size_bytes - bytes.size(), bytes, cancellation);
     if (!read || read.value() != bytes.size()) {
-        return base::Result<void>::failure(
+        return base::Result<FooterMetrics>::failure(
             !read ? read.error()
                   : registration_error(base::ErrorCode::kCorruptData,
                                        "archive footer is truncated"));
     }
     auto footer = archive::decode_backup_footer(bytes);
     if (!footer || footer.value().part_file_size != size_bytes) {
-        return base::Result<void>::failure(
+        return base::Result<FooterMetrics>::failure(
             !footer ? footer.error()
                     : registration_error(base::ErrorCode::kCorruptData,
                                          "archive footer size mismatch"));
     }
-    return base::Result<void>::success();
+    FooterMetrics metrics;
+    metrics.deduplicated_block_count = footer.value().deduplicated_block_count;
+    metrics.deduplicated_logical_bytes = footer.value().deduplicated_logical_bytes;
+    return base::Result<FooterMetrics>::success(metrics);
 }
 
 [[nodiscard]] base::Result<bool>
@@ -244,7 +254,7 @@ inspect_archive(ports::IObjectReader& reader, const std::string& main_key,
                       : extra.error());
         }
     }
-    auto footer = validate_final_footer(reader, final_key, final_size, cancellation);
+    auto footer = read_final_footer_metrics(reader, final_key, final_size, cancellation);
     if (!footer) {
         return base::Result<ArchiveInspection>::failure(footer.error());
     }
@@ -253,6 +263,8 @@ inspect_archive(ports::IObjectReader& reader, const std::string& main_key,
         return base::Result<ArchiveInspection>::failure(sidecar.error());
     }
     result.has_sidecar = sidecar.value();
+    result.deduplicated_block_count = footer.value().deduplicated_block_count;
+    result.deduplicated_logical_bytes = footer.value().deduplicated_logical_bytes;
     return base::Result<ArchiveInspection>::success(result);
 }
 
@@ -416,6 +428,8 @@ BackupCatalogRegistrar::publish(const WorkerJobRequest& request,
     entry.logical_size_bytes = response.task_result->logical_bytes;
     entry.stored_size_bytes = archive.value().stored_size_bytes;
     if (is_file_set) {
+        entry.deduplicated_block_count = 0;
+        entry.deduplicated_logical_bytes = 0;
         entry.source_count =
             static_cast<std::uint32_t>(request.worker_request.file_source_refs.size());
         entry.source_volume_ids.clear();
@@ -439,6 +453,8 @@ BackupCatalogRegistrar::publish(const WorkerJobRequest& request,
             static_cast<std::uint32_t>(request.worker_request.source_refs.size());
         // Ordered stable Volume GUID paths used by the Worker; parent selection matches these.
         entry.source_volume_ids = request.worker_request.source_refs;
+        entry.deduplicated_block_count = archive.value().deduplicated_block_count;
+        entry.deduplicated_logical_bytes = archive.value().deduplicated_logical_bytes;
         entry.file_entry_count = 0;
         entry.file_stream_count = 0;
         entry.file_selection_fingerprint.clear();

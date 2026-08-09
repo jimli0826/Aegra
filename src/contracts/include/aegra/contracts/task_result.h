@@ -34,6 +34,10 @@ struct TaskResult final {
     std::uint64_t chunk_count{0};
     std::uint64_t entry_count{0};
     std::uint64_t stream_count{0};
+    /// volume_set: DEDUP entry count from committed Footer; file_set always 0.
+    std::uint64_t deduplicated_block_count{0};
+    /// volume_set: expanded plaintext bytes represented by DEDUP entries; file_set always 0.
+    std::uint64_t deduplicated_logical_bytes{0};
     std::string message_code;
     std::vector<std::string> warning_codes;
     std::optional<PartialRestoreStats> partial_restore;

@@ -42,16 +42,27 @@ namespace {
                 {"created_utc_ms", point.created_utc_ms},
                 {"logical_size_bytes", point.logical_size_bytes},
                 {"stored_size_bytes", point.stored_size_bytes},
+                {"deduplicated_block_count", point.deduplicated_block_count},
+                {"deduplicated_logical_bytes", point.deduplicated_logical_bytes},
                 {"source_count", point.source_count},
                 {"has_sidecar", point.has_sidecar}};
 }
 
 [[nodiscard]] contracts::RecoveryPointSummary parse_recovery_point(const Json& payload) {
-    constexpr std::array<std::string_view, 11> keys{
-        "file_uuid",         "backup_set_uuid",    "parent_uuid",
-        "backup_type",       "content_kind",       "chain_state",
-        "created_utc_ms",    "logical_size_bytes", "stored_size_bytes",
-        "source_count",      "has_sidecar"};
+    constexpr std::array<std::string_view, 13> keys{
+        "file_uuid",
+        "backup_set_uuid",
+        "parent_uuid",
+        "backup_type",
+        "content_kind",
+        "chain_state",
+        "created_utc_ms",
+        "logical_size_bytes",
+        "stored_size_bytes",
+        "deduplicated_block_count",
+        "deduplicated_logical_bytes",
+        "source_count",
+        "has_sidecar"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("recovery point summary fields are invalid");
     }
@@ -68,6 +79,10 @@ namespace {
     point.created_utc_ms = unsigned_value<std::uint64_t>(payload, "created_utc_ms");
     point.logical_size_bytes = unsigned_value<std::uint64_t>(payload, "logical_size_bytes");
     point.stored_size_bytes = unsigned_value<std::uint64_t>(payload, "stored_size_bytes");
+    point.deduplicated_block_count =
+        unsigned_value<std::uint64_t>(payload, "deduplicated_block_count");
+    point.deduplicated_logical_bytes =
+        unsigned_value<std::uint64_t>(payload, "deduplicated_logical_bytes");
     point.source_count = unsigned_value<std::uint32_t>(payload, "source_count");
     point.has_sidecar = payload.at("has_sidecar").get<bool>();
     return point;
@@ -301,6 +316,7 @@ parse_repository_connection(const Json& payload) {
         {"progress", summary.progress ? encode_task_progress(*summary.progress) : Json(nullptr)},
         {"message_code", summary.message_code},
         {"source_ids", summary.source_ids},
+        {"schedule_id", optional_string_json(summary.schedule_id)},
         {"repository_connection_id", optional_string_json(summary.repository_connection_id)},
         {"requested_backup_type",
          summary.requested_backup_type ? Json(*summary.requested_backup_type) : Json(nullptr)},
@@ -313,7 +329,7 @@ parse_repository_connection(const Json& payload) {
 }
 
 [[nodiscard]] contracts::JobSummary parse_job(const Json& payload) {
-    constexpr std::array<std::string_view, 16> keys{
+    constexpr std::array<std::string_view, 17> keys{
         "job_id",
         "trace_id",
         "operation",
@@ -325,6 +341,7 @@ parse_repository_connection(const Json& payload) {
         "progress",
         "message_code",
         "source_ids",
+        "schedule_id",
         "repository_connection_id",
         "requested_backup_type",
         "effective_backup_type",
@@ -349,6 +366,7 @@ parse_repository_connection(const Json& payload) {
     }
     summary.message_code = payload.at("message_code").get<std::string>();
     summary.source_ids = payload.at("source_ids").get<std::vector<std::string>>();
+    summary.schedule_id = optional_string(payload.at("schedule_id"));
     summary.repository_connection_id = optional_string(payload.at("repository_connection_id"));
     if (!payload.at("requested_backup_type").is_null()) {
         summary.requested_backup_type =
@@ -586,11 +604,12 @@ parse_recovery_point_source_volume(const Json& payload) {
                 {"trigger", encode_schedule_trigger(summary.trigger)},
                 {"next_run_utc_ms", optional_uint64_json(summary.next_run_utc_ms)},
                 {"exclude_page_and_hibernation_files", summary.exclude_page_and_hibernation_files},
+                {"deduplication_enabled", summary.deduplication_enabled},
                 {"encryption_enabled", summary.encryption_enabled}};
 }
 
 [[nodiscard]] contracts::ScheduleSummary parse_schedule(const Json& payload) {
-    constexpr std::array<std::string_view, 12> keys{
+    constexpr std::array<std::string_view, 13> keys{
         "schedule_id",
         "display_name",
         "enabled",
@@ -602,6 +621,7 @@ parse_recovery_point_source_volume(const Json& payload) {
         "trigger",
         "next_run_utc_ms",
         "exclude_page_and_hibernation_files",
+        "deduplication_enabled",
         "encryption_enabled"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("schedule summary fields are invalid");
@@ -623,6 +643,7 @@ parse_recovery_point_source_volume(const Json& payload) {
     summary.next_run_utc_ms = optional_uint64(payload.at("next_run_utc_ms"));
     summary.exclude_page_and_hibernation_files =
         payload.at("exclude_page_and_hibernation_files").get<bool>();
+    summary.deduplication_enabled = payload.at("deduplication_enabled").get<bool>();
     summary.encryption_enabled = payload.at("encryption_enabled").get<bool>();
     return summary;
 }
@@ -914,6 +935,8 @@ template <typename Item, typename Parser>
         {"chunk_count", result.chunk_count},
         {"entry_count", result.entry_count},
         {"stream_count", result.stream_count},
+        {"deduplicated_block_count", result.deduplicated_block_count},
+        {"deduplicated_logical_bytes", result.deduplicated_logical_bytes},
         {"message_code", result.message_code},
         {"warning_codes", result.warning_codes},
         {"partial_restore", result.partial_restore ? encode_partial_restore(*result.partial_restore)
@@ -931,7 +954,7 @@ template <typename Item, typename Parser>
 }
 
 [[nodiscard]] contracts::TaskResult parse_task_result(const Json& payload) {
-    constexpr std::array<std::string_view, 17> keys{
+    constexpr std::array<std::string_view, 19> keys{
         "schema_version",
         "job_id",
         "trace_id",
@@ -942,6 +965,8 @@ template <typename Item, typename Parser>
         "chunk_count",
         "entry_count",
         "stream_count",
+        "deduplicated_block_count",
+        "deduplicated_logical_bytes",
         "message_code",
         "warning_codes",
         "partial_restore",
@@ -965,6 +990,10 @@ template <typename Item, typename Parser>
     result.chunk_count = unsigned_value<std::uint64_t>(payload, "chunk_count");
     result.entry_count = unsigned_value<std::uint64_t>(payload, "entry_count");
     result.stream_count = unsigned_value<std::uint64_t>(payload, "stream_count");
+    result.deduplicated_block_count =
+        unsigned_value<std::uint64_t>(payload, "deduplicated_block_count");
+    result.deduplicated_logical_bytes =
+        unsigned_value<std::uint64_t>(payload, "deduplicated_logical_bytes");
     result.message_code = payload.at("message_code").get<std::string>();
     result.warning_codes = payload.at("warning_codes").get<std::vector<std::string>>();
     if (!payload.at("partial_restore").is_null()) {

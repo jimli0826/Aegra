@@ -80,17 +80,23 @@ base::Result<void> validate_recovery_point_summary(const RecoveryPointSummary& s
         summary.chain_state != RecoveryPointChainState::kComplete) {
         return invalid("full recovery point chain state is invalid");
     }
-    // file_set: Full or Incremental only; never Differential; never volume sidecar.
+    // file_set: Full or Incremental only; never Differential; never volume sidecar; dedup always 0.
     // Parent presence is already tied to backup_type by the Full/parent invariant above.
     if (summary.content_kind == ContentKind::kFileSet) {
-        if (summary.backup_type == PersonalBackupType::kDifferential || summary.has_sidecar) {
+        if (summary.backup_type == PersonalBackupType::kDifferential || summary.has_sidecar ||
+            summary.deduplicated_block_count != 0 || summary.deduplicated_logical_bytes != 0) {
             return invalid("file_set recovery point summary constraints violated");
         }
     }
     if (summary.created_utc_ms > kMaximumWireInteger ||
         summary.logical_size_bytes > kMaximumWireInteger ||
-        summary.stored_size_bytes > kMaximumWireInteger) {
+        summary.stored_size_bytes > kMaximumWireInteger ||
+        summary.deduplicated_block_count > kMaximumWireInteger ||
+        summary.deduplicated_logical_bytes > kMaximumWireInteger) {
         return invalid("recovery point summary integer exceeds the service wire range");
+    }
+    if ((summary.deduplicated_block_count == 0) != (summary.deduplicated_logical_bytes == 0)) {
+        return invalid("recovery point summary dedup counters are inconsistent");
     }
     return base::Result<void>::success();
 }

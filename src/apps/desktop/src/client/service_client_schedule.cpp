@@ -195,6 +195,7 @@ bool ServiceClient::upsertSchedule(const QString& schedule_id, const QString& di
                                    const QString& connection_id, const QString& frequency,
                                    const QString& time_of_day,
                                    const bool exclude_page_and_hibernation_files,
+                                   const bool deduplication_enabled,
                                    const bool encryption_enabled,
                                    const QString& archive_password, const int backup_type) {
     if (state_ != State::kReady || !schedules_available_ || schedule_command_busy_ ||
@@ -233,7 +234,8 @@ bool ServiceClient::upsertSchedule(const QString& schedule_id, const QString& di
     const auto body = encode_upsert_schedule_request(
         request_id, idempotency_key, schedule_id, display_name, enabled, source_ids, connection_id,
         backup_type, trigger_kind, local_minute, 0, QStringLiteral("UTC"),
-        exclude_page_and_hibernation_files, encryption_enabled, archive_password);
+        exclude_page_and_hibernation_files, deduplication_enabled, encryption_enabled,
+        archive_password);
     const auto started =
         coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
             return handle_schedule_command_frame(frame_body);
@@ -248,6 +250,7 @@ bool ServiceClient::upsertSchedule(const QString& schedule_id, const QString& di
 bool ServiceClient::createSchedule(const QVariantList& sources, const QString& connection_id,
                                    const QString& frequency, const QString& time_of_day,
                                    const bool exclude_page_and_hibernation_files,
+                                   const bool deduplication_enabled,
                                    const bool encryption_enabled,
                                    const QString& archive_password,
                                    const bool start_full_backup_after_create,
@@ -277,7 +280,7 @@ bool ServiceClient::createSchedule(const QVariantList& sources, const QString& c
     const auto started =
         upsertSchedule({}, display_names.join(QStringLiteral(", ")), true, source_ids,
                        connection_id, frequency, time_of_day, exclude_page_and_hibernation_files,
-                       encryption_enabled, archive_password, backup_type);
+                       deduplication_enabled, encryption_enabled, archive_password, backup_type);
     if (!started) {
         start_full_backup_after_schedule_create_ = false;
     }
@@ -320,6 +323,7 @@ bool ServiceClient::setScheduleEnabled(const QString& schedule_id, const bool en
         return false;
     }
     const auto exclude = found.value(QStringLiteral("excludePageAndHibernation"), true).toBool();
+    const auto dedup = found.value(QStringLiteral("deduplicationEnabled"), true).toBool();
     const auto encryption = found.value(QStringLiteral("encryptionEnabled"), false).toBool();
     const auto schedule_backup_type = found.value(QStringLiteral("backupType"), kBackupTypeFull).toInt();
     // Preserve create-time sources, options, encryption, and backup_type; only enabled (and other
@@ -328,8 +332,8 @@ bool ServiceClient::setScheduleEnabled(const QString& schedule_id, const bool en
                           enabled, found.value(QStringLiteral("sourceIds")).toList(),
                           found.value(QStringLiteral("connectionId")).toString(),
                           found.value(QStringLiteral("frequency")).toString(),
-                          found.value(QStringLiteral("timeOfDay")).toString(), exclude, encryption,
-                          {}, schedule_backup_type);
+                          found.value(QStringLiteral("timeOfDay")).toString(), exclude, dedup,
+                          encryption, {}, schedule_backup_type);
 }
 
 RequestDisposition ServiceClient::handle_schedule_command_frame(const QByteArray& body) {

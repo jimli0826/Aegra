@@ -236,8 +236,8 @@ QByteArray encode_upsert_file_set_schedule_request(
     const QString& display_name, const bool enabled, const QVariantList& file_selections,
     const QString& repository_connection_id, const int backup_type, const int trigger_kind,
     const int local_minute_of_day, const int weekday_mask, const QString& timezone_id,
-    const bool exclude_page_and_hibernation_files, const bool encryption_enabled,
-    const QString& archive_password) {
+    const bool exclude_page_and_hibernation_files, const bool /*deduplication_enabled*/,
+    const bool encryption_enabled, const QString& archive_password) {
     QJsonArray selections;
     for (const auto& item : file_selections) {
         const auto map = item.toMap();
@@ -266,6 +266,8 @@ QByteArray encode_upsert_file_set_schedule_request(
         {QStringLiteral("backup_type"), backup_type},
         {QStringLiteral("trigger"), trigger},
         {QStringLiteral("exclude_page_and_hibernation_files"), exclude_page_and_hibernation_files},
+        // file_set never enables volume chunk DEDUP (ADR-0022).
+        {QStringLiteral("deduplication_enabled"), false},
         {QStringLiteral("encryption_enabled"), encryption_enabled},
         {QStringLiteral("archive_password"), archive_password}};
     return QJsonDocument(

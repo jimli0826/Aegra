@@ -279,7 +279,7 @@ inline constexpr const char* kSelectJobSql =
     "parent_recovery_point_id, preflight_token, message_code, idempotency_key, result_error_code, "
     "result_outcome, result_message_code, exclude_page_and_hibernation_files, request_fingerprint, "
     "result_requested_backup_type, result_effective_backup_type, result_effective_parent_uuid, "
-    "result_incremental_downgrade_reason "
+    "result_incremental_downgrade_reason, schedule_id "
     "FROM jobs WHERE job_id = ?";
 
 inline constexpr const char* kSelectCommandSql =
@@ -289,9 +289,9 @@ inline constexpr const char* kSelectCommandSql =
 inline constexpr const char* kSelectScheduleSql =
     "SELECT schedule_id, display_name, enabled, content_kind, source_ids, owner_sid, "
     "repository_connection_id, backup_type, trigger_kind, local_minute_of_day, weekday_mask, "
-    "timezone_id, next_run_utc_ms, exclude_page_and_hibernation_files, encryption_enabled, "
-    "archive_password_protected, backup_set_uuid, last_recovery_point_id, created_utc_ms, "
-    "updated_utc_ms FROM schedules WHERE schedule_id = ?";
+    "timezone_id, next_run_utc_ms, exclude_page_and_hibernation_files, deduplication_enabled, "
+    "encryption_enabled, archive_password_protected, backup_set_uuid, last_recovery_point_id, "
+    "created_utc_ms, updated_utc_ms FROM schedules WHERE schedule_id = ?";
 
 [[nodiscard]] std::string encode_relative_path_blob(
     const std::vector<contracts::EncodedName>& components);

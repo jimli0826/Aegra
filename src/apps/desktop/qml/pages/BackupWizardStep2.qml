@@ -570,10 +570,11 @@ Item {
                         width: parent.width
                         spacing: 14
 
-                        // Dedup
+                        // Volume Set single-chunk DEDUP only (ADR-0022); hidden for file_set.
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 10
+                            visible: !root.filesMode
                             Rectangle {
                                 width: 18
                                 height: 18
@@ -595,18 +596,31 @@ Item {
                                     onClicked: root.enableDedup = !root.enableDedup
                                 }
                             }
-                            Text {
+                            ColumnLayout {
                                 Layout.fillWidth: true
-                                //% "Enable deduplication"
-                                text: qsTrId("aegra.backup.opt.dedup")
-                                color: Theme.colorTextWhite
-                                font.pixelSize: 13
-                                font.family: Theme.fontFamily
-                                wrapMode: Text.WordWrap
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.enableDedup = !root.enableDedup
+                                spacing: 2
+                                Text {
+                                    Layout.fillWidth: true
+                                    //% "Enable volume chunk deduplication"
+                                    text: qsTrId("aegra.backup.opt.dedup")
+                                    color: Theme.colorTextWhite
+                                    font.pixelSize: 13
+                                    font.family: Theme.fontFamily
+                                    wrapMode: Text.WordWrap
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.enableDedup = !root.enableDedup
+                                    }
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    //% "Same-chunk only within each volume backup; not global or cross-backup"
+                                    text: qsTrId("aegra.backup.opt.dedup_hint")
+                                    color: Theme.colorTextDim
+                                    font.pixelSize: 11
+                                    font.family: Theme.fontFamily
+                                    wrapMode: Text.WordWrap
                                 }
                             }
                         }

@@ -141,10 +141,14 @@ base::Result<void> validate_catalog_entry(const CatalogEntry& entry) {
         entry.split_part_count > kMaximumSplitPartCount || entry.catalog_generation == 0) {
         return invalid("catalog entry chain or location is invalid");
     }
+    if ((entry.deduplicated_block_count == 0) != (entry.deduplicated_logical_bytes == 0)) {
+        return invalid("catalog entry dedup counters are inconsistent");
+    }
     if (is_file_set(entry)) {
         if ((entry.backup_type != format::BackupType::kFull &&
              entry.backup_type != format::BackupType::kIncremental) ||
             entry.has_sidecar || !entry.source_volume_ids.empty() || entry.source_count == 0 ||
+            entry.deduplicated_block_count != 0 || entry.deduplicated_logical_bytes != 0 ||
             !valid_hex_fingerprint(entry.file_selection_fingerprint)) {
             return invalid("file_set catalog entry fields are invalid");
         }

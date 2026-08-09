@@ -22,10 +22,11 @@
    volume identity、逻辑大小和完整记录数必须一致；当前文件继承父 `backup_set_uuid`，其
    `parent_uuid` 等于父 `file_uuid`。
 3. Pipeline 仍读取完整源。Personal Archive Session 对每个输入块计算当前状态：DATA 使用 SHA-256，
-   ZERO 使用零 hash；新 Sidecar 始终保存完整状态。只有相对父 Sidecar 发生变化的块进入 `.bkf`
+   ZERO/FREE 使用零 hash；新 Sidecar 始终保存完整状态。只有相对父 Sidecar 发生变化的块进入 `.bkf`
    chunk 流。
-4. DATA 只有在父状态也是 DATA 且 SHA-256 相同时才视为未变化。当前 ZERO 在父状态为 ZERO 或 SKIP
-   时视为未变化；从 DATA 变为 ZERO 必须写入显式 ZERO entry。
+4. DATA 只有在父状态也是 DATA 且 SHA-256 相同时才视为未变化；ZERO/FREE 仅在父状态与当前状态完全
+   相同时才视为未变化。DATA→ZERO 必须写显式 ZERO，DATA/ZERO→FREE 必须写显式 FREE，FREE→ZERO
+   必须写显式 ZERO。链 Reader 合并最终 FREE range，恢复端跳过这些目标区间。
 5. 一个物理 Chunk 的 BlockEntry 必须覆盖连续逻辑范围。输入 chunk 内出现未变化空洞时，Writer 将
    变化区间拆成多个连续物理 chunk，并重新生成从 0 开始的持久化 `chunk_index`。完全无变化的输入
    chunk 不落盘；零变化增量允许只有 Header、Metadata、Footer 和完整 Sidecar。

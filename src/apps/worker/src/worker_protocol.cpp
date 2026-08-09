@@ -123,6 +123,11 @@ std::optional<contracts::BackupOptions> optional_backup(const Json& root) {
         throw std::invalid_argument("worker request backup.encryption_enabled is required");
     }
     result.encryption_enabled = encryption->get<bool>();
+    const auto dedup = iterator->find("deduplication_enabled");
+    if (dedup == iterator->end() || !dedup->is_boolean()) {
+        throw std::invalid_argument("worker request backup.deduplication_enabled is required");
+    }
+    result.deduplication_enabled = dedup->get<bool>();
     result.candidate_parent_uuid = iterator->value("candidate_parent_uuid", std::string{});
     if (iterator->contains("selection_fingerprint") &&
         !iterator->at("selection_fingerprint").is_null()) {
@@ -365,6 +370,8 @@ Json encode_task_result(const contracts::TaskResult& result) {
         {"chunk_count", result.chunk_count},
         {"entry_count", result.entry_count},
         {"stream_count", result.stream_count},
+        {"deduplicated_block_count", result.deduplicated_block_count},
+        {"deduplicated_logical_bytes", result.deduplicated_logical_bytes},
         {"message_code", result.message_code},
         {"warning_codes", result.warning_codes},
         {"partial_restore", nullptr},

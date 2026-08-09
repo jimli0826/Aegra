@@ -13,6 +13,9 @@ Snapshot Session -> Block Source -> Extent Enumerator -> Chunker
 
 职责：有界并发、背压、Chunk 边界、逻辑映射、转换、校验、进度、取消、重试分类和提交/中止。
 
+Block Source 可通过 `describe_extent()` 报告 DATA/FREE。Pipeline 只为 DATA extent 调用 `read()`；FREE
+区间在 chunk descriptor 中保留，逻辑进度照常推进，但不把该区间当作全零数据读取或散列。
+
 ## Restore Pipeline
 
 ```text
@@ -21,6 +24,11 @@ Recovery Point Reader -> Manifest Validation -> Chunk Resolver
 ```
 
 职责：目标预检、顺序与随机读取、数据重建、完整性验证、可恢复检查点和错误分类。
+
+Restore 预检验证每个 chunk 的 FREE 区间有序、不重叠且不越界。认证并展开 chunk 后，仅把 FREE 的补集
+写入 `IBlockSink`；FREE 区间直接跳过，不清零、不覆盖目标盘原内容。`RestoreSummary.restored_bytes`
+表示完成处理的逻辑字节，`disk_written_bytes` 表示实际提交给 Sink 的字节，`free_skipped_bytes` 和
+`free_range_count` 分别表示跳过的 FREE 字节与区间数；成功时后两个字节计数之和必须等于逻辑处理量。
 
 ## 依赖
 
@@ -98,7 +106,7 @@ IFileRecoveryPointReader -> FileSetRestorePipeline -> IFileTreeSink
 
 阶段 2 已实现 fixed-size raw Chunk、Memory Adapter、Backup/Restore Pipeline、按字节预算的有界队列、取消、Commit/Abort、Restore 预检和内存 roundtrip。
 
-阶段 3 已完成第一条纵向切片：同一 Pipeline 可把 Memory Block Source 写入一个正式加密 metadata、逐块 Zstandard 压缩、Footer 完成标记的单 volume `.bkf`，再通过 `IRecoveryPointReader` 还原到 Block Sink。Pipeline 没有新增对具体 Adapter 的依赖。后续 Transform 组合接口将用于企业 Repository、payload 加密和去重，不把个人格式判断加入 Pipeline。
+阶段 3 已完成第一条纵向切片：同一 Pipeline 可把 Memory Block Source 写入一个正式加密 metadata、逐块 Zstandard 压缩、Footer 完成标记的单 volume `.bkf`，再通过 `IRecoveryPointReader` 还原到 Block Sink。Pipeline 没有新增对具体 Adapter 的依赖。ADR-0022 的个人版单 Chunk 去重由 Personal Archive Session 在 Adapter 内完成；Pipeline 只传递逻辑块与统计结果，不 include DEDUP 格式。企业 Repository 的跨备份去重仍由其 CAS/Transform 组合承担。
 
 阶段 6 的个人增量实现仍复用同一 Backup Pipeline 读取完整源，由 Archive Session 在 Adapter 内形成稀疏变化层；恢复侧由 Chain Reader 先合并为连续视图，再交给原 Restore Pipeline。Pipeline 不知道父 UUID、Sidecar 或个人备份链。
 

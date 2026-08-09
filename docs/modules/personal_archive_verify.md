@@ -26,7 +26,7 @@ Validate Verify Job
 ```
 
 `PersonalArchiveReader::open()` 完成 Header、metadata、分卷、Chunk 结构和 Footer 校验；
-`IRecoveryPointReader::read_chunk()` 完成每个 Chunk 的密文认证、解压、ZERO 展开与输出范围校验。
+`IRecoveryPointReader::read_chunk()` 完成每个 Chunk 的密文认证、解压、ZERO/DEDUP 展开与输出范围校验。
 `VerifyPipeline` 负责 descriptor 稳定性、非重叠顺序、payload 大小、取消和进度。增量层允许合法空洞，
 因此 Pipeline 不要求 Chunk 覆盖整个逻辑卷。
 
@@ -44,6 +44,7 @@ Validate Verify Job
 
 - 口令只在同步 Reader 创建和 Verify 生命周期内存活，不写入 Job、日志或结果；
 - Reader 的 metadata、stored payload、logical payload 和分卷数量使用受信任上限；
+- DEDUP 只允许当前 Volume Chunk 内后向引用 RAW/COMPRESSED；Verify 重算 block/bytes 并核对 Footer；
 - 认证失败时不向调用方返回未认证数据；
 - 取消在打开 Reader 后逐 Chunk 检查，并贯穿读取、认证和解压；
 - Verify 只读打开 Archive，不创建 partial、Sidecar 或临时恢复目标。

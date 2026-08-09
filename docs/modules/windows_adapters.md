@@ -89,7 +89,7 @@ Source 独占 Handle，可以并发调用 `read()`。每次读取使用独立重
 - raw / VSS 设备读：`ReadFile` 允许 partial IRP，**循环读满**请求长度；单次 IRP 上限 1 MiB。
   循环后仍读不满可读区间才失败（真 EOF / 设备截断），**不得**把 partial 当成致命 short read；
 - raw 与 VSS 均尝试 `FSCTL_ALLOW_EXTENDED_DASD_IO`（VSS 拒绝时继续，raw 失败则打开失败）；
-- Free-skip / 已验证排除区间的零填充由 `FreeSkipBlockSource` 负责，不与设备 short read 混用。
+- Free-skip / 已验证排除区间的 FREE 分类由 `FreeSkipBlockSource` 负责，不与设备 short read 混用。
 
 `kStableFile` 保持严格语义：short/EOF 原样返回，不零填充。
 
@@ -105,13 +105,15 @@ Source 独占 Handle，可以并发调用 `read()`。每次读取使用独立重
 - **exFAT/RAW/未知**：不启用，整卷读取；
 - bitmap 失败时 `applied=false`，调用方退回全量读取（宁可备份变大，不可漏数据）。
 
-`FreeSkipBlockSource` 包装底层 `IBlockSource`：空闲区间直接零填充且不发起设备 I/O，已用区间转发。
-全量 Archive 仍写出完整逻辑长度；空闲簇在 Personal Archive 中会落成 `ZERO` 块（无 payload），
-既省读盘也省存储。Pipeline 不感知 bitmap。
+`FreeSkipBlockSource` 包装底层 `IBlockSource`：`describe_extent()` 将空闲区间报告为 FREE，已用区间报告为
+DATA。Backup Pipeline 对 FREE 不调用 `read()`，Personal Archive 把它编码成 FREE BlockEntry（无 payload），
+全量 Archive 仍覆盖完整逻辑地址空间。真实全零 DATA 才编码为 ZERO；恢复 FREE 时直接跳过目标写盘。
+Composition Root 在包装前把 cluster extent 向内收缩到 Archive block 边界；同时含 DATA 与 FREE cluster 的
+Archive block 按 DATA 读取和保存，防止把已用字节误标 FREE。卷末短 block 可在确认全部空闲时标 FREE。
 
 `merge_page_and_hibernation_exclusions`（Desktop Options「Exclude pagefile / hiberfil / swapfile」）：
 对齐 AipCopy `ExcludeJunkFiles` / `AddFileToExcludedClusters`。在与块读取**相同**的设备根上解析
-pagefile.sys / hiberfil.sys / swapfile.sys 的 LCN，并入 free-skip plan（零填充且不读盘）：
+pagefile.sys / hiberfil.sys / swapfile.sys 的 LCN，并入 free-skip plan（标记 FREE 且不读盘）：
 
 - **raw**：canonical Volume GUID 根；
 - **VSS**：`snapshot_device_path`（`\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopyN`）根，与
@@ -123,9 +125,12 @@ pagefile.sys / hiberfil.sys / swapfile.sys 的 LCN，并入 free-skip plan（零
 VSS：`supports_vss_snapshot` 仅按文件系统筛候选；真正加入 Snapshot Set 前调用
 `is_volume_snapshot_supported`（`IsVolumeSupported`）。不支持的卷走 raw，`vss_used=false`。
 
-Worker 默认几何与旧引擎对齐：`block=64KiB`、`chunk=64MiB`、`memory_budget=256MiB`。
-Archive 块准备对 hash/Zstd 使用 `hardware_concurrency` 并行；线程内异常捕获后返回 `Result`，
-禁止未 join 的 `std::thread` 析构。
+Worker 默认几何：`block=64KiB`、`chunk=256MiB`、`memory_budget=512MiB`（budget ≥ chunk，
+约两个物理 Chunk 流水线重叠；格式单 Chunk payload 上限 512 MiB）。
+`PersonalArchiveSession` 在创建时启动 **session 级** block worker pool（线程数 =
+`hardware_concurrency`，至少 1），供每个物理 Chunk 的 hash/zstd 并行复用；**不得**在每个
+Chunk 上重新 `std::thread` 创建/join。每个 pool worker 持有并复用一个 `ZstdCompressor`
+（`ZSTD_CCtx` + 输出 scratch）。线程内异常捕获后返回 `Result`；Session 析构时 join pool。
 
 ### `WindowsVssSnapshotSession`
 

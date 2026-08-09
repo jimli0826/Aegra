@@ -153,6 +153,8 @@ constexpr uint32_t BACKUP_FLAG_SPLIT        = 0x00000020;
 ```
 
 正式产品文件必须设置 `BACKUP_FLAG_ENCRYPTED`。FULL / INCREMENTAL / DIFFERENTIAL 互斥且恰有一个。
+`BACKUP_FLAG_DEDUP` 表示 volume_set Writer 启用了 [ADR-0022](../adr/0022-volume-set-chunk-local-deduplication.md)
+策略；即使没有产生 DEDUP entry 也保持置位。file_set 禁止置位。
 
 ### 2.2 capability_flags
 
@@ -191,7 +193,8 @@ constexpr uint8_t COMPRESSION_ZSTD      = 1;
 - `split_part_index` 与文件名后缀不一致；
 - FULL 时 `parent_uuid` 必须全 0；INCREMENTAL/DIFFERENTIAL 时不得全 0；
 - file_set：`CAP_HAS_FILE_INDEX` 置位、不得置 `CAP_VOLUME_SIDECAR_OK`、禁止 DIFFERENTIAL；
-  FULL 时 `parent_uuid` 全 0；INCREMENTAL 时 `parent_uuid` 非 0 且 `CAP_FILE_METADATA_BASELINE` 置位。
+  FULL 时 `parent_uuid` 全 0；INCREMENTAL 时 `parent_uuid` 非 0 且 `CAP_FILE_METADATA_BASELINE` 置位；
+  不得设置 `BACKUP_FLAG_DEDUP`。
 
 Header 不保存文件名、路径、entry 数、index 位置或未加密客户 metadata。
 
@@ -300,11 +303,41 @@ struct BlockEntry {
     } ptr;
     uint32_t stored_size;
     uint32_t logical_size;
-    uint8_t  flags; // RAW=0x01 COMPRESSED=0x02 ZERO=0x04 DEDUP=0x08
+    uint8_t  flags; // RAW=0x01 COMPRESSED=0x02 ZERO=0x04 DEDUP=0x08 FREE=0x10
 };
 static_assert(sizeof(BlockEntry) == 25);
 #pragma pack(pop)
 ```
+
+Volume BlockEntry 规则：
+
+- RAW/COMPRESSED 表示已分配数据块，`logical_size` 是展开字节数；真实全零内容仍编码为 ZERO；
+- ZERO/FREE 都不占 payload，`ptr.payload_offset=0`，`stored_size=0`，`logical_size` 是连续逻辑块数；
+- FREE 只表示文件系统空闲簇或经用户选项排除的 `pagefile.sys`、`hiberfil.sys`、`swapfile.sys`
+  extent。备份端不得读取这些区间，恢复端不得向这些区间写盘；
+- FREE 与 ZERO 是不同状态。恢复 ZERO 必须写零，恢复 FREE 必须跳过；Sidecar 对每个逻辑块分别记录
+  DATA/ZERO/FREE，非 DATA 状态 hash 全零；
+- FREE 区间必须按 block 边界编码（卷末最后一个逻辑块可短于 block size），相邻 FREE 块应合并为 run。
+  同一 Archive block 内只要包含任意已用 cluster，该 block 整体按 DATA/ZERO 读取和编码，不允许部分标 FREE。
+
+#### 4.1.1 Volume DEDUP 语义
+
+DEDUP 仅用于 volume_set，引用域严格限制为当前物理 `VolumeChunk` record：
+
+- `flags` 必须恰为 DEDUP；`ptr.ref_index` 是当前 `BlockEntry[]` 的零基索引；
+- `ref_index < current_entry_index`，且目标必须恰为 RAW 或 COMPRESSED；禁止引用 ZERO、FREE 或 DEDUP；
+- `stored_size == 0`、`logical_size == 0`，entry 不占 payload；
+- DEDUP 表示一个逻辑块，不得编码 run；目标 canonical 解码长度必须等于该目标位置允许的块长度；
+- 禁止跨 Chunk、part、source、Archive 或 Recovery Point 引用；
+- canonical 是当前 Chunk 中按逻辑块序遇到的首个相同 DATA 块。Writer 用
+  `(SHA-256(plaintext), logical_size)` 查找候选，命中后必须逐字节确认；
+- FREE 分类早于读取、ZERO 检测与 DEDUP；ZERO 检测早于 DEDUP。Incremental 父层未变化块先被省略，
+  不能成为本层 canonical；
+- DEDUP entry 存在而 Header 未置 `BACKUP_FLAG_DEDUP`，或 file_set 出现 DEDUP，均为 corrupt。
+
+BlockEntry 表是 AEAD AAD 而非密文，DEDUP flag/ref 会暴露当前 Chunk 内的块相等关系。不得持久化候选哈希，
+不得使用 convergent encryption。完整算法与安全边界见
+[Volume Set 去重设计](../architecture/VOLUME_SET_DEDUPLICATION.md)。
 
 Volume chunk AEAD AAD（顺序拼接）：
 
@@ -742,11 +775,13 @@ struct BackupFooterBody {
     uint64_t part_file_size;        // this part size including footer record
     uint8_t  file_uuid[16];         // must match header
 
-    // body offset 168: secondary roots (ADR-0019); remainder reserved zero
+    // body offset 168: secondary roots (ADR-0019), then volume dedup metrics
     IndexRootLocator entry_id_root; // 48 B
     IndexRootLocator stream_root;   // 48 B
     IndexRootLocator chunk_root;    // 48 B
-    uint8_t  reserved[168];         // zero; body total 480
+    uint64_t deduplicated_block_count;   // volume_set DEDUP entries; file_set 0
+    uint64_t deduplicated_logical_bytes; // expanded bytes represented by DEDUP; file_set 0
+    uint8_t  reserved[152];         // zero; body total 480
 };
 static_assert(sizeof(BackupFooterBody) == 480);
 #pragma pack(pop)
@@ -761,7 +796,12 @@ Footer 无独立 AEAD；完整性依赖：
 
 volume_set：全部 index root 与 `entry_count`/`stream_count`/`index_page_count` 必须为 0。
 file_set：`entry_count > 0` 时 Namespace 与 Entry ID root 必须有效；`volume_chunk_count == 0`；
-`stream_count > 0` ⇔ Stream root 有效；`file_stream_chunk_count > 0` ⇔ Chunk root 有效。
+`stream_count > 0` ⇔ Stream root 有效；`file_stream_chunk_count > 0` ⇔ Chunk root 有效；两个 dedup 计数必须为 0。
+
+volume_set 的 `deduplicated_block_count` 是 DEDUP entry 总数，`deduplicated_logical_bytes` 是这些 entry
+展开后的逻辑长度总和。两者必须同时为 0 或同时大于 0，且不得计入 ZERO、压缩节省或 Incremental 父层省略。
+Header 未设置 DEDUP 时两者必须为 0；设置 DEDUP 但未命中重复时也为 0。
+Volume Restore/完整 Verify 读取最后一个 Chunk 后必须重算两个计数并与 Footer 一致；不一致为 corrupt。
 
 file_set Footer 计数语义（FI4）：
 
@@ -812,7 +852,9 @@ AEAD AAD：
 ```
 
 `disks`/`volumes`/`system`/`backup_job` 字段集与 V6 文档一致；V7 仅要求根上显式 `content_kind=1`。
-增量链、Sidecar、多 Volume Snapshot Set 语义保持不变。
+增量按 Sidecar 的 DATA/ZERO/FREE 精确状态比较：仅状态相同（DATA 还要求 SHA-256 相同）才省略；
+DATA→FREE、ZERO→FREE、FREE→ZERO 都必须在当前层显式写对应 BlockEntry。链 Reader 合并各层 FREE
+区间并向恢复管线暴露最终跳写范围。多 Volume Snapshot Set 语义保持不变。
 
 ### 7.2 file_set 根 Map
 
@@ -852,6 +894,7 @@ AEAD AAD：
 
 - Header `compression_method`：volume 与 file_set 默认均为 `COMPRESSION_ZSTD`（1）。
 - `COMPRESSION_ZSTD`：每个 BlockEntry 的 stored payload 为独立 zstd frame；
+- volume_set 启用 DEDUP 时先选择 plaintext canonical，再仅对 canonical 执行机会性压缩；
 - file_set 写入为**机会性**压缩：仅当 zstd 输出严格小于逻辑块长度时使用 `COMPRESSED`，否则 `RAW`；
 - 解压后长度必须等于该 entry 的 `logical_size`（RAW 时 `stored_size == logical_size`）；
 - 解压输出上限 `min(block_size, entry.logical_size)`（file stream 最后一块可小于 block_size）；
@@ -877,6 +920,8 @@ AEAD AAD：
 | 超限 count/size/depth | corrupt |
 | 重复 key / 环 / 不可达 | corrupt |
 | extent 指向缺失 chunk 或错误 source_index | corrupt |
+| DEDUP 未声明、前向/越界引用、目标类型或长度非法 | corrupt |
+| FREE run 越界、与逻辑块不对齐或携带 payload | corrupt |
 | 未知 critical record kind | corrupt |
 
 ## 10. 与产品上限的关系

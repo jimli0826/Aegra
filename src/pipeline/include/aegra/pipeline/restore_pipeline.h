@@ -20,6 +20,9 @@ struct RestorePlan final {
 
 struct RestoreSummary final {
     std::uint64_t restored_bytes{0};
+    std::uint64_t disk_written_bytes{0};
+    std::uint64_t free_skipped_bytes{0};
+    std::uint64_t free_range_count{0};
     std::uint64_t chunk_count{0};
     std::size_t peak_buffered_bytes{0};
 };

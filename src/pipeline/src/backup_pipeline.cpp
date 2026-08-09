@@ -84,6 +84,11 @@ struct BackupConsumerContext final {
     std::uint64_t logical_size;
 };
 
+struct ReadRangeResult final {
+    std::vector<std::byte> payload;
+    std::vector<ports::ChunkFreeRange> free_ranges;
+};
+
 base::Result<void> validate_plan(const BackupPlan& plan) {
     if (plan.job_id.empty() || plan.trace_id.empty() || plan.chunk_size_bytes == 0 ||
         plan.memory_budget_bytes == 0) {
@@ -143,26 +148,61 @@ base::Result<void> validate_plan(const BackupPlan& plan) {
     return base::Result<void>::success();
 }
 
-base::Result<std::vector<std::byte>> read_range(ports::IBlockSource& source,
-                                                const ChunkRange& range,
-                                                const base::CancellationToken& cancellation) {
-    std::vector<std::byte> payload(static_cast<std::size_t>(range.logical_size));
+base::Result<void> read_data_extent(ports::IBlockSource& source, const std::uint64_t offset,
+                                    std::span<std::byte> destination,
+                                    const base::CancellationToken& cancellation) {
     std::size_t filled = 0;
-    while (filled < payload.size()) {
-        auto destination = std::span<std::byte>(payload).subspan(filled);
-        auto result = source.read(range.logical_offset + filled, destination, cancellation);
+    while (filled < destination.size()) {
+        auto result = source.read(offset + filled, destination.subspan(filled), cancellation);
         if (!result) {
-            return base::Result<std::vector<std::byte>>::failure(result.error());
+            return base::Result<void>::failure(result.error());
         }
         if (result.value() == 0) {
-            return base::Result<std::vector<std::byte>>::failure(base::Error{
+            return base::Result<void>::failure(base::Error{
                 base::ErrorCode::kIoFailure,
                 "block source returned zero bytes before end of range",
             });
         }
         filled += result.value();
     }
-    return base::Result<std::vector<std::byte>>::success(std::move(payload));
+    return base::Result<void>::success();
+}
+
+base::Result<ReadRangeResult> read_range(ports::IBlockSource& source, const ChunkRange& range,
+                                         const base::CancellationToken& cancellation) {
+    ReadRangeResult result;
+    result.payload.resize(static_cast<std::size_t>(range.logical_size));
+    std::uint64_t consumed = 0;
+    while (consumed < range.logical_size) {
+        const auto remaining = range.logical_size - consumed;
+        auto extent =
+            source.describe_extent(range.logical_offset + consumed, remaining, cancellation);
+        if (!extent) {
+            return base::Result<ReadRangeResult>::failure(extent.error());
+        }
+        if (extent.value().logical_offset != range.logical_offset + consumed ||
+            extent.value().logical_size == 0 || extent.value().logical_size > remaining) {
+            return base::Result<ReadRangeResult>::failure(
+                base::Error{base::ErrorCode::kInternal, "block source returned an invalid extent"});
+        }
+        if (extent.value().state == ports::BlockExtentState::kFree) {
+            result.free_ranges.push_back({consumed, extent.value().logical_size});
+        } else if (extent.value().state == ports::BlockExtentState::kData) {
+            const auto output = std::span<std::byte>(result.payload)
+                                    .subspan(static_cast<std::size_t>(consumed),
+                                             static_cast<std::size_t>(extent.value().logical_size));
+            auto read =
+                read_data_extent(source, extent.value().logical_offset, output, cancellation);
+            if (!read) {
+                return base::Result<ReadRangeResult>::failure(read.error());
+            }
+        } else {
+            return base::Result<ReadRangeResult>::failure(
+                {base::ErrorCode::kInternal, "block source returned an unknown extent state"});
+        }
+        consumed += extent.value().logical_size;
+    }
+    return base::Result<ReadRangeResult>::success(std::move(result));
 }
 
 base::Result<ports::ChunkData> read_next_chunk(BackupProducerContext& context,
@@ -172,14 +212,12 @@ base::Result<ports::ChunkData> read_next_chunk(BackupProducerContext& context,
         return base::Result<ports::ChunkData>::failure(payload.error());
     }
     ports::ChunkDescriptor descriptor{
-        range.chunk_index,
-        range.logical_offset,
-        range.logical_size,
-        static_cast<std::uint64_t>(payload.value().size()),
-        context.source_index,
+        range.chunk_index,    range.logical_offset,
+        range.logical_size,   static_cast<std::uint64_t>(payload.value().payload.size()),
+        context.source_index, std::move(payload.value().free_ranges),
     };
     return base::Result<ports::ChunkData>::success(
-        ports::ChunkData{descriptor, std::move(payload).value()});
+        ports::ChunkData{std::move(descriptor), std::move(payload.value().payload)});
 }
 
 base::Result<void> produce_all_chunks(BackupProducerContext& context) {

@@ -55,6 +55,15 @@ base::Result<void> validate_descriptor(const ports::ChunkDescriptor& descriptor,
         return base::Result<void>::failure(
             base::Error{base::ErrorCode::kCorruptData, "chunk exceeds logical source size"});
     }
+    std::uint64_t free_end = 0;
+    for (const auto& range : descriptor.free_ranges) {
+        if (range.size == 0 || range.offset < free_end || range.offset > descriptor.logical_size ||
+            range.size > descriptor.logical_size - range.offset) {
+            return base::Result<void>::failure(
+                {base::ErrorCode::kCorruptData, "chunk free ranges are invalid"});
+        }
+        free_end = range.offset + range.size;
+    }
     return base::Result<void>::success();
 }
 
@@ -170,6 +179,32 @@ void publish_progress(ports::IProgressSink* sink, const RestorePlan& plan,
         summary.restored_bytes, restore_phase_message(phase)));
 }
 
+base::Result<void> write_allocated_ranges(RestoreConsumerContext& context,
+                                          const ports::ChunkData& chunk) {
+    std::uint64_t position = 0;
+    for (const auto& free : chunk.descriptor.free_ranges) {
+        if (free.offset > position) {
+            const auto size = free.offset - position;
+            auto written = context.sink.write(
+                chunk.descriptor.logical_offset + position,
+                std::span<const std::byte>(chunk.payload)
+                    .subspan(static_cast<std::size_t>(position), static_cast<std::size_t>(size)),
+                context.cancellation);
+            if (!written) {
+                return written;
+            }
+        }
+        position = free.offset + free.size;
+    }
+    if (position == chunk.descriptor.logical_size) {
+        return base::Result<void>::success();
+    }
+    return context.sink.write(
+        chunk.descriptor.logical_offset + position,
+        std::span<const std::byte>(chunk.payload).subspan(static_cast<std::size_t>(position)),
+        context.cancellation);
+}
+
 base::Result<RestoreSummary> consume_chunks(RestoreConsumerContext& context) {
     RestoreSummary summary;
     while (true) {
@@ -182,12 +217,19 @@ base::Result<RestoreSummary> consume_chunks(RestoreConsumerContext& context) {
             break;
         }
         auto chunk = std::move(chunk_optional).value();
-        auto written = context.sink.write(chunk.descriptor.logical_offset, chunk.payload,
-                                          context.cancellation);
+        auto written = write_allocated_ranges(context, chunk);
         if (!written) {
             return base::Result<RestoreSummary>::failure(written.error());
         }
+        std::uint64_t chunk_free_bytes = 0;
+        for (const auto& range : chunk.descriptor.free_ranges) {
+            chunk_free_bytes += range.size;
+        }
         summary.restored_bytes += chunk.descriptor.logical_size;
+        summary.disk_written_bytes += chunk.descriptor.logical_size - chunk_free_bytes;
+        summary.free_skipped_bytes += chunk_free_bytes;
+        summary.free_range_count +=
+            static_cast<std::uint64_t>(chunk.descriptor.free_ranges.size());
         ++summary.chunk_count;
         publish_progress(context.progress, context.plan, contracts::TaskPhase::kWriting, summary,
                          context.logical_size);

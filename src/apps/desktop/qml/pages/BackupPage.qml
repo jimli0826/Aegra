@@ -334,29 +334,8 @@ Item {
         return rev * 10000 + active * 1000 + pct
     }
 
-    /// Match keys for JobModel.latestBackupStatus.
-    /// volume_set: schedule.sourceIds (volume identity codes).
-    /// file_set: selection_id values — Service stores them on JobSummary.source_ids.
-    function scheduleMatchIds(schedule) {
-        if (!schedule)
-            return []
-        var sources = schedule.sourceIds || []
-        if (sources && sources.length > 0)
-            return sources
-        var summaries = schedule.selectionSummaries || []
-        var ids = []
-        for (var i = 0; i < summaries.length; ++i) {
-            var item = summaries[i]
-            if (!item)
-                continue
-            var id = item.selectionId || item.selection_id || ""
-            if (id && id.length > 0)
-                ids.push(id)
-        }
-        return ids
-    }
-
     /// Resolve backup status for a schedule row (success / failed / running+%).
+    /// Bound by schedule_id so identical sources do not share one Job's state.
     /// Returns { statusKey, progressPercent, stateText }.
     function scheduleBackupStatus(schedule) {
         var _ = root.jobsStatusRevision
@@ -365,9 +344,10 @@ Item {
         var jobs = serviceClient.jobs
         if (!jobs || typeof jobs.latestBackupStatus !== "function")
             return { statusKey: "none", progressPercent: 0, stateText: "" }
-        var sources = root.scheduleMatchIds(schedule)
-        var conn = schedule.connectionId || ""
-        var st = jobs.latestBackupStatus(sources, conn)
+        var scheduleId = schedule.scheduleId || schedule.id || ""
+        if (scheduleId.length === 0)
+            return { statusKey: "none", progressPercent: 0, stateText: "" }
+        var st = jobs.latestBackupStatus(scheduleId)
         if (!st)
             return { statusKey: "none", progressPercent: 0, stateText: "" }
         return {
@@ -408,6 +388,8 @@ Item {
         var timeOfDay = s2 ? s2.timeOfDay : "02:00"
         var backupType = s2 ? (s2.backupType === 2 ? 2 : 1) : 1
         var excludePage = s2 ? s2.excludePageHibernation : true
+        // volume_set only; file_set always false (ADR-0022).
+        var enableDedup = filesMode ? false : (s2 ? s2.enableDedup : true)
         var encryption = s2 ? s2.encryption : false
         var password = s2 ? (s2.password || "") : ""
         var passwordConfirm = s2 ? (s2.passwordConfirm || "") : ""
@@ -430,6 +412,7 @@ Item {
             timeOfDay: timeOfDay,
             backupType: backupType,
             excludePage: excludePage,
+            enableDedup: enableDedup,
             encryption: encryption,
             password: encryption ? password : ""
         }
@@ -449,8 +432,8 @@ Item {
                                                      (p.backupType === 2) ? 2 : 1)
         } else {
             ok = serviceClient.createSchedule(p.sources, p.connId, p.frequency, p.timeOfDay,
-                                              p.excludePage, p.encryption, p.password,
-                                              !!startFirstBackup,
+                                              p.excludePage, !!p.enableDedup, p.encryption,
+                                              p.password, !!startFirstBackup,
                                               (p.backupType === 2) ? 2 : 1)
         }
         if (!ok) {
@@ -2051,6 +2034,47 @@ Item {
                                 Layout.fillHeight: true
                                 //% "SOURCE"
                                 title: qsTrId("aegra.backup.section.source_upper")
+
+                                // Header right: refresh inventory (disks + file browse)
+                                headerRightComponent: Component {
+                                    MouseArea {
+                                        id: refreshBtnArea
+                                        width: 28
+                                        height: 28
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            spinAnim.restart()
+                                            serviceClient.refreshInventory()
+                                            if (serviceClient.fileBrowseAvailable) serviceClient.loadFileBrowseRoots()
+                                        }
+
+                                        Rectangle {
+                                            anchors.fill: parent
+                                            radius: 6
+                                            color: refreshBtnArea.pressed ? Theme.colorButtonHover : (refreshBtnArea.containsMouse ? Theme.colorHover : "transparent")
+                                            border.width: 0
+
+                                            NavIcon {
+                                                id: refreshNavIcon
+                                                anchors.centerIn: parent
+                                                width: 16
+                                                height: 16
+                                                name: "refresh"
+                                                color: refreshBtnArea.containsMouse ? Theme.colorAccentBlue : Theme.colorTextGrey
+
+                                                NumberAnimation on rotation {
+                                                    id: spinAnim
+                                                    running: false
+                                                    from: 0
+                                                    to: 360
+                                                    duration: 400
+                                                    easing.type: Easing.InOutQuad
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
 
                                 // File-set selection summary — hidden per UI request.
                                 Text {

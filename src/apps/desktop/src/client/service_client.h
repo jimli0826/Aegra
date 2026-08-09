@@ -212,6 +212,7 @@ class ServiceClient final : public QObject {
                                      const QString& connection_id, const QString& frequency,
                                      const QString& time_of_day,
                                      bool exclude_page_and_hibernation_files = true,
+                                     bool deduplication_enabled = true,
                                      bool encryption_enabled = false,
                                      const QString& archive_password = {},
                                      int backup_type = 1);
@@ -222,12 +223,14 @@ class ServiceClient final : public QObject {
     Q_INVOKABLE bool createSchedule(const QVariantList& sources, const QString& connection_id,
                                     const QString& frequency, const QString& time_of_day,
                                     bool exclude_page_and_hibernation_files = true,
+                                    bool deduplication_enabled = true,
                                     bool encryption_enabled = false,
                                     const QString& archive_password = {},
                                     bool start_full_backup_after_create = false,
                                     int backup_type = 1);
     /// Creates a file_set schedule from the current fileBrowseSources selection (opaque tokens).
     /// backup_type: 1 full, 2 incremental (Differential is not offered for file_set).
+    /// deduplication_enabled is always forced false for file_set.
     Q_INVOKABLE bool createFileSetSchedule(const QString& connection_id, const QString& frequency,
                                            const QString& time_of_day,
                                            bool exclude_page_and_hibernation_files = true,

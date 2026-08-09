@@ -28,8 +28,8 @@ base::Result<void> JobStore::insert(const ports::JobRecord& record,
         "result_error_code, result_outcome, result_message_code, "
         "exclude_page_and_hibernation_files, request_fingerprint, "
         "result_requested_backup_type, result_effective_backup_type, "
-        "result_effective_parent_uuid, result_incremental_downgrade_reason) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+        "result_effective_parent_uuid, result_incremental_downgrade_reason, schedule_id) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     if (!statement) {
         return base::Result<void>::failure(statement.error());
     }
@@ -148,6 +148,9 @@ base::Result<void> JobStore::insert(const ports::JobRecord& record,
     } else if (auto bound = stmt.bind_null(25); !bound) {
         return bound;
     }
+    if (auto bound = stmt.bind_text(26, record.schedule_id); !bound) {
+        return bound;
+    }
     auto stepped = stmt.step();
     if (!stepped) {
         return base::Result<void>::failure(stepped.error());
@@ -210,7 +213,7 @@ base::Result<contracts::JobPage> JobStore::list(const contracts::JobListRequest&
         "result_error_code, result_outcome, result_message_code, "
         "exclude_page_and_hibernation_files, request_fingerprint, "
         "result_requested_backup_type, result_effective_backup_type, "
-        "result_effective_parent_uuid, result_incremental_downgrade_reason "
+        "result_effective_parent_uuid, result_incremental_downgrade_reason, schedule_id "
         "FROM jobs WHERE 1=1";
     if (request.operation) {
         sql += " AND operation = ?";

@@ -32,6 +32,7 @@ Validate Request
 -> Classify volumes: FS candidate + IsVolumeSupported → VSS set; others raw
 -> Optionally wrap each source with Volume Bitmap free-cluster skip (same device path as read)
 -> pagefile/hiber/swap exclusion on the same read root (live GUID or VSS snapshot; AipCopy style)
+-> Report both classes as FREE extents; do not read/hash them and persist FREE BlockEntry runs
 -> Build one V6 Manifest containing all selected Volumes
 -> Log worker thread count; hash/compress fan-out in PersonalArchive (exception-safe)
 -> For incremental, authenticate parent Archive and Sidecar
@@ -56,6 +57,7 @@ Archive。Pipeline 失败时 Archive Session 负责 Abort，Composition Root 仍
 - 备份类型；增量还要求显式 parent Archive path 和调用期间有效的 parent password view；
 - 密码学随机且非零的 file UUID；全量另有互不相同的 backup-set UUID，增量由父 Archive 继承；
 - block/chunk/memory geometry、KDF 参数和可选分卷大小；
+- 显式 `deduplication_enabled`；开启时仅按 ADR-0022 在当前物理 Volume Chunk 内去重；
 - created UTC、应用版本和 hostname。
 
 成功表示 Archive 已经 Commit。此后 Snapshot 删除失败不能把已发布 Archive 伪装成未提交，因此
@@ -91,6 +93,12 @@ Validate JobRequest and trusted options
 - schema 或 operation-specific 校验失败表示请求未被接受，返回 `Result` failure 且不获取凭据；
 - 请求一旦被接受，取消、凭据、随机源、VSS、I/O 和 Archive 失败均转换为 `TaskResult`；
 - TaskResult 不复制底层 Error message，只使用稳定 message/warning code；
+- volume backup 成功后，在 Session 销毁并完成 Commit 的前提下：
+  - `TaskResult.logical_bytes`：各 Volume 明文逻辑长度之和；
+  - `TaskResult.stored_bytes`：已提交 `.bkf` 全部分卷文件大小之和（wire，含 header/chunk/footer；
+    **不是** pipeline 阶段 `descriptor.stored_size`，stage-2 volume 下该值常等于 logical）；
+  - 任务日志 `Result.payload_bytes`：Footer `total_payload_size`（仅 chunk payload，不含 framing）；
+  - `deduplicated_block_count` / `deduplicated_logical_bytes` 从 Footer 投影（ADR-0022）；
 - Snapshot 清理失败映射为 `kSucceededWithWarning`，容量与 chunk 指标仍来自已提交 Archive；
 - deadline 和 Service 分配的 UUID/时间在获取凭据前校验；任务运行中的 deadline 由 Worker Host 转换为
   CancellationToken。

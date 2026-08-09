@@ -45,7 +45,7 @@ Validate Restore Job and trusted chain-depth limit
 -> Lock and dismount target volume
 -> Preflight descriptors, capacity and memory budget
 -> Read/authenticate/decompress each Chunk for that volume only
--> Write by logical offset
+-> Write DATA/ZERO by logical offset; skip authenticated FREE ranges without target writes
 -> Flush target
 -> Unlock and close target
 ```
@@ -73,7 +73,7 @@ Validate restore.disk_restore + base-first source_refs + PhysicalDrive target
 -> For each volume (offset order):
      Volume-scoped reader over the chain view (source_index rewritten to 0)
      -> OffsetBlockSink(physical_offset)
-     -> RestorePipeline
+     -> RestorePipeline (FREE ranges skipped, no disk write)
 -> Flush disk sink and close handle
 -> apply_disk_signature_policy (preserve=true keeps source MBR/GPT DiskId; false randomizes)
 -> rebuild_partition_table_from_raw_layout
@@ -153,7 +153,9 @@ resolve_chain(tip) → base-first Catalog entries
   **空** `SecretRef`（`value` 为空表示无密码，合法，不得被 Job 校验拒绝）。Desktop 当前对整条链
   使用同一 Archive 口令；
 - 成功 `restore.completed`；稳定 `restore.*` message code；
-- `logical_bytes` / `stored_bytes` 为各卷写入逻辑字节之和，`chunk_count` 为完成写入的 Chunk 总数。
+- `logical_bytes` / `stored_bytes` 为各卷完成处理的逻辑字节之和，`chunk_count` 为完成处理的 Chunk 总数。
+- Worker 日志额外记录 `disk_written_bytes`、`free_skipped_bytes` 和 `free_ranges`，用于区分实际写盘量
+  与直接跳过的 FREE 区域；`restored_bytes = disk_written_bytes + free_skipped_bytes`。
 
 ## 不变量与失败语义
 

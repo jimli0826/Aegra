@@ -16,6 +16,8 @@
 - [文件集增量备份与链式恢复设计](architecture/FILE_SET_INCREMENTAL_BACKUP_RESTORE.md)
 - [文件集 metadata signature 增量改造开发计划](development/FILE_SET_METADATA_SIGNATURE_DEVELOPMENT_PLAN.md)
 - [FAT32 文件集支持开发计划（FS1-FS5）](development/FAT32_FILE_SET_DEVELOPMENT_PLAN.md)
+- [Volume Set 单 Chunk 去重设计](architecture/VOLUME_SET_DEDUPLICATION.md)
+- [Volume Set 单 Chunk 去重开发计划（VD1-VD6）](development/VOLUME_SET_DEDUPLICATION_DEVELOPMENT_PLAN.md)
 - [文件集增量备份历史开发计划](development/FILE_SET_INCREMENTAL_DEVELOPMENT_PLAN.md)
 - [文件集产品上限、稳定码与验证矩阵](development/FILE_SET_PRODUCT_LIMITS_AND_CODES.md)
 
@@ -32,6 +34,7 @@
 - [ADR-0018：文件集增量备份的 USN 基线与链式恢复（已被替代）](adr/0018-file-set-incremental-usn-and-chain.md)
 - [ADR-0020：文件集增量备份的 metadata signature 基线](adr/0020-file-set-metadata-signature-incremental.md)
 - [ADR-0021：FAT32 文件集备份源与恢复目标](adr/0021-fat32-file-set-source-and-restore.md)
+- [ADR-0022：Volume Set 单 Chunk 固定块去重](adr/0022-volume-set-chunk-local-deduplication.md)
 
 ## 权威格式与需求
 

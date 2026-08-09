@@ -270,8 +270,17 @@ base::Result<void> validate_job_summary(const JobSummary& summary) {
     }
     if (!valid_source_ids(summary.source_ids, true) ||
         (summary.repository_connection_id &&
-         !valid_stable_value(*summary.repository_connection_id, kMaximumIdentifierBytes))) {
-        return invalid("job summary source or repository connection is invalid");
+         !valid_stable_value(*summary.repository_connection_id, kMaximumIdentifierBytes)) ||
+        (summary.schedule_id &&
+         !valid_stable_value(*summary.schedule_id, kMaximumIdentifierBytes))) {
+        return invalid("job summary source, schedule, or repository connection is invalid");
+    }
+    if (summary.operation == JobOperation::kBackup) {
+        if (!summary.schedule_id || summary.schedule_id->empty()) {
+            return invalid("backup job summary requires schedule_id");
+        }
+    } else if (summary.schedule_id && !summary.schedule_id->empty()) {
+        return invalid("non-backup job summary must not set schedule_id");
     }
     return base::Result<void>::success();
 }
@@ -306,6 +315,9 @@ base::Result<void> validate_schedule_summary(const ScheduleSummary& summary) {
             return invalid("volume schedule summary sources are invalid");
         }
     } else {
+        if (summary.deduplication_enabled) {
+            return invalid("file schedule cannot enable deduplication");
+        }
         if (!summary.source_ids.empty() || summary.selection_summaries.empty() ||
             summary.selection_summaries.size() > kMaximumFileSelections ||
             summary.backup_type != BackupType::kFull) {
@@ -480,10 +492,14 @@ base::Result<void> validate_upsert_schedule_command(const UpsertScheduleCommand&
         !known_backup_type(command.backup_type)) {
         return invalid("upsert schedule command is invalid");
     }
-    if (command.protection.content_kind == ContentKind::kFileSet &&
-        command.backup_type != BackupType::kFull &&
-        command.backup_type != BackupType::kIncremental) {
-        return invalid("file_set schedule requires full or incremental backup type");
+    if (command.protection.content_kind == ContentKind::kFileSet) {
+        if (command.deduplication_enabled) {
+            return invalid("file_set schedule cannot enable deduplication");
+        }
+        if (command.backup_type != BackupType::kFull &&
+            command.backup_type != BackupType::kIncremental) {
+            return invalid("file_set schedule requires full or incremental backup type");
+        }
     }
     auto protection = validate_protection_spec_input(command.protection, !command.schedule_id);
     if (!protection) {

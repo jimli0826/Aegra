@@ -194,6 +194,46 @@ Item {
                 ctx.stroke()
                 break
 
+            case "refresh": // refresh-cw (Lucide standard)
+                // Top arc & arrow
+                ctx.beginPath()
+                ctx.arc(12, 12, 9, Math.PI, Math.PI * 1.5, false)
+                ctx.lineTo(21, 8)
+                ctx.stroke()
+
+                ctx.beginPath()
+                ctx.moveTo(21, 3)
+                ctx.lineTo(21, 8)
+                ctx.lineTo(16, 8)
+                ctx.stroke()
+
+                // Bottom arc & arrow
+                ctx.beginPath()
+                ctx.arc(12, 12, 9, 0, Math.PI * 0.5, false)
+                ctx.lineTo(3, 16)
+                ctx.stroke()
+
+                ctx.beginPath()
+                ctx.moveTo(3, 21)
+                ctx.lineTo(3, 16)
+                ctx.lineTo(8, 16)
+                ctx.stroke()
+                break
+
+            case "bell": // bell (Lucide outline)
+                ctx.beginPath()
+                ctx.moveTo(18, 8)
+                ctx.arc(12, 8, 6, 0, Math.PI, true)
+                ctx.quadraticCurveTo(6, 15, 3, 17)
+                ctx.lineTo(21, 17)
+                ctx.quadraticCurveTo(18, 15, 18, 8)
+                ctx.stroke()
+
+                ctx.beginPath()
+                ctx.arc(12, 17, 2.5, Math.PI * 0.15, Math.PI * 0.85, false)
+                ctx.stroke()
+                break
+
             default:
                 rrect(5, 5, 14, 14, 2)
                 break

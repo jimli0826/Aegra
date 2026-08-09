@@ -44,9 +44,21 @@ class PayloadCipher final {
     protect(std::span<const std::byte> plaintext, std::span<const std::byte> authenticated_data,
             const PayloadNonce& nonce) const;
 
+      /// Encrypts a detached payload in its existing buffer and returns its authentication tag.
+      [[nodiscard]] base::Result<PayloadTag>
+      protect_in_place(std::span<std::byte> payload,
+               std::span<const std::byte> authenticated_data,
+               const PayloadNonce& nonce) const;
+
     [[nodiscard]] base::Result<std::vector<std::byte>>
     unprotect(std::span<const std::byte> ciphertext, std::span<const std::byte> authenticated_data,
               const PayloadNonce& nonce, const PayloadTag& tag) const;
+
+    /// Authenticates and decrypts a detached payload in its existing buffer.
+    [[nodiscard]] base::Result<void>
+    unprotect_in_place(std::span<std::byte> payload,
+               std::span<const std::byte> authenticated_data,
+               const PayloadNonce& nonce, const PayloadTag& tag) const;
 
   private:
     struct Impl;

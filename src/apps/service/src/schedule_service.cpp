@@ -169,6 +169,8 @@ make_canonical_uuid(ports::IRandomSource& random, const base::CancellationToken&
     fingerprint += "|";
     fingerprint += command.exclude_page_and_hibernation_files ? "1" : "0";
     fingerprint += "|";
+    fingerprint += command.deduplication_enabled ? "1" : "0";
+    fingerprint += "|";
     fingerprint += command.encryption_enabled ? "1" : "0";
     fingerprint += "|pwd:";
     fingerprint += password_digest_token(command.archive_password);
@@ -288,6 +290,11 @@ enforce_schedule_update_invariants(const contracts::UpsertScheduleCommand& comma
         return base::Result<void>::failure(
             {base::ErrorCode::kInvalidArgument,
              "schedule backup options cannot be changed after create"});
+    }
+    if (command.deduplication_enabled != existing.deduplication_enabled) {
+        return base::Result<void>::failure(
+            {base::ErrorCode::kInvalidArgument,
+             "schedule deduplication cannot be changed after create"});
     }
     if (command.encryption_enabled != existing.encryption_enabled) {
         return base::Result<void>::failure(
@@ -448,6 +455,11 @@ ScheduleService::upsert_schedule(const contracts::UpsertScheduleCommand& command
     record.backup_type = command.backup_type;
     record.trigger = command.trigger;
     record.exclude_page_and_hibernation_files = command.exclude_page_and_hibernation_files;
+    if (content_kind == contracts::ContentKind::kFileSet) {
+        record.deduplication_enabled = false;
+    } else {
+        record.deduplication_enabled = command.deduplication_enabled;
+    }
     record.encryption_enabled = command.encryption_enabled;
     record.archive_password_protected = std::move(archive_password_protected);
     record.backup_set_uuid = std::move(backup_set_uuid);

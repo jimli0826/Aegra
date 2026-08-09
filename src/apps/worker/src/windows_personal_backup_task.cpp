@@ -118,8 +118,12 @@ contracts::TaskResult completed_result(const contracts::JobRequest& job,
                                  : contracts::TaskOutcome::kSucceeded;
     result.error_code = base::ErrorCode::kNone;
     result.logical_bytes = backup.backup.logical_bytes;
-    result.stored_bytes = backup.backup.stored_bytes;
+    // Wire size: committed .bkf part file sum (not volume logical / chunker descriptor size).
+    result.stored_bytes =
+        backup.archive_file_bytes != 0 ? backup.archive_file_bytes : backup.backup.stored_bytes;
     result.chunk_count = backup.backup.chunk_count;
+    result.deduplicated_block_count = backup.deduplicated_block_count;
+    result.deduplicated_logical_bytes = backup.deduplicated_logical_bytes;
     result.message_code =
         has_warning ? "backup.completed_with_warning" : "backup.completed";
     if (has_warning) {
@@ -224,6 +228,7 @@ WindowsPersonalBackupRequest make_backup_request(
     request.application_version = options.application_version;
     request.hostname = options.hostname;
     request.exclude_page_and_hibernation_files = job.backup->exclude_page_and_hibernation_files;
+    request.deduplication_enabled = job.backup->deduplication_enabled;
     return request;
 }
 
@@ -313,6 +318,8 @@ void log_backup_request(WorkerTaskLog* log, const contracts::JobRequest& job,
     log->field_bool("encryption_enabled", request.encryption_enabled);
     log->field_bool("exclude_page_and_hibernation_files",
                     request.exclude_page_and_hibernation_files);
+    // ADR-0022: volume_set single-chunk DEDUP policy (frozen on schedule).
+    log->field_bool("deduplication_enabled", request.deduplication_enabled);
     log->field_bytes("block_size", request.block_size_bytes);
     log->field_bytes("chunk_size", request.chunk_size_bytes);
     log->field_bytes("memory_budget", request.memory_budget_bytes);
@@ -326,7 +333,8 @@ void log_backup_request(WorkerTaskLog* log, const contracts::JobRequest& job,
 
 void log_backup_result(WorkerTaskLog* log, const contracts::TaskResult& result,
                        const base::Error* error,
-                       const std::chrono::steady_clock::time_point started) {
+                       const std::chrono::steady_clock::time_point started,
+                       const std::uint64_t total_payload_bytes = 0) {
     if (log == nullptr) {
         return;
     }
@@ -340,8 +348,16 @@ void log_backup_result(WorkerTaskLog* log, const contracts::TaskResult& result,
                                   : "succeeded");
         log->field("message_code", result.message_code);
         log->field_bytes("logical_bytes", result.logical_bytes);
+        // On-disk archive wire size (all .bkf parts). Compare to logical for savings.
         log->field_bytes("stored_bytes", result.stored_bytes);
+        if (total_payload_bytes > 0) {
+            // Chunk payloads only (after ZERO/DEDUP/zstd); excludes headers/footer.
+            log->field_bytes("payload_bytes", total_payload_bytes);
+        }
         log->field_u64("chunks", result.chunk_count);
+        // Footer-projected ADR-0022 metrics (DEDUP entries only; not ZERO/zstd savings).
+        log->field_u64("deduplicated_block_count", result.deduplicated_block_count);
+        log->field_bytes("deduplicated_logical_bytes", result.deduplicated_logical_bytes);
         if (elapsed.count() > 0 && result.logical_bytes > 0) {
             const auto bps = static_cast<std::uint64_t>(
                 (static_cast<double>(result.logical_bytes) * 1000.0) /
@@ -427,7 +443,8 @@ run_accepted_task(const contracts::JobRequest& job, const WindowsPersonalBackupT
     }
     auto result = validated_task_result(completed_result(job, backup.value()));
     if (result) {
-        log_backup_result(log, result.value(), nullptr, started);
+        log_backup_result(log, result.value(), nullptr, started,
+                          backup.value().total_payload_bytes);
     }
     return result;
 }

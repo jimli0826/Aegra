@@ -129,6 +129,8 @@ struct JobSummary final {
     // Present for backup/restore jobs when the control plane stored them.
     // Volume: inventory source ids. File: opaque selection ids (never paths).
     std::vector<std::string> source_ids;
+    /// Backup jobs: owning schedule_id. Null/empty for restore, verify, and other ops.
+    std::optional<std::string> schedule_id;
     std::optional<std::string> repository_connection_id;
     /// Requested backup type for backup jobs (control-plane insert); null otherwise.
     std::optional<std::uint8_t> requested_backup_type;
@@ -177,6 +179,8 @@ struct ScheduleSummary final {
     ScheduleTrigger trigger;
     std::optional<std::uint64_t> next_run_utc_ms;
     bool exclude_page_and_hibernation_files{true};
+    /// volume_set: frozen at create (default true); file_set always false.
+    bool deduplication_enabled{true};
     bool encryption_enabled{false};
 };
 
@@ -458,7 +462,7 @@ struct UpsertScheduleCommand final {
     /// Absent = create; present = update an existing schedule.
     /// Update mutability (Service enforces against the durable record):
     /// - Immutable after create: protection source, backup_type, exclude_page_and_hibernation_files,
-    ///   encryption_enabled, archive password (DPAPI ciphertext in SQLite).
+    ///   deduplication_enabled, encryption_enabled, archive password (DPAPI ciphertext in SQLite).
     /// - Mutable: display_name, enabled, repository_connection_id, trigger (schedule settings).
     std::optional<std::string> schedule_id;
     std::string display_name;
@@ -468,6 +472,8 @@ struct UpsertScheduleCommand final {
     BackupType backup_type{BackupType::kFull};
     ScheduleTrigger trigger;
     bool exclude_page_and_hibernation_files{true};
+    /// volume_set create default true; frozen after create. file_set must be false.
+    bool deduplication_enabled{true};
     bool encryption_enabled{false};
     /// Create-only when encryption_enabled. Must be empty on update.
     std::string archive_password;

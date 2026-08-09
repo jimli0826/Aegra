@@ -52,6 +52,10 @@ struct CatalogEntry final {
     std::uint64_t created_utc_ms{0};
     std::uint64_t logical_size_bytes{0};
     std::uint64_t stored_size_bytes{0};
+    /// volume_set: DEDUP entry count from V7 Footer; file_set always 0.
+    std::uint64_t deduplicated_block_count{0};
+    /// volume_set: expanded DEDUP logical bytes from V7 Footer; file_set always 0.
+    std::uint64_t deduplicated_logical_bytes{0};
     std::uint32_t source_count{0};
     /// Ordered stable volume identities (canonical Volume GUID paths) matching the archive
     /// source order. Used for incremental parent selection without opening the parent archive.

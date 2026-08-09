@@ -555,6 +555,7 @@ Item {
                         required property string backupTypeText
                         required property string logicalSizeText
                         required property string storedSizeText
+                        required property string deduplicatedLogicalBytesText
                         required property string chainStateText
                         required property bool chainComplete
                         required property string parentSummaryText
@@ -648,6 +649,17 @@ Item {
                                 color: Theme.colorTextGrey
                                 font.family: Theme.fontFamily
                                 font.pixelSize: 11
+                            }
+                            Text {
+                                visible: drawerPanel.width >= 900
+                                Layout.preferredWidth: 72
+                                //% "Deduplicated"
+                                text: qsTrId("aegra.repository.dedup.bytes") + ": "
+                                      + deduplicatedLogicalBytesText
+                                color: Theme.colorTextDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 10
+                                elide: Text.ElideRight
                             }
                             Text {
                                 Layout.preferredWidth: 72

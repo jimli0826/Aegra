@@ -188,6 +188,8 @@ struct ResolvedBackupPlan final {
     std::string repository_connection_id;
     bool exclude_page_and_hibernation_files{true};
     bool encryption_enabled{false};
+    /// volume_set: from schedule (default true); file_set always false.
+    bool deduplication_enabled{true};
     std::string backup_set_uuid;
     /// schedules.last_recovery_point_id — sole Incremental parent candidate (no Catalog tip scan).
     std::optional<std::string> last_recovery_point_id;
@@ -219,6 +221,8 @@ struct ResolvedBackupPlan final {
     fingerprint += plan.exclude_page_and_hibernation_files ? "1" : "0";
     fingerprint += "|";
     fingerprint += plan.encryption_enabled ? "1" : "0";
+    fingerprint += "|";
+    fingerprint += plan.deduplication_enabled ? "1" : "0";
     return fingerprint;
 }
 
@@ -319,6 +323,9 @@ resolve_backup_plan(ports::IControlPlaneDatabase& control_plane,
     plan.repository_connection_id = record.repository_connection_id;
     plan.exclude_page_and_hibernation_files = record.exclude_page_and_hibernation_files;
     plan.encryption_enabled = record.encryption_enabled;
+    plan.deduplication_enabled = record.content_kind == contracts::ContentKind::kVolumeSet
+                                     ? record.deduplication_enabled
+                                     : false;
     plan.backup_set_uuid = record.backup_set_uuid;
     plan.last_recovery_point_id = record.last_recovery_point_id;
     return base::Result<ResolvedBackupPlan>::success(std::move(plan));
@@ -589,6 +596,7 @@ make_backup_options(const BackupOptionsInput& input) {
     backup.created_utc_ms = input.identity.created_utc_ms;
     backup.exclude_page_and_hibernation_files = input.plan.exclude_page_and_hibernation_files;
     backup.encryption_enabled = input.plan.encryption_enabled;
+    backup.deduplication_enabled = input.plan.deduplication_enabled;
     if (!input.parent_resolution.parent) {
         // Full (requested or demoted from Incremental when the parent chain is unusable).
         backup.type = contracts::BackupType::kFull;
@@ -820,6 +828,7 @@ prepare_file_set_backup(const ResolvedBackupPlan& plan, PrepareBackupContext& co
     backup.created_utc_ms = identity.value().created_utc_ms;
     backup.exclude_page_and_hibernation_files = plan.exclude_page_and_hibernation_files;
     backup.encryption_enabled = plan.encryption_enabled;
+    backup.deduplication_enabled = false; // file_set never uses volume DEDUP
     backup.backup_set_uuid = plan.backup_set_uuid;
     backup.selection_fingerprint = std::move(fingerprint).value();
     std::optional<std::string> parent_id;

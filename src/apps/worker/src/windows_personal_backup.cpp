@@ -6,8 +6,12 @@
 #include "aegra/adapters/windows_disk/windows_disk.h"
 #include "aegra/contracts/service_control.h"
 #include "aegra/format/manifest.h"
+#include "aegra/format/personal_archive.h"
 
 #include <algorithm>
+#include <array>
+#include <fstream>
+#include <iomanip>
 #include <limits>
 #include <map>
 #include <optional>
@@ -398,10 +402,162 @@ run_volume_pipelines(const WindowsPersonalBackupRequest& request, PreparedVolume
             (std::max)(total.peak_buffered_bytes, backup.value().peak_buffered_bytes);
     }
     stage.note_bytes("logical_bytes", total.logical_bytes);
-    stage.note_bytes("stored_bytes", total.stored_bytes);
+    // Pipeline "stored" tracks descriptor.stored_size (volume stage-2 == logical), not .bkf wire.
+    // True archive size is projected from committed Footer / part files after commit (O3).
     stage.note_u64("chunks", total.chunk_count);
     stage.note_bytes("peak_buffer", total.peak_buffered_bytes);
     return base::Result<pipeline::BackupSummary>::success(total);
+}
+
+[[nodiscard]] std::filesystem::path archive_part_path(const std::filesystem::path& destination,
+                                                     const std::uint32_t part_index) {
+    if (part_index == 0) {
+        return destination;
+    }
+    std::ostringstream suffix;
+    suffix << '.' << std::setw(3) << std::setfill('0') << part_index;
+    auto result = destination;
+    result += suffix.str();
+    return result;
+}
+
+[[nodiscard]] base::Result<std::filesystem::path>
+resolve_final_archive_part(const std::filesystem::path& destination) {
+    namespace archive = format::personal_archive;
+    std::error_code filesystem_error;
+    if (!std::filesystem::is_regular_file(destination, filesystem_error) || filesystem_error) {
+        return base::Result<std::filesystem::path>::failure(
+            base::Error{base::ErrorCode::kCorruptData, "committed archive main part is missing"});
+    }
+    const auto file_size = std::filesystem::file_size(destination, filesystem_error);
+    if (filesystem_error || file_size < archive::kBackupHeaderSize) {
+        return base::Result<std::filesystem::path>::failure(
+            base::Error{base::ErrorCode::kCorruptData, "committed archive header is missing"});
+    }
+    std::ifstream input(destination, std::ios::binary);
+    if (!input) {
+        return base::Result<std::filesystem::path>::failure(
+            base::Error{base::ErrorCode::kIoFailure, "failed to open committed archive"});
+    }
+    std::array<std::byte, archive::kBackupHeaderSize> header_bytes{};
+    input.read(reinterpret_cast<char*>(header_bytes.data()),
+               static_cast<std::streamsize>(header_bytes.size()));
+    if (!input) {
+        return base::Result<std::filesystem::path>::failure(
+            base::Error{base::ErrorCode::kIoFailure, "failed to read committed archive header"});
+    }
+    auto header = archive::decode_backup_header(header_bytes);
+    if (!header) {
+        return base::Result<std::filesystem::path>::failure(header.error());
+    }
+    const bool split = (header.value().flags & archive::kBackupFlagSplit) != 0;
+    if (!split) {
+        return base::Result<std::filesystem::path>::success(destination);
+    }
+    // Matches repository catalog split bound; worker does not depend on personal_repository.
+    constexpr std::uint32_t kMaximumSplitPartCount = 1'000;
+    const auto declared = header.value().split_part_count;
+    const auto maximum = declared != 0 ? declared : kMaximumSplitPartCount;
+    std::filesystem::path final_part = destination;
+    for (std::uint32_t index = 1; index < maximum; ++index) {
+        const auto candidate = archive_part_path(destination, index);
+        if (!std::filesystem::is_regular_file(candidate, filesystem_error) || filesystem_error) {
+            if (declared != 0) {
+                return base::Result<std::filesystem::path>::failure(base::Error{
+                    base::ErrorCode::kCorruptData, "committed archive split part is missing"});
+            }
+            break;
+        }
+        final_part = candidate;
+    }
+    return base::Result<std::filesystem::path>::success(std::move(final_part));
+}
+
+struct FooterCommitMetrics final {
+    /// Sum of all committed archive part file sizes on disk.
+    std::uint64_t archive_file_bytes{0};
+    /// Footer total_payload_size (chunk payloads only).
+    std::uint64_t total_payload_bytes{0};
+    std::uint64_t deduplicated_block_count{0};
+    std::uint64_t deduplicated_logical_bytes{0};
+};
+
+[[nodiscard]] base::Result<std::uint64_t>
+sum_archive_part_file_bytes(const std::filesystem::path& destination,
+                            const std::filesystem::path& final_part) {
+    std::error_code filesystem_error;
+    std::uint64_t total = 0;
+    for (std::uint32_t index = 0;; ++index) {
+        const auto part = archive_part_path(destination, index);
+        if (!std::filesystem::is_regular_file(part, filesystem_error) || filesystem_error) {
+            if (index == 0) {
+                return base::Result<std::uint64_t>::failure(base::Error{
+                    base::ErrorCode::kCorruptData, "committed archive main part is missing"});
+            }
+            break;
+        }
+        const auto size = std::filesystem::file_size(part, filesystem_error);
+        if (filesystem_error) {
+            return base::Result<std::uint64_t>::failure(
+                base::Error{base::ErrorCode::kIoFailure, "failed to size committed archive part"});
+        }
+        if (total > (std::numeric_limits<std::uint64_t>::max)() - size) {
+            return base::Result<std::uint64_t>::failure(
+                base::Error{base::ErrorCode::kInvalidArgument, "archive part size sum overflows"});
+        }
+        total += size;
+        if (part == final_part) {
+            break;
+        }
+    }
+    return base::Result<std::uint64_t>::success(total);
+}
+
+[[nodiscard]] base::Result<FooterCommitMetrics>
+read_committed_footer_metrics(const std::filesystem::path& destination) {
+    namespace archive = format::personal_archive;
+    auto final_part = resolve_final_archive_part(destination);
+    if (!final_part) {
+        return base::Result<FooterCommitMetrics>::failure(final_part.error());
+    }
+    std::error_code filesystem_error;
+    const auto file_size = std::filesystem::file_size(final_part.value(), filesystem_error);
+    if (filesystem_error || file_size < archive::kBackupFooterSize) {
+        return base::Result<FooterCommitMetrics>::failure(
+            base::Error{base::ErrorCode::kCorruptData, "committed archive footer is missing"});
+    }
+    std::ifstream input(final_part.value(), std::ios::binary);
+    if (!input) {
+        return base::Result<FooterCommitMetrics>::failure(
+            base::Error{base::ErrorCode::kIoFailure, "failed to open committed archive footer"});
+    }
+    input.seekg(static_cast<std::streamoff>(file_size - archive::kBackupFooterSize),
+                std::ios::beg);
+    std::array<std::byte, archive::kBackupFooterSize> footer_bytes{};
+    input.read(reinterpret_cast<char*>(footer_bytes.data()),
+               static_cast<std::streamsize>(footer_bytes.size()));
+    if (!input) {
+        return base::Result<FooterCommitMetrics>::failure(
+            base::Error{base::ErrorCode::kIoFailure, "failed to read committed archive footer"});
+    }
+    auto footer = archive::decode_backup_footer(footer_bytes);
+    if (!footer) {
+        return base::Result<FooterCommitMetrics>::failure(footer.error());
+    }
+    if (footer.value().part_file_size != file_size) {
+        return base::Result<FooterCommitMetrics>::failure(
+            base::Error{base::ErrorCode::kCorruptData, "committed archive footer size mismatch"});
+    }
+    auto wire = sum_archive_part_file_bytes(destination, final_part.value());
+    if (!wire) {
+        return base::Result<FooterCommitMetrics>::failure(wire.error());
+    }
+    FooterCommitMetrics metrics;
+    metrics.archive_file_bytes = wire.value();
+    metrics.total_payload_bytes = footer.value().total_payload_size;
+    metrics.deduplicated_block_count = footer.value().deduplicated_block_count;
+    metrics.deduplicated_logical_bytes = footer.value().deduplicated_logical_bytes;
+    return base::Result<FooterCommitMetrics>::success(metrics);
 }
 
 base::Result<WindowsPersonalBackupResult> backup_windows_personal_volumes_with_runtime(
@@ -418,8 +574,9 @@ base::Result<WindowsPersonalBackupResult> backup_windows_personal_volumes_with_r
         stage.note_u64("volume_count", request.volume_guid_paths.size());
         stage.note_bool("exclude_page_and_hibernation_files",
                         request.exclude_page_and_hibernation_files);
-        auto prepared = runtime.prepare_sources(
-            request.volume_guid_paths, request.exclude_page_and_hibernation_files, cancellation);
+        auto prepared = runtime.prepare_sources(request.volume_guid_paths,
+                                                request.exclude_page_and_hibernation_files,
+                                                request.block_size_bytes, cancellation);
         if (!prepared) {
             stage.fail(prepared.error(), "open_volume_or_vss", backup_stage_hint(prepared.error()));
             return base::Result<WindowsPersonalBackupResult>::failure(prepared.error());
@@ -466,14 +623,28 @@ base::Result<WindowsPersonalBackupResult> backup_windows_personal_volumes_with_r
     if (!backup) {
         return base::Result<WindowsPersonalBackupResult>::failure(backup.error());
     }
+    // Session owns the archive until destruction; release it before reading the committed Footer.
+    session.reset();
+    auto footer_metrics = read_committed_footer_metrics(request.destination);
+    if (!footer_metrics) {
+        return base::Result<WindowsPersonalBackupResult>::failure(footer_metrics.error());
+    }
     if (cleanup_error) {
         if (auto* log = WorkerTaskLog::active(); log != nullptr) {
             log->warn("Snapshot cleanup reported a non-fatal error after commit");
             log->field("cleanup_error", cleanup_error->message);
         }
     }
-    return base::Result<WindowsPersonalBackupResult>::success(
-        WindowsPersonalBackupResult{backup.value(), std::move(cleanup_error)});
+    WindowsPersonalBackupResult result;
+    result.backup = std::move(backup).value();
+    // O3: TaskResult.stored_bytes / BackupSummary.stored_bytes = on-disk archive wire size.
+    result.backup.stored_bytes = footer_metrics.value().archive_file_bytes;
+    result.archive_file_bytes = footer_metrics.value().archive_file_bytes;
+    result.total_payload_bytes = footer_metrics.value().total_payload_bytes;
+    result.deduplicated_block_count = footer_metrics.value().deduplicated_block_count;
+    result.deduplicated_logical_bytes = footer_metrics.value().deduplicated_logical_bytes;
+    result.snapshot_cleanup_error = std::move(cleanup_error);
+    return base::Result<WindowsPersonalBackupResult>::success(std::move(result));
 }
 
 } // namespace detail

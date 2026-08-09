@@ -36,7 +36,8 @@ source/target、`SecretRef`、trace 和 deadline。`content_kind` 为 `volume_se
 - **file_set restore**：`source_refs`（archive 路径）+ `file_restore_target`；`target_ref` 为空。
 
 Backup Job 还必须拥有 `BackupOptions`：显式 `type`、`file_uuid`、`created_utc_ms`，全量必须拥有不同于
-`file_uuid` 的 `backup_set_uuid`。volume 增量同时拥有 `parent_source_ref`（`parent_credential_ref` 可选）。
+`file_uuid` 的 `backup_set_uuid`。`deduplication_enabled` 必须显式存在：volume_set 默认 true 并可为 false，
+file_set 必须 false。volume 增量同时拥有 `parent_source_ref`（`parent_credential_ref` 可选）。
 file_set 允许 Full/Incremental：`selection_fingerprint` 必填；Incremental 可携带 `candidate_parent_uuid`，
 并使用 ADR-0020 的 `mtime_size_v1` metadata baseline；禁止 volume 风格 `parent_source_ref`。Service 在提交
 Worker 前分配持久化身份、创建时间与 selection fingerprint；Worker 不得重新生成 Archive 身份。`SecretRef`
@@ -46,7 +47,8 @@ Worker 前分配持久化身份、创建时间与 selection fingerprint；Worker
 并增加 `discovered_entries` / `processed_entries`。`TaskResult` schema 4 增加 `entry_count`、
 `stream_count`、可选 `partial_restore`，以及 file_set backup 的 `requested_backup_type` /
 `effective_backup_type` / `effective_parent_uuid` / `incremental_downgrade_reason`。不得复制 Adapter
-的原始错误文本。
+的原始错误文本。ADR-0022 另增加非负 `deduplicated_block_count` / `deduplicated_logical_bytes`；仅成功的
+volume_set backup 可为非零，其它任务固定为 0。
 
 `file_set.h` 定义 `ContentKind`、名称编码、`FileSourceRef`、`FileEntryDesc`、`StableFileIdentity`、
 `FileSelectionFingerprint`、
@@ -72,7 +74,7 @@ Volume schedule 创建/更新：
   口令经 Service 用 DPAPI `CRYPTPROTECT_LOCAL_MACHINE` 保护（`pOptionalEntropy` = `schedule_id`）
   并以 Base64 写入 SQLite。
 - **更新**（有 `schedule_id`）：不得携带 `archive_password`；保护源、`backup_type`、
-  `exclude_page_and_hibernation_files`、`encryption_enabled` 与保护口令创建后冻结。
+  `exclude_page_and_hibernation_files`、`deduplication_enabled`、`encryption_enabled` 与保护口令创建后冻结。
   允许修改 `display_name`、`enabled`、`repository_connection_id`、`trigger`。
 
 file_set schedule（F6）：

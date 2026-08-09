@@ -48,6 +48,9 @@ base::Result<void> validate_backup_options(const JobRequest& request) {
         return invalid("backup options are required and must have a known type");
     }
     if (request.content_kind == ContentKind::kFileSet) {
+        if (request.backup->deduplication_enabled) {
+            return invalid("file_set backup cannot enable deduplication");
+        }
         if (request.backup->type != BackupType::kFull &&
             request.backup->type != BackupType::kIncremental) {
             return invalid("file_set backup allows full or incremental only");

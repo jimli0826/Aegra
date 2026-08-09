@@ -74,7 +74,10 @@ inline constexpr std::uint8_t kIndexProtectAead = 1;
 inline constexpr std::uint8_t kBlockFlagRaw = 0x01;
 inline constexpr std::uint8_t kBlockFlagCompressed = 0x02;
 inline constexpr std::uint8_t kBlockFlagZero = 0x04;
+/// volume_set only: same-chunk backward reference to RAW/COMPRESSED (ADR-0022).
 inline constexpr std::uint8_t kBlockFlagDedup = 0x08;
+/// Filesystem-free or explicitly excluded logical blocks. Restore skips these ranges.
+inline constexpr std::uint8_t kBlockFlagFree = 0x10;
 
 inline constexpr std::uint64_t kMaximumCborMetadataBytes = 64ULL * 1024ULL * 1024ULL;
 inline constexpr std::uint32_t kMaximumBlockSizeBytes = 64U * 1024U * 1024U;
@@ -192,11 +195,22 @@ struct FileIndexPageHeader final {
 
 struct BlockEntry final {
     std::uint64_t logical_block_index{0};
+    /// RAW/COMPRESSED: payload offset; DEDUP: zero-based BlockEntry ref_index in this chunk.
     std::uint64_t data_offset_or_reference{0};
     std::uint32_t stored_size{0};
     std::uint32_t logical_size{0};
     std::uint8_t flags{kBlockFlagRaw};
 };
+
+/// True when entry is exactly DEDUP (no combined flags).
+[[nodiscard]] constexpr bool is_dedup_block_entry(const BlockEntry& entry) noexcept {
+    return entry.flags == kBlockFlagDedup;
+}
+
+/// True when entry may be a DEDUP canonical target (RAW or COMPRESSED only).
+[[nodiscard]] constexpr bool is_canonical_dedup_target(const BlockEntry& entry) noexcept {
+    return entry.flags == kBlockFlagRaw || entry.flags == kBlockFlagCompressed;
+}
 
 /// Footer root pointer for one File Index tree (ADR-0019). Zero page_id means absent.
 struct IndexRootLocator final {
@@ -226,6 +240,10 @@ struct BackupFooter final {
     IndexRootLocator entry_id_root{};
     IndexRootLocator stream_root{};
     IndexRootLocator chunk_root{};
+    /// volume_set: DEDUP entry count (ADR-0022); file_set must be 0.
+    std::uint64_t deduplicated_block_count{0};
+    /// volume_set: expanded plaintext bytes of DEDUP targets; file_set must be 0.
+    std::uint64_t deduplicated_logical_bytes{0};
 };
 
 using EncodedBackupHeader = std::array<std::byte, kBackupHeaderSize>;

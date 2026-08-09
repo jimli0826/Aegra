@@ -32,10 +32,11 @@ V7 `file_set` 由 `PersonalFileArchiveSession`（`IFileBackupSession`）与 `Per
 （`IFileRecoveryPointReader`）实现：entry 先写入 index spool，finalize 时写出 leaf index page 与 Footer；
 Index page 使用独立 HKDF info `MYBACKUP-V7-FILE-INDEX-PAGE`。File stream chunk 默认
 `COMPRESSION_ZSTD`：写入时对逻辑 block 做机会性 zstd（压得更小才标 `COMPRESSED`，否则 `RAW`）；
-读取时按 BlockEntry flags 解压。Writer 支持 Full 与 Incremental（FI4）：
+读取时按 BlockEntry flags 解压。Writer 支持 Full 与 Incremental：
 - Full：`parent_uuid=0`，全部 stream 必须 `content_storage=local`；
-- Incremental：`parent_uuid` 非 0、`CAP_FILE_USN_BASELINE` 置位、Manifest 含 fingerprint 与
-  `journal_checkpoints`；tip Index 完整，未变/metadata stream 仅写 `parent_stream_index`（无 payload）；
+- Incremental：`parent_uuid` 非 0、`CAP_FILE_METADATA_BASELINE` 置位、Manifest 含 fingerprint 与
+  `change_detection_method=mtime_size_v1`；tip Index 完整，metadata signature 未变的 stream 仅写
+  `parent_stream_index`（无 payload）；
 - Footer：`entry_count`/`stream_count` 为 tip 全集；`file_stream_chunk_count`/`logical_bytes` 仅本层 local payload。
 Abort/析构删除 partial 与 spool，不发布可见 RP。Writer finalize 对 spool 做紧凑 key 排序并流式写
 leaf（M5）。Writer finalize 写出 Namespace 树及 Entry ID / Stream / Chunk 二级索引（ADR-0019），
@@ -50,7 +51,7 @@ O(log N) 定位后按需加载 leaf/chunk。Chain 非 tip `kDeferred`（M6）；
 在 open 时认证每层 Header/Footer（密码在 open 期间消费）并校验 parent_uuid、backup_set、
 selection fingerprint、无环与深度 ≤ 128。tip 立即认证 Index roots；祖先层延迟到首次 stream 访问。
 browse/`describe_entry` 只暴露 tip Index；`read_stream` 迭代解析 `content_storage=parent` 到最终
-local 层，逐跳校验 stable identity / stream kind / logical size，并维护 visited 防环。
+local 层，逐跳校验 stream kind / logical size，并维护 visited 防环。
 `chain_generation_digest()` 为 base-first 各层 Index root digest 的 `+` 拼接（digest 来自 Footer，
 不依赖 deferred root 认证）；`resolve_stream_reference` 仅解析 parent 引用不读 payload。
 单层 `PersonalFileArchiveReader::read_stream` 拒绝 parent storage。
@@ -75,38 +76,39 @@ page 和 Sidecar key，并使用 XChaCha20-Poly1305 detached tag；内容散列�
 
 Target：`aegra_adapter_windows_filesystem` / `Aegra::AdapterWindowsFilesystem`。
 
-依赖：`Aegra::Format`（platform_metadata envelope 编解码）、`Advapi32`（security descriptor I/O）。
+依赖：`Aegra::Format`（platform_metadata envelope 编解码）、`Advapi32`（security descriptor I/O）、
+`Shell32`/`Ole32`（`SHGetKnownFolderPath` 解析用户特殊目录）。
 
 - `WindowsFileSnapshotView`：接收 composition root 注入的 snapshot root 映射（不创建 VSS）；分页枚举
-  selection、no-follow 打开、主数据流读取；拒绝非 NTFS/ReFS 与 EFS。打开时启用
-  SeBackup/SeRestore/SeSecurity；每个 entry 将 self-relative SECURITY_DESCRIPTOR 写入
-  `platform_metadata`（V7 tag 1），SACL 不可读则 `file_source.security_descriptor_unreadable`。
+  selection、no-follow 打开、主数据流读取；支持 NTFS/ReFS/FAT32，拒绝其它文件系统与 EFS。NTFS/ReFS
+  entry 保存 stable File ID 和 self-relative SECURITY_DESCRIPTOR（V7 tag 1），SACL 不可读则
+  `file_source.security_descriptor_unreadable`；FAT32 entry 使用 null identity 且不保存 security。
   递归 `FindFirstFileExW` / `FindNextFileW` 失败（访问拒绝、I/O、路径异常）按固定
   `unreadable_policy=fail_job` 返回 `file_source.unreadable`，不得当作空目录；Pipeline 失败
   触发 Archive Abort，避免生成不完整且可见的 Recovery Point。
-- `WindowsFileTreeSink`：绑定目标根句柄；同目录 `.aegra-partial` staging、冲突策略
+  枚举时按产品策略跳过卷级系统目录 `$RECYCLE.BIN` 与 `System Volume Information`（与 Browse
+  隐藏对齐；整卷 file_set 选择不会把它们写入 Archive）。
+  整卷 selection 的 root entry 名使用 `display_label`（非法路径字符已剥离），不用 selection UUID。
+- `WindowsFileTreeSink`：绑定 NTFS/ReFS/FAT32 目标根句柄；同目录 `.aegra-partial` staging、冲突策略
   fail/replace/rename、目录 metadata；文件/目录 metadata 应用时写回 Owner/Group/DACL/SACL
-  （`supports_security_descriptor=true`）。F8 Worker restore 与 Service Prepare 空间/能力探测
-  均经此 Sink。
+  （NTFS/ReFS 为 true，FAT32 为 false）。FAT32 同时声明 `maximum_file_size_bytes=0xFFFFFFFF`。
+  F8 Worker restore 与 Service Prepare 空间/能力探测均经此 Sink。
   - `kFail`：目标已存在 → `file_restore.target_collision`（不覆盖）。
   - `kReplace`：清除目标只读后 `MOVEFILE_REPLACE_EXISTING`，失败则 Delete+rename。
   - `kRename`：目标已存在时发布为 `name (N).ext`（N=1..9999），耗尽 →
     `file_restore.rename_exhausted`。
-  - **能力声明（FI0）**：`capabilities()` 仅诚实声明 `supports_security_descriptor` 与
-    `free_bytes`。不支持 reparse / hard link / sparse / ADS，Port 上无对应方法或 capability 位。
+  - **能力声明（FI0）**：`capabilities()` 声明 `supports_security_descriptor`、`free_bytes` 与
+    `maximum_file_size_bytes`。不支持 reparse / hard link / sparse / ADS，Port 上无对应方法或 capability 位。
   - **Source 严格检测（FI0/FI2）**：完整枚举期间检测 reparse、`NumberOfLinks>1` 的文件、sparse 属性、
     命名 ADS，分别返回 `file_source.unsupported_reparse|hard_link|sparse|ads`，整 Job fail 且无 RP。
-  - **USN Journal（FI2）**：`query_journal_state` / `read_change_batch` 仅对同一 snapshot volume handle
-    调用 `FSCTL_QUERY_USN_JOURNAL` / `FSCTL_READ_USN_JOURNAL`（V2/V3 record）。禁止 live volume 回退。
-    Worker 在 VSS 创建前可调用幂等 `ensure_file_change_journal_active`：仅当 live NTFS volume 返回
-    `ERROR_JOURNAL_NOT_ACTIVE` 时创建 128 MiB journal（16 MiB allocation delta）；不读取 live baseline/records，
-    已有 journal 不修改。
-    snapshot 上 journal 不可用时 `available=false`（供 Full 降级）；读取半开区间
-    `[start_usn,end_usn)`，并返回仅用于 Worker 诊断的稳定 unavailable reason 与 native error code；
-    有界 batch，未知 reason bit 映射为 `kAmbiguous`。实现见
-    `windows_usn_journal.cpp`。
+  - **Incremental 变化判断（ADR-0020）**：Windows source 必须为每个 entry 提供 snapshot-consistent
+    `write_time` 与 `logical_size`。Pipeline 用 parent path index 比较 metadata signature；Windows Adapter
+    不为 file_set Incremental 创建、查询或读取 USN Journal；历史 USN reader 及其 CMake source 已删除。
 - `WindowsFileSourceBrowser`：Service 浏览用 opaque node token；不向调用方返回路径；reparse/sparse
-  节点标记 `kUnsupported` 且不可选。
+  节点标记 `kUnsupported` 且不可选。根列表（`parent_node_token=null`）先返回当前用户可映射的特殊目录
+  （Desktop / Downloads / Documents / Pictures / Music / Videos，Explorer 顺序），再返回授权盘符卷。
+  特殊目录经 `SHGetKnownFolderPath` 解析，并绑定到已授权 volume 的 `volume_identity` + 相对组件；
+  无法映射到授权卷或目录不存在时省略该项。Desktop 仍只看到 token 与 display_name，不接收绝对路径。
 
 ## 通用规则
 

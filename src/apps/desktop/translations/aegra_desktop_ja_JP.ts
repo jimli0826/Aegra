@@ -693,6 +693,10 @@ Server: %1</source>
         <source>The target folder does not support required features (for example ACL). Choose an NTFS folder.</source>
         <translation>ターゲットフォルダーが必要な機能（ACL など）に対応していません。NTFS フォルダーを選んでください。</translation>
     </message>
+    <message id="aegra.error.file_restore.target_file_too_large">
+        <source>A selected file exceeds the target file system's per-file size limit.</source>
+        <translation>選択したファイルがターゲットファイルシステムの単一ファイル上限を超えています。</translation>
+    </message>
     <message id="aegra.error.file_restore.target_not_directory">
         <source>Select a folder as the restore destination.</source>
         <translation>復元先としてフォルダーを選択してください。</translation>
@@ -942,8 +946,8 @@ Server: %1</source>
         <translation>セキュリティ（ACL）を復元</translation>
     </message>
     <message id="aegra.restore.file.restore_security_hint">
-        <source>Apply Owner, Group, DACL, and SACL from the archive. Uncheck to keep target default permissions (timestamps and attributes are still restored).</source>
-        <translation>アーカイブから所有者・グループ・DACL・SACL を適用します。オフにするとターゲット既定のアクセス権を維持します（タイムスタンプと属性は復元されます）。</translation>
+        <source>Apply Owner, Group, DACL, and SACL from the archive. FAT32 targets require this option to be off and cannot store files larger than 4 GiB - 1. Timestamps and attributes are still restored.</source>
+        <translation>アーカイブから所有者・グループ・DACL・SACL を適用します。FAT32 ターゲットではオフにする必要があり、4 GiB - 1 を超えるファイルは保存できません。タイムスタンプと属性は復元されます。</translation>
     </message>
     <message id="aegra.restore.file.conflict_policy">
         <source>If a file already exists</source>
@@ -1762,8 +1766,8 @@ Server: %1</source>
         <translation>バックアップの種類</translation>
     </message>
     <message id="aegra.backup.file.incremental_baseline_note">
-        <source>Changing the file selection later creates a new full baseline. Incremental runs only when the selection is unchanged and a valid parent exists.</source>
-        <translation>後から選択範囲を変更すると新しいフル基準が作成されます。増分は選択が変わらず有効な親がある場合のみ実行されます。</translation>
+        <source>Incremental backup reuses a file only when its path, modification time, and size match the parent. FAT32 timestamps are coarse, so equal time and size cannot detect every content change. Changing the selection creates a new full baseline.</source>
+        <translation>ファイルのパス、更新日時、サイズが親と一致する場合にのみ再利用します。FAT32 の時刻精度は粗いため、同じ時刻とサイズではすべての内容変更を検出できません。選択変更時は新しいフル基準を作成します。</translation>
     </message>
     <message id="aegra.backup.downgrade.no_parent">
         <source>No eligible parent recovery point; a new full baseline was created.</source>
@@ -1777,29 +1781,9 @@ Server: %1</source>
         <source>Parent backup chain is incomplete; a new full baseline was created.</source>
         <translation>親バックアップ チェーンが不完全なため、新しいフル基準を作成しました。</translation>
     </message>
-    <message id="aegra.backup.downgrade.journal_missing">
-        <source>Change journal was unavailable; a new full baseline was created.</source>
-        <translation>変更ジャーナルを利用できないため、新しいフル基準を作成しました。</translation>
-    </message>
-    <message id="aegra.backup.downgrade.journal_reset">
-        <source>Change journal was reset; a new full baseline was created.</source>
-        <translation>変更ジャーナルがリセットされたため、新しいフル基準を作成しました。</translation>
-    </message>
-    <message id="aegra.backup.downgrade.journal_wrapped">
-        <source>Change journal wrapped; a new full baseline was created.</source>
-        <translation>変更ジャーナルがラップしたため、新しいフル基準を作成しました。</translation>
-    </message>
-    <message id="aegra.backup.downgrade.journal_inaccessible">
-        <source>Change journal was inaccessible; a new full baseline was created.</source>
-        <translation>変更ジャーナルにアクセスできないため、新しいフル基準を作成しました。</translation>
-    </message>
-    <message id="aegra.backup.downgrade.volume_identity_changed">
-        <source>Volume identity changed; a new full baseline was created.</source>
-        <translation>ボリューム識別が変更されたため、新しいフル基準を作成しました。</translation>
-    </message>
-    <message id="aegra.backup.downgrade.baseline_invalid">
-        <source>Parent baseline is invalid; a new full baseline was created.</source>
-        <translation>親基準が無効なため、新しいフル基準を作成しました。</translation>
+    <message id="aegra.backup.downgrade.metadata_baseline_invalid">
+        <source>Parent metadata baseline is invalid; a new full baseline was created.</source>
+        <translation>親のメタデータ基準が無効なため、新しいフル基準を作成しました。</translation>
     </message>
     <message id="aegra.backup.downgrade.generic">
         <source>Incremental was not eligible; a full backup was created instead.</source>
@@ -1877,21 +1861,9 @@ Server: %1</source>
         <source>Backup selection no longer matches the parent baseline. A full backup is required.</source>
         <translation>バックアップ選択が親基準と一致しなくなりました。フル バックアップが必要です。</translation>
     </message>
-    <message id="aegra.error.file_backup.journal_missing">
-        <source>Change journal unavailable; incremental cannot continue.</source>
-        <translation>変更ジャーナルを利用できないため、増分を続行できません。</translation>
-    </message>
-    <message id="aegra.error.file_backup.journal_reset">
-        <source>Change journal was reset; a full backup is required.</source>
-        <translation>変更ジャーナルがリセットされたため、フル バックアップが必要です。</translation>
-    </message>
-    <message id="aegra.error.file_backup.journal_wrapped">
-        <source>Change journal wrapped; a full backup is required.</source>
-        <translation>変更ジャーナルがラップしたため、フル バックアップが必要です。</translation>
-    </message>
-    <message id="aegra.error.file_backup.journal_inaccessible">
-        <source>Change journal inaccessible; a full backup is required.</source>
-        <translation>変更ジャーナルにアクセスできないため、フル バックアップが必要です。</translation>
+    <message id="aegra.error.file_backup.metadata_baseline_invalid">
+        <source>The parent metadata baseline is invalid. Run a full backup.</source>
+        <translation>親のメタデータ基準が無効です。フル バックアップを実行してください。</translation>
     </message>
     <message id="aegra.error.file_backup.unsupported_incremental">
         <source>Incremental backup is not supported for this selection.</source>

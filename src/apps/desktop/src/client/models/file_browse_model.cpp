@@ -11,6 +11,22 @@ namespace {
     return node.selectability == 1 && node.availability == 1;
 }
 
+/// Target-folder picker (singleDirectoryMode) only needs directories; hide files from the tree.
+[[nodiscard]] QVector<FileBrowseNode> filter_nodes_for_mode(QVector<FileBrowseNode> nodes,
+                                                            const bool single_directory_mode) {
+    if (!single_directory_mode) {
+        return nodes;
+    }
+    QVector<FileBrowseNode> directories;
+    directories.reserve(nodes.size());
+    for (auto& node : nodes) {
+        if (node.is_directory) {
+            directories.push_back(std::move(node));
+        }
+    }
+    return directories;
+}
+
 } // namespace
 
 FileBrowseNode file_browse_node_from_map(const QVariantMap& map, const int depth,
@@ -63,8 +79,9 @@ void FileBrowseModel::clear() {
 }
 
 void FileBrowseModel::set_roots(QVector<FileBrowseNode> roots) {
+    auto filtered = filter_nodes_for_mode(std::move(roots), single_directory_mode_);
     beginResetModel();
-    rows_ = std::move(roots);
+    rows_ = std::move(filtered);
     token_index_.clear();
     for (int index = 0; index < rows_.size(); ++index) {
         rows_[index].depth = 0;
@@ -98,6 +115,7 @@ void FileBrowseModel::set_children(const QString& parent_token, QVector<FileBrow
             endRemoveRows();
         }
     }
+    auto filtered = filter_nodes_for_mode(std::move(children), single_directory_mode_);
     parent.children_loaded = true;
     parent.loading = false;
     parent.expanded = true;
@@ -105,11 +123,11 @@ void FileBrowseModel::set_children(const QString& parent_token, QVector<FileBrow
     for (int index = 0; index < rows_.size(); ++index) {
         token_index_.insert(rows_[index].node_token, index);
     }
-    if (!children.isEmpty()) {
+    if (!filtered.isEmpty()) {
         const int insert_at = parent_index + 1;
-        beginInsertRows(QModelIndex(), insert_at, insert_at + children.size() - 1);
-        for (int offset = 0; offset < children.size(); ++offset) {
-            auto child = std::move(children[offset]);
+        beginInsertRows(QModelIndex(), insert_at, insert_at + filtered.size() - 1);
+        for (int offset = 0; offset < filtered.size(); ++offset) {
+            auto child = std::move(filtered[offset]);
             child.parent_token = parent_token;
             child.depth = parent.depth + 1;
             if (parent.check_state == 2 && is_selectable_node(child) && !single_directory_mode_) {

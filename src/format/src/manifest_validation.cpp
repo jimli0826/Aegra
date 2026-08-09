@@ -139,14 +139,11 @@ base::Result<void> validate_manifest(const Manifest& manifest) {
         if (!fp) {
             return invalid("file_set manifest selection_fingerprint is invalid");
         }
-        auto checkpoints =
-            contracts::validate_file_journal_checkpoints(manifest.file_set_baseline.journal_checkpoints);
-        if (!checkpoints) {
-            return invalid("file_set manifest journal_checkpoints are invalid");
-        }
-        if (manifest.backup_job.backup_type == BackupType::kIncremental &&
-            manifest.file_set_baseline.journal_checkpoints.empty()) {
-            return invalid("file_set incremental requires journal_checkpoints");
+        if (!contracts::is_known_file_change_detection_method(
+                manifest.file_set_baseline.change_detection_method) ||
+            manifest.file_set_baseline.change_detection_method !=
+                contracts::FileChangeDetectionMethod::kMtimeSizeV1) {
+            return invalid("file_set manifest change_detection_method is invalid");
         }
         return validate_extensions(manifest);
     }
@@ -154,7 +151,8 @@ base::Result<void> validate_manifest(const Manifest& manifest) {
         !std::all_of(manifest.file_set_baseline.selection_fingerprint.begin(),
                      manifest.file_set_baseline.selection_fingerprint.end(),
                      [](const std::byte item) { return item == std::byte{0}; }) ||
-        !manifest.file_set_baseline.journal_checkpoints.empty()) {
+        manifest.file_set_baseline.change_detection_method !=
+            contracts::FileChangeDetectionMethod::kNone) {
         return invalid("volume_set manifest cannot carry file_set_baseline");
     }
     if (manifest.volumes.empty()) {

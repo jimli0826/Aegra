@@ -292,6 +292,7 @@ WindowsFileSetBackupRequest make_backup_request(const contracts::JobRequest& job
     request.encryption_enabled = secrets.encryption_enabled;
     request.file_uuid = ids.first;
     request.backup_set_uuid = ids.second;
+    request.selection_fingerprint = *job.backup->selection_fingerprint;
     request.requested_type = job.backup->type;
     // Service demotion keeps type=Incremental with service_full_reason; Worker writes Full.
     if (job.backup->service_full_reason) {
@@ -342,32 +343,47 @@ open_parent_archive(const contracts::BackupOptions& options, const std::string_v
     auto reader = adapters::personal_archive::PersonalFileArchiveReader::open(open_request);
     if (!reader) {
         // Parent credential/open failures are hard failures — never silent Full.
-        return base::Result<std::unique_ptr<adapters::personal_archive::PersonalFileArchiveReader>>::
-            failure(reader.error().code == base::ErrorCode::kUnauthorized
-                        ? base::Error{base::ErrorCode::kUnauthorized, "parent archive credential failed"}
-                        : reader.error());
+        return base::
+            Result<std::unique_ptr<adapters::personal_archive::PersonalFileArchiveReader>>::failure(
+                reader.error().code == base::ErrorCode::kUnauthorized
+                    ? base::Error{base::ErrorCode::kUnauthorized,
+                                  "parent archive credential failed"}
+                    : reader.error());
     }
     auto expected = base::parse_uuid(options.candidate_parent_uuid);
     if (!expected) {
-        return base::Result<std::unique_ptr<adapters::personal_archive::PersonalFileArchiveReader>>::
-            failure(expected.error());
+        return base::
+            Result<std::unique_ptr<adapters::personal_archive::PersonalFileArchiveReader>>::failure(
+                expected.error());
     }
     if (reader.value()->identity().file_uuid != expected.value()) {
-        return base::Result<std::unique_ptr<adapters::personal_archive::PersonalFileArchiveReader>>::
-            failure(base::Error{base::ErrorCode::kConflict,
-                                "parent archive identity does not match candidate_parent_uuid"});
+        return base::
+            Result<std::unique_ptr<adapters::personal_archive::PersonalFileArchiveReader>>::failure(
+                base::Error{base::ErrorCode::kConflict,
+                            "parent archive identity does not match candidate_parent_uuid"});
     }
     auto set = base::parse_uuid(options.backup_set_uuid);
     if (!set) {
-        return base::Result<std::unique_ptr<adapters::personal_archive::PersonalFileArchiveReader>>::
-            failure(set.error());
+        return base::
+            Result<std::unique_ptr<adapters::personal_archive::PersonalFileArchiveReader>>::failure(
+                set.error());
     }
     if (reader.value()->identity().backup_set_uuid != set.value()) {
-        return base::Result<std::unique_ptr<adapters::personal_archive::PersonalFileArchiveReader>>::
-            failure(base::Error{base::ErrorCode::kConflict,
-                                "parent archive backup set does not match schedule"});
+        return base::
+            Result<std::unique_ptr<adapters::personal_archive::PersonalFileArchiveReader>>::failure(
+                base::Error{base::ErrorCode::kConflict,
+                            "parent archive backup set does not match schedule"});
     }
     return reader;
+}
+
+[[nodiscard]] bool
+parent_baseline_matches(const adapters::personal_archive::PersonalFileArchiveReader& parent,
+                        const contracts::FileSelectionFingerprint& expected) noexcept {
+    const auto& baseline = parent.manifest().file_set_baseline;
+    return baseline.fingerprint_algorithm == expected.algorithm_id &&
+           baseline.selection_fingerprint == expected.digest &&
+           baseline.change_detection_method == contracts::FileChangeDetectionMethod::kMtimeSizeV1;
 }
 
 [[nodiscard]] std::string_view backup_hint_for(const base::ErrorCode code,
@@ -487,7 +503,8 @@ run_accepted_task(const contracts::JobRequest& job, const WindowsPersonalBackupT
 
     if (cancellation.stop_requested() ||
         (job.deadline_utc_ms > 0 && context.clock.now_utc_ms() >= job.deadline_utc_ms)) {
-        const base::Error error{base::ErrorCode::kCancelled, "file_set backup cancelled before start"};
+        const base::Error error{base::ErrorCode::kCancelled,
+                                "file_set backup cancelled before start"};
         return fail(base::ErrorCode::kCancelled, &error);
     }
     auto created_utc = format_utc(job.backup->created_utc_ms);
@@ -517,9 +534,8 @@ run_accepted_task(const contracts::JobRequest& job, const WindowsPersonalBackupT
         secrets = std::move(resolved).value();
     }
 
-    auto request =
-        make_backup_request(job, options, secrets, ids.value(), std::move(created_utc).value(),
-                            std::move(spool).value());
+    auto request = make_backup_request(job, options, secrets, ids.value(),
+                                       std::move(created_utc).value(), std::move(spool).value());
     log_backup_request(log, job);
 
     std::unique_ptr<adapters::personal_archive::PersonalFileArchiveReader> parent_reader;
@@ -528,18 +544,32 @@ run_accepted_task(const contracts::JobRequest& job, const WindowsPersonalBackupT
         auto opened =
             open_parent_archive(*job.backup, secrets.archive->view(), options.memory_budget_bytes);
         if (!opened) {
-            const auto code = credential_error_code(opened.error().code);
-            const base::Error error{code, opened.error().message};
-            stage.fail(error, "open_parent", backup_hint_for(code, error.message));
-            return fail(code, &error);
+            if (opened.error().code != base::ErrorCode::kUnauthorized &&
+                opened.error().code != base::ErrorCode::kCancelled) {
+                request.effective_type = contracts::BackupType::kFull;
+                request.service_full_reason =
+                    contracts::IncrementalDowngradeReason::kChainIncomplete;
+                stage.note("eligibility", "full_chain_incomplete");
+            } else {
+                const auto code = credential_error_code(opened.error().code);
+                const base::Error error{code, opened.error().message};
+                stage.fail(error, "open_parent", backup_hint_for(code, error.message));
+                return fail(code, &error);
+            }
+        } else if (!parent_baseline_matches(*opened.value(), request.selection_fingerprint)) {
+            request.effective_type = contracts::BackupType::kFull;
+            request.service_full_reason = contracts::IncrementalDowngradeReason::kBaselineInvalid;
+            stage.note("eligibility", "full_metadata_baseline_invalid");
+        } else {
+            parent_reader = std::move(opened).value();
+            request.parent_uuid = parent_reader->identity().file_uuid;
+            request.parent_reader = parent_reader.get();
+            stage.note("parent_uuid", job.backup->candidate_parent_uuid);
+            stage.note_u64(
+                "change_detection_method",
+                static_cast<std::uint64_t>(
+                    parent_reader->manifest().file_set_baseline.change_detection_method));
         }
-        parent_reader = std::move(opened).value();
-        request.parent_uuid = parent_reader->identity().file_uuid;
-        request.parent_checkpoints =
-            parent_reader->manifest().file_set_baseline.journal_checkpoints;
-        request.parent_reader = parent_reader.get();
-        stage.note("parent_uuid", job.backup->candidate_parent_uuid);
-        stage.note_u64("parent_checkpoint_count", request.parent_checkpoints.size());
     }
 
     auto backup = detail::backup_windows_file_set(request, cancellation, context.progress);

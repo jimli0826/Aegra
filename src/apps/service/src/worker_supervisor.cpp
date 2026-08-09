@@ -225,16 +225,62 @@ persist_missing_result(const SessionDependencies& dependencies,
                               state, message, std::move(fields));
 }
 
+/// Keep a terminal progress snapshot so ListJobs can report real bytes (not synthetic 1/1).
+void retain_terminal_progress(const std::shared_ptr<WorkerSessionState>& session,
+                              const std::shared_ptr<SessionDependencies>& dependencies,
+                              const contracts::WorkerResponse* response) noexcept {
+    if (dependencies->progress_mutex == nullptr || dependencies->last_progress == nullptr) {
+        return;
+    }
+    std::lock_guard lock(*dependencies->progress_mutex);
+    auto& cache = *dependencies->last_progress;
+    if (response != nullptr && response->task_result) {
+        const auto& tr = *response->task_result;
+        const bool ok = tr.outcome == contracts::TaskOutcome::kSucceeded ||
+                        tr.outcome == contracts::TaskOutcome::kSucceededWithWarning;
+        if (ok) {
+            // Success: completed progress must have processed == logical when logical is set.
+            const auto total = tr.logical_bytes > 0
+                                   ? tr.logical_bytes
+                                   : (tr.stored_bytes > 0 ? tr.stored_bytes : 1ULL);
+            contracts::TaskProgress done;
+            done.schema_version = contracts::kTaskProgressSchemaVersion;
+            done.job_id = session->job_id;
+            done.trace_id = session->trace_id;
+            done.phase = contracts::TaskPhase::kCompleted;
+            done.logical_bytes = total;
+            done.processed_bytes = total;
+            done.stored_bytes = tr.stored_bytes;
+            done.discovered_entries = tr.entry_count;
+            done.processed_entries = tr.entry_count;
+            done.message_code =
+                tr.message_code.empty() ? std::string("job.succeeded") : tr.message_code;
+            cache[session->job_id] = std::move(done);
+        }
+        // Failure/cancel: keep last live progress quantum (do not force 100%).
+    }
+    // Bound cache growth for long-lived Service processes.
+    constexpr std::size_t kMaximumCachedProgress = 2'048;
+    constexpr std::size_t kProgressPruneTarget = 1'024;
+    if (cache.size() > kMaximumCachedProgress) {
+        for (auto it = cache.begin();
+             it != cache.end() && cache.size() > kProgressPruneTarget;) {
+            if (it->first == session->job_id) {
+                ++it;
+                continue;
+            }
+            it = cache.erase(it);
+        }
+    }
+}
+
 void publish_completion(const WorkerJobRequest& request,
                         const std::shared_ptr<WorkerSessionState>& session,
                         const std::shared_ptr<SessionDependencies>& dependencies,
                         const base::Result<contracts::ServiceJobState>& persisted,
                         const contracts::WorkerResponse* response) noexcept {
     session->completed = true;
-    if (dependencies->progress_mutex != nullptr && dependencies->last_progress != nullptr) {
-        std::lock_guard lock(*dependencies->progress_mutex);
-        dependencies->last_progress->erase(session->job_id);
-    }
+    retain_terminal_progress(session, dependencies, response);
     if (!persisted || !dependencies->on_completion)
         return;
     try {

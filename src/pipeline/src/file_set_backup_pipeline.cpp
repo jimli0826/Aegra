@@ -65,13 +65,9 @@ class SessionGuard final {
             err(base::ErrorCode::kInsufficientSpace, "file backup memory budget is insufficient"));
     }
     if (plan.effective_type == contracts::BackupType::kIncremental) {
-        if (plan.parent_reader == nullptr || plan.parent_checkpoints.empty()) {
+        if (plan.parent_reader == nullptr) {
             return base::Result<void>::failure(
                 err(base::ErrorCode::kInvalidArgument, "file_backup.parent_required"));
-        }
-        auto checkpoints = contracts::validate_file_journal_checkpoints(plan.parent_checkpoints);
-        if (!checkpoints) {
-            return base::Result<void>::failure(checkpoints.error());
         }
     } else if (plan.effective_type != contracts::BackupType::kFull) {
         return base::Result<void>::failure(
@@ -144,148 +140,21 @@ enumerate_all(ports::IFileSnapshotView& snapshot, const FileSetBackupPlan& plan,
               ports::IProgressSink* progress) {
     std::vector<contracts::FileEntryDesc> all;
     for (const auto& selection : plan.selections) {
-        auto page =
-            enumerate_selection(snapshot, selection, plan.enumerate_batch_size, cancellation, summary);
+        auto page = enumerate_selection(snapshot, selection, plan.enumerate_batch_size,
+                                        cancellation, summary);
         if (!page) {
             return page;
         }
         all.insert(all.end(), std::make_move_iterator(page.value().begin()),
                    std::make_move_iterator(page.value().end()));
-        publish(progress, plan, contracts::TaskPhase::kPreparing, summary, "file_backup.enumerating");
+        publish(progress, plan, contracts::TaskPhase::kPreparing, summary,
+                "file_backup.enumerating");
     }
     if (all.empty()) {
         return base::Result<std::vector<contracts::FileEntryDesc>>::failure(
             err(base::ErrorCode::kInvalidArgument, "file backup selection is empty"));
     }
     return base::Result<std::vector<contracts::FileEntryDesc>>::success(std::move(all));
-}
-
-[[nodiscard]] std::vector<std::string> unique_volume_identities(
-    const std::vector<contracts::FileSourceRef>& selections) {
-    std::vector<std::string> volumes;
-    for (const auto& selection : selections) {
-        volumes.push_back(selection.volume_identity);
-    }
-    std::sort(volumes.begin(), volumes.end());
-    volumes.erase(std::unique(volumes.begin(), volumes.end()), volumes.end());
-    return volumes;
-}
-
-[[nodiscard]] const contracts::FileJournalCheckpoint*
-find_checkpoint(const std::vector<contracts::FileJournalCheckpoint>& checkpoints,
-                const std::string& volume_identity) noexcept {
-    for (const auto& checkpoint : checkpoints) {
-        if (checkpoint.volume_identity == volume_identity) {
-            return &checkpoint;
-        }
-    }
-    return nullptr;
-}
-
-/// Collect current snapshot journal checkpoints for all selected volumes.
-/// If any volume is unavailable, returns empty list (baseline not usable for next Incremental).
-[[nodiscard]] base::Result<std::vector<contracts::FileJournalCheckpoint>>
-collect_current_checkpoints(ports::IFileSnapshotView& snapshot,
-                            const std::vector<std::string>& volumes,
-                            const base::CancellationToken& cancellation) {
-    std::vector<contracts::FileJournalCheckpoint> checkpoints;
-    checkpoints.reserve(volumes.size());
-    for (const auto& volume_identity : volumes) {
-        if (cancellation.stop_requested()) {
-            return base::Result<std::vector<contracts::FileJournalCheckpoint>>::failure(
-                err(base::ErrorCode::kCancelled, "file backup journal query cancelled"));
-        }
-        auto state = snapshot.query_journal_state(volume_identity, cancellation);
-        if (!state) {
-            return base::Result<std::vector<contracts::FileJournalCheckpoint>>::failure(
-                state.error());
-        }
-        if (!state.value().available) {
-            return base::Result<std::vector<contracts::FileJournalCheckpoint>>::success({});
-        }
-        contracts::FileJournalCheckpoint checkpoint;
-        checkpoint.volume_identity = volume_identity;
-        checkpoint.journal_id = state.value().journal_id;
-        checkpoint.next_usn = state.value().next_usn;
-        checkpoints.push_back(std::move(checkpoint));
-    }
-    return base::Result<std::vector<contracts::FileJournalCheckpoint>>::success(
-        std::move(checkpoints));
-}
-
-[[nodiscard]] base::Result<std::vector<contracts::FileChangeHint>>
-read_volume_change_hints(ports::IFileSnapshotView& snapshot, const std::string& volume_identity,
-                         const std::int64_t start_usn, const std::int64_t end_usn,
-                         const base::CancellationToken& cancellation) {
-    std::vector<contracts::FileChangeHint> hints;
-    std::int64_t cursor = start_usn;
-    while (cursor < end_usn) {
-        if (cancellation.stop_requested()) {
-            return base::Result<std::vector<contracts::FileChangeHint>>::failure(
-                err(base::ErrorCode::kCancelled, "file backup journal read cancelled"));
-        }
-        auto batch = snapshot.read_change_batch(volume_identity, cursor, end_usn,
-                                                contracts::kMaximumChangeHintsPerBatch, cancellation);
-        if (!batch) {
-            return base::Result<std::vector<contracts::FileChangeHint>>::failure(batch.error());
-        }
-        for (auto& hint : batch.value().hints) {
-            hints.push_back(std::move(hint));
-        }
-        if (!batch.value().next_start_usn.has_value()) {
-            break;
-        }
-        if (batch.value().next_start_usn.value() <= cursor) {
-            return base::Result<std::vector<contracts::FileChangeHint>>::failure(
-                err(base::ErrorCode::kConflict, "file_backup.journal_wrapped"));
-        }
-        cursor = batch.value().next_start_usn.value();
-    }
-    return base::Result<std::vector<contracts::FileChangeHint>>::success(std::move(hints));
-}
-
-/// Defense-in-depth continuity check + USN range read for Incremental.
-[[nodiscard]] base::Result<std::vector<contracts::FileChangeHint>>
-collect_incremental_hints(ports::IFileSnapshotView& snapshot, const FileSetBackupPlan& plan,
-                          const base::CancellationToken& cancellation) {
-    if (!plan.change_hints.empty()) {
-        return base::Result<std::vector<contracts::FileChangeHint>>::success(plan.change_hints);
-    }
-    std::vector<contracts::FileChangeHint> all_hints;
-    const auto volumes = unique_volume_identities(plan.selections);
-    for (const auto& volume_identity : volumes) {
-        const auto* parent_cp = find_checkpoint(plan.parent_checkpoints, volume_identity);
-        if (parent_cp == nullptr) {
-            return base::Result<std::vector<contracts::FileChangeHint>>::failure(
-                err(base::ErrorCode::kConflict, "file_backup.journal_missing"));
-        }
-        auto state = snapshot.query_journal_state(volume_identity, cancellation);
-        if (!state) {
-            return base::Result<std::vector<contracts::FileChangeHint>>::failure(state.error());
-        }
-        if (!state.value().available) {
-            return base::Result<std::vector<contracts::FileChangeHint>>::failure(
-                err(base::ErrorCode::kConflict, "file_backup.journal_inaccessible"));
-        }
-        if (state.value().journal_id != parent_cp->journal_id) {
-            return base::Result<std::vector<contracts::FileChangeHint>>::failure(
-                err(base::ErrorCode::kConflict, "file_backup.journal_reset"));
-        }
-        if (state.value().lowest_valid_usn > parent_cp->next_usn ||
-            parent_cp->next_usn > state.value().next_usn) {
-            return base::Result<std::vector<contracts::FileChangeHint>>::failure(
-                err(base::ErrorCode::kConflict, "file_backup.journal_wrapped"));
-        }
-        auto volume_hints = read_volume_change_hints(snapshot, volume_identity, parent_cp->next_usn,
-                                                     state.value().next_usn, cancellation);
-        if (!volume_hints) {
-            return base::Result<std::vector<contracts::FileChangeHint>>::failure(
-                volume_hints.error());
-        }
-        all_hints.insert(all_hints.end(), std::make_move_iterator(volume_hints.value().begin()),
-                         std::make_move_iterator(volume_hints.value().end()));
-    }
-    return base::Result<std::vector<contracts::FileChangeHint>>::success(std::move(all_hints));
 }
 
 struct StreamWriteContext final {
@@ -297,10 +166,10 @@ struct StreamWriteContext final {
     ports::IProgressSink* progress{nullptr};
 };
 
-[[nodiscard]] base::Result<void>
-write_stream_content(StreamWriteContext& context, contracts::FileEntryDesc& entry,
-                     contracts::FileStreamDesc& stream,
-                     const base::CancellationToken& cancellation) {
+[[nodiscard]] base::Result<void> write_stream_content(StreamWriteContext& context,
+                                                      contracts::FileEntryDesc& entry,
+                                                      contracts::FileStreamDesc& stream,
+                                                      const base::CancellationToken& cancellation) {
     auto reader =
         context.snapshot.open_stream_reader(entry.entry_id, stream.stream_index, cancellation);
     if (!reader) {
@@ -385,22 +254,6 @@ FileSetBackupPipeline::run(const FileSetBackupPlan& plan,
     FileSetBackupSummary summary;
     publish(progress_, plan, contracts::TaskPhase::kPreparing, summary, "file_backup.preparing");
 
-    const auto volumes = unique_volume_identities(plan.selections);
-    auto current_checkpoints = collect_current_checkpoints(snapshot_, volumes, cancellation);
-    if (!current_checkpoints) {
-        return base::Result<FileSetBackupSummary>::failure(current_checkpoints.error());
-    }
-    summary.journal_checkpoints = std::move(current_checkpoints).value();
-
-    std::vector<contracts::FileChangeHint> hints;
-    if (plan.effective_type == contracts::BackupType::kIncremental) {
-        auto collected = collect_incremental_hints(snapshot_, plan, cancellation);
-        if (!collected) {
-            return base::Result<FileSetBackupSummary>::failure(collected.error());
-        }
-        hints = std::move(collected).value();
-    }
-
     auto entries = enumerate_all(snapshot_, plan, cancellation, summary, progress_);
     if (!entries) {
         return base::Result<FileSetBackupSummary>::failure(entries.error());
@@ -409,14 +262,12 @@ FileSetBackupPipeline::run(const FileSetBackupPlan& plan,
     FileSetChangePlannerRequest planner_request;
     planner_request.effective_type = plan.effective_type;
     planner_request.parent_reader = plan.parent_reader;
-    planner_request.change_hints = std::move(hints);
     planner_request.parent_index_budget_bytes =
         plan.memory_budget_bytes > plan.chunk_size_bytes
             ? plan.memory_budget_bytes - plan.chunk_size_bytes
             : plan.memory_budget_bytes;
 
-    auto planned =
-        plan_file_set_streams(std::move(entries).value(), planner_request, cancellation);
+    auto planned = plan_file_set_streams(std::move(entries).value(), planner_request, cancellation);
     if (!planned) {
         return base::Result<FileSetBackupSummary>::failure(planned.error());
     }
@@ -440,8 +291,8 @@ FileSetBackupPipeline::run(const FileSetBackupPlan& plan,
 
     publish(progress_, plan, contracts::TaskPhase::kReading, summary, "file_backup.reading");
     std::uint64_t next_chunk_index = 0;
-    StreamWriteContext write_context{snapshot_, session_, plan, summary, next_chunk_index,
-                                     progress_};
+    StreamWriteContext write_context{snapshot_, session_,         plan,
+                                     summary,   next_chunk_index, progress_};
     for (const auto& item : planned.value().local_streams) {
         auto& entry = planned.value().entries[item.entry_pos];
         auto& stream = entry.streams[item.stream_pos];

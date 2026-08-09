@@ -6,14 +6,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <optional>
 #include <string>
 #include <vector>
 
 namespace aegra::contracts {
 
 // Product / format hard limits. Configurations may only tighten these values.
-// FI0/FI1: directory / regular file / unnamed main stream; local|parent content; USN baseline.
+// Current file_set: directory / regular file / unnamed main stream; local|parent content.
 inline constexpr std::uint32_t kMaximumFileSelections = 100;
 inline constexpr std::uint32_t kMaximumFileDirectoryDepth = 64;
 inline constexpr std::uint32_t kMaximumRelativePathComponents = 64;
@@ -40,8 +39,6 @@ inline constexpr std::size_t kStableFileIdBytes = 16;
 /// Selection fingerprint: SHA-256 over canonical preimage (algorithm id 1).
 inline constexpr std::uint8_t kSelectionFingerprintAlgorithmSha256V1 = 1;
 inline constexpr std::size_t kSelectionFingerprintBytes = 32;
-inline constexpr std::uint32_t kMaximumJournalCheckpoints = 64;
-inline constexpr std::uint32_t kMaximumChangeHintsPerBatch = 4'096;
 /// File recovery chain depth (tip inclusive).
 inline constexpr std::uint32_t kMaximumFileChainDepth = 128;
 inline constexpr std::uint64_t kMaximumWireInteger =
@@ -94,13 +91,10 @@ enum class FileContentStorage : std::uint8_t {
     kParent = 2,
 };
 
-/// Conservative USN-derived change classification (platform-independent).
-enum class FileChangeReason : std::uint8_t {
+/// Persisted file_set content-change detection method.
+enum class FileChangeDetectionMethod : std::uint8_t {
     kNone = 0,
-    kContent = 1,
-    kNamespace = 2,
-    kMetadata = 3,
-    kAmbiguous = 4,
+    kMtimeSizeV1 = 1,
 };
 
 /// Non-sensitive reason Incremental request became effective Full.
@@ -109,11 +103,6 @@ enum class IncrementalDowngradeReason : std::uint8_t {
     kNoParent = 1,
     kSelectionChanged = 2,
     kChainIncomplete = 3,
-    kJournalMissing = 4,
-    kJournalReset = 5,
-    kJournalWrapped = 6,
-    kJournalInaccessible = 7,
-    kVolumeIdentityChanged = 8,
     kBaselineInvalid = 9,
 };
 
@@ -137,58 +126,14 @@ struct FileSourceRef final {
 };
 
 /// Stable identity within one volume: (volume_identity, FILE_ID_128).
-/// Null identity: empty volume_identity and all-zero file_id (logical root only; not written).
+/// Null identity: empty volume_identity and all-zero file_id (allowed when the source filesystem
+/// does not provide a stable file identity, such as FAT32).
 struct StableFileIdentity final {
     std::string volume_identity;
     std::array<std::byte, kStableFileIdBytes> file_id{};
 
     [[nodiscard]] friend bool operator==(const StableFileIdentity&,
                                          const StableFileIdentity&) = default;
-};
-
-/// Parent Recovery Point USN checkpoint for one selected volume (encrypted metadata).
-struct FileJournalCheckpoint final {
-    std::string volume_identity;
-    std::uint64_t journal_id{0};
-    std::int64_t next_usn{0};
-
-    [[nodiscard]] friend bool operator==(const FileJournalCheckpoint&,
-                                         const FileJournalCheckpoint&) = default;
-};
-
-enum class FileJournalUnavailableReason : std::uint8_t {
-    kNone = 0,
-    kOpenFailed = 1,
-    kUnsupported = 2,
-    kInactive = 3,
-    kAccessDenied = 4,
-    kInvalidResponse = 5,
-};
-
-/// Live snapshot journal state for Incremental eligibility (Port query result).
-struct FileJournalState final {
-    std::string volume_identity;
-    std::uint64_t journal_id{0};
-    std::int64_t lowest_valid_usn{0};
-    std::int64_t next_usn{0};
-    /// false => journal cannot be proven snapshot-consistent (Full downgrade).
-    bool available{false};
-    FileJournalUnavailableReason unavailable_reason{FileJournalUnavailableReason::kNone};
-    /// Platform-native diagnostic only; never persisted in Archive metadata or IPC.
-    std::uint32_t native_error_code{0};
-};
-
-/// One USN-derived change hint. Identity bytes are never logged as plaintext paths.
-struct FileChangeHint final {
-    StableFileIdentity identity;
-    FileChangeReason reason{FileChangeReason::kAmbiguous};
-};
-
-/// Bounded batch of change hints from a journal range.
-struct FileChangeBatch final {
-    std::vector<FileChangeHint> hints;
-    /// Next half-open start USN; nullopt when range exhausted for this query.
-    std::optional<std::int64_t> next_start_usn;
 };
 
 /// Authenticated selection fingerprint (algorithm + fixed digest).
@@ -227,7 +172,7 @@ struct FileEntryDesc final {
     FileEntryKind kind{FileEntryKind::kFile};
     EncodedName name;
     std::string selection_id;
-    /// Required non-null for directory and regular file Index entries.
+    /// Null when the source filesystem does not provide a stable file identity.
     StableFileIdentity stable_identity;
     std::uint32_t attributes{0};
     std::uint32_t flags{0};
@@ -264,27 +209,22 @@ struct PartialRestoreStats final {
 [[nodiscard]] bool is_known_file_conflict_policy(FileConflictPolicy policy) noexcept;
 [[nodiscard]] bool is_known_file_stream_kind(FileStreamKind kind) noexcept;
 [[nodiscard]] bool is_known_file_content_storage(FileContentStorage storage) noexcept;
-[[nodiscard]] bool is_known_file_change_reason(FileChangeReason reason) noexcept;
-[[nodiscard]] bool is_known_incremental_downgrade_reason(IncrementalDowngradeReason reason) noexcept;
+[[nodiscard]] bool is_known_file_change_detection_method(FileChangeDetectionMethod method) noexcept;
+[[nodiscard]] bool
+is_known_incremental_downgrade_reason(IncrementalDowngradeReason reason) noexcept;
 [[nodiscard]] bool is_known_selection_fingerprint_algorithm(std::uint8_t algorithm_id) noexcept;
 
 [[nodiscard]] bool is_null_stable_file_identity(const StableFileIdentity& identity) noexcept;
-[[nodiscard]] bool is_zero_selection_fingerprint(const FileSelectionFingerprint& fingerprint) noexcept;
+[[nodiscard]] bool
+is_zero_selection_fingerprint(const FileSelectionFingerprint& fingerprint) noexcept;
 
 [[nodiscard]] base::Result<void> validate_encoded_name(const EncodedName& name);
 [[nodiscard]] base::Result<void> validate_stable_file_identity(const StableFileIdentity& identity,
                                                                bool allow_null);
-[[nodiscard]] base::Result<void> validate_file_journal_checkpoint(const FileJournalCheckpoint& checkpoint);
-[[nodiscard]] base::Result<void>
-validate_file_journal_checkpoints(const std::vector<FileJournalCheckpoint>& checkpoints);
-[[nodiscard]] base::Result<void> validate_file_journal_state(const FileJournalState& state);
-[[nodiscard]] base::Result<void> validate_file_change_hint(const FileChangeHint& hint);
-[[nodiscard]] base::Result<void> validate_file_change_batch(const FileChangeBatch& batch);
 [[nodiscard]] base::Result<void>
 validate_file_selection_fingerprint(const FileSelectionFingerprint& fingerprint);
 [[nodiscard]] base::Result<void> validate_file_source_ref(const FileSourceRef& ref);
-[[nodiscard]] base::Result<void>
-validate_file_source_refs(const std::vector<FileSourceRef>& refs);
+[[nodiscard]] base::Result<void> validate_file_source_refs(const std::vector<FileSourceRef>& refs);
 [[nodiscard]] base::Result<void> validate_file_stream_desc(const FileStreamDesc& stream);
 [[nodiscard]] base::Result<void> validate_file_entry_desc(const FileEntryDesc& entry);
 [[nodiscard]] base::Result<void> validate_file_restore_target(const FileRestoreTarget& target);
@@ -294,9 +234,5 @@ validate_file_source_refs(const std::vector<FileSourceRef>& refs);
 /// Caller hashes with SHA-256; contracts stay free of crypto libraries.
 [[nodiscard]] base::Result<std::vector<std::byte>>
 encode_file_selection_fingerprint_preimage(const std::vector<FileSourceRef>& refs);
-
-/// Compare checkpoint continuity against live journal state (half-open USN range eligibility).
-[[nodiscard]] base::Result<void>
-validate_journal_continuity(const FileJournalCheckpoint& parent, const FileJournalState& current);
 
 } // namespace aegra::contracts

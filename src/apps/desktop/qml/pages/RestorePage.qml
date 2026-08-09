@@ -24,6 +24,54 @@ Item {
         id: restoreFileIconComponent
         FileDocIcon { size: 16 }
     }
+    Component {
+        id: restoreSpecialDesktopIcon
+        SpecialFolderIcon { size: 16; variant: "desktop" }
+    }
+    Component {
+        id: restoreSpecialDownloadsIcon
+        SpecialFolderIcon { size: 16; variant: "downloads" }
+    }
+    Component {
+        id: restoreSpecialDocumentsIcon
+        SpecialFolderIcon { size: 16; variant: "documents" }
+    }
+    Component {
+        id: restoreSpecialPicturesIcon
+        SpecialFolderIcon { size: 16; variant: "pictures" }
+    }
+    Component {
+        id: restoreSpecialMusicIcon
+        SpecialFolderIcon { size: 16; variant: "music" }
+    }
+    Component {
+        id: restoreSpecialVideosIcon
+        SpecialFolderIcon { size: 16; variant: "videos" }
+    }
+
+    function isVolumeRootLabel(name) {
+        var text = String(name || "")
+        return /\([A-Za-z]:\)$/.test(text) || /^[A-Za-z]:$/.test(text)
+    }
+    function restoreTargetIconFor(depth, isDirectory, displayName) {
+        if (depth === 0) {
+            switch (String(displayName || "").toLowerCase()) {
+            case "desktop": return restoreSpecialDesktopIcon
+            case "downloads": return restoreSpecialDownloadsIcon
+            case "documents": return restoreSpecialDocumentsIcon
+            case "pictures": return restoreSpecialPicturesIcon
+            case "music": return restoreSpecialMusicIcon
+            case "videos": return restoreSpecialVideosIcon
+            default:
+                return isVolumeRootLabel(displayName)
+                       ? restoreVolumeIconComponent
+                       : restoreFolderIconComponent
+            }
+        }
+        if (isDirectory)
+            return restoreFolderIconComponent
+        return restoreFileIconComponent
+    }
 
     /// Options expanded by default (old RestorePage: optionsCollapsed: false).
     property bool optionsCollapsed: false
@@ -3052,13 +3100,8 @@ Item {
                                         Layout.preferredWidth: 16
                                         Layout.preferredHeight: 16
                                         Layout.alignment: Qt.AlignVCenter
-                                        sourceComponent: {
-                                            if (depth === 0)
-                                                return restoreVolumeIconComponent
-                                            if (isDirectory)
-                                                return restoreFolderIconComponent
-                                            return restoreFileIconComponent
-                                        }
+                                        sourceComponent: root.restoreTargetIconFor(
+                                            depth, isDirectory, displayName)
                                     }
                                     Text {
                                         Layout.fillWidth: true
@@ -3474,7 +3517,7 @@ Item {
                     Text {
                         Layout.fillWidth: true
                         visible: root.isFileMode
-                        //% "Apply Owner, Group, DACL, and SACL from the archive. Uncheck to keep target default permissions (timestamps and attributes are still restored)."
+                        //% "Apply Owner, Group, DACL, and SACL from the archive. FAT32 targets require this option to be off and cannot store files larger than 4 GiB - 1. Timestamps and attributes are still restored."
                         text: qsTrId("aegra.restore.file.restore_security_hint")
                         color: Theme.colorTextGrey
                         font.pixelSize: 11

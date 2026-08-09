@@ -76,7 +76,8 @@ class WorkerSupervisor {
 
     [[nodiscard]] std::uint32_t active_count() const noexcept;
 
-    /// Last progress event for an active job (cleared when the job ends).
+    /// Latest progress for a job: live quantums while running, TaskResult snapshot after
+    /// completion (retained so ListJobs reports real bytes instead of synthetic 1/1).
     [[nodiscard]] std::optional<contracts::TaskProgress>
     last_progress(std::string_view job_id) const;
 

@@ -1,11 +1,15 @@
 # ADR-0018：文件集增量备份的 USN 基线与链式恢复
 
-- 状态：Accepted
+- 状态：Superseded by [ADR-0020](0020-file-set-metadata-signature-incremental.md)
 - 日期：2026-08-08
 - 决策者：Aegra 项目
 - 关联模块：contracts、ports、format、pipeline、personal_repository、adapters/windows_filesystem、apps/worker、apps/service、apps/desktop
 - 替代范围：ADR-0016 中“文件级 Incremental 暂缓”的范围，以及 reparse、hard link、sparse、ADS 属于文件集备份能力的决定
 - 关联文档：[增量架构设计](../architecture/FILE_SET_INCREMENTAL_BACKUP_RESTORE.md)、[增量开发计划](../development/FILE_SET_INCREMENTAL_DEVELOPMENT_PLAN.md)、[文件集基础设计](../architecture/FILE_SET_BACKUP_RESTORE.md)
+
+> ADR-0018 保留为历史记录。现行 file_set 增量变化判断以 [ADR-0020](0020-file-set-metadata-signature-incremental.md)
+> 为准：不再以 NTFS/ReFS USN Journal 连续性作为增量资格和变化分类依据，而使用同路径普通文件的
+> `write_time + logical_size` metadata signature。
 
 ## 背景
 

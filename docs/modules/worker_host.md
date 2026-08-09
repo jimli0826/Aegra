@@ -85,9 +85,11 @@ Worker 明确拒绝 differential。Incremental 必须提供 `parent_source_ref`�
 （缺省时复用当前 Archive 口令或空口令），并在 Backend 调用期间同时保持新 Archive 和父 Archive 的
 Secret 存活。多 Volume 增量要求父 Archive 与当前 Job 的有序 Volume 集合一致。
 
-**file_set** Backup（`content_kind=2`）只接受 Full：`file_source_refs` 1–100 条，`source_refs=[]`，
-`target_ref` 为 Archive 目标。Worker 对涉及 Volume 创建**同一个** VSS Snapshot Set（无 raw 回退），
-注入 `WindowsFileSnapshotView`，经 `FileSetBackupPipeline` 写入 `PersonalFileArchiveSession`（V7）。
+**file_set** Backup（`content_kind=2`）接受 Full/Incremental：`file_source_refs` 1–100 条，`source_refs=[]`，
+`target_ref` 为 Archive 目标；Incremental 可携带 `candidate_parent_uuid` 和 Service 选出的父层引用。Worker
+对涉及 Volume 创建**同一个** VSS Snapshot Set（无 raw 回退），注入 `WindowsFileSnapshotView`，经
+`FileSetBackupPipeline` 写入 `PersonalFileArchiveSession`（V7）。ADR-0020 后 Incremental 使用同路径普通文件的
+`write_time + logical_size` 与父 Index 比较，不再要求 USN checkpoint。
 Index spool 位于 `AEGRA_DATA_DIR/staging/job-<job_id>/index-spool/`（或 LOCALAPPDATA/ProgramData 回退）。
 任务日志只记录 `selection_id`，不记录路径组件。详见
 [windows_file_set_backup.md](windows_file_set_backup.md)。file_set **Verify**（F7）打开

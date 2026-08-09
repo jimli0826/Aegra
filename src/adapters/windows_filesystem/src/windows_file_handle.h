@@ -6,11 +6,27 @@
 #include <Windows.h>
 
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace aegra::adapters::windows_filesystem::detail {
+
+enum class SupportedFileSystem : std::uint8_t {
+    kNtfs,
+    kRefs,
+    kFat32,
+};
+
+struct FileSystemCapabilities final {
+    SupportedFileSystem filesystem{SupportedFileSystem::kNtfs};
+    bool supports_security_descriptors{true};
+    bool supports_stable_file_id{true};
+    bool supports_hard_links{true};
+    bool supports_named_data_streams{true};
+    std::uint64_t maximum_file_size_bytes{(std::numeric_limits<std::uint64_t>::max)()};
+};
 
 class UniqueHandle final {
   public:
@@ -51,9 +67,11 @@ open_path(const std::vector<std::uint16_t>& utf16_path, DWORD access, DWORD shar
 /// (required for VSS device objects and Volume GUID roots). Strips embedded NULs.
 [[nodiscard]] std::vector<std::uint16_t>
 ensure_trailing_directory_separator(std::vector<std::uint16_t> utf16_path);
-[[nodiscard]] base::Result<void> ensure_ntfs_or_refs(const UniqueHandle& root);
-/// Path-based FS check (trailing '\\' added if missing). Used when ByHandle fails on
+[[nodiscard]] base::Result<FileSystemCapabilities>
+query_supported_file_system(const UniqueHandle& root);
+/// Path-based FS query (trailing '\\' added if missing). Used when ByHandle fails on
 /// some VSS/device roots with ERROR_INVALID_FUNCTION.
-[[nodiscard]] base::Result<void> ensure_ntfs_or_refs_path(const std::wstring& directory_root);
+[[nodiscard]] base::Result<FileSystemCapabilities>
+query_supported_file_system_path(const std::wstring& directory_root);
 
 } // namespace aegra::adapters::windows_filesystem::detail

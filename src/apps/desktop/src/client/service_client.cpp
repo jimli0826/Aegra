@@ -17,7 +17,9 @@ namespace {
 
 constexpr auto kServicePipeName = "aegra-service-control";
 constexpr qsizetype kMaximumJobs = 10'000;
-constexpr int kJobPollIntervalMilliseconds = 2'000;
+// Active-job poll: keep short so file restore/backup percent can move between quantums.
+// Idle polling is off (timer only runs while has_active_jobs()).
+constexpr int kJobPollIntervalMilliseconds = 500;
 
 [[nodiscard]] QString job_toast_key(const JobRow& row) {
     return row.job_id + QLatin1Char('|') + QString::number(row.state);

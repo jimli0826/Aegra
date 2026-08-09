@@ -30,7 +30,8 @@ namespace {
 [[nodiscard]] bool same_fingerprint(const format::FileSetBaseline& left,
                                     const format::FileSetBaseline& right) noexcept {
     return left.fingerprint_algorithm == right.fingerprint_algorithm &&
-           left.selection_fingerprint == right.selection_fingerprint;
+           left.selection_fingerprint == right.selection_fingerprint &&
+           left.change_detection_method == right.change_detection_method;
 }
 
 [[nodiscard]] base::Result<std::vector<std::unique_ptr<PersonalFileArchiveReader>>>
@@ -60,9 +61,8 @@ open_file_layers(const ArchiveChainOpenRequest& request) {
         std::move(layers));
 }
 
-[[nodiscard]] base::Result<void>
-validate_file_layer_link(const PersonalFileArchiveReader& parent,
-                         const PersonalFileArchiveReader& child) {
+[[nodiscard]] base::Result<void> validate_file_layer_link(const PersonalFileArchiveReader& parent,
+                                                          const PersonalFileArchiveReader& child) {
     const auto& parent_id = parent.identity();
     const auto& child_id = child.identity();
     if (child_id.backup_type != format::BackupType::kIncremental) {
@@ -73,7 +73,8 @@ validate_file_layer_link(const PersonalFileArchiveReader& parent,
         return base::Result<void>::failure(
             error(base::ErrorCode::kConflict, "file archive chain parent_uuid mismatch"));
     }
-    if (child_id.backup_set_uuid != parent_id.backup_set_uuid || is_zero_uuid(child_id.backup_set_uuid)) {
+    if (child_id.backup_set_uuid != parent_id.backup_set_uuid ||
+        is_zero_uuid(child_id.backup_set_uuid)) {
         return base::Result<void>::failure(
             error(base::ErrorCode::kConflict, "file archive chain backup_set mismatch"));
     }
@@ -82,7 +83,8 @@ validate_file_layer_link(const PersonalFileArchiveReader& parent,
         return base::Result<void>::failure(
             error(base::ErrorCode::kConflict, "file archive chain content_kind mismatch"));
     }
-    if (!same_fingerprint(parent.manifest().file_set_baseline, child.manifest().file_set_baseline)) {
+    if (!same_fingerprint(parent.manifest().file_set_baseline,
+                          child.manifest().file_set_baseline)) {
         return base::Result<void>::failure(
             error(base::ErrorCode::kConflict, "file archive chain selection fingerprint mismatch"));
     }
@@ -104,8 +106,7 @@ validate_file_chain(const std::vector<std::unique_ptr<PersonalFileArchiveReader>
     seen.reserve(layers.size());
     for (std::size_t index = 0; index < layers.size(); ++index) {
         const auto& identity = layers[index]->identity().file_uuid;
-        if (is_zero_uuid(identity) ||
-            std::find(seen.begin(), seen.end(), identity) != seen.end()) {
+        if (is_zero_uuid(identity) || std::find(seen.begin(), seen.end(), identity) != seen.end()) {
             return base::Result<void>::failure(
                 error(base::ErrorCode::kConflict, "file archive chain contains a repeated UUID"));
         }
@@ -146,8 +147,8 @@ resolve_to_local(const std::vector<std::unique_ptr<PersonalFileArchiveReader>>& 
             return base::Result<ResolvedLocalStream>::failure(
                 error(base::ErrorCode::kCancelled, "file chain resolve cancelled"));
         }
-        const auto visit_key =
-            (static_cast<std::uint64_t>(layer_index) << 32U) | static_cast<std::uint64_t>(stream_index);
+        const auto visit_key = (static_cast<std::uint64_t>(layer_index) << 32U) |
+                               static_cast<std::uint64_t>(stream_index);
         if (!visited.insert(visit_key).second) {
             return base::Result<ResolvedLocalStream>::failure(
                 error(base::ErrorCode::kCorruptData, "file chain parent stream cycle"));
@@ -169,8 +170,8 @@ resolve_to_local(const std::vector<std::unique_ptr<PersonalFileArchiveReader>>& 
         }
         if (owner.value().stream.content_storage == contracts::FileContentStorage::kLocal) {
             if (owner.value().stream.parent_stream_index != 0) {
-                return base::Result<ResolvedLocalStream>::failure(
-                    error(base::ErrorCode::kCorruptData, "local stream carries parent_stream_index"));
+                return base::Result<ResolvedLocalStream>::failure(error(
+                    base::ErrorCode::kCorruptData, "local stream carries parent_stream_index"));
             }
             ResolvedLocalStream resolved;
             resolved.layer_index = layer_index;
@@ -182,7 +183,8 @@ resolve_to_local(const std::vector<std::unique_ptr<PersonalFileArchiveReader>>& 
             return base::Result<ResolvedLocalStream>::failure(
                 error(base::ErrorCode::kCorruptData, "file stream content_storage is invalid"));
         }
-        if (owner.value().stream.parent_stream_index == 0 || !owner.value().stream.extents.empty()) {
+        if (owner.value().stream.parent_stream_index == 0 ||
+            !owner.value().stream.extents.empty()) {
             return base::Result<ResolvedLocalStream>::failure(
                 error(base::ErrorCode::kCorruptData, "parent stream reference is invalid"));
         }
@@ -251,8 +253,8 @@ read_full_stream(ports::IFileRecoveryPointReader& reader, const std::uint32_t st
     return base::Result<std::uint64_t>::success(verified);
 }
 
-[[nodiscard]] base::Result<void>
-accumulate_verified_bytes(std::uint64_t& total, const std::uint64_t verified) {
+[[nodiscard]] base::Result<void> accumulate_verified_bytes(std::uint64_t& total,
+                                                           const std::uint64_t verified) {
     if (total > (std::numeric_limits<std::uint64_t>::max)() - verified) {
         return base::Result<void>::failure(
             error(base::ErrorCode::kCorruptData, "file chain verify byte count overflow"));
@@ -294,8 +296,9 @@ verify_entry_local_streams(PersonalFileArchiveReader& layer, const contracts::Fi
 }
 
 [[nodiscard]] base::Result<void>
-verify_entry_tip_streams(PersonalFileArchiveChainReader& chain, const contracts::FileEntryDesc& entry,
-                         const std::size_t budget, const base::CancellationToken& cancellation,
+verify_entry_tip_streams(PersonalFileArchiveChainReader& chain,
+                         const contracts::FileEntryDesc& entry, const std::size_t budget,
+                         const base::CancellationToken& cancellation,
                          std::unordered_set<std::uint32_t>& seen, std::uint64_t& total) {
     for (const auto& stream : entry.streams) {
         if (!seen.insert(stream.stream_index).second) {
@@ -334,8 +337,8 @@ verify_tip_streams(PersonalFileArchiveChainReader& chain, PersonalFileArchiveRea
                    const std::size_t budget, const base::CancellationToken& cancellation) {
     std::uint64_t total = 0;
     std::unordered_set<std::uint32_t> seen;
-    auto walk = tip.for_each_entry_in_leaf_order(
-        cancellation, [&](const contracts::FileEntryDesc& entry) {
+    auto walk =
+        tip.for_each_entry_in_leaf_order(cancellation, [&](const contracts::FileEntryDesc& entry) {
             return verify_entry_tip_streams(chain, entry, budget, cancellation, seen, total);
         });
     if (!walk) {
@@ -364,11 +367,13 @@ base::Result<std::unique_ptr<PersonalFileArchiveChainReader>>
 PersonalFileArchiveChainReader::open(const ArchiveChainOpenRequest& request) {
     auto layers = open_file_layers(request);
     if (!layers) {
-        return base::Result<std::unique_ptr<PersonalFileArchiveChainReader>>::failure(layers.error());
+        return base::Result<std::unique_ptr<PersonalFileArchiveChainReader>>::failure(
+            layers.error());
     }
     auto valid = validate_file_chain(layers.value());
     if (!valid) {
-        return base::Result<std::unique_ptr<PersonalFileArchiveChainReader>>::failure(valid.error());
+        return base::Result<std::unique_ptr<PersonalFileArchiveChainReader>>::failure(
+            valid.error());
     }
     auto implementation = std::make_unique<Impl>();
     implementation->layers = std::move(layers).value();
@@ -432,8 +437,7 @@ PersonalFileArchiveChainReader::describe_entry(const std::uint64_t entry_id,
     return implementation_->layers.back()->describe_entry(entry_id, cancellation);
 }
 
-base::Result<void>
-PersonalFileArchiveChainReader::resolve_stream_reference(
+base::Result<void> PersonalFileArchiveChainReader::resolve_stream_reference(
     const std::uint32_t stream_index, const base::CancellationToken cancellation) const {
     if (stream_index == 0) {
         return base::Result<void>::failure(
@@ -471,9 +475,8 @@ PersonalFileArchiveChainReader::read_stream(const ports::FileStreamReadRequest& 
     }
     ports::FileStreamReadRequest local_request = request;
     local_request.stream_index = resolved.value().stream_index;
-    return implementation_->layers[resolved.value().layer_index]->read_stream(local_request,
-                                                                              destination,
-                                                                              cancellation);
+    return implementation_->layers[resolved.value().layer_index]->read_stream(
+        local_request, destination, cancellation);
 }
 
 base::Result<FileChainVerifyResult>

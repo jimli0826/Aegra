@@ -693,6 +693,10 @@ Server: %1</translation>
         <source>The target folder does not support required features (for example ACL). Choose an NTFS folder.</source>
         <translation>Der Zielordner unterstützt erforderliche Funktionen nicht (z. B. ACL). Bitte einen NTFS-Ordner wählen.</translation>
     </message>
+    <message id="aegra.error.file_restore.target_file_too_large">
+        <source>A selected file exceeds the target file system's per-file size limit.</source>
+        <translation>Eine ausgewählte Datei überschreitet das Dateigrößenlimit des Zieldateisystems.</translation>
+    </message>
     <message id="aegra.error.file_restore.target_not_directory">
         <source>Select a folder as the restore destination.</source>
         <translation>Wählen Sie einen Ordner als Wiederherstellungsziel.</translation>
@@ -942,8 +946,8 @@ Server: %1</translation>
         <translation>Sicherheit wiederherstellen (ACL)</translation>
     </message>
     <message id="aegra.restore.file.restore_security_hint">
-        <source>Apply Owner, Group, DACL, and SACL from the archive. Uncheck to keep target default permissions (timestamps and attributes are still restored).</source>
-        <translation>Owner, Group, DACL und SACL aus dem Archiv anwenden. Deaktivieren, um Standardberechtigungen am Ziel zu behalten (Zeitstempel und Attribute werden weiterhin wiederhergestellt).</translation>
+        <source>Apply Owner, Group, DACL, and SACL from the archive. FAT32 targets require this option to be off and cannot store files larger than 4 GiB - 1. Timestamps and attributes are still restored.</source>
+        <translation>Owner, Gruppe, DACL und SACL aus dem Archiv anwenden. Für FAT32-Ziele muss diese Option deaktiviert sein; Dateien über 4 GiB - 1 sind nicht möglich. Zeitstempel und Attribute werden wiederhergestellt.</translation>
     </message>
     <message id="aegra.restore.file.conflict_policy">
         <source>If a file already exists</source>
@@ -1762,8 +1766,8 @@ Server: %1</translation>
         <translation>Sicherungstyp</translation>
     </message>
     <message id="aegra.backup.file.incremental_baseline_note">
-        <source>Changing the file selection later creates a new full baseline. Incremental runs only when the selection is unchanged and a valid parent exists.</source>
-        <translation>Eine spätere Änderung der Dateiauswahl erstellt eine neue Voll-Basis. Inkrementell läuft nur bei unveränderter Auswahl und gültigem Elternpunkt.</translation>
+        <source>Incremental backup reuses a file only when its path, modification time, and size match the parent. FAT32 timestamps are coarse, so equal time and size cannot detect every content change. Changing the selection creates a new full baseline.</source>
+        <translation>Eine Datei wird nur bei gleichem Pfad, gleicher Änderungszeit und Größe wiederverwendet. FAT32-Zeitstempel sind grob; gleiche Zeit und Größe erkennen nicht jede Inhaltsänderung. Eine geänderte Auswahl erzeugt eine neue Vollsicherungsbasis.</translation>
     </message>
     <message id="aegra.backup.downgrade.no_parent">
         <source>No eligible parent recovery point; a new full baseline was created.</source>
@@ -1777,29 +1781,9 @@ Server: %1</translation>
         <source>Parent backup chain is incomplete; a new full baseline was created.</source>
         <translation>Eltern-Sicherungskette unvollständig; neue Voll-Basis erstellt.</translation>
     </message>
-    <message id="aegra.backup.downgrade.journal_missing">
-        <source>Change journal was unavailable; a new full baseline was created.</source>
-        <translation>Änderungsjournal nicht verfügbar; neue Voll-Basis erstellt.</translation>
-    </message>
-    <message id="aegra.backup.downgrade.journal_reset">
-        <source>Change journal was reset; a new full baseline was created.</source>
-        <translation>Änderungsjournal zurückgesetzt; neue Voll-Basis erstellt.</translation>
-    </message>
-    <message id="aegra.backup.downgrade.journal_wrapped">
-        <source>Change journal wrapped; a new full baseline was created.</source>
-        <translation>Änderungsjournal übergelaufen; neue Voll-Basis erstellt.</translation>
-    </message>
-    <message id="aegra.backup.downgrade.journal_inaccessible">
-        <source>Change journal was inaccessible; a new full baseline was created.</source>
-        <translation>Änderungsjournal nicht zugänglich; neue Voll-Basis erstellt.</translation>
-    </message>
-    <message id="aegra.backup.downgrade.volume_identity_changed">
-        <source>Volume identity changed; a new full baseline was created.</source>
-        <translation>Volume-Identität geändert; neue Voll-Basis erstellt.</translation>
-    </message>
-    <message id="aegra.backup.downgrade.baseline_invalid">
-        <source>Parent baseline is invalid; a new full baseline was created.</source>
-        <translation>Eltern-Basis ungültig; neue Voll-Basis erstellt.</translation>
+    <message id="aegra.backup.downgrade.metadata_baseline_invalid">
+        <source>Parent metadata baseline is invalid; a new full baseline was created.</source>
+        <translation>Die Metadaten-Basis des Elternpunkts ist ungültig; eine neue Voll-Basis wurde erstellt.</translation>
     </message>
     <message id="aegra.backup.downgrade.generic">
         <source>Incremental was not eligible; a full backup was created instead.</source>
@@ -1877,21 +1861,9 @@ Server: %1</translation>
         <source>Backup selection no longer matches the parent baseline. A full backup is required.</source>
         <translation>Sicherungsauswahl stimmt nicht mehr mit der Eltern-Basis überein. Vollsicherung erforderlich.</translation>
     </message>
-    <message id="aegra.error.file_backup.journal_missing">
-        <source>Change journal unavailable; incremental cannot continue.</source>
-        <translation>Änderungsjournal nicht verfügbar; Inkrementell nicht fortsetzbar.</translation>
-    </message>
-    <message id="aegra.error.file_backup.journal_reset">
-        <source>Change journal was reset; a full backup is required.</source>
-        <translation>Änderungsjournal zurückgesetzt; Vollsicherung erforderlich.</translation>
-    </message>
-    <message id="aegra.error.file_backup.journal_wrapped">
-        <source>Change journal wrapped; a full backup is required.</source>
-        <translation>Änderungsjournal übergelaufen; Vollsicherung erforderlich.</translation>
-    </message>
-    <message id="aegra.error.file_backup.journal_inaccessible">
-        <source>Change journal inaccessible; a full backup is required.</source>
-        <translation>Änderungsjournal nicht zugänglich; Vollsicherung erforderlich.</translation>
+    <message id="aegra.error.file_backup.metadata_baseline_invalid">
+        <source>The parent metadata baseline is invalid. Run a full backup.</source>
+        <translation>Die Metadaten-Basis des Elternpunkts ist ungültig. Führen Sie eine Vollsicherung aus.</translation>
     </message>
     <message id="aegra.error.file_backup.unsupported_incremental">
         <source>Incremental backup is not supported for this selection.</source>

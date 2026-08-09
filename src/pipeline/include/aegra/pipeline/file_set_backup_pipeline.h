@@ -27,15 +27,10 @@ struct FileSetBackupPlan final {
     std::size_t memory_budget_bytes{64U * 1024U * 1024U};
     std::uint32_t enumerate_batch_size{256};
 
-    /// Effective type after eligibility (FI3/FI7). Full ignores parent fields.
+    /// Effective type after parent-chain eligibility. Full ignores parent_reader.
     contracts::BackupType effective_type{contracts::BackupType::kFull};
     /// Non-owning parent Recovery Point reader; required when effective_type is Incremental.
     ports::IFileRecoveryPointReader* parent_reader{nullptr};
-    /// Parent USN checkpoints (sorted unique by volume_identity); required for Incremental.
-    std::vector<contracts::FileJournalCheckpoint> parent_checkpoints;
-    /// Optional pre-merged change hints. When empty and Incremental, pipeline reads journal
-    /// from snapshot using parent_checkpoints and live journal state.
-    std::vector<contracts::FileChangeHint> change_hints;
 };
 
 struct FileSetBackupSummary final {
@@ -53,8 +48,6 @@ struct FileSetBackupSummary final {
     std::uint64_t stored_bytes{0};
     std::uint64_t chunk_count{0};
     std::uint64_t processed_entries{0};
-    /// Snapshot journal checkpoints captured for this Recovery Point (may be empty).
-    std::vector<contracts::FileJournalCheckpoint> journal_checkpoints;
 };
 
 /// Platform-agnostic file_set backup orchestration.

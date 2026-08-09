@@ -80,9 +80,10 @@ base::Result<void> validate_recovery_point_summary(const RecoveryPointSummary& s
         summary.chain_state != RecoveryPointChainState::kComplete) {
         return invalid("full recovery point chain state is invalid");
     }
+    // file_set: Full or Incremental only; never Differential; never volume sidecar.
+    // Parent presence is already tied to backup_type by the Full/parent invariant above.
     if (summary.content_kind == ContentKind::kFileSet) {
-        if (summary.backup_type != PersonalBackupType::kFull || summary.parent_uuid ||
-            summary.has_sidecar) {
+        if (summary.backup_type == PersonalBackupType::kDifferential || summary.has_sidecar) {
             return invalid("file_set recovery point summary constraints violated");
         }
     }

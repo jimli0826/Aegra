@@ -421,7 +421,7 @@ BackupCatalogRegistrar::publish(const WorkerJobRequest& request,
         entry.source_volume_ids.clear();
         entry.file_entry_count = response.task_result->entry_count;
         entry.file_stream_count = response.task_result->stream_count;
-        // Hex fingerprint for parent match; USN checkpoints live in authenticated Manifest.
+        // Hex fingerprint is the Catalog-side key for selecting a compatible parent.
         if (request.worker_request.backup && request.worker_request.backup->selection_fingerprint) {
             const auto& digest = request.worker_request.backup->selection_fingerprint->digest;
             entry.file_selection_fingerprint.resize(digest.size() * 2);
@@ -432,7 +432,7 @@ BackupCatalogRegistrar::publish(const WorkerJobRequest& request,
                 entry.file_selection_fingerprint[index * 2 + 1] = kHex[value & 0x0FU];
             }
         }
-        // Successful Worker publish carries authenticated selection fingerprint + USN baseline.
+        // Successful Worker publish carries an authenticated metadata-signature baseline.
         entry.file_baseline_available = !entry.file_selection_fingerprint.empty();
     } else {
         entry.source_count =

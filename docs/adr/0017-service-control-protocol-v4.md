@@ -7,7 +7,7 @@
 - 替代范围：ADR-0013 中的 Service wire schema 与 API version；传输、ACL 与 Repository 权威决策仍分别见
   ADR-0011、ADR-0014、ADR-0010
 - 关联文档：[SERVICE_CONTROL_PROTOCOL_V4.md](../protocol/SERVICE_CONTROL_PROTOCOL_V4.md)、[ADR-0016](0016-file-set-backup-and-restore-boundary.md)
-- 后续决策：file_set Incremental 的 StartBackup/Schedule 语义由 [ADR-0018](0018-file-set-incremental-usn-and-chain.md) 扩展；协议仍为 current V4，不做版本兼容
+- 后续决策：file_set Incremental 的 StartBackup/Schedule 语义由 [ADR-0020](0020-file-set-metadata-signature-incremental.md) 扩展；协议仍为 current V4，不做版本兼容
 
 ## 背景
 
@@ -57,7 +57,8 @@ node token，更新不得改变已解析 selection。
 
 `ListRecoveryPoints` / Job / Schedule 摘要增加 `content_kind` 字段（exact_keys 同步升级）。
 
-`StartBackup` 对 file_set Schedule 只允许 Full；Worker Job 为 schema 4。
+`StartBackup` 对 file_set Schedule 允许 Full 或 Incremental；Incremental 使用 ADR-0020 的 metadata signature
+baseline。Worker Job 为 schema 4。
 
 ### 4. 安全边界
 

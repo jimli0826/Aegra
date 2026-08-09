@@ -1,10 +1,15 @@
 # 文件集增量备份分阶段开发计划
 
-> 本计划是 agent 实施依据，对应 [ADR-0018](../adr/0018-file-set-incremental-usn-and-chain.md) 和
+> 本计划的 FI0-FI10 部分记录历史 USN 实施。现行实施依据是
+> [ADR-0020](../adr/0020-file-set-metadata-signature-incremental.md) 和
 > [增量架构设计](../architecture/FILE_SET_INCREMENTAL_BACKUP_RESTORE.md)。
 > 仓库禁止新增任何测试源码、fixture、测试脚本、测试 executable、CTest 或其它项目测试资产。
 >
-> **FI1 已完成** — owner: Grok agent；baseline: `b41043c`；Debug/Release 生产 Target 已通过。
+> **设计变更 2026-08-09**：file_set Incremental 改为同路径普通文件 `write_time + logical_size`
+> metadata signature 判断变化；USN baseline、journal checkpoints 和 journal continuity 不再是 current design。
+> 本次改造的 agent 可执行步骤、文件所有权和验收矩阵见
+> [metadata signature 增量改造开发计划](FILE_SET_METADATA_SIGNATURE_DEVELOPMENT_PLAN.md)。本文件中的 MS 表仅保留
+> 路线摘要，FI0-FI10 仅保留历史实施记录。
 
 ## 1. Agent 开工规则
 
@@ -27,21 +32,35 @@
   分支，不实现 migration、conversion、alias、fallback、dual-read、feature negotiation 或开发 Archive 修复工具。
 - 本期只支持 `file_set + full|incremental + local NTFS/ReFS + VSS + unnamed main stream`；不支持 Differential。
 - reparse、hard link、sparse、ADS 在 Backup strict fail，在 Restore 第一次 mutation 前拒绝。
-- 不使用 path/size/mtime 证明内容未变化；Incremental 必须建立在 snapshot-consistent USN 连续性上。
-- journal 不可证明时 effective Full；credential failure、源不可读和不支持对象仍是 Job failure。
+- 使用同路径普通文件 `write_time + logical_size` 判断 payload 是否可复用；同大小同 mtime 内容变化是已接受风险。
+- selection fingerprint、父链、metadata baseline 不可证明时 effective Full；credential failure、源不可读和不支持对象仍是 Job failure。
 - tip File Index 是完整当前树；不能把增量实现成只含变化 entry 的 event log。
 - changed file 整文件写入；禁止 block delta、跨文件 dedup、任意祖先引用和 `.bhx` 复用。
-- 文件树、父索引、USN records、payload 和 page 处理均有 byte/count 上限、取消和背压；禁止全树内存 map。
+- 文件树、父 path 索引、payload 和 page 处理均有 byte/count 上限、取消和背压；禁止全树内存 map。
 - `pipeline` 不 include Windows、Archive Adapter、Repository、SQLite 或 Qt；Adapter 之间不直接依赖实现。
-- 客户路径、名称、file ID、USN record 和 security descriptor 不进入 Catalog、普通日志或 TaskResult arguments。
+- 客户路径、名称和 security descriptor 不进入 Catalog、普通日志或 TaskResult arguments。
+
+## 2.1 Metadata Signature 改造路线摘要（历史编号）
+
+详细任务、禁止事项、逐包构建和人工验证以
+[独立 MS 开发计划](FILE_SET_METADATA_SIGNATURE_DEVELOPMENT_PLAN.md) 为唯一执行依据；下表是设计切换时留下的路线
+摘要，其编号、顺序和完成状态不得用于 agent 派工。
+
+| ID | 状态 | 优先级 | 工作包 | 前置 |
+| --- | --- | --- | --- | --- |
+| MS1 | 已完成 | P0 | 合同/格式重命名：`CAP_FILE_METADATA_BASELINE`、`change_detection_method`，移除 current metadata `journal_checkpoints` | ADR-0020 |
+| MS2 | 已完成 | P0 | Pipeline planner：parent path index + `write_time/logical_size` 比较，删除 USN hints | MS1 |
+| MS3 | 已完成 | P0 | Worker/Service 编排：不再查询 journal eligibility，不再生成 journal downgrade reason | MS1、MS2 |
+| MS4 | 已完成 | P1 | Adapter 清理：USN Port 和 Windows USN reader 已从 current source 删除 | MS3 |
+| MS5 | 进行中 | Gate | 双配置生产构建与静态检查已通过；隔离 VSS/Archive 人工矩阵待执行 | MS1–MS4 |
 
 ## 3. 工作包总览
 
 | ID | 状态 | 优先级 | 工作包 | 前置 | 可并行关系 |
 | --- | --- | --- | --- | --- | --- |
 | FI0 | 已完成 | Gate | 范围收缩与现行合同清理 | ADR-0018 | 无 |
-| FI1 | 已完成 | P0 | USN baseline、file identity 与增量格式合同 | FI0 | 无 |
-| FI2 | 已完成 | P0 | Windows USN source 与不支持对象检测 | FI1 | FI3（合同冻结后） |
+| FI1 | 历史完成 | P0 | USN baseline、file identity 与增量格式合同（已被 MS1 替换） | FI0 | 无 |
+| FI2 | 历史完成 | P0 | Windows USN source 与不支持对象检测（USN source 已由 MS4 删除） | FI1 | FI3（合同冻结后） |
 | FI3 | 已完成 | P0 | Parent Index comparator 与 change planner | FI1 | FI2 |
 | FI4 | 已完成 | P0 | Incremental Archive writer 与 parent stream | FI1、FI3 | FI2 |
 | FI5 | 已完成 | P0 | File chain reader 与 chain Verify | FI4 | FI6（接口冻结后） |
@@ -373,7 +392,7 @@ file restore pipeline 接线、相关模块/协议文档。
 - 使用 VS 2026 Insiders 和 Qt 6.8.3 完成 Windows Debug/Release 全部 production build。
 - 运行仓库 architecture/static/format/secret checks、`git diff --check` 和文档链接检查。
 - 搜索确认无 reparse/hard-link/sparse/ADS 写入/恢复路径、虚假 capability、V6/V7 dual-read、Catalog alias、SQLite
-  migration、Service/Worker schema fallback 或 “timestamp incremental”。
+  migration、Service/Worker schema fallback 或 ADR-0020 以外的旧 timestamp/USN 双路径。
 - 执行 §15 人工矩阵，记录环境、命令、结果、日志 code 与未提交隔离数据位置；验证后删除隔离数据。
 - 更新 ADR/architecture/format/protocol/module/product/status 文档，工作包全部标为已完成。
 - 对 production functions/files 运行工程规模检查；拆分超限代码，不以注释豁免。
@@ -393,11 +412,11 @@ file restore pipeline 接线、相关模块/协议文档。
 | I02 | 无变化 Full→Inc | 完整 tip tree，无 local file payload，内容从父层读取 |
 | I03 | create/overwrite/extend/truncate | changed file 整流 local，其它 parent |
 | I04 | metadata/security only | 当前 metadata + parent content |
-| I05 | rename/move | tip 仅新层级，内容 parent reference |
+| I05 | rename/move | tip 仅新层级，新路径按 local stream 写入 |
 | I06 | delete | tip 不含 entry，旧 RP 仍可浏览/恢复 |
-| I07 | delete+recreate same name | 新 identity/local content，不复用旧 stream |
+| I07 | delete+recreate same name | mtime/size 任一不同则 local；若同 mtime+同大小则按 ADR-0020 风险接受可能复用 parent |
 | I08 | 连续 3/16/128 层 | browse/Verify/Restore 一致，深度上限明确 |
-| I09 | 多 selection/多 volume | 同一 VSS set，各卷 checkpoint 完整 |
+| I09 | 多 selection/多 volume | 同一 VSS set，按各 selection-relative path 比较 metadata signature |
 | I10 | 加密+分卷 incremental | 跨 part page/payload/parent resolution 正确 |
 | I11 | scheduler restart | 下一次仍选正确 tip，requested/effective 状态可重建 |
 | I12 | Catalog rebuild | 结构链重建；认证后恢复 fingerprint/baseline 投影 |
@@ -406,14 +425,12 @@ file restore pipeline 接线、相关模块/协议文档。
 
 | ID | 场景 | 期望 |
 | --- | --- | --- |
-| D01 | journal missing/disabled | effective Full + journal_missing |
-| D02 | journal ID reset | effective Full + journal_reset |
-| D03 | parent USN 已低于 lowest valid | effective Full + journal_wrapped |
-| D04 | snapshot journal API unavailable | effective Full + journal_inaccessible |
-| D05 | selection fingerprint 改变 | 新 baseline Full，不接旧链 |
-| D06 | parent structurally missing/corrupt | effective Full + chain reason；不跳选旧父 |
-| D07 | volume identity 改变 | effective Full + volume_identity_changed |
-| D08 | parent credential wrong | Job failed credential；不得 downgrade |
+| D01 | parent 无 metadata baseline / method 不匹配 | effective Full + baseline reason |
+| D02 | selection fingerprint 改变 | 新 baseline Full，不接旧链 |
+| D03 | parent structurally missing/corrupt | effective Full + chain reason；不跳选旧父 |
+| D04 | volume identity 改变 | effective Full + volume_identity_changed |
+| D05 | parent credential wrong | Job failed credential；不得 downgrade |
+| D06 | 同大小同 mtime 内容变化 | 按 ADR-0020 风险接受：判定未变并引用 parent stream |
 
 ### 15.3 不支持对象
 
@@ -706,10 +723,10 @@ credentials、日志和样本不提交仓库。
     `IncrementalDowngradeReason`、parent_selector demote 路径均存在
 - §15 人工矩阵：
   - 静态覆盖：I/D/U/C 各场景对应 code path 与 message_code 已在生产代码中定位
-  - 提升权限下的完整 live Service 矩阵（隔离样本 + VSS/USN 运行态）与 F10 相同，需本机
+  - 提升权限下的完整 live Service 矩阵（隔离样本 + VSS 运行态）与 F10 相同，需本机
     admin Service 与隔离数据；不在本机自动化环境提交隔离 Archive/凭据
-  - 无 P0/P1 代码缺口：不支持对象 strict fail、journal 不可证明时降级 Full、chain
-    browse/restore 经 chain reader、Desktop 不暴露 USN/file ID
-- 文档同步：ADR-0018 保持 Accepted；architecture 增量/基础设计状态 FI0–FI10 已完成；
+  - 无 P0/P1 代码缺口：不支持对象 strict fail、metadata baseline 不可证明时降级 Full、chain
+    browse/restore 经 chain reader、Desktop 不暴露内部 file identity
+- 文档同步：ADR-0018 已 Superseded，ADR-0020 保持 Accepted；architecture 增量/基础设计状态转 metadata signature；
   modules README、windows_file_set_backup、PRODUCT_SCOPE、本计划总览表
 - 已知限制：无（file_set Incremental 工作包序列结束）

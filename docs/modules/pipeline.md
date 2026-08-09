@@ -73,18 +73,25 @@ IFileRecoveryPointReader -> FileSetRestorePipeline -> IFileTreeSink
   entry Index → finalize/commit。Adapter 在 entry 上填充 `platform_metadata`（含 security）；
   Pipeline 原样写入 index。
   - **Full**：全部主数据流 `content_storage=local`。
-  - **Incremental**（`effective_type=incremental` + parent reader + parent checkpoints）：从 snapshot
-    读取 USN hints，构建有界 parent identity 索引（紧凑排序向量，非全量 `FileEntryDesc` map），
-    按分类表决定 local 整文件或 direct-parent stream；歧义永远 local；tip Index 仍是完整当前树。
+  - **Incremental**（`effective_type=incremental` + parent reader + metadata baseline）：完整枚举 current
+    namespace，构建有界 parent path 索引（紧凑排序向量/磁盘 spool，非全量 `FileEntryDesc` map），同路径普通
+    文件按 `write_time + logical_size` 决定 local 整文件或 direct-parent stream；无法验证父 stream 时 local；
+    tip Index 仍是完整当前树。
 - 恢复：只依赖 `IFileRecoveryPointReader`（composition 注入 chain reader）；选择闭包（目录 seed
   展开全部可达后代 + 路径祖先）→ capability 预检 → 按深度建目录骨架 → 文件 staging/publish →
   目录 metadata。`entry_ids` 是 seed，不是最终写出集合。parent stream 由 reader 解析，Pipeline
   不感知链层。
   文件/目录始终应用时间戳与属性；仅当 `FileSetRestorePlan.restore_security=true` 时向 Sink
   传递 `platform_metadata` 中的 security descriptor。
+  capability 预检同时比较每个普通文件和 `maximum_file_size_bytes`；FAT32 超过 4 GiB - 1 时在写前返回
+  `file_restore.target_file_too_large`。
   祖先遍历与 `path_for_entry` 带 visited/depth 上限，环或超深返回 `format.corrupt_index`。
   Partial `stable_error_codes` 去重且 ≤ `kMaximumPartialRestoreErrorCodes`（64）；目录 metadata
   失败会回退 `entries_restored` 并计入 `entries_failed`（仅对已成功 create 的目录）。
+  **进度：** 选择闭包完成后以所选普通文件逻辑字节之和作为 `TaskProgress.logical_bytes`；
+  写目录骨架、每个 stream quantum 与每个文件 publish 后发布 `kWriting` 进度；`kCompleted`
+  将 `processed_bytes` 对齐到 `logical_bytes`（满足 contracts，Desktop 显示 100%）。
+  目录-only 选择时 `logical_bytes` 为空，UI 仍可能在成功态由 Service 投影为 100%。
 - 不 include personal_archive 实现类、Windows filesystem 或 VSS；只依赖 ports + format 常量。
 
 ## 当前状态

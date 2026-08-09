@@ -693,6 +693,10 @@ Server: %1</source>
         <source>The target folder does not support required features (for example ACL). Choose an NTFS folder.</source>
         <translation>目標資料夾不支援所需功能（例如 ACL）。請選擇 NTFS 資料夾。</translation>
     </message>
+    <message id="aegra.error.file_restore.target_file_too_large">
+        <source>A selected file exceeds the target file system's per-file size limit.</source>
+        <translation>所選檔案超過目標檔案系統的單檔大小上限。</translation>
+    </message>
     <message id="aegra.error.file_restore.target_not_directory">
         <source>Select a folder as the restore destination.</source>
         <translation>請選擇一個資料夾作為還原目標。</translation>
@@ -942,8 +946,8 @@ Server: %1</source>
         <translation>還原安全性設定（ACL）</translation>
     </message>
     <message id="aegra.restore.file.restore_security_hint">
-        <source>Apply Owner, Group, DACL, and SACL from the archive. Uncheck to keep target default permissions (timestamps and attributes are still restored).</source>
-        <translation>從封存套用擁有者、群組、DACL 與 SACL。取消勾選則保留目標預設權限（仍會還原時間戳與屬性）。</translation>
+        <source>Apply Owner, Group, DACL, and SACL from the archive. FAT32 targets require this option to be off and cannot store files larger than 4 GiB - 1. Timestamps and attributes are still restored.</source>
+        <translation>從封存套用擁有者、群組、DACL 與 SACL。FAT32 目標必須關閉此選項，且無法儲存大於 4 GiB - 1 的檔案。仍會還原時間戳與屬性。</translation>
     </message>
     <message id="aegra.restore.file.conflict_policy">
         <source>If a file already exists</source>
@@ -1762,8 +1766,8 @@ Server: %1</source>
         <translation>備份類型</translation>
     </message>
     <message id="aegra.backup.file.incremental_baseline_note">
-        <source>Changing the file selection later creates a new full baseline. Incremental runs only when the selection is unchanged and a valid parent exists.</source>
-        <translation>之後變更檔案選取會建立新的完整基線。僅在選取未變且存在有效父還原點時才會執行遞增。</translation>
+        <source>Incremental backup reuses a file only when its path, modification time, and size match the parent. FAT32 timestamps are coarse, so equal time and size cannot detect every content change. Changing the selection creates a new full baseline.</source>
+        <translation>僅當檔案的路徑、修改時間及大小與父還原點一致時，遞增備份才會重用該檔案。FAT32 時間戳精度較粗，相同時間和大小無法發現所有內容變更。變更檔案選取會建立新的完整基線。</translation>
     </message>
     <message id="aegra.backup.downgrade.no_parent">
         <source>No eligible parent recovery point; a new full baseline was created.</source>
@@ -1777,29 +1781,9 @@ Server: %1</source>
         <source>Parent backup chain is incomplete; a new full baseline was created.</source>
         <translation>父備份鏈不完整，已建立新的完整基線。</translation>
     </message>
-    <message id="aegra.backup.downgrade.journal_missing">
-        <source>Change journal was unavailable; a new full baseline was created.</source>
-        <translation>變更日誌不可用，已建立新的完整基線。</translation>
-    </message>
-    <message id="aegra.backup.downgrade.journal_reset">
-        <source>Change journal was reset; a new full baseline was created.</source>
-        <translation>變更日誌已重設，已建立新的完整基線。</translation>
-    </message>
-    <message id="aegra.backup.downgrade.journal_wrapped">
-        <source>Change journal wrapped; a new full baseline was created.</source>
-        <translation>變更日誌已回繞，已建立新的完整基線。</translation>
-    </message>
-    <message id="aegra.backup.downgrade.journal_inaccessible">
-        <source>Change journal was inaccessible; a new full baseline was created.</source>
-        <translation>無法存取變更日誌，已建立新的完整基線。</translation>
-    </message>
-    <message id="aegra.backup.downgrade.volume_identity_changed">
-        <source>Volume identity changed; a new full baseline was created.</source>
-        <translation>磁碟區識別已變更，已建立新的完整基線。</translation>
-    </message>
-    <message id="aegra.backup.downgrade.baseline_invalid">
-        <source>Parent baseline is invalid; a new full baseline was created.</source>
-        <translation>父基線無效，已建立新的完整基線。</translation>
+    <message id="aegra.backup.downgrade.metadata_baseline_invalid">
+        <source>Parent metadata baseline is invalid; a new full baseline was created.</source>
+        <translation>父還原點的中繼資料基線無效，已建立新的完整基線。</translation>
     </message>
     <message id="aegra.backup.downgrade.generic">
         <source>Incremental was not eligible; a full backup was created instead.</source>
@@ -1877,21 +1861,9 @@ Server: %1</source>
         <source>Backup selection no longer matches the parent baseline. A full backup is required.</source>
         <translation>備份選取與父基線不再相符，需要完整備份。</translation>
     </message>
-    <message id="aegra.error.file_backup.journal_missing">
-        <source>Change journal unavailable; incremental cannot continue.</source>
-        <translation>變更日誌不可用，無法繼續遞增備份。</translation>
-    </message>
-    <message id="aegra.error.file_backup.journal_reset">
-        <source>Change journal was reset; a full backup is required.</source>
-        <translation>變更日誌已重設，需要完整備份。</translation>
-    </message>
-    <message id="aegra.error.file_backup.journal_wrapped">
-        <source>Change journal wrapped; a full backup is required.</source>
-        <translation>變更日誌已回繞，需要完整備份。</translation>
-    </message>
-    <message id="aegra.error.file_backup.journal_inaccessible">
-        <source>Change journal inaccessible; a full backup is required.</source>
-        <translation>無法存取變更日誌，需要完整備份。</translation>
+    <message id="aegra.error.file_backup.metadata_baseline_invalid">
+        <source>The parent metadata baseline is invalid. Run a full backup.</source>
+        <translation>父還原點的中繼資料基線無效。請執行完整備份。</translation>
     </message>
     <message id="aegra.error.file_backup.unsupported_incremental">
         <source>Incremental backup is not supported for this selection.</source>

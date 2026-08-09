@@ -77,37 +77,54 @@ ensure_trailing_directory_separator(std::vector<std::uint16_t> utf16_path) {
 
 namespace {
 
-[[nodiscard]] base::Result<void> check_ntfs_or_refs_name(const wchar_t* fs_name) {
+[[nodiscard]] base::Result<FileSystemCapabilities>
+capabilities_for_name(const wchar_t* fs_name) {
     if (fs_name == nullptr || fs_name[0] == L'\0') {
-        return base::Result<void>::failure(
+        return base::Result<FileSystemCapabilities>::failure(
             {base::ErrorCode::kInvalidArgument, "file_source.unsupported_filesystem"});
     }
-    if (_wcsicmp(fs_name, L"NTFS") != 0 && _wcsicmp(fs_name, L"ReFS") != 0) {
-        return base::Result<void>::failure(
-            {base::ErrorCode::kInvalidArgument, "file_source.unsupported_filesystem"});
+    FileSystemCapabilities capabilities;
+    if (_wcsicmp(fs_name, L"NTFS") == 0) {
+        capabilities.filesystem = SupportedFileSystem::kNtfs;
+        return base::Result<FileSystemCapabilities>::success(capabilities);
     }
-    return base::Result<void>::success();
+    if (_wcsicmp(fs_name, L"ReFS") == 0) {
+        capabilities.filesystem = SupportedFileSystem::kRefs;
+        return base::Result<FileSystemCapabilities>::success(capabilities);
+    }
+    if (_wcsicmp(fs_name, L"FAT32") == 0) {
+        capabilities.filesystem = SupportedFileSystem::kFat32;
+        capabilities.supports_security_descriptors = false;
+        capabilities.supports_stable_file_id = false;
+        capabilities.supports_hard_links = false;
+        capabilities.supports_named_data_streams = false;
+        capabilities.maximum_file_size_bytes = 0xFFFFFFFFULL;
+        return base::Result<FileSystemCapabilities>::success(capabilities);
+    }
+    return base::Result<FileSystemCapabilities>::failure(
+        {base::ErrorCode::kInvalidArgument, "file_source.unsupported_filesystem"});
 }
 
 } // namespace
 
-base::Result<void> ensure_ntfs_or_refs(const UniqueHandle& root) {
+base::Result<FileSystemCapabilities> query_supported_file_system(const UniqueHandle& root) {
     if (!root.valid()) {
-        return base::Result<void>::failure(
+        return base::Result<FileSystemCapabilities>::failure(
             {base::ErrorCode::kInvalidArgument, "filesystem root handle is invalid"});
     }
     wchar_t fs_name[MAX_PATH + 1]{};
     if (GetVolumeInformationByHandleW(root.get(), nullptr, 0, nullptr, nullptr, nullptr, fs_name,
                                       MAX_PATH) == FALSE) {
-        return base::Result<void>::failure(
+        return base::Result<FileSystemCapabilities>::failure(
             win32_error(GetLastError(), "GetVolumeInformationByHandleW"));
     }
-    return check_ntfs_or_refs_name(fs_name);
+    return capabilities_for_name(fs_name);
 }
 
-base::Result<void> ensure_ntfs_or_refs_path(const std::wstring& directory_root) {
+base::Result<FileSystemCapabilities>
+query_supported_file_system_path(const std::wstring& directory_root) {
     if (directory_root.empty()) {
-        return base::Result<void>::failure(
+        return base::Result<FileSystemCapabilities>::failure(
             {base::ErrorCode::kInvalidArgument, "filesystem root path is empty"});
     }
     std::wstring path = directory_root;
@@ -120,9 +137,10 @@ base::Result<void> ensure_ntfs_or_refs_path(const std::wstring& directory_root) 
     wchar_t fs_name[MAX_PATH + 1]{};
     if (GetVolumeInformationW(path.c_str(), nullptr, 0, nullptr, nullptr, nullptr, fs_name,
                               MAX_PATH) == FALSE) {
-        return base::Result<void>::failure(win32_error(GetLastError(), "GetVolumeInformationW"));
+        return base::Result<FileSystemCapabilities>::failure(
+            win32_error(GetLastError(), "GetVolumeInformationW"));
     }
-    return check_ntfs_or_refs_name(fs_name);
+    return capabilities_for_name(fs_name);
 }
 
 } // namespace aegra::adapters::windows_filesystem::detail

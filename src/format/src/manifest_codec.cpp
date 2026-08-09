@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <exception>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -226,40 +227,26 @@ using Json = nlohmann::json;
     return result;
 }
 
-[[nodiscard]] Json encode_checkpoint(const contracts::FileJournalCheckpoint& checkpoint) {
-    return {{"volume_identity", checkpoint.volume_identity},
-            {"journal_id", checkpoint.journal_id},
-            {"next_usn", checkpoint.next_usn}};
-}
-
-[[nodiscard]] contracts::FileJournalCheckpoint decode_checkpoint(const Json& value) {
-    contracts::FileJournalCheckpoint checkpoint;
-    checkpoint.volume_identity = value.at("volume_identity").get<std::string>();
-    checkpoint.journal_id = value.at("journal_id").get<std::uint64_t>();
-    checkpoint.next_usn = value.at("next_usn").get<std::int64_t>();
-    return checkpoint;
-}
-
 [[nodiscard]] Json encode_file_set_baseline(const FileSetBaseline& baseline) {
-    Json checkpoints = Json::array();
-    for (const auto& checkpoint : baseline.journal_checkpoints) {
-        checkpoints.push_back(encode_checkpoint(checkpoint));
-    }
-    return {{"fingerprint_algorithm", baseline.fingerprint_algorithm},
-            {"selection_fingerprint", encode_binary(baseline.selection_fingerprint)},
-            {"journal_checkpoints", std::move(checkpoints)}};
+    return {
+        {"fingerprint_algorithm", baseline.fingerprint_algorithm},
+        {"selection_fingerprint", encode_binary(baseline.selection_fingerprint)},
+        {"change_detection_method", static_cast<std::uint8_t>(baseline.change_detection_method)}};
 }
 
 [[nodiscard]] FileSetBaseline decode_file_set_baseline(const Json& value) {
+    if (!value.is_object() || value.size() != 3 || !value.contains("fingerprint_algorithm") ||
+        !value.contains("selection_fingerprint") || !value.contains("change_detection_method")) {
+        throw std::invalid_argument("file_set_baseline keys are invalid");
+    }
     FileSetBaseline baseline;
     baseline.fingerprint_algorithm = value.at("fingerprint_algorithm").get<std::uint8_t>();
     const auto digest = decode_binary(value.at("selection_fingerprint"));
     if (digest.size() == baseline.selection_fingerprint.size()) {
         std::copy(digest.begin(), digest.end(), baseline.selection_fingerprint.begin());
     }
-    for (const auto& item : value.at("journal_checkpoints")) {
-        baseline.journal_checkpoints.push_back(decode_checkpoint(item));
-    }
+    baseline.change_detection_method = static_cast<contracts::FileChangeDetectionMethod>(
+        value.at("change_detection_method").get<std::uint8_t>());
     return baseline;
 }
 

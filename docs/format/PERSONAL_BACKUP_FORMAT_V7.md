@@ -1,6 +1,8 @@
 # 个人版备份文件格式 V7（`.bkf`）
 
-> **范围变更：** [ADR-0018](../adr/0018-file-set-incremental-usn-and-chain.md) 已接受 file_set Incremental，
+> **范围变更：** [ADR-0020](../adr/0020-file-set-metadata-signature-incremental.md) 已接受 file_set Incremental
+> 使用 metadata signature（`write_time + logical_size`）判断变化；[ADR-0018](../adr/0018-file-set-incremental-usn-and-chain.md)
+> 的 USN baseline 已被替代。
 > 并明确本期不支持 reparse、hard link、sparse 和 ADS。**FI0 已从 current V7 exact schema 删除**这些字段、
 > 枚举与 platform reparse section；Reader 对含旧字段/枚举的开发 Archive 统一 corrupt/unsupported，不兼容、不迁移。
 > 增量目标合同以 [增量设计](../architecture/FILE_SET_INCREMENTAL_BACKUP_RESTORE.md) §7 为准（FI1 起）。
@@ -66,7 +68,7 @@ constexpr uint8_t CONTENT_KIND_FILE_SET   = 2;
 - Header、Catalog、Job 与 Service 摘要必须一致。
 - `CONTENT_KIND_VOLUME_SET` 禁止出现 `source_type=file_stream` 或 index page record。
 - `CONTENT_KIND_FILE_SET` 禁止出现 `source_type=volume`；禁止 `.bhx` Sidecar；禁止 DIFFERENTIAL。
-  FULL：`parent_uuid` 全 0。INCREMENTAL：`parent_uuid` 非 0 且必须置位 `CAP_FILE_USN_BASELINE`。
+  FULL：`parent_uuid` 全 0。INCREMENTAL：`parent_uuid` 非 0 且必须置位 `CAP_FILE_METADATA_BASELINE`。
 
 ## 2. BackupHeader
 
@@ -157,7 +159,7 @@ constexpr uint32_t BACKUP_FLAG_SPLIT        = 0x00000020;
 ```cpp
 constexpr uint32_t CAP_HAS_FILE_INDEX     = 0x00000001; // file_set 必须置位
 constexpr uint32_t CAP_VOLUME_SIDECAR_OK  = 0x00000002; // volume_set 增量链可用 sidecar
-constexpr uint32_t CAP_FILE_USN_BASELINE  = 0x00000004; // file_set Incremental 必须置位
+constexpr uint32_t CAP_FILE_METADATA_BASELINE = 0x00000004; // file_set Incremental 必须置位
 ```
 
 未知 bit 必须为 0；Reader 对未知非零 bit 拒绝（critical）。
@@ -189,7 +191,7 @@ constexpr uint8_t COMPRESSION_ZSTD      = 1;
 - `split_part_index` 与文件名后缀不一致；
 - FULL 时 `parent_uuid` 必须全 0；INCREMENTAL/DIFFERENTIAL 时不得全 0；
 - file_set：`CAP_HAS_FILE_INDEX` 置位、不得置 `CAP_VOLUME_SIDECAR_OK`、禁止 DIFFERENTIAL；
-  FULL 时 `parent_uuid` 全 0；INCREMENTAL 时 `parent_uuid` 非 0 且 `CAP_FILE_USN_BASELINE` 置位。
+  FULL 时 `parent_uuid` 全 0；INCREMENTAL 时 `parent_uuid` 非 0 且 `CAP_FILE_METADATA_BASELINE` 置位。
 
 Header 不保存文件名、路径、entry 数、index 位置或未加密客户 metadata。
 
@@ -463,9 +465,9 @@ key = (
   "name_encoding": u8,           // 1
   "name": bstr,                  // UTF-16LE
   "selection_id": bstr,          // 16-byte UUID; only selection roots; else empty bstr length 0
-  "stable_file_identity": {      // required non-null for dir/file; not for logical root
-    "volume_identity": bstr,     // UTF-8 canonical volume GUID path bytes
-    "file_id": bstr              // exactly 16 bytes (FILE_ID_128)
+  "stable_file_identity": {      // NTFS/ReFS identity; FAT32 uses null representation
+    "volume_identity": bstr,     // canonical volume identity, or empty for null
+    "file_id": bstr              // 16-byte FILE_ID_128, or 16 zero bytes for null
   },
   "attributes": u32,             // portable Windows file attributes subset; no reparse/sparse bits
   "flags": u32,                  // ENTRY_FLAG_* (known mask only)
@@ -830,13 +832,7 @@ AEAD AAD：
   "file_set_baseline": {
     "fingerprint_algorithm": 1,    // SHA-256 over canonical preimage (algorithm id 1)
     "selection_fingerprint": bstr, // exactly 32 bytes; non-zero
-    "journal_checkpoints": [       // sorted unique by volume_identity
-      {
-        "volume_identity": tstr,
-        "journal_id": u64,
-        "next_usn": i64
-      }
-    ]
+    "change_detection_method": 1   // 1=mtime_size_v1
   },
   "extensions": {}
 }
@@ -845,8 +841,10 @@ AEAD AAD：
 规则：
 
 - Full/Incremental 均必须携带有效 `selection_fingerprint`；
-- Incremental 必须非空 `journal_checkpoints`，且 Header 置 `CAP_FILE_USN_BASELINE`；
-- Full 允许空 `journal_checkpoints`（USN 尚未可用时）；有 checkpoint 时按 volume 排序且唯一；
+- Full/Incremental 均必须携带 `change_detection_method=1`，且 Incremental Header 置
+  `CAP_FILE_METADATA_BASELINE`；
+- current V7 file_set metadata 不包含 `journal_checkpoints`；含该字段的开发期 Archive 统一按
+  unsupported/corrupt 拒绝；
 - 禁止在 file_set CBOR 中嵌入完整文件树、ACL 或逐文件路径列表。`relative_components` 只存在于
   控制面 durable selection 与 Worker Job，不进入 Catalog；Archive 内路径组件只存在于认证 File Index。
 

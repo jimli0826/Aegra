@@ -34,20 +34,6 @@ base::Result<void> invalid(std::string message) {
     return !value.empty() && value.size() <= kMaximumVolumeIdentityBytes;
 }
 
-[[nodiscard]] bool is_known_file_journal_unavailable_reason(
-    const FileJournalUnavailableReason reason) noexcept {
-    switch (reason) {
-    case FileJournalUnavailableReason::kNone:
-    case FileJournalUnavailableReason::kOpenFailed:
-    case FileJournalUnavailableReason::kUnsupported:
-    case FileJournalUnavailableReason::kInactive:
-    case FileJournalUnavailableReason::kAccessDenied:
-    case FileJournalUnavailableReason::kInvalidResponse:
-        return true;
-    }
-    return false;
-}
-
 [[nodiscard]] bool valid_relative_component_bytes(const std::vector<std::byte>& bytes) noexcept {
     if (bytes.size() < kMinimumNameUtf16LeBytes || bytes.size() > kMaximumNameUtf16LeBytes ||
         (bytes.size() % 2U) != 0U) {
@@ -98,7 +84,8 @@ base::Result<void> invalid(std::string message) {
     return true;
 }
 
-[[nodiscard]] bool file_id_is_zero(const std::array<std::byte, kStableFileIdBytes>& file_id) noexcept {
+[[nodiscard]] bool
+file_id_is_zero(const std::array<std::byte, kStableFileIdBytes>& file_id) noexcept {
     return std::all_of(file_id.begin(), file_id.end(),
                        [](const std::byte item) { return item == std::byte{0}; });
 }
@@ -190,16 +177,9 @@ bool is_known_file_content_storage(const FileContentStorage storage) noexcept {
     return storage == FileContentStorage::kLocal || storage == FileContentStorage::kParent;
 }
 
-bool is_known_file_change_reason(const FileChangeReason reason) noexcept {
-    switch (reason) {
-    case FileChangeReason::kNone:
-    case FileChangeReason::kContent:
-    case FileChangeReason::kNamespace:
-    case FileChangeReason::kMetadata:
-    case FileChangeReason::kAmbiguous:
-        return true;
-    }
-    return false;
+bool is_known_file_change_detection_method(const FileChangeDetectionMethod method) noexcept {
+    return method == FileChangeDetectionMethod::kNone ||
+           method == FileChangeDetectionMethod::kMtimeSizeV1;
 }
 
 bool is_known_incremental_downgrade_reason(const IncrementalDowngradeReason reason) noexcept {
@@ -208,11 +188,6 @@ bool is_known_incremental_downgrade_reason(const IncrementalDowngradeReason reas
     case IncrementalDowngradeReason::kNoParent:
     case IncrementalDowngradeReason::kSelectionChanged:
     case IncrementalDowngradeReason::kChainIncomplete:
-    case IncrementalDowngradeReason::kJournalMissing:
-    case IncrementalDowngradeReason::kJournalReset:
-    case IncrementalDowngradeReason::kJournalWrapped:
-    case IncrementalDowngradeReason::kJournalInaccessible:
-    case IncrementalDowngradeReason::kVolumeIdentityChanged:
     case IncrementalDowngradeReason::kBaselineInvalid:
         return true;
     }
@@ -254,83 +229,8 @@ base::Result<void> validate_stable_file_identity(const StableFileIdentity& ident
     return base::Result<void>::success();
 }
 
-base::Result<void> validate_file_journal_checkpoint(const FileJournalCheckpoint& checkpoint) {
-    if (!valid_volume_identity(checkpoint.volume_identity) || checkpoint.journal_id == 0 ||
-        checkpoint.next_usn < 0) {
-        return invalid("file journal checkpoint is invalid");
-    }
-    return base::Result<void>::success();
-}
-
 base::Result<void>
-validate_file_journal_checkpoints(const std::vector<FileJournalCheckpoint>& checkpoints) {
-    if (checkpoints.size() > kMaximumJournalCheckpoints) {
-        return invalid("file journal checkpoint count exceeds limit");
-    }
-    std::string previous;
-    for (const auto& checkpoint : checkpoints) {
-        auto valid = validate_file_journal_checkpoint(checkpoint);
-        if (!valid) {
-            return valid;
-        }
-        if (!previous.empty() && checkpoint.volume_identity <= previous) {
-            return invalid("file journal checkpoints must be sorted unique by volume_identity");
-        }
-        previous = checkpoint.volume_identity;
-    }
-    return base::Result<void>::success();
-}
-
-base::Result<void> validate_file_journal_state(const FileJournalState& state) {
-    if (!valid_volume_identity(state.volume_identity)) {
-        return invalid("file journal state volume_identity is invalid");
-    }
-    if (!is_known_file_journal_unavailable_reason(state.unavailable_reason)) {
-        return invalid("file journal unavailable reason is invalid");
-    }
-    if (!state.available) {
-        if (state.unavailable_reason == FileJournalUnavailableReason::kNone) {
-            return invalid("unavailable file journal state requires a reason");
-        }
-        return base::Result<void>::success();
-    }
-    if (state.journal_id == 0 || state.lowest_valid_usn < 0 || state.next_usn < 0 ||
-        state.lowest_valid_usn > state.next_usn ||
-        state.unavailable_reason != FileJournalUnavailableReason::kNone ||
-        state.native_error_code != 0) {
-        return invalid("file journal state range is invalid");
-    }
-    return base::Result<void>::success();
-}
-
-base::Result<void> validate_file_change_hint(const FileChangeHint& hint) {
-    auto identity = validate_stable_file_identity(hint.identity, false);
-    if (!identity) {
-        return identity;
-    }
-    if (!is_known_file_change_reason(hint.reason) || hint.reason == FileChangeReason::kNone) {
-        return invalid("file change reason is invalid");
-    }
-    return base::Result<void>::success();
-}
-
-base::Result<void> validate_file_change_batch(const FileChangeBatch& batch) {
-    if (batch.hints.size() > kMaximumChangeHintsPerBatch) {
-        return invalid("file change batch exceeds limit");
-    }
-    for (const auto& hint : batch.hints) {
-        auto valid = validate_file_change_hint(hint);
-        if (!valid) {
-            return valid;
-        }
-    }
-    if (batch.next_start_usn && *batch.next_start_usn < 0) {
-        return invalid("file change batch next_start_usn is invalid");
-    }
-    return base::Result<void>::success();
-}
-
-base::Result<void> validate_file_selection_fingerprint(const FileSelectionFingerprint& fingerprint) {
+validate_file_selection_fingerprint(const FileSelectionFingerprint& fingerprint) {
     if (!is_known_selection_fingerprint_algorithm(fingerprint.algorithm_id) ||
         is_zero_selection_fingerprint(fingerprint)) {
         return invalid("file selection fingerprint is invalid");
@@ -398,7 +298,8 @@ base::Result<void> validate_file_stream_desc(const FileStreamDesc& stream) {
     if (!is_known_name_encoding(stream.name.encoding) || !stream.name.bytes.empty()) {
         return invalid("main stream name must be empty");
     }
-    if (!is_known_file_content_storage(stream.content_storage) || !valid_wire_u64(stream.logical_size)) {
+    if (!is_known_file_content_storage(stream.content_storage) ||
+        !valid_wire_u64(stream.logical_size)) {
         return invalid("file stream content_storage or logical_size is invalid");
     }
     if (stream.content_storage == FileContentStorage::kLocal) {
@@ -415,14 +316,15 @@ base::Result<void> validate_file_stream_desc(const FileStreamDesc& stream) {
 }
 
 base::Result<void> validate_file_entry_desc(const FileEntryDesc& entry) {
-    if (entry.entry_id == 0 || !is_known_file_entry_kind(entry.kind)) {
+    if (entry.entry_id == 0 || !is_known_file_entry_kind(entry.kind) ||
+        !base::is_canonical_uuid(entry.selection_id)) {
         return invalid("file entry id or kind is invalid");
     }
     auto name = validate_encoded_name(entry.name);
     if (!name) {
         return name;
     }
-    auto identity = validate_stable_file_identity(entry.stable_identity, false);
+    auto identity = validate_stable_file_identity(entry.stable_identity, true);
     if (!identity) {
         return identity;
     }
@@ -537,34 +439,6 @@ encode_file_selection_fingerprint_preimage(const std::vector<FileSourceRef>& ref
         }
     }
     return base::Result<std::vector<std::byte>>::success(std::move(preimage));
-}
-
-base::Result<void> validate_journal_continuity(const FileJournalCheckpoint& parent,
-                                               const FileJournalState& current) {
-    auto parent_ok = validate_file_journal_checkpoint(parent);
-    if (!parent_ok) {
-        return parent_ok;
-    }
-    auto current_ok = validate_file_journal_state(current);
-    if (!current_ok) {
-        return current_ok;
-    }
-    if (!current.available) {
-        return invalid("file_backup.journal_inaccessible");
-    }
-    if (parent.volume_identity != current.volume_identity) {
-        return invalid("file_backup.volume_identity_changed");
-    }
-    if (parent.journal_id != current.journal_id) {
-        return invalid("file_backup.journal_reset");
-    }
-    if (parent.next_usn < current.lowest_valid_usn) {
-        return invalid("file_backup.journal_wrapped");
-    }
-    if (parent.next_usn > current.next_usn) {
-        return invalid("file_backup.baseline_invalid");
-    }
-    return base::Result<void>::success();
 }
 
 } // namespace aegra::contracts

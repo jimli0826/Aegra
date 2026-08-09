@@ -75,10 +75,10 @@ file_set 不沿用 volume 的 64 KiB block 作为 stream write 量子。Worker �
 ## 当前状态
 
 F5 Full file_set 备份、F7 完整 Verify、F8 选择性恢复、F9 Desktop UX 均已接线；F10 发布门禁已通过。
-**FI0–FI10 已完成**：USN contract/source、change planner、Incremental Archive writer、file chain
-reader/Verify、Catalog 选父/降级/retention、Service/Worker 计划任务编排、Browse/Restore 多链、
-Desktop Incremental UX 与发布门禁。Worker 数据面接受 `effective_type` / `parent_uuid` / parent
-reader / parent checkpoints 并写入 Header+Index。
+**设计变更（ADR-0020）**：file_set Incremental 的变化判断从 USN contract/source 改为 metadata signature：
+同路径普通文件的 `write_time + logical_size` 与直接父层相同则引用 parent stream，否则本层写完整 local stream。
+代码切换已完成；Worker 数据面输入为 `effective_type` / `parent_uuid` / parent reader / selection fingerprint，
+Manifest 固定写 `change_detection_method=mtime_size_v1`，不再查询或保存 journal checkpoint。
 
 File Index Writer 自底向上构建多层 B+tree（leaf → internal…→ root，depth≤8），与产品上限 L04
 （10_000_000 entries）/ L14 一致；不再在 leaf>257 时误报 `index_depth_limit`。Reader 递归收集 leaf
@@ -94,25 +94,46 @@ File Index Writer 自底向上构建多层 B+tree（leaf → internal…→ root
 Archive Abort。空目录仍通过 `.` / `..` 正常打开，不会走失败路径。禁止把枚举错误静默为
 “无 children”，以免提交不完整 Recovery Point。
 
+## 卷级系统目录排除
+
+选择整卷（或递归路径下出现下列名称）时，`WindowsFileSnapshotView::queue_children` **不**把下列
+目录入队，因此不会进入 File Index / Archive：
+
+| 名称 | 原因 |
+| --- | --- |
+| `$RECYCLE.BIN` | 回收站；非用户主动选择的保护数据 |
+| `System Volume Information` | VSS/系统还原元数据；备份无意义且常不可读 |
+
+名称比较为 ASCII 大小写不敏感。这与 Browse 隐藏策略一致；已有 Archive 不受影响，需重新备份。
+
+## 卷根 Archive 显示名
+
+整卷 selection（`relative_components` 为空）的 root entry 名称使用
+`FileSourceRef.display_label`（与 Browse 一致，如 `新加卷 (F:)`），并去掉 Windows 路径非法字符
+（`:` 等）以便恢复时可作为目标下目录名；**不再**把 opaque `selection_id` UUID 写入 entry name。
+子目录/文件 selection 仍使用真实路径 leaf 名。
+
 ## 不支持对象（ADR-0018）
 
 本期只支持目录、普通文件和未命名主数据流。reparse、hard link、sparse、ADS 在 Backup 枚举时 strict fail，
 在 Restore 第一次目标 mutation 前拒绝。Sink 不得宣称或预留这些能力，也不得跟随、扁平化、展开为 dense、
 复制为独立文件或忽略 ADS。现有预留字段、分支和虚假 `supports_*` 由 FI0 直接删除；旧开发 Archive 不兼容。
 
-文件 Incremental 的目标边界、USN 资格和 chain reader 见
+文件 Incremental 的目标边界、metadata signature 资格和 chain reader 见
 [增量设计](../architecture/FILE_SET_INCREMENTAL_BACKUP_RESTORE.md)；实施记录见
 [FI0–FI10](../development/FILE_SET_INCREMENTAL_DEVELOPMENT_PLAN.md)。
 
-## ACL / Security Descriptor（ADR-0016 / V7 §5.7）
+## 文件系统能力与 ACL（ADR-0016 / ADR-0021 / V7 §5.7）
 
-- 备份：`WindowsFileSnapshotView::open` 启用 `SeBackupPrivilege` / `SeRestorePrivilege` /
-  `SeSecurityPrivilege`；枚举每个 entry 时 `GetFileSecurityW` 读取 self-relative
+- 备份：NTFS/ReFS 枚举启用 `SeBackupPrivilege` / `SeSecurityPrivilege`，并读取 self-relative
   Owner/Group/DACL/SACL，写入 `platform_metadata` envelope（tag 1）并置
   `ENTRY_FLAG_HAS_SECURITY`。启用特权后仍无法读完整 SD → strict failure
   `file_source.security_descriptor_unreadable`（经 TaskResult `message_code` 透出）。
-- 恢复：`WindowsFileTreeSink` 同样启用上述特权；`apply_metadata` /
+- FAT32 备份仍必须来自 VSS snapshot；条目使用 null stable identity，不探测 FileId/hard-link/ADS/security，
+  `platform_metadata` 为空。Incremental 仍按同路径 `write_time + logical_size`，受 FAT32 粗 mtime 精度限制。
+- 恢复：NTFS/ReFS `WindowsFileTreeSink` 启用 restore/security 特权；`apply_metadata` /
   `apply_directory_metadata` 从 envelope 解出 SD 并以 `SetFileSecurityW` 写回 staging/目标路径。
   Pipeline 始终恢复时间戳与属性；仅当 `restore_security=true` 时应用 SD。
-- 目标能力：`supports_security_descriptor=true`；preflight 在 `restore_security` 且 entry 含
-  platform metadata 时校验。日志/Catalog 仍禁止输出 SD 字节或 SID 明文。
+- FAT32 目标声明 `supports_security_descriptor=false` 和 `maximum_file_size_bytes=0xFFFFFFFF`；ACL 开启或
+  单文件超限时在写前拒绝。关闭 ACL 后仍恢复时间戳、属性和主数据流。
+- 日志/Catalog 仍禁止输出 SD 字节或 SID 明文。

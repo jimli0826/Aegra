@@ -431,7 +431,7 @@ QString JobModel::backup_type_text(const std::int64_t backup_type) const {
 }
 
 QString JobModel::downgrade_reason_text(const std::int64_t reason) const {
-    // Maps contracts::IncrementalDowngradeReason (1..9) to localized copy.
+    // Maps contracts::IncrementalDowngradeReason (1, 2, 3, or 9) to localized copy.
     // Desktop never invents authority — only surfaces Service-projected reason codes.
     switch (reason) {
     case 1:
@@ -443,24 +443,9 @@ QString JobModel::downgrade_reason_text(const std::int64_t reason) const {
     case 3:
         //% "Parent backup chain is incomplete; a new full baseline was created."
         return qtTrId("aegra.backup.downgrade.chain_incomplete");
-    case 4:
-        //% "Change journal was unavailable; a new full baseline was created."
-        return qtTrId("aegra.backup.downgrade.journal_missing");
-    case 5:
-        //% "Change journal was reset; a new full baseline was created."
-        return qtTrId("aegra.backup.downgrade.journal_reset");
-    case 6:
-        //% "Change journal wrapped; a new full baseline was created."
-        return qtTrId("aegra.backup.downgrade.journal_wrapped");
-    case 7:
-        //% "Change journal was inaccessible; a new full baseline was created."
-        return qtTrId("aegra.backup.downgrade.journal_inaccessible");
-    case 8:
-        //% "Volume identity changed; a new full baseline was created."
-        return qtTrId("aegra.backup.downgrade.volume_identity_changed");
     case 9:
-        //% "Parent baseline is invalid; a new full baseline was created."
-        return qtTrId("aegra.backup.downgrade.baseline_invalid");
+        //% "Parent metadata baseline is invalid; a new full baseline was created."
+        return qtTrId("aegra.backup.downgrade.metadata_baseline_invalid");
     default:
         //% "Incremental was not eligible; a full backup was created instead."
         return qtTrId("aegra.backup.downgrade.generic");

@@ -6,17 +6,19 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <span>
 #include <vector>
 
 namespace aegra::ports {
 
-/// FI0: only security descriptors and free space are product capabilities.
+/// FI0: only security descriptors, free space, and per-file size are product capabilities.
 /// Reparse / hard link / sparse / ADS are unsupported and have no capability bits.
 struct FileSinkCapabilities final {
     bool supports_security_descriptor{false};
     std::uint64_t free_bytes{0};
+    std::uint64_t maximum_file_size_bytes{(std::numeric_limits<std::uint64_t>::max)()};
 };
 
 /// Staged writer for one ordinary file (unnamed main stream only).

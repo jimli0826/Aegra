@@ -2,10 +2,10 @@
 
 | 属性 | 内容 |
 | --- | --- |
-| 状态 | Full 基线已完成；Incremental 由 ADR-0018 接受，FI0–FI10 已完成 |
+| 状态 | Full 与 metadata-signature Incremental 已完成生产接线；人工 VSS/Archive 场景待隔离环境验收 |
 | 版本 | 1.0 |
 | 日期 | 2026-08-07 |
-| 范围 | Windows 个人版、本地 NTFS/ReFS、当前 Full 文件集备份与选择性恢复 |
+| 范围 | Windows 个人版、本地 NTFS/ReFS/FAT32、当前 Full/Incremental 文件集备份与选择性恢复 |
 | 权威格式/协议 | [V7](../format/PERSONAL_BACKUP_FORMAT_V7.md)、[Catalog V2](../format/PERSONAL_REPOSITORY_FORMAT_V2.md)、[Service V4](../protocol/SERVICE_CONTROL_PROTOCOL_V4.md)、[上限与码](../development/FILE_SET_PRODUCT_LIMITS_AND_CODES.md) |
 
 ## 1. 目标与非目标
@@ -24,15 +24,19 @@
 - 所有长操作有取消、背压、确定的失败原子性和结构化进度。
 
 首版明确不包含：UNC/SMB 源、EFS raw、Cloud Files 在线召回、application-consistent VSS writer 协调、
-文件级 Incremental/Differential/去重、跨平台恢复、原位置系统文件覆盖、WinPE 文件恢复、Shell Extension 和
+文件级 Differential/去重、跨平台恢复、原位置系统文件覆盖、WinPE 文件恢复、Shell Extension 和
 Archive 虚拟挂载。这些能力不能以隐藏开关或 best-effort 分支进入首版。
 
-### 1.2 ADR-0018 范围更新
+### 1.2 Incremental 范围更新
 
-[ADR-0018](../adr/0018-file-set-incremental-usn-and-chain.md) 已接受文件 Incremental 的目标设计，实施状态与
-工作包见[增量开发计划](../development/FILE_SET_INCREMENTAL_DEVELOPMENT_PLAN.md)。本期文件 Backup/Restore
-只支持目录、普通文件和未命名主数据流；reparse point、hard link、sparse file、ADS 均 strict reject。
-本文后续关于保存或还原这四类对象的描述属于 ADR-0016 的旧范围，已被 ADR-0018 替代，不得作为实现依据。
+[ADR-0020](../adr/0020-file-set-metadata-signature-incremental.md) 已将文件 Incremental 的变化判断改为同路径普通文件
+`write_time + logical_size` metadata signature；[ADR-0018](../adr/0018-file-set-incremental-usn-and-chain.md) 的
+USN baseline 已被替代且 current 生产代码已完成切换。实施记录见
+[metadata signature 开发计划](../development/FILE_SET_METADATA_SIGNATURE_DEVELOPMENT_PLAN.md)。
+本期文件 Backup/Restore 只支持目录、普通文件和未命名主数据流；reparse point、hard link、sparse file、ADS 均
+strict reject。本文后续关于保存或还原这四类对象的描述属于 ADR-0016 的旧范围，不得作为实现依据。
+FAT32 边界由 [ADR-0021](../adr/0021-fat32-file-set-source-and-restore.md) 冻结：仅支持 VSS snapshot source，
+条目不带 stable File ID/ACL；恢复目标无 ACL 能力且单文件上限为 4 GiB - 1。
 
 ### 1.1 未发布产品的版本策略
 
@@ -200,8 +204,8 @@ restore.target = BlockRestoreTarget | FileRestoreTarget
 File Source Ref 只在受限 Service-to-Worker Pipe 中存在，包含 canonical Volume GUID path、版本化相对组件、
 规则和 selection ID。校验要求：
 
-- 当前已完成 Worker 实现中，`operation=backup`、`content_kind=file_set` 时只允许 Full；FI7 将按 ADR-0018
-  同步扩展 current schema 4 consumer，不新增兼容版本；
+- Worker schema 4 中，`operation=backup`、`content_kind=file_set` 允许 Full/Incremental；Incremental 使用
+  ADR-0020 的 metadata signature baseline，不新增兼容版本；
 - File Source Ref 为 1..100 个，selection ID 与规范路径唯一；
 - relative component 非空且不能包含分隔符、NUL、`.` 或 `..`；
 - credential 仍只用 `SecretRef`；
@@ -296,7 +300,7 @@ root digest 和分卷完整性字段。Reader 先验证分卷和 Footer，再读
 
 ### 11.1 一致性和枚举
 
-- 解析 selection 涉及的 canonical Volume；拒绝网络、FAT/RAW 和无法稳定识别的源；
+- 解析 selection 涉及的 canonical Volume；支持 NTFS/ReFS/FAT32，拒绝网络、RAW 和其它文件系统；
 - 所有 Volume 在一个 VSS Snapshot Set 中创建 snapshot；任一失败则 Job 不开始写 Archive；
 - 枚举从 snapshot root 开始，使用 handle identity 防止名称重解析；
 - 使用 no-follow/open-reparse-point 方式获取 link 本身，不遍历 target；
@@ -305,14 +309,14 @@ root digest 和分卷完整性字段。Reader 先验证分卷和 Footer，再读
 
 ### 11.2 Metadata
 
-首版必须支持 directory、regular file、creation/access/write/change timestamps、Windows attributes、directory
-case-sensitive flag、owner/group/DACL/SACL self-relative descriptor、main stream、ADS、sparse ranges、hard link
-identity 和 reparse data no-follow。
+当前必须支持 directory、regular file、creation/access/write/change timestamps、Windows attributes 与 unnamed
+main stream。NTFS/ReFS 还保存 stable File ID 和 owner/group/DACL/SACL self-relative descriptor；FAT32 对应字段
+为空。reparse、hard link、sparse、ADS 与 EFS 均不进入 Archive。
 
-SACL 策略已冻结（ADR-0016）：启用 `SeBackupPrivilege`/`SeSecurityPrivilege` 后仍无法读取完整 security
-descriptor 则 strict failure（`file_source.security_descriptor_unreadable`）。目标缺 ADS/sparse/ACL/reparse
-能力时 preflight 拒绝（`file_restore.target_capability_missing`），无 lossy 策略。EFS、offline cloud
-placeholder 和 unsupported reparse 返回稳定 `file_source.unsupported_*`。
+NTFS/ReFS 的 SACL 策略已冻结：启用 `SeBackupPrivilege`/`SeSecurityPrivilege` 后仍无法读取完整 security
+descriptor 则 strict failure（`file_source.security_descriptor_unreadable`）。FAT32 不申请或保存 security。
+FAT32 目标在 `restore_security=true` 时以 `file_restore.target_capability_missing` 拒绝，关闭后恢复普通 metadata；
+超过 4 GiB - 1 的单文件以 `file_restore.target_file_too_large` 在写前拒绝。
 
 ## 12. FileSet Restore Pipeline
 
@@ -339,7 +343,8 @@ Catalog V2 增加 `content_kind`、`source_count`、可选认证后 `file_entry_
 `format_version=7`。Catalog 不保存 selection path、文件名、目录摘要、ACL、owner SID 或 File Index locator。
 
 扫描无凭据时从 V7 Header 重建 `content_kind` 和结构状态；认证后补全计数。File Recovery Point 不参与
-Volume geometry/Sidecar 逻辑，首版只允许 `parent_uuid=null`、`has_sidecar=false`。
+Volume geometry/Sidecar 逻辑；Full 使用 `parent_uuid=null`，Incremental 使用父 `file_uuid`，且
+`has_sidecar=false`。
 
 Verify 必须认证每个 File Index page、父子图、stream extent、所有引用 Chunk，并读取、认证和解压每个 payload。
 

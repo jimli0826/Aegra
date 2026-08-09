@@ -439,10 +439,18 @@ run_file_set_restore(const contracts::JobRequest& job,
     plan.conflict_policy = job.file_restore_target->conflict_policy;
     plan.restore_security = job.file_restore_target->restore_security;
 
-    const auto buffer = static_cast<std::uint32_t>((std::min)(
-        options.memory_budget_bytes,
-        static_cast<std::uint64_t>((std::numeric_limits<std::uint32_t>::max)())));
-    plan.read_buffer_bytes = buffer == 0 ? 4U * 1024U * 1024U : buffer;
+    // Cap the I/O quantum so progress is published many times during large restores.
+    // Using the full memory budget (e.g. 256 MiB) as the read buffer collapses a
+    // ~100 MiB job into a single quantum → Desktop only ever sees 0% then 100%.
+    constexpr std::uint32_t kRestoreProgressQuantumBytes = 4U * 1024U * 1024U;
+    const auto budget = options.memory_budget_bytes == 0
+                            ? static_cast<std::uint64_t>(kRestoreProgressQuantumBytes)
+                            : options.memory_budget_bytes;
+    plan.read_buffer_bytes = static_cast<std::uint32_t>(
+        (std::min)(budget, static_cast<std::uint64_t>(kRestoreProgressQuantumBytes)));
+    if (plan.read_buffer_bytes == 0) {
+        plan.read_buffer_bytes = kRestoreProgressQuantumBytes;
+    }
     pipeline::FileSetRestorePipeline pipeline(*reader, *sink, context.progress);
     auto summary = pipeline.run(plan, cancellation);
     if (!summary) {

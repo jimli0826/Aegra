@@ -101,7 +101,7 @@ StartBackup 不传 parent；**父候选唯一来源**是控制面 `schedules.las
 4. tip fingerprint 与 Schedule 当前 selection fingerprint 不一致 → `kSelectionChanged` → Full
 5. `resolve_chain` 失败或链上任一层 fingerprint/结构不合格 → 对应 stable reason → Full
 6. 成功 → Incremental，parent = last_rp，`reason = kNone`
-7. 期刊/USN 资格（journal missing/reset/wrap/inaccessible）由 Worker 在 FI7 判定，不在本模块
+7. metadata baseline 资格由 Worker 验证；不再存在 journal missing/reset/wrap/inaccessible 选父条件
 
 **推进 tip**（volume/file 相同）：
 
@@ -275,7 +275,8 @@ F2 已将 Catalog Entry 升至 schema 2：`content_kind`（`volume_set`|`file_se
 - `RecoveryPointGraph` 对 file/volume 分别校验 content_kind、fingerprint 与父类型；
 - `parent_selector` 提供 file Incremental 选父与 stable downgrade reason；
 - `retention` 提供 tip 祖先闭包与“请求新 Full”信号；删除计划继续 descendant-first 且 file 无 `.bhx`；
-- 认证发布路径在 fingerprint 非空时投影 `file_baseline_available=true`（无凭据扫描仍为 false）。
+- 认证发布路径在 fingerprint 非空且 change detection method 可认证时投影 `file_baseline_available=true`
+  （无凭据扫描仍为 false）。
 
 Service/Worker 计划任务真正请求 Incremental 仍属 **FI7**。
 

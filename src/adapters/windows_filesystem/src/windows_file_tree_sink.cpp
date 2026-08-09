@@ -90,9 +90,10 @@ void clear_readonly_attribute(const std::wstring& path) noexcept {
 class StagedFileWriter final : public ports::IStagedFileWriter {
   public:
     StagedFileWriter(std::wstring final_path, std::wstring staging_path, UniqueHandle handle,
-                     const std::uint64_t logical_size)
+                     const std::uint64_t logical_size, const bool supports_security_descriptor)
         : final_path_(std::move(final_path)), staging_path_(std::move(staging_path)),
-          handle_(std::move(handle)), logical_size_(logical_size) {}
+          handle_(std::move(handle)), logical_size_(logical_size),
+          supports_security_descriptor_(supports_security_descriptor) {}
 
     ~StagedFileWriter() override { abort(); }
 
@@ -149,6 +150,11 @@ class StagedFileWriter final : public ports::IStagedFileWriter {
             return base::Result<void>::failure(win32_error(GetLastError(), "SetFileAttributesW"));
         }
         if (!entry.platform_metadata.empty()) {
+            if (!supports_security_descriptor_) {
+                return base::Result<void>::failure(
+                    {base::ErrorCode::kInvalidArgument,
+                     "file_restore.target_capability_missing"});
+            }
             auto security =
                 format::file_index::extract_platform_security_descriptor(entry.platform_metadata);
             if (!security) {
@@ -252,6 +258,7 @@ class StagedFileWriter final : public ports::IStagedFileWriter {
     std::wstring staging_path_;
     UniqueHandle handle_;
     std::uint64_t logical_size_{0};
+    bool supports_security_descriptor_{false};
     bool published_{false};
     bool aborted_{false};
 };
@@ -261,6 +268,7 @@ class StagedFileWriter final : public ports::IStagedFileWriter {
 struct WindowsFileTreeSink::Impl final {
     std::vector<std::uint16_t> root_utf16;
     UniqueHandle root_handle;
+    detail::FileSystemCapabilities filesystem;
 };
 
 WindowsFileTreeSink::WindowsFileTreeSink(std::unique_ptr<Impl> implementation) noexcept
@@ -274,23 +282,33 @@ WindowsFileTreeSink::open(const WindowsFileTreeSinkOpenRequest& request) {
         return base::Result<std::unique_ptr<WindowsFileTreeSink>>::failure(
             {base::ErrorCode::kInvalidArgument, "target root is required"});
     }
-    auto privileges = detail::enable_file_restore_privileges();
-    if (!privileges) {
-        return base::Result<std::unique_ptr<WindowsFileTreeSink>>::failure(privileges.error());
+    auto restore_privilege = detail::enable_file_restore_privileges(false);
+    if (!restore_privilege) {
+        return base::Result<std::unique_ptr<WindowsFileTreeSink>>::failure(
+            restore_privilege.error());
     }
-    auto handle = detail::open_path(request.target_root_utf16, FILE_READ_ATTRIBUTES | FILE_LIST_DIRECTORY,
-                                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                    OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS);
+    auto handle = detail::open_path(
+        request.target_root_utf16, FILE_READ_ATTRIBUTES | FILE_LIST_DIRECTORY,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS);
     if (!handle) {
         return base::Result<std::unique_ptr<WindowsFileTreeSink>>::failure(handle.error());
     }
-    auto fs = detail::ensure_ntfs_or_refs(handle.value());
+    auto fs = detail::query_supported_file_system(handle.value());
     if (!fs) {
         return base::Result<std::unique_ptr<WindowsFileTreeSink>>::failure(fs.error());
+    }
+    if (fs.value().supports_security_descriptors) {
+        auto security_privilege = detail::enable_file_restore_privileges(true);
+        if (!security_privilege) {
+            return base::Result<std::unique_ptr<WindowsFileTreeSink>>::failure(
+                security_privilege.error());
+        }
     }
     auto implementation = std::make_unique<Impl>();
     implementation->root_utf16 = request.target_root_utf16;
     implementation->root_handle = std::move(handle).value();
+    implementation->filesystem = fs.value();
     return base::Result<std::unique_ptr<WindowsFileTreeSink>>::success(
         std::unique_ptr<WindowsFileTreeSink>(new WindowsFileTreeSink(std::move(implementation))));
 }
@@ -302,8 +320,9 @@ WindowsFileTreeSink::capabilities(const base::CancellationToken cancellation) co
             {base::ErrorCode::kCancelled, "capabilities cancelled"});
     }
     ports::FileSinkCapabilities caps;
-    // FI0: only security descriptors are product-capable; no reparse/hard-link/sparse/ADS.
-    caps.supports_security_descriptor = true;
+    caps.supports_security_descriptor =
+        implementation_->filesystem.supports_security_descriptors;
+    caps.maximum_file_size_bytes = implementation_->filesystem.maximum_file_size_bytes;
     std::wstring root(implementation_->root_utf16.begin(), implementation_->root_utf16.end());
     // Volume GUID roots require a trailing '\\' for GetDiskFreeSpaceExW (ERROR_INVALID_FUNCTION
     // without it). Try as-is, then with/without the trailing separator.
@@ -357,6 +376,10 @@ WindowsFileTreeSink::begin_file(const std::vector<contracts::EncodedName>& relat
         return base::Result<std::unique_ptr<ports::IStagedFileWriter>>::failure(
             {base::ErrorCode::kCancelled, "begin file cancelled"});
     }
+    if (logical_size > implementation_->filesystem.maximum_file_size_bytes) {
+        return base::Result<std::unique_ptr<ports::IStagedFileWriter>>::failure(
+            {base::ErrorCode::kInvalidArgument, "file_restore.target_file_too_large"});
+    }
     auto final_path = detail::join_relative_path(implementation_->root_utf16, relative_components);
     if (!final_path) {
         return base::Result<std::unique_ptr<ports::IStagedFileWriter>>::failure(final_path.error());
@@ -369,7 +392,8 @@ WindowsFileTreeSink::begin_file(const std::vector<contracts::EncodedName>& relat
     }
     return base::Result<std::unique_ptr<ports::IStagedFileWriter>>::success(
         std::make_unique<StagedFileWriter>(std::move(final_path).value(), std::move(staging),
-                                           std::move(handle).value(), logical_size));
+                                           std::move(handle).value(), logical_size,
+                                           implementation_->filesystem.supports_security_descriptors));
 }
 
 base::Result<void> WindowsFileTreeSink::apply_directory_metadata(
@@ -405,6 +429,10 @@ base::Result<void> WindowsFileTreeSink::apply_directory_metadata(
         return base::Result<void>::failure(win32_error(GetLastError(), "SetFileAttributesW"));
     }
     if (!entry.platform_metadata.empty()) {
+        if (!implementation_->filesystem.supports_security_descriptors) {
+            return base::Result<void>::failure(
+                {base::ErrorCode::kInvalidArgument, "file_restore.target_capability_missing"});
+        }
         auto security =
             format::file_index::extract_platform_security_descriptor(entry.platform_metadata);
         if (!security) {

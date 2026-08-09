@@ -14,7 +14,7 @@ Item {
     property string timeOfDay: "02:00"
     /// 1 = Full, 2 = Incremental (file_set and volume; Differential not offered for files).
     property int backupType: 1
-    /// When true, wizard shows file_set Incremental baseline guidance (no USN/path details).
+    /// When true, wizard shows file_set Incremental metadata-signature guidance.
     property bool filesMode: false
     property bool enableDedup: true
     property bool excludePageHibernation: true
@@ -221,7 +221,7 @@ Item {
                         Layout.leftMargin: 116
                         visible: root.filesMode && root.backupType === 2
                         wrapMode: Text.WordWrap
-                        //% "Changing the file selection later creates a new full baseline. Incremental runs only when the selection is unchanged and a valid parent exists."
+                        //% "Incremental backup reuses a file only when its path, modification time, and size match the parent. FAT32 timestamps are coarse, so equal time and size cannot detect every content change. Changing the selection creates a new full baseline."
                         text: qsTrId("aegra.backup.file.incremental_baseline_note")
                         color: Theme.colorTextGrey
                         font.pixelSize: 12

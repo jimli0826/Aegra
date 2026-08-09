@@ -121,7 +121,10 @@ file_backup.logical_bytes_limit
 file_backup.index_page_limit
 file_backup.index_depth_limit
 file_backup.index_spool_budget_exceeded
-file_backup.unsupported_incremental
+file_backup.incremental_downgraded_full
+file_backup.metadata_baseline_invalid
+file_backup.parent_chain_invalid
+file_backup.selection_fingerprint_mismatch
 file_backup.vss_failed
 file_backup.destination_full
 file_backup.aborted
@@ -169,6 +172,7 @@ file_restore.preflight_expired
 file_restore.preflight_consumed
 file_restore.selection_limit
 file_restore.target_capability_missing
+file_restore.target_file_too_large
 file_restore.target_not_directory
 file_restore.target_reparse_escape
 file_restore.target_collision
@@ -177,7 +181,6 @@ file_restore.target_full
 file_restore.partial
 file_restore.failed_before_write
 file_restore.original_location_unsupported
-file_restore.system_directory_unsupported
 file_recover.credential_required
 file_recover.credential_failed
 file_recover.corrupt
@@ -247,17 +250,18 @@ SecretRef、口令。
 | B09 | deadline | `job.deadline_exceeded` |
 | B10 | Worker crash | Job `Interrupted` / `OutcomeUnknown` 收敛 |
 | B11 | Index spool > 8 GiB | `file_backup.index_spool_budget_exceeded` |
-| B12 | 请求 file Incremental | `file_backup.unsupported_incremental` |
+| B12 | file Incremental baseline 不合格 | `file_backup.incremental_downgraded_full` + stable downgrade reason |
 
 ### 4.3 恢复失败
 
 | ID | 场景 | 期望 |
 | --- | --- | --- |
-| R01 | 目标 FAT 无 ACL | `file_restore.target_capability_missing` |
+| R01 | FAT32 目标且请求恢复 ACL | `file_restore.target_capability_missing` |
 | R02 | 冲突 + Fail | `file_restore.target_collision` |
 | R03 | 目标盘满 | `file_restore.target_full` / InsufficientSpace |
 | R04 | 目标 reparse 替换逃逸 | `file_restore.target_reparse_escape` |
 | R05 | 写前认证失败 | `file_restore.failed_before_write` |
+| R06 | FAT32 目标存在超过 4 GiB - 1 的文件 | `file_restore.target_file_too_large`；写前拒绝 |
 | R06 | 写中失败 | partial + `file_restore.partial` |
 | R07 | 原位置恢复 | `file_restore.original_location_unsupported` |
 | R08 | 过期 preflight | `file_restore.preflight_expired` |

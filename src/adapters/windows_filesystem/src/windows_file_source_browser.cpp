@@ -2,6 +2,7 @@
 
 #include "windows_file_handle.h"
 #include "windows_file_names.h"
+#include "windows_file_special_folders.h"
 
 #include "aegra/base/error.h"
 
@@ -109,6 +110,19 @@ struct BrowseNode final {
     return (data.dwFileAttributes & kSystemHidden) == kSystemHidden;
 }
 
+[[nodiscard]] contracts::FileSourceNode make_directory_summary(const std::string& token,
+                                                               const std::string& display_name) {
+    contracts::FileSourceNode summary;
+    summary.node_token = token;
+    summary.display_name = display_name;
+    summary.entry_kind = contracts::FileEntryKind::kDirectory;
+    summary.selectability = contracts::FileNodeSelectability::kSelectable;
+    summary.has_children = true;
+    summary.is_directory = true;
+    summary.availability = contracts::SourceAvailability::kAvailable;
+    return summary;
+}
+
 } // namespace
 
 struct WindowsFileSourceBrowser::Impl final {
@@ -120,6 +134,43 @@ struct WindowsFileSourceBrowser::Impl final {
         const auto id = next_token++;
         nodes.emplace(id, std::move(node));
         return id;
+    }
+
+    /// Roots page: special folders first (Explorer quick access), then drive volumes.
+    [[nodiscard]] contracts::FileSourceNodePage list_roots(const std::uint32_t maximum_results) {
+        contracts::FileSourceNodePage result;
+        const auto specials = detail::resolve_special_folder_browse_roots(roots);
+        std::uint32_t emitted = 0;
+        for (const auto& folder : specials) {
+            if (emitted >= maximum_results) {
+                break;
+            }
+            BrowseNode node;
+            node.volume_identity = folder.volume_identity;
+            node.relative_components = folder.relative_components;
+            node.kind = contracts::FileEntryKind::kDirectory;
+            node.absolute_path = folder.absolute_path;
+            node.display_name = folder.display_name;
+            const auto id = insert(std::move(node));
+            result.items.push_back(make_directory_summary(make_token(id), nodes[id].display_name));
+            ++emitted;
+        }
+        for (const auto& root : roots) {
+            if (emitted >= maximum_results) {
+                break;
+            }
+            BrowseNode node;
+            node.volume_identity = root.volume_identity;
+            node.kind = contracts::FileEntryKind::kDirectory;
+            node.absolute_path.assign(root.snapshot_root_utf16.begin(),
+                                      root.snapshot_root_utf16.end());
+            node.display_name =
+                root.display_name.empty() ? root.volume_identity : root.display_name;
+            const auto id = insert(std::move(node));
+            result.items.push_back(make_directory_summary(make_token(id), nodes[id].display_name));
+            ++emitted;
+        }
+        return result;
     }
 };
 
@@ -162,29 +213,8 @@ WindowsFileSourceBrowser::list_children(const ports::FileBrowseCaller& caller,
     std::string volume_identity;
     std::vector<contracts::EncodedName> parent_components;
     if (!parent_node_token.has_value()) {
-        for (const auto& root : implementation_->roots) {
-            BrowseNode node;
-            node.volume_identity = root.volume_identity;
-            node.kind = contracts::FileEntryKind::kDirectory;
-            node.absolute_path.assign(root.snapshot_root_utf16.begin(),
-                                      root.snapshot_root_utf16.end());
-            node.display_name =
-                root.display_name.empty() ? root.volume_identity : root.display_name;
-            const auto id = implementation_->insert(std::move(node));
-            contracts::FileSourceNode summary;
-            summary.node_token = make_token(id);
-            summary.display_name = implementation_->nodes[id].display_name;
-            summary.entry_kind = contracts::FileEntryKind::kDirectory;
-            summary.selectability = contracts::FileNodeSelectability::kSelectable;
-            summary.has_children = true;
-            summary.is_directory = true;
-            summary.availability = contracts::SourceAvailability::kAvailable;
-            result.items.push_back(std::move(summary));
-            if (result.items.size() >= page.maximum_results) {
-                break;
-            }
-        }
-        return base::Result<contracts::FileSourceNodePage>::success(std::move(result));
+        return base::Result<contracts::FileSourceNodePage>::success(
+            implementation_->list_roots(page.maximum_results));
     }
     auto parent_id = parse_token(*parent_node_token);
     if (!parent_id) {

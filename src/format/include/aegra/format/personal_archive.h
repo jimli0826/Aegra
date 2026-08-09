@@ -45,8 +45,8 @@ inline constexpr std::uint32_t kCborMetadataFlagEncrypted = 0x00000001;
 
 inline constexpr std::uint32_t kCapabilityHasFileIndex = 0x00000001;
 inline constexpr std::uint32_t kCapabilityVolumeSidecarOk = 0x00000002;
-/// file_set Incremental requires this critical capability (FI1 USN baseline metadata present).
-inline constexpr std::uint32_t kCapabilityFileUsnBaseline = 0x00000004;
+/// file_set Incremental requires authenticated metadata baseline fields.
+inline constexpr std::uint32_t kCapabilityFileMetadataBaseline = 0x00000004;
 
 inline constexpr std::uint8_t kContentKindVolumeSet = 1;
 inline constexpr std::uint8_t kContentKindFileSet = 2;

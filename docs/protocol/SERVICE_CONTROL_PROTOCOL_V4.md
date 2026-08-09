@@ -1,7 +1,8 @@
 # 本地 Service 控制面协议 V4（详细说明）
 
-> [ADR-0018](../adr/0018-file-set-incremental-usn-and-chain.md) 已接受 file_set Incremental。FI7 将直接扩展
-> current V4 的 Schedule/Job/Recovery Point 字段，不增加 V5 或 V4 兼容分支；目标控制面语义见
+> [ADR-0020](../adr/0020-file-set-metadata-signature-incremental.md) 已将 file_set Incremental 变化判断改为
+> metadata signature（`write_time + logical_size`）。current V4 的 Schedule/Job/Recovery Point 字段直接承载
+> Full/Incremental，不增加 V5 或 V4 兼容分支；目标控制面语义见
 > [增量设计](../architecture/FILE_SET_INCREMENTAL_BACKUP_RESTORE.md) §4。
 
 | 属性 | 内容 |
@@ -381,7 +382,9 @@ volume 任务与非 backup 结果四字段均为 null。
 - 不返回绝对路径、volume path、file id；
 - token TTL 默认 15 分钟；绑定 caller SID + connection session；
 - 最大 active tokens / connection：4096；
-- 排序：`entry_kind`（dir first）+ display_name 二进制序 + token 次序稳定化；
+- 根列表（`parent_node_token=null`）：先返回当前用户可映射的特殊目录（固定英文 label：
+  Desktop、Downloads、Documents、Pictures、Music、Videos），再返回授权盘符卷；无法映射到授权卷
+  的特殊目录省略。子目录排序仍为 `entry_kind`（dir first）+ display_name 二进制序 + token 次序稳定化；
 - 过期/错绑 token → `file_browse.token_invalid`；
 - 未授权 volume → 不出现或 `availability=Unavailable`。
 
@@ -466,7 +469,7 @@ volume 任务与非 backup 结果四字段均为 null。
 | `target_node_token` | string | 浏览得到的目录 token |
 | `conflict_policy` | number | FileConflictPolicy |
 | `archive_secret_ref` | string \| null |
-| `restore_security` | bool | 首版必须 true（应用 Owner/Group/DACL/SACL） |
+| `restore_security` | bool | true 时应用 Owner/Group/DACL/SACL；FAT32 目标必须为 false |
 
 FI0：不再有 `restore_ads`；Archive 不含 ADS，恢复只写 unnamed main stream。
 
@@ -493,8 +496,9 @@ chain depth、selected entry IDs、target root identity、policy、counts、expi
 Prepare 在写前解析选择闭包内全部 parent stream 引用到 local owner。
 **不**保存 Archive/target 绝对路径、Secret、文件树。
 
-目标缺能力 → `restore_eligible=false` 或直接 RequestFailed（首版：RequestFailed
-`file_restore.target_capability_missing`）。
+目标缺 ACL 能力且 `restore_security=true` → RequestFailed
+`file_restore.target_capability_missing`。选择闭包存在超过目标单文件上限的文件 → RequestFailed
+`file_restore.target_file_too_large`。FAT32 单文件上限为 4 GiB - 1。
 
 ---
 
@@ -519,7 +523,7 @@ payload 保持 repository/schedule/job 引用形状；若 Schedule 为 file_set�
 | `enabled` | bool |
 | `trigger` | ScheduleTrigger |
 | `repository_connection_id` | string \| null |
-| `backup_type` | number | file_set 必须 Full |
+| `backup_type` | number | file_set 允许 Full(1) 或 Incremental(2)，禁止 Differential |
 | `protection` | ProtectionSpec | §4.8 |
 | `encryption` | object \| null | 既有形状 |
 

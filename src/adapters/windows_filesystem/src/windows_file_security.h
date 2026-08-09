@@ -11,11 +11,11 @@
 
 namespace aegra::adapters::windows_filesystem::detail {
 
-/// Enables the privileges required to read content and full security descriptors.
-[[nodiscard]] base::Result<void> enable_file_backup_privileges();
+/// Enables SeBackupPrivilege and optionally SeSecurityPrivilege for full descriptors.
+[[nodiscard]] base::Result<void> enable_file_backup_privileges(bool require_security_descriptor);
 
-/// Enables the privileges required to restore content and full security descriptors.
-[[nodiscard]] base::Result<void> enable_file_restore_privileges();
+/// Enables SeRestorePrivilege and optionally SeSecurityPrivilege for full descriptors.
+[[nodiscard]] base::Result<void> enable_file_restore_privileges(bool require_security_descriptor);
 
 /// Reads Owner/Group/DACL/SACL as a self-relative SECURITY_DESCRIPTOR.
 /// On failure after privileges: message is file_source.security_descriptor_unreadable.

@@ -161,7 +161,9 @@ per-file Archive Credential 映射与 Local Storage 故障恢复验证仍待补�
   Service 铸造短期 opaque token（TTL、caller SID + pipe session 绑定、断线 `clear_session`）。
   根节点仅包含带盘符的卷（如 `新加卷 (D:)` / `System (C:)`）；无盘符的系统隐藏分区
   （EFI/MSR/Recovery 等）不进入树。子节点枚举跳过 `HIDDEN|SYSTEM` 与
-  `System Volume Information` / `$RECYCLE.BIN` 等系统保护项（仅浏览过滤，不改变备份语义）。
+  `System Volume Information` / `$RECYCLE.BIN` 等系统保护项。
+  **Backup 对齐**：`WindowsFileSnapshotView` 递归枚举同样跳过
+  `System Volume Information` 与 `$RECYCLE.BIN`（整卷 file_set 选择时不写入 Archive）。
   `display_name` 为 UTF-8（含中文等非 ASCII 文件名），不再做 ASCII `?` 投影。
 - **Session**：每个 Named Pipe 连接携带 `ServiceSessionContext`（peer SID + 唯一 session id）；
   `UpsertSchedule` 用其解析 file_set selection 并写入 `owner_sid`。
@@ -200,7 +202,9 @@ per-file Archive Credential 映射与 Local Storage 故障恢复验证仍待补�
   - 不存 Archive/target 绝对路径或明文 Secret
 - **Start**：校验 token 未过期/`filec|`/唯一占用；重开全链比对 tip digest 与 chain generation；
   Worker Job `source_refs` 为 base-first 全链路径 + 同密文凭据（每层一份）。
-- **错误码**：`file_restore.preflight_ok|expired|consumed|target_full|system_directory_unsupported`
+- **目标卷**：允许系统卷上的用户目录（Documents/Desktop 等）；`inventory.is_system` 仅用于
+  volume restore 的 PE 门禁，不得拦截 file restore。只读/不可用卷仍拒绝。
+- **错误码**：`file_restore.preflight_ok|expired|consumed|target_full|target_capability_missing|target_file_too_large`
   等；volume preflight token 不得启动 file restore。
 
 ### F10：发布门禁

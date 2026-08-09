@@ -76,10 +76,13 @@ constexpr SECURITY_INFORMATION kReadSecurityInformation =
 
 } // namespace
 
-base::Result<void> enable_file_backup_privileges() {
+base::Result<void> enable_file_backup_privileges(const bool require_security_descriptor) {
     auto backup = enable_one_privilege(L"SeBackupPrivilege", "SeBackupPrivilege");
     if (!backup) {
         return base::Result<void>::failure(security_unreadable(backup.error()));
+    }
+    if (!require_security_descriptor) {
+        return base::Result<void>::success();
     }
     auto security = enable_one_privilege(L"SeSecurityPrivilege", "SeSecurityPrivilege");
     if (!security) {
@@ -88,10 +91,13 @@ base::Result<void> enable_file_backup_privileges() {
     return base::Result<void>::success();
 }
 
-base::Result<void> enable_file_restore_privileges() {
+base::Result<void> enable_file_restore_privileges(const bool require_security_descriptor) {
     auto restore = enable_one_privilege(L"SeRestorePrivilege", "SeRestorePrivilege");
     if (!restore) {
         return restore;
+    }
+    if (!require_security_descriptor) {
+        return base::Result<void>::success();
     }
     return enable_one_privilege(L"SeSecurityPrivilege", "SeSecurityPrivilege");
 }

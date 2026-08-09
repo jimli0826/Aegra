@@ -14,7 +14,9 @@
 - [文件集备份与恢复设计](architecture/FILE_SET_BACKUP_RESTORE.md)
 - [文件集备份与恢复分阶段开发计划](development/FILE_SET_BACKUP_DEVELOPMENT_PLAN.md)
 - [文件集增量备份与链式恢复设计](architecture/FILE_SET_INCREMENTAL_BACKUP_RESTORE.md)
-- [文件集增量备份分阶段开发计划](development/FILE_SET_INCREMENTAL_DEVELOPMENT_PLAN.md)
+- [文件集 metadata signature 增量改造开发计划](development/FILE_SET_METADATA_SIGNATURE_DEVELOPMENT_PLAN.md)
+- [FAT32 文件集支持开发计划（FS1-FS5）](development/FAT32_FILE_SET_DEVELOPMENT_PLAN.md)
+- [文件集增量备份历史开发计划](development/FILE_SET_INCREMENTAL_DEVELOPMENT_PLAN.md)
 - [文件集产品上限、稳定码与验证矩阵](development/FILE_SET_PRODUCT_LIMITS_AND_CODES.md)
 
 现行核心决策：
@@ -27,7 +29,9 @@
 - [ADR-0015：项目不维护自动化测试用例](adr/0015-no-project-test-suite.md)
 - [ADR-0016：文件集备份、恢复与个人 Archive V7 边界](adr/0016-file-set-backup-and-restore-boundary.md)
 - [ADR-0017：本地 Service 控制面协议 V4](adr/0017-service-control-protocol-v4.md)
-- [ADR-0018：文件集增量备份的 USN 基线与链式恢复](adr/0018-file-set-incremental-usn-and-chain.md)
+- [ADR-0018：文件集增量备份的 USN 基线与链式恢复（已被替代）](adr/0018-file-set-incremental-usn-and-chain.md)
+- [ADR-0020：文件集增量备份的 metadata signature 基线](adr/0020-file-set-metadata-signature-incremental.md)
+- [ADR-0021：FAT32 文件集备份源与恢复目标](adr/0021-fat32-file-set-source-and-restore.md)
 
 ## 权威格式与需求
 

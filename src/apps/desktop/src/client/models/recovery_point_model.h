@@ -71,7 +71,7 @@ class RecoveryPointModel final : public QAbstractListModel {
     /// contentKind, sizeText, logicalSizeBytes, sourceCount, createdUtcMs, createdText,
     /// chainComplete, parentSummary, chainDepth, isBaseline.
     Q_INVOKABLE [[nodiscard]] QVariantList checkpointsForDate(const QString& date_ymd) const;
-    /// Safe parent summary for details panel: parent time + short id (no file IDs / USN).
+    /// Safe parent summary for details panel: parent time plus short identifier.
     Q_INVOKABLE [[nodiscard]] QVariantMap recoveryPointDetails(const QString& file_uuid) const;
 
   signals:

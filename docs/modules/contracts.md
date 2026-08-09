@@ -38,8 +38,9 @@ source/target、`SecretRef`、trace 和 deadline。`content_kind` 为 `volume_se
 Backup Job 还必须拥有 `BackupOptions`：显式 `type`、`file_uuid`、`created_utc_ms`，全量必须拥有不同于
 `file_uuid` 的 `backup_set_uuid`。volume 增量同时拥有 `parent_source_ref`（`parent_credential_ref` 可选）。
 file_set 允许 Full/Incremental：`selection_fingerprint` 必填；Incremental 可携带 `candidate_parent_uuid`，
-禁止 volume 风格 `parent_source_ref`。Service 在提交 Worker 前分配持久化身份、创建时间与 selection
-fingerprint；Worker 不得重新生成 Archive 身份。`SecretRef` 只保存凭据定位符，禁止保存明文 Secret。
+并使用 ADR-0020 的 `mtime_size_v1` metadata baseline；禁止 volume 风格 `parent_source_ref`。Service 在提交
+Worker 前分配持久化身份、创建时间与 selection fingerprint；Worker 不得重新生成 Archive 身份。`SecretRef`
+只保存凭据定位符，禁止保存明文 Secret。
 
 `TaskProgress` schema 4 同时携带 `job_id` 与 `trace_id`；`logical_bytes` 可为 null（文件枚举阶段未知总量），
 并增加 `discovered_entries` / `processed_entries`。`TaskResult` schema 4 增加 `entry_count`、
@@ -48,11 +49,12 @@ fingerprint；Worker 不得重新生成 Archive 身份。`SecretRef` 只保存�
 的原始错误文本。
 
 `file_set.h` 定义 `ContentKind`、名称编码、`FileSourceRef`、`FileEntryDesc`、`StableFileIdentity`、
-`FileJournalCheckpoint`/`FileJournalState`、`FileChangeBatch`、`FileSelectionFingerprint`、
+`FileSelectionFingerprint`、
 `FileContentStorage`、`IncrementalDowngradeReason`、`FileRestoreTarget`、`PartialRestoreStats` 与
 产品上限常量；Contracts/Ports 禁止路径类型、HANDLE、Qt、JSON。
-`FileJournalState` 的 unavailable reason/native error 仅用于同进程 Worker 诊断，不进入 Archive、Catalog
-或 IPC 编码。
+ADR-0020 已删除 `FileJournalCheckpoint`、`FileJournalState`、`FileChangeBatch` 等历史 USN 合同；current
+Archive、Catalog 和 IPC 只表达 selection fingerprint、`FileChangeDetectionMethod` 与有效降级原因 1、2、3、9。
+`StableFileIdentity` 的 null 值可用于不提供稳定文件身份的 FAT32 条目；不得合成路径哈希身份。
 
 `WorkerResponse` / `WorkerCommand` / `WorkerEvent` 语义不变；具体 framing 见
 [ADR-0008](../adr/0008-worker-session-named-pipe-protocol.md)。

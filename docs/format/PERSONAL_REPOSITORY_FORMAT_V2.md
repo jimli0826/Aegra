@@ -1,7 +1,8 @@
 # 个人版 Repository Descriptor 与 Catalog V2
 
-> **范围变更：** [ADR-0018](../adr/0018-file-set-incremental-usn-and-chain.md) 已允许 file_set Incremental。
-> Catalog V2 的 file Full-only 规则及 exact keys 将在 FI1/FI6 直接修订；旧开发 Catalog 不双读、不迁移。
+> **范围变更：** [ADR-0020](../adr/0020-file-set-metadata-signature-incremental.md) 已将 file_set Incremental
+> 变化判断改为 metadata signature（`write_time + logical_size`）；[ADR-0018](../adr/0018-file-set-incremental-usn-and-chain.md)
+> 的 USN baseline 规则已被替代。旧开发 Catalog 不双读、不迁移。
 > 目标字段和父链规则以[增量设计](../architecture/FILE_SET_INCREMENTAL_BACKUP_RESTORE.md) §10 为准。
 
 | 属性 | 内容 |
@@ -123,7 +124,7 @@ Descriptor 不保存显示名称、Storage URI、凭据、Archive 口令或 UI �
 | `structural_state` | 持久化固定 `complete` |
 | `catalog_generation` | 从 1 起，替换同一 Entry 时递增 |
 | `file_selection_fingerprint` | **file_set**：小写 hex（64 字符）的 selection fingerprint，或空；**volume_set** 必须 `""` |
-| `file_baseline_available` | **file_set**：true 当认证 baseline（fingerprint + journal checkpoints）可用；**volume_set** 必须 false |
+| `file_baseline_available` | **file_set**：true 当认证 metadata baseline（fingerprint + change detection method）可用；**volume_set** 必须 false |
 
 ### 3.3 禁止字段
 
@@ -231,7 +232,7 @@ generation 变化或 UUID 冲突时拒绝。
 | `file_entry_count` | 0 | 认证后 ≥ 0 |
 | `file_selection_fingerprint` | `""` | hex 或空 |
 | `file_baseline_available` | false | true 当 baseline 可用 |
-| 增量选父 | 使用 volume 几何 + sidecar | fingerprint + baseline + chain |
+| 增量选父 | 使用 volume 几何 + sidecar | fingerprint + metadata baseline + chain |
 
 ## 10. 拒绝规则（Catalog Reader）
 

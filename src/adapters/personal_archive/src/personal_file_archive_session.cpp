@@ -85,8 +85,9 @@ make_metadata_aad(const archive::EncodedBackupHeader& header,
             error(base::ErrorCode::kInvalidArgument, "encrypted file archive requires a password"));
     }
     if (!request.encryption_enabled && !request.password.empty()) {
-        return base::Result<void>::failure(error(
-            base::ErrorCode::kInvalidArgument, "unencrypted file archive must not supply a password"));
+        return base::Result<void>::failure(
+            error(base::ErrorCode::kInvalidArgument,
+                  "unencrypted file archive must not supply a password"));
     }
     if (request.block_size < archive::kMinimumFileBlockSizeBytes ||
         request.block_size % archive::kFileBlockSizeAlignment != 0 ||
@@ -105,19 +106,14 @@ make_metadata_aad(const archive::EncodedBackupHeader& header,
     const auto backup_type = request.manifest.backup_job.backup_type;
     if (backup_type == format::BackupType::kFull) {
         if (!is_zero_uuid(request.parent_uuid)) {
-            return base::Result<void>::failure(
-                error(base::ErrorCode::kInvalidArgument, "full file archive must not set parent_uuid"));
+            return base::Result<void>::failure(error(base::ErrorCode::kInvalidArgument,
+                                                     "full file archive must not set parent_uuid"));
         }
     } else if (backup_type == format::BackupType::kIncremental) {
         if (is_zero_uuid(request.parent_uuid) || request.parent_uuid == request.file_uuid) {
-            return base::Result<void>::failure(error(
-                base::ErrorCode::kInvalidArgument,
-                "incremental file archive requires a distinct non-zero parent_uuid"));
-        }
-        if (request.manifest.file_set_baseline.journal_checkpoints.empty()) {
-            return base::Result<void>::failure(error(
-                base::ErrorCode::kInvalidArgument,
-                "incremental file archive requires journal_checkpoints"));
+            return base::Result<void>::failure(
+                error(base::ErrorCode::kInvalidArgument,
+                      "incremental file archive requires a distinct non-zero parent_uuid"));
         }
     } else {
         return base::Result<void>::failure(
@@ -132,9 +128,9 @@ struct SpooledIndexValidation final {
 };
 
 /// Finalize-time Index rules for Full vs Incremental (syntax only; parent payload is FI5).
-[[nodiscard]] base::Result<void>
-validate_spooled_entry(const contracts::FileEntryDesc& entry, const format::BackupType backup_type,
-                       SpooledIndexValidation& state) {
+[[nodiscard]] base::Result<void> validate_spooled_entry(const contracts::FileEntryDesc& entry,
+                                                        const format::BackupType backup_type,
+                                                        SpooledIndexValidation& state) {
     auto valid = contracts::validate_file_entry_desc(entry);
     if (!valid) {
         return valid;
@@ -170,8 +166,8 @@ struct SpooledEntryRef final {
 make_file_chunk_aad(const archive::EncodedBackupHeader& part_header, const std::uint64_t body_size,
                     const archive::FileStreamChunkHeader& header,
                     const std::span<const archive::BlockEntry> entries) {
-    auto prefix =
-        archive::encode_archive_record_prefix(archive::make_file_stream_chunk_record_prefix(body_size));
+    auto prefix = archive::encode_archive_record_prefix(
+        archive::make_file_stream_chunk_record_prefix(body_size));
     auto authenticated = header;
     authenticated.payload_authentication_tag.fill(std::byte{0});
     auto encoded_header = archive::encode_file_stream_chunk_header(authenticated);
@@ -198,8 +194,8 @@ make_file_chunk_aad(const archive::EncodedBackupHeader& part_header, const std::
 [[nodiscard]] base::Result<std::vector<std::byte>>
 make_index_page_aad(const archive::EncodedBackupHeader& part_header, const std::uint64_t body_size,
                     const archive::FileIndexPageHeader& header) {
-    auto prefix =
-        archive::encode_archive_record_prefix(archive::make_file_index_page_record_prefix(body_size));
+    auto prefix = archive::encode_archive_record_prefix(
+        archive::make_file_index_page_record_prefix(body_size));
     auto authenticated = header;
     authenticated.authentication_tag.fill(std::byte{0});
     authenticated.content_digest.fill(std::byte{0});
@@ -225,7 +221,8 @@ make_index_page_aad(const archive::EncodedBackupHeader& part_header, const std::
     }
     std::uint32_t size = 0;
     for (std::size_t i = 0; i < 4; ++i) {
-        size |= static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(size_bytes[i])) << (i * 8U);
+        size |= static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(size_bytes[i]))
+                << (i * 8U);
     }
     return base::Result<std::uint32_t>::success(size);
 }
@@ -303,8 +300,8 @@ protect_index_page(PreparedIndexPage prepared, const bool encryption_enabled,
                    const archive::EncodedBackupHeader& part_header) {
     if (prepared.ciphertext.empty() ||
         prepared.ciphertext.size() > archive::kMaximumIndexPagePlainBytes) {
-        return base::Result<PreparedIndexPage>::failure(error(
-            base::ErrorCode::kInvalidArgument, "file_backup.index_page_limit"));
+        return base::Result<PreparedIndexPage>::failure(
+            error(base::ErrorCode::kInvalidArgument, "file_backup.index_page_limit"));
     }
     prepared.header.plain_size = static_cast<std::uint32_t>(prepared.ciphertext.size());
     prepared.header.encoded_size = prepared.header.plain_size;
@@ -359,11 +356,9 @@ prepare_leaf_index_page(const std::vector<contracts::FileEntryDesc>& entries,
     return protect_index_page(std::move(prepared), encryption_enabled, payload_cipher, part_header);
 }
 
-[[nodiscard]] base::Result<PreparedIndexPage>
-prepare_internal_index_page(const index::InternalPageBody& body, const std::uint64_t page_id,
-                            const bool encryption_enabled,
-                            crypto_sodium::PayloadCipher* payload_cipher,
-                            const archive::EncodedBackupHeader& part_header) {
+[[nodiscard]] base::Result<PreparedIndexPage> prepare_internal_index_page(
+    const index::InternalPageBody& body, const std::uint64_t page_id, const bool encryption_enabled,
+    crypto_sodium::PayloadCipher* payload_cipher, const archive::EncodedBackupHeader& part_header) {
     auto plain = index::encode_internal_page_cbor(body);
     if (!plain) {
         return base::Result<PreparedIndexPage>::failure(plain.error());
@@ -410,9 +405,9 @@ struct NamespaceWriteResult final {
     std::vector<index::StreamIndexRecord> stream_records;
 };
 
-[[nodiscard]] base::Result<void>
-emit_index_page(std::ofstream& output, const archive::FileIndexPageHeader& header,
-                std::span<const std::byte> ciphertext);
+[[nodiscard]] base::Result<void> emit_index_page(std::ofstream& output,
+                                                 const archive::FileIndexPageHeader& header,
+                                                 std::span<const std::byte> ciphertext);
 
 [[nodiscard]] base::Result<BuiltIndexPage>
 write_one_leaf_page(std::ofstream& output, std::uint64_t& next_page_id,
@@ -469,12 +464,10 @@ void append_secondary_records_for_leaf(const std::vector<contracts::FileEntryDes
 }
 
 /// Stream leaf packing: at most one leaf of FileEntryDesc resident (M5).
-[[nodiscard]] base::Result<NamespaceWriteResult>
-write_leaves_from_sorted_spool(std::ofstream& output, std::ifstream& spool_input,
-                               std::uint64_t& next_page_id, const bool encryption_enabled,
-                               crypto_sodium::PayloadCipher* index_cipher,
-                               const archive::EncodedBackupHeader& part_header,
-                               const std::vector<SpooledEntryRef>& refs) {
+[[nodiscard]] base::Result<NamespaceWriteResult> write_leaves_from_sorted_spool(
+    std::ofstream& output, std::ifstream& spool_input, std::uint64_t& next_page_id,
+    const bool encryption_enabled, crypto_sodium::PayloadCipher* index_cipher,
+    const archive::EncodedBackupHeader& part_header, const std::vector<SpooledEntryRef>& refs) {
     if (refs.empty()) {
         return base::Result<NamespaceWriteResult>::failure(
             error(base::ErrorCode::kInvalidArgument, "file archive requires at least one entry"));
@@ -482,7 +475,8 @@ write_leaves_from_sorted_spool(std::ofstream& output, std::ifstream& spool_input
     NamespaceWriteResult result;
     result.entry_records.reserve(refs.size());
     std::vector<contracts::FileEntryDesc> current;
-    current.reserve((std::min)(refs.size(), static_cast<std::size_t>(index::kMaximumLeafEntriesPerPage)));
+    current.reserve(
+        (std::min)(refs.size(), static_cast<std::size_t>(index::kMaximumLeafEntriesPerPage)));
     for (const auto& ref : refs) {
         auto entry = read_spool_entry_at(spool_input, ref);
         if (!entry) {
@@ -539,9 +533,9 @@ struct IndexTreeRoot final {
     std::uint64_t page_count{0};
 };
 
-[[nodiscard]] base::Result<void>
-emit_index_page(std::ofstream& output, const archive::FileIndexPageHeader& header,
-                const std::span<const std::byte> ciphertext) {
+[[nodiscard]] base::Result<void> emit_index_page(std::ofstream& output,
+                                                 const archive::FileIndexPageHeader& header,
+                                                 const std::span<const std::byte> ciphertext) {
     const auto body_size = ciphertext.size();
     auto prefix = archive::encode_archive_record_prefix(
         archive::make_file_index_page_record_prefix(body_size));
@@ -575,8 +569,7 @@ make_internal_body(const std::span<const BuiltIndexPage> children) {
             return base::Result<index::InternalPageBody>::failure(
                 error(base::ErrorCode::kInternal, "index child locator is incomplete"));
         }
-        body.children.push_back(
-            index::ChildPageLocator{child.page_id, child.file_offset});
+        body.children.push_back(index::ChildPageLocator{child.page_id, child.file_offset});
     }
     for (std::size_t i = 1; i < children.size(); ++i) {
         body.keys.push_back(children[i].first_key);
@@ -601,7 +594,8 @@ internal_page_fits(const std::span<const BuiltIndexPage> children) {
                                        archive::kMaximumIndexPagePlainBytes);
 }
 
-/// Largest fanout in [2, remaining] that fits plain-size limits; never leaves a single orphan child.
+/// Largest fanout in [2, remaining] that fits plain-size limits; never leaves a single orphan
+/// child.
 [[nodiscard]] base::Result<std::size_t>
 choose_internal_fanout(const std::span<const BuiltIndexPage> level, const std::size_t start) {
     if (start >= level.size()) {
@@ -614,8 +608,7 @@ choose_internal_fanout(const std::span<const BuiltIndexPage> level, const std::s
             error(base::ErrorCode::kInvalidArgument, "file_backup.index_page_limit"));
     }
     const auto max_take =
-        (std::min)(remaining,
-                   static_cast<std::size_t>(index::kMaximumInternalKeysPerPage) + 1U);
+        (std::min)(remaining, static_cast<std::size_t>(index::kMaximumInternalKeysPerPage) + 1U);
     for (auto take = max_take; take >= 2; --take) {
         // Internal pages need ≥2 children; skip sizes that would leave exactly one child behind.
         if (remaining > take && remaining - take == 1) {
@@ -643,9 +636,8 @@ write_internal_group(std::ofstream& output, std::uint64_t& next_page_id,
         return base::Result<BuiltIndexPage>::failure(body.error());
     }
     const auto page_id = next_page_id++;
-    auto prepared =
-        prepare_internal_index_page(body.value(), page_id, encryption_enabled, index_cipher,
-                                    part_header);
+    auto prepared = prepare_internal_index_page(body.value(), page_id, encryption_enabled,
+                                                index_cipher, part_header);
     if (!prepared) {
         return base::Result<BuiltIndexPage>::failure(prepared.error());
     }
@@ -654,8 +646,7 @@ write_internal_group(std::ofstream& output, std::uint64_t& next_page_id,
         return base::Result<BuiltIndexPage>::failure(
             error(base::ErrorCode::kIoFailure, "failed to locate file index page offset"));
     }
-    auto written =
-        emit_index_page(output, prepared.value().header, prepared.value().ciphertext);
+    auto written = emit_index_page(output, prepared.value().header, prepared.value().ciphertext);
     if (!written) {
         return base::Result<BuiltIndexPage>::failure(written.error());
     }
@@ -683,9 +674,9 @@ write_internal_level(std::ofstream& output, std::uint64_t& next_page_id,
         if (!take) {
             return base::Result<std::vector<BuiltIndexPage>>::failure(take.error());
         }
-        auto written =
-            write_internal_group(output, next_page_id, encryption_enabled, index_cipher, part_header,
-                                 std::span<const BuiltIndexPage>(children.data() + start, take.value()));
+        auto written = write_internal_group(
+            output, next_page_id, encryption_enabled, index_cipher, part_header,
+            std::span<const BuiltIndexPage>(children.data() + start, take.value()));
         if (!written) {
             return base::Result<std::vector<BuiltIndexPage>>::failure(written.error());
         }
@@ -702,8 +693,7 @@ write_internal_level(std::ofstream& output, std::uint64_t& next_page_id,
 /// Bottom-up B+tree: given written leaves, raise internal levels until a single root (depth ≤ 8).
 [[nodiscard]] base::Result<IndexTreeRoot>
 raise_index_tree_to_root(std::ofstream& output, std::uint64_t& next_page_id,
-                         const bool encryption_enabled,
-                         crypto_sodium::PayloadCipher* index_cipher,
+                         const bool encryption_enabled, crypto_sodium::PayloadCipher* index_cipher,
                          const archive::EncodedBackupHeader& part_header,
                          std::vector<BuiltIndexPage> level) {
     if (level.empty()) {
@@ -800,8 +790,9 @@ PersonalFileArchiveSession::create(const FileArchiveCreateRequest& request) {
     auto cbor = format::encode_manifest_cbor(request.manifest);
     if (!cbor || cbor.value().size() > kMaximumMetadataSize) {
         return base::Result<std::unique_ptr<PersonalFileArchiveSession>>::failure(
-            !cbor ? cbor.error()
-                  : error(base::ErrorCode::kInvalidArgument, "file archive metadata exceeds limit"));
+            !cbor
+                ? cbor.error()
+                : error(base::ErrorCode::kInvalidArgument, "file archive metadata exceeds limit"));
     }
 
     archive::BackupHeader logical_header;
@@ -816,7 +807,7 @@ PersonalFileArchiveSession::create(const FileArchiveCreateRequest& request) {
     logical_header.compression_method = archive::CompressionMethod::kZstandard;
     if (request.manifest.backup_job.backup_type == format::BackupType::kIncremental) {
         logical_header.flags = archive::kBackupFlagIncremental;
-        logical_header.capability_flags |= archive::kCapabilityFileUsnBaseline;
+        logical_header.capability_flags |= archive::kCapabilityFileMetadataBaseline;
     } else {
         logical_header.flags = archive::kBackupFlagFull;
     }
@@ -825,8 +816,7 @@ PersonalFileArchiveSession::create(const FileArchiveCreateRequest& request) {
         logical_header.encryption_method = archive::PayloadEncryptionMethod::kXChaCha20Poly1305;
     }
 
-    auto implementation =
-        std::make_unique<Impl>(request.password, request.encryption_enabled);
+    auto implementation = std::make_unique<Impl>(request.password, request.encryption_enabled);
     implementation->destination = request.destination;
     implementation->partial = partial;
     implementation->spool_path = request.index_spool_directory / "index.spool";
@@ -848,8 +838,7 @@ PersonalFileArchiveSession::create(const FileArchiveCreateRequest& request) {
         }
         logical_header.cbor_size = archive::kMetadataEnvelopeHeaderSize + cbor.value().size() +
                                    crypto_sodium::kMetadataTagSize;
-        logical_header.first_record_offset =
-            logical_header.cbor_offset + logical_header.cbor_size;
+        logical_header.first_record_offset = logical_header.cbor_offset + logical_header.cbor_size;
         auto header = archive::encode_backup_header(logical_header);
         archive::MetadataEnvelopeHeader envelope;
         envelope.plaintext_size = cbor.value().size();
@@ -874,10 +863,11 @@ PersonalFileArchiveSession::create(const FileArchiveCreateRequest& request) {
         metadata = std::move(protected_metadata).value();
         encoded_envelope = encoded_env.value();
         implementation->part_header = header.value();
-        auto cipher = crypto_sodium::PayloadCipher::create(request.password, metadata.kdf,
-                                                           metadata.salt);
+        auto cipher =
+            crypto_sodium::PayloadCipher::create(request.password, metadata.kdf, metadata.salt);
         if (!cipher) {
-            return base::Result<std::unique_ptr<PersonalFileArchiveSession>>::failure(cipher.error());
+            return base::Result<std::unique_ptr<PersonalFileArchiveSession>>::failure(
+                cipher.error());
         }
         implementation->payload_cipher = std::move(cipher).value();
         auto index_cipher = crypto_sodium::PayloadCipher::create_index_page(
@@ -889,8 +879,7 @@ PersonalFileArchiveSession::create(const FileArchiveCreateRequest& request) {
         implementation->index_cipher = std::move(index_cipher).value();
     } else {
         logical_header.cbor_size = archive::kMetadataEnvelopeHeaderSize + cbor.value().size();
-        logical_header.first_record_offset =
-            logical_header.cbor_offset + logical_header.cbor_size;
+        logical_header.first_record_offset = logical_header.cbor_offset + logical_header.cbor_size;
         logical_header.encryption_method = archive::PayloadEncryptionMethod::kNone;
         auto header = archive::encode_backup_header(logical_header);
         archive::MetadataEnvelopeHeader envelope;
@@ -962,9 +951,9 @@ PersonalFileArchiveSession::write_entry(const contracts::FileEntryDesc& entry,
     for (const auto& stream : entry.streams) {
         if (stream.content_storage == contracts::FileContentStorage::kParent) {
             if (implementation_->backup_type != format::BackupType::kIncremental) {
-                return base::Result<void>::failure(error(
-                    base::ErrorCode::kInvalidArgument,
-                    "full file archive cannot contain parent streams"));
+                return base::Result<void>::failure(
+                    error(base::ErrorCode::kInvalidArgument,
+                          "full file archive cannot contain parent streams"));
             }
             ++entry_parent_streams;
         } else {
@@ -1070,7 +1059,8 @@ PersonalFileArchiveSession::write_stream_chunk(const ports::FileChunkWriteReques
         }
         header.payload_nonce = nonce.value();
         const auto body_size = archive::kBlockEntrySize + payload.size();
-        auto aad = make_file_chunk_aad(implementation_->part_header, body_size, header, {&entry, 1});
+        auto aad =
+            make_file_chunk_aad(implementation_->part_header, body_size, header, {&entry, 1});
         if (!aad) {
             return base::Result<std::uint64_t>::failure(aad.error());
         }
@@ -1091,8 +1081,8 @@ PersonalFileArchiveSession::write_stream_chunk(const ports::FileChunkWriteReques
     }
 
     const auto body_size = archive::kBlockEntrySize + payload.size();
-    auto prefix =
-        archive::encode_archive_record_prefix(archive::make_file_stream_chunk_record_prefix(body_size));
+    auto prefix = archive::encode_archive_record_prefix(
+        archive::make_file_stream_chunk_record_prefix(body_size));
     auto encoded_header = archive::encode_file_stream_chunk_header(header);
     auto encoded_entry = archive::encode_block_entry(entry);
     if (!prefix || !encoded_header || !encoded_entry) {
@@ -1105,10 +1095,10 @@ PersonalFileArchiveSession::write_stream_chunk(const ports::FileChunkWriteReques
         return base::Result<std::uint64_t>::failure(
             error(base::ErrorCode::kIoFailure, "failed to locate file stream chunk offset"));
     }
-    for (const auto bytes : {std::span<const std::byte>(prefix.value()),
-                             std::span<const std::byte>(encoded_header.value()),
-                             std::span<const std::byte>(encoded_entry.value()),
-                             std::span<const std::byte>(payload)}) {
+    for (const auto bytes :
+         {std::span<const std::byte>(prefix.value()),
+          std::span<const std::byte>(encoded_header.value()),
+          std::span<const std::byte>(encoded_entry.value()), std::span<const std::byte>(payload)}) {
         auto written = write_bytes(implementation_->output, bytes);
         if (!written) {
             return base::Result<std::uint64_t>::failure(written.error());
@@ -1182,9 +1172,9 @@ PersonalFileArchiveSession::finalize(const base::CancellationToken cancellation)
     std::uint64_t page_count = tree.value().page_count;
 
     // page_count in digest preimage is 0: Footer only stores total index_page_count (all trees).
-    auto preimage = index::make_index_root_digest_preimage(
-        root_page_id, 0, implementation_->entry_count, implementation_->stream_count,
-        root_content_digest);
+    auto preimage =
+        index::make_index_root_digest_preimage(root_page_id, 0, implementation_->entry_count,
+                                               implementation_->stream_count, root_content_digest);
     auto index_root_digest = crypto_sodium::sha256(preimage);
     if (!index_root_digest) {
         return base::Result<void>::failure(index_root_digest.error());
@@ -1245,8 +1235,7 @@ PersonalFileArchiveSession::finalize(const base::CancellationToken cancellation)
     footer.entry_id_root = entry_tree.value().locator;
     footer.stream_root = stream_root;
     footer.chunk_root = chunk_root;
-    footer.part_file_size =
-        static_cast<std::uint64_t>(footer_offset) + archive::kBackupFooterSize;
+    footer.part_file_size = static_cast<std::uint64_t>(footer_offset) + archive::kBackupFooterSize;
     footer.stored_bytes = footer.part_file_size;
     footer.file_uuid = implementation_->file_uuid;
     auto encoded_footer = archive::encode_backup_footer(footer);
@@ -1263,8 +1252,7 @@ PersonalFileArchiveSession::finalize(const base::CancellationToken cancellation)
     return base::Result<void>::success();
 }
 
-base::Result<void>
-PersonalFileArchiveSession::commit(const base::CancellationToken cancellation) {
+base::Result<void> PersonalFileArchiveSession::commit(const base::CancellationToken cancellation) {
     if (cancellation.stop_requested()) {
         return base::Result<void>::failure(error(base::ErrorCode::kCancelled, "backup cancelled"));
     }

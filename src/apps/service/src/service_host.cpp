@@ -404,25 +404,25 @@ jobs_response(const contracts::ServiceRequest& request, const ServiceRuntimeInfo
         return base::Result<contracts::ServiceResponse>::success(failure(
             result.error().code, request.request_id, request.kind, "control_plane.query_failed"));
     }
-    // Merge live Worker progress into active jobs for Desktop Home Tasks polling.
+    // Merge live / terminal Worker progress into Job summaries for Desktop polling.
+    // Prefer supervisor cache (live quantums + TaskResult snapshot on completion).
+    // Synthetic 1/1 is only a last resort when Service restarted and cache is cold.
     if (runtime.worker_supervisor) {
         for (auto& item : result.value().items) {
-            if (!item.progress) {
-                if (auto live = runtime.worker_supervisor->last_progress(item.job_id)) {
-                    item.progress = std::move(*live);
-                } else if (item.state == contracts::ServiceJobState::kSucceeded) {
-                    // Terminal success without a stored progress snapshot → show 100% in UI.
-                    contracts::TaskProgress done;
-                    done.schema_version = contracts::kTaskProgressSchemaVersion;
-                    done.job_id = item.job_id;
-                    done.trace_id = item.trace_id;
-                    done.phase = contracts::TaskPhase::kCompleted;
-                    done.logical_bytes = 1;
-                    done.processed_bytes = 1;
-                    done.stored_bytes = 0;
-                    done.message_code = "job.succeeded";
-                    item.progress = std::move(done);
-                }
+            if (auto live = runtime.worker_supervisor->last_progress(item.job_id)) {
+                item.progress = std::move(*live);
+            } else if (!item.progress &&
+                       item.state == contracts::ServiceJobState::kSucceeded) {
+                contracts::TaskProgress done;
+                done.schema_version = contracts::kTaskProgressSchemaVersion;
+                done.job_id = item.job_id;
+                done.trace_id = item.trace_id;
+                done.phase = contracts::TaskPhase::kCompleted;
+                done.logical_bytes = 1;
+                done.processed_bytes = 1;
+                done.stored_bytes = 0;
+                done.message_code = "job.succeeded";
+                item.progress = std::move(done);
             }
             // Wire contract requires a non-empty stable message_code on progress payloads.
             if (item.progress && item.progress->message_code.empty()) {

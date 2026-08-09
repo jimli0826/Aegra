@@ -360,8 +360,13 @@ parse_repository_connection(const Json& payload) {
     }
     summary.effective_parent_uuid = optional_string(payload.at("effective_parent_uuid"));
     if (!payload.at("incremental_downgrade_reason").is_null()) {
-        summary.incremental_downgrade_reason =
-            unsigned_value<std::uint8_t>(payload, "incremental_downgrade_reason");
+        const auto reason = static_cast<contracts::IncrementalDowngradeReason>(
+            unsigned_value<std::uint8_t>(payload, "incremental_downgrade_reason"));
+        if (!contracts::is_known_incremental_downgrade_reason(reason) ||
+            reason == contracts::IncrementalDowngradeReason::kNone) {
+            throw std::invalid_argument("job summary incremental downgrade reason is invalid");
+        }
+        summary.incremental_downgrade_reason = static_cast<std::uint8_t>(reason);
     }
     return summary;
 }
@@ -977,9 +982,13 @@ template <typename Item, typename Parser>
         result.effective_parent_uuid = payload.at("effective_parent_uuid").get<std::string>();
     }
     if (!payload.at("incremental_downgrade_reason").is_null()) {
-        result.incremental_downgrade_reason =
-            static_cast<contracts::IncrementalDowngradeReason>(
-                unsigned_value<std::uint8_t>(payload, "incremental_downgrade_reason"));
+        const auto reason = static_cast<contracts::IncrementalDowngradeReason>(
+            unsigned_value<std::uint8_t>(payload, "incremental_downgrade_reason"));
+        if (!contracts::is_known_incremental_downgrade_reason(reason) ||
+            reason == contracts::IncrementalDowngradeReason::kNone) {
+            throw std::invalid_argument("task result incremental downgrade reason is invalid");
+        }
+        result.incremental_downgrade_reason = reason;
     }
     return result;
 }

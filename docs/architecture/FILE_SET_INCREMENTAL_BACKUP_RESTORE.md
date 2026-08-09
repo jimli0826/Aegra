@@ -2,11 +2,11 @@
 
 | 属性 | 内容 |
 | --- | --- |
-| 状态 | Accepted design；FI0–FI10 已完成 |
-| 版本 | 1.0 |
-| 日期 | 2026-08-08 |
-| 范围 | Windows 个人版、本地 NTFS/ReFS、file_set Full/Incremental、计划任务、链式浏览/验证/恢复 |
-| 决策 | [ADR-0018](../adr/0018-file-set-incremental-usn-and-chain.md) |
+| 状态 | Implemented；metadata signature 已完成 current 生产代码切换，隔离环境人工矩阵待执行 |
+| 版本 | 2.0 |
+| 日期 | 2026-08-09 |
+| 范围 | Windows 个人版、file_set Full/Incremental、计划任务、链式浏览/验证/恢复 |
+| 决策 | [ADR-0020](../adr/0020-file-set-metadata-signature-incremental.md)（变化判断）、[ADR-0021](../adr/0021-fat32-file-set-source-and-restore.md)（FAT32 能力） |
 
 ## 1. 目标与非目标
 
@@ -16,7 +16,7 @@
 
 目标：
 
-- USN Journal 连续性可证明时生成 Incremental，不可证明时安全地产生有效 Full；
+- 使用 `write_time + logical_size` 判断同一路径普通文件内容是否变化，不依赖 USN Journal；
 - tip Recovery Point 可直接分页浏览当前树，不重放目录事件；
 - 支持创建、修改、metadata-only、删除、rename 和 move；
 - Restore/Verify 通过统一 chain reader 解析本层及父层内容；
@@ -28,6 +28,8 @@ Full、跨 Schedule 复用内容、UNC、无 VSS fallback、跨平台恢复。
 
 本期明确不支持 Backup 或 Restore：reparse point、hard link、sparse file、ADS。遇到即 strict fail；不存在
 follow、flatten、dense materialization、duplicate-as-independent 或 ignore-stream 模式。
+源文件系统支持 NTFS/ReFS/FAT32 且必须由 VSS Provider 创建 snapshot；FAT32 的 coarse mtime 是
+metadata signature 的已知漏检边界。
 
 ## 2. 术语
 
@@ -35,7 +37,8 @@ follow、flatten、dense materialization、duplicate-as-independent 或 ignore-s
 | --- | --- |
 | requested type | 用户或 Schedule 请求的备份类型 |
 | effective type | 实际发布 Recovery Point 的类型；Incremental 资格失败时为 Full |
-| baseline | 父 Recovery Point 中用于证明下次增量资格的选择 fingerprint 和各卷 USN checkpoint |
+| metadata signature | 普通文件的 `(write_time, logical_size)` |
+| baseline | 父 Recovery Point 中用于判定下次增量资格的 selection fingerprint 与 change detection method |
 | tip | 用户选择用于浏览、Verify 或 Restore 的链末 Recovery Point |
 | local stream | 内容 extents 位于当前 Archive 的主数据流 |
 | parent stream | 当前 Index 不含 payload，引用直接父层 stream 的主数据流 |
@@ -52,12 +55,12 @@ Recovery Point 的 Index 仍描述完整当前树。
 Schedule(requested=incremental)
   -> Service selects parent candidate
   -> Worker opens parent chain + one VSS Snapshot Set
-  -> validate selection fingerprint and USN continuity
+  -> validate selection fingerprint and metadata baseline
        eligible   -> effective=incremental
        ineligible -> effective=full, parent_uuid=0
   -> enumerate complete current namespace
   -> reject unsupported objects
-  -> classify entries with USN + parent Index
+  -> classify entries with parent path Index + write_time/logical_size
   -> write changed/new main streams
   -> write complete current File Index
   -> commit Archive Group, then Catalog
@@ -81,8 +84,9 @@ adapters/personal_archive -> base, contracts, ports, format
 format, ports, contracts -> base
 ```
 
-Windows Adapter 读取 USN；`pipeline` 只消费平台无关 change/baseline Port。Archive Adapter 解析物理 page/record；
-chain reader 暴露 `IFileRecoveryPoint` 语义。只有 composition root 选择具体 Adapter。
+Windows Adapter 负责 VSS snapshot 枚举、metadata/security 读取和不支持对象检测；`pipeline` 使用平台无关
+parent path index 与 metadata signature 比较。Archive Adapter 解析物理 page/record；chain reader 暴露
+`IFileRecoveryPoint` 语义。只有 composition root 选择具体 Adapter。
 
 ## 4. 计划任务语义
 
@@ -93,6 +97,7 @@ chain reader 暴露 `IFileRecoveryPoint` 语义。只有 composition root 选择
 - `backup_set_uuid`；
 - 规范化 selection roots、recursion、exclusion、metadata/security 选项；
 - selection fingerprint 算法及其版本；
+- change detection method（当前固定 `mtime_size_v1`）；
 - chain depth policy；
 - Repository connection 和 credential reference。
 
@@ -107,7 +112,7 @@ Service/Repository graph 为同一 backup set 选择最新可用 Recovery Point�
 2. structural state complete，Catalog 与 Header identity 一致；
 3. backup set 与 selection fingerprint 相同；
 4. 从候选到 Full root 的链完整、无环、深度不超过 128；
-5. Credential 可认证候选 baseline 和 File Index；
+5. Credential 可认证候选 metadata baseline 和 File Index；
 6. 不是处于删除计划、缺卷、冲突或 credential-failed 状态。
 
 没有候选不是错误：effective type 为 Full。父候选存在但损坏/缺失时也不沿链向后“找一个看起来可用的旧父层”；
@@ -134,101 +139,72 @@ effective_parent_uuid
 incremental_downgrade_reason (nullable stable enum)
 ```
 
-建议 downgrade reason：`no_parent`、`selection_changed`、`chain_incomplete`、`journal_missing`、
-`journal_reset`、`journal_wrapped`、`journal_inaccessible`、`volume_identity_changed`、`baseline_invalid`。
-这些码可进入日志和 UI；路径、file ID、USN record 内容不能进入普通消息。
+建议 downgrade reason：`no_parent`、`selection_changed`、`chain_incomplete`、`baseline_invalid`、
+`parent_unavailable`、`volume_identity_changed`。旧 `journal_*` reason 属 ADR-0018 历史路径，不再由
+metadata baseline 增量产生。这些码可进入日志和 UI；路径、文件名和 security descriptor 不能进入普通消息。
 
-## 5. USN 基线与一致性
+## 5. Metadata Baseline
 
-### 5.1 Checkpoint
+ADR-0018 的 USN checkpoint 与 journal 连续性设计已被 ADR-0020 替代；现行 baseline 只包含 selection
+fingerprint 与 change detection method。
 
-每个 selected Volume 在认证 metadata 中保存：
+每个 file_set Full/Incremental 的认证 metadata 保存：
 
 ```text
-FileJournalCheckpoint {
-  volume_identity
-  journal_id: u64
-  next_usn: i64
+file_set_baseline {
+  fingerprint_algorithm = 1
+  selection_fingerprint = 32-byte digest
+  change_detection_method = 1   // mtime_size_v1
 }
 ```
 
-数组按 `volume_identity` 的 canonical bytes 排序且唯一，必须恰好覆盖 selection 所涉及的 Volume。checkpoint 与
-selection fingerprint 位于加密认证 metadata，不进入明文 Header 或未认证 Catalog。
+baseline 只证明“本 RP 可作为同一 selection 与同一变化判断方法的父层”。它不证明源端所有内容变化都能被发现；
+内容变化判断由当前枚举结果和父 Index 中的 metadata signature 比较完成。
 
-### 5.2 Snapshot 时序
+### 5.1 当前命名空间仍是权威
 
-一个 Job 的所有 selected Volume 仍属于同一个 VSS Snapshot Set。对每个 snapshot volume：
-
-1. 创建 VSS 前，在已验证的 live NTFS volume 上查询 journal；仅当返回
-  `ERROR_JOURNAL_NOT_ACTIVE` 时幂等创建 journal，不读取 live baseline 或 records；
-2. 创建 VSS Snapshot Set；
-3. 查询 snapshot 中的当前 journal state；
-4. 验证 parent checkpoint；
-5. 读取 snapshot 的 `[parent.next_usn, current.next_usn)`；
-6. 枚举当前选择树并读取数据；
-7. 将步骤 3 得到的 `current.next_usn` 写作本 Recovery Point checkpoint。
-
-USN state、记录和文件枚举必须来自同一 snapshot-consistent namespace。若平台不能从 snapshot 提供可验证的 journal
-视图，该卷不具备 Incremental 资格，任务转 Full；不得混用 live volume journal 与 snapshot 文件树。
-创建 journal 只预置 NTFS 持久能力，不提供资格数据；预置失败不阻断有效 Full，但会记录诊断并使后续 Incremental
-继续安全降级。
-
-### 5.3 连续性检查
-
-对每卷要求：
-
-```text
-current.journal_id == parent.journal_id
-current.lowest_valid_usn <= parent.next_usn <= current.next_usn
-```
-
-还需完整读到目标区间；任何 record gap、buffer truncation、unsupported record version、read error 或 journal state
-变化都使资格失效。资格判断必须在创建 Archive partial 或至少在写入 payload 前完成；若已经创建 staging，立即 Abort。
-
-### 5.4 USN 不是命名空间权威
-
-USN records 只构成变化提示和连续性证明，不能替代当前树枚举。完整枚举负责：
+metadata signature 只构成 payload 复用判断，不能替代当前树枚举。完整枚举负责：
 
 - 生成当前父子图、名称、metadata 和删除后的最终状态；
 - 发现排除规则结果；
 - 检测不支持对象；
-- 核对 `(volume_identity, FILE_ID_128)` 与 parent entry；
-- 防止 record 合并、rename pair 缺失或 file ID reuse 导致错误引用。
+- 构建 parent path index 并校验 parent stream 引用；
+- 防止 rename/move、删除、新路径或类型变化被误表达为旧路径内容。
 
 ## 6. Entry 身份与变化规划
 
-### 6.1 身份
+### 6.1 匹配 key
 
-Index entry 的 `stable_file_identity` 只在加密 page 中出现：
+Incremental planner 为直接父层构建 path index：
 
 ```text
-volume_identity + FILE_ID_128
+key = (selection_id, relative_path_components, entry_kind)
 ```
 
-目录和普通文件都保存 identity。Path/name 是当前层展示和层级字段，不参与身份相等。若 file ID 相同但 USN 序列
-显示 delete/create、entry kind 改变或父 metadata 无法证明连续，则按新对象处理。
+路径组件使用 Archive File Index 中的规范化 encoded name；比较按编码字节执行，不使用 locale。rename/move 后路径
+不同，因此按新 entry 处理并写 local stream。`StableFileIdentity` 可继续作为加密 File Index 中的诊断/校验
+metadata，但不再作为增量匹配 key 或变化证明。
 
 ### 6.2 分类表
 
-| 当前 entry | 父 entry | USN/身份结论 | 本层动作 |
+普通文件的变化签名为 `write_time + logical_size`。分类表：
+
+| 当前 entry | 父 entry | metadata signature 结论 | 本层动作 |
 | --- | --- | --- | --- |
-| 普通文件 | 无 | create/new identity | 写完整 local stream |
-| 普通文件 | 同 identity | content reason | 写完整 local stream |
-| 普通文件 | 同 identity | metadata-only | 写当前 metadata，引用 parent stream |
-| 普通文件 | 同 identity | rename/move only | 写当前 parent/name，引用 parent stream |
-| 普通文件 | 同 identity | 无相关变化且连续 | 引用 parent stream |
-| 普通文件 | 任意 | 歧义/未知 reason | 写完整 local stream |
+| 普通文件 | 无 | 新路径或新文件 | 写完整 local stream |
+| 普通文件 | 同路径普通文件 | `write_time` 和 `logical_size` 均相同 | 写当前 metadata，引用 parent stream |
+| 普通文件 | 同路径普通文件 | `write_time` 或 `logical_size` 不同 | 写完整 local stream |
+| 普通文件 | 同路径非文件/父 stream 不可验证 | 类型或引用不合格 | 写完整 local stream |
 | 目录 | 无/有 | 当前枚举结果 | 写当前 directory entry，无 stream |
 | 父中存在 | 当前缺失 | delete/out of selection | tip Index 不写该 entry |
 
-文件 size 不同必须视为内容变化。size 相同绝不单独证明内容相同。只要决定 local，本层保存整个普通文件主数据流，
-不读取父 payload 做 delta。
+只要决定 local，本层保存整个普通文件主数据流，不读取父 payload 做 delta。Full 仍把全部普通文件写为 local。
 
 ### 6.3 规划资源上限
 
-Parent lookup 与 current enumeration 使用磁盘 spool/有界索引，不把全部 entry 放入 `unordered_map`。建议按 stable
-identity 外排或使用有界 page lookup。所有 count、offset、USN、logical bytes 使用 checked arithmetic。取消需贯穿
-journal read、enumeration、parent lookup、content read、index write 和 finalization。
+Parent lookup 与 current enumeration 使用磁盘 spool/有界索引，不把全部 entry 放入 `unordered_map`。建议按 path key
+外排或使用有界 page lookup。所有 count、offset、logical bytes 使用 checked arithmetic。取消需贯穿
+enumeration、parent lookup、content read、index write 和 finalization。
 
 ## 7. Archive 与 File Index 目标合同
 
@@ -238,9 +214,9 @@ FI0/FI1 直接修订当前 Personal Archive V7，不引入 V8 或旧 V7 fallback
 
 - `file_set` 允许 FULL 或 INCREMENTAL；禁止 DIFFERENTIAL；
 - FULL：`parent_uuid=0`；INCREMENTAL：`parent_uuid!=0`；
-- 增加 critical capability `CAP_FILE_USN_BASELINE`，file Incremental 必须置位；
+- 增加 critical capability `CAP_FILE_METADATA_BASELINE`，file Incremental 必须置位；
 - file_set 始终 `CAP_HAS_FILE_INDEX`，始终禁止 volume Sidecar capability；
-- 加密 metadata 增加 `selection_fingerprint`、`fingerprint_algorithm`、`journal_checkpoints[]`；
+- 加密 metadata 增加 `selection_fingerprint`、`fingerprint_algorithm`、`change_detection_method`；
 - Header/Catalog 记录 effective type；requested type 只属于控制面和 Job result，不伪装成 Archive 类型。
 
 ### 7.2 Entry 与 stream
@@ -268,8 +244,8 @@ parent:
   parent_stream_index
 ```
 
-`parent` 只能用于 Incremental，且父 stream 必须属于 `Header.parent_uuid`。引用时当前/父 stream 的 entry stable
-identity、stream kind 和 logical size 必须一致。禁止 parent 引用与 local extents 同时出现。
+`parent` 只能用于 Incremental，且父 stream 必须属于 `Header.parent_uuid`。引用时当前/父 stream 的 path key、
+stream kind 和 logical size 必须一致。禁止 parent 引用与 local extents 同时出现。
 
 FI0 删除 `kReparse`、alternate stream、hard-link group、allocated/sparse ranges、sparse flags 和对应 platform
 metadata tag。Reader 对超出当前 exact schema 的字段或枚举统一报 corrupt/unsupported current format，不解析旧语义。
@@ -278,9 +254,9 @@ metadata tag。Reader 对超出当前 exact schema 的字段或枚举统一报 c
 
 - tip Index 是完整当前 namespace；所有非 root entry 恰有一个可达父 directory；
 - key 仍按 `(parent_entry_id, encoded_name, entry_id)` 规范排序；
-- stable identity 在当前 Index 中唯一；不允许 hard-link identity 重复；
+- 非 null stable identity 在当前 Index 中唯一；FAT32 null identity 可重复；
 - local extent 连续、不重叠、不越界，引用当前 Archive file stream chunk；
-- parent stream index 在直接父 Index 中唯一存在且通过身份/大小校验；
+- parent stream index 在直接父 Index 中唯一存在且通过 stream kind/大小校验；
 - 引用深度不超过 Repository chain limit；任何环或跨链引用拒绝；
 - page、root digest、Footer count 和 Archive Group 完整性规则保持。
 
@@ -332,7 +308,7 @@ File chain Verify 至少执行：
 2. 认证 tip Index、选择 entry 与全部后代；
 3. 解析每个 selected file 的 parent stream 链到 local payload；
 4. 确认 Archive 不含 reparse/hard-link/sparse/ADS 语义；
-5. 校验目标 NTFS/ReFS、安全路径、空间、冲突策略和 security metadata 能力；
+5. 校验目标 NTFS/ReFS/FAT32、安全路径、空间、冲突策略、security metadata 能力和单文件上限；
 6. 绑定目标根 identity 并生成 durable preflight token。
 
 写入阶段只通过 chain reader 读取逻辑主数据流。目录/普通文件 staging、flush、发布、metadata 和 partial restore
@@ -366,13 +342,13 @@ Windows snapshot enumerator 对每个当前 entry 执行：
 - attributes/allocated semantics 检测 sparse；返回 `file_source.unsupported_sparse`；
 - stream enumeration 确认只有 unnamed main `$DATA`；发现其它 `$DATA` stream 返回 `file_source.unsupported_ads`。
 
-检测覆盖 Full 与 Incremental 的完整枚举，即使 USN 判断该 entry 未变化也不能跳过。发生错误后 Abort Archive staging，
-不发布 Catalog。
+检测覆盖 Full 与 Incremental 的完整枚举，即使 metadata signature 判断该 entry 未变化也不能跳过。发生错误后
+Abort Archive staging，不发布 Catalog。
 
 ### 11.2 Restore/Reader
 
 Current-format Parser exact-schema 拒绝相关旧字段/枚举。Restore preflight 另做 defense-in-depth capability scan，确保
-没有 alternate stream、sparse extent、duplicate stable identity 或 reparse entry。拒绝发生在创建目录/staging 前。
+没有 alternate stream、sparse extent、duplicate non-null stable identity 或 reparse entry。拒绝发生在创建目录/staging 前。
 
 ### 11.3 不允许的捷径
 
@@ -384,12 +360,12 @@ Current-format Parser exact-schema 拒绝相关旧字段/枚举。Restore prefli
 
 ## 12. 安全、资源与可观测性
 
-- File identity、journal record、路径、名称、security descriptor 位于认证/加密边界，不进入 Catalog 或普通日志；
+- 路径、名称、security descriptor 位于认证/加密边界，不进入 Catalog 或普通日志；
 - 日志只记录 RP UUID、layer depth、entry/byte count、requested/effective type 和稳定 reason code；
-- journal batch、entry batch、parent lookup cache、content queue 和 index page 都有 byte/count 上限；
+- entry batch、parent lookup cache、content queue 和 index page 都有 byte/count 上限；
 - parent Archive handle 数最多 128；实现可按层惰性打开，但 preflight 必须完成链身份认证；
-- 所有 `offset+size`、count multiplication、USN range 和 byte total 使用 checked arithmetic；
-- cancellation 在有界时间内中断 USN read、enumeration、stream read、page read、queue wait 和 finalize；
+- 所有 `offset+size`、count multiplication 和 byte total 使用 checked arithmetic；
+- cancellation 在有界时间内中断 enumeration、stream read、page read、queue wait 和 finalize；
 - partial/staging 文件、spool 与 Archive Group 由 RAII 清理；首卷与 Catalog 仍最后发布。
 
 新增/调整的稳定码至少包括：
@@ -398,10 +374,7 @@ Current-format Parser exact-schema 拒绝相关旧字段/枚举。Restore prefli
 file_backup.incremental_downgraded_full
 file_backup.parent_chain_invalid
 file_backup.selection_fingerprint_mismatch
-file_backup.journal_missing
-file_backup.journal_reset
-file_backup.journal_wrapped
-file_backup.journal_inaccessible
+file_backup.metadata_baseline_invalid
 file_source.unsupported_reparse
 file_source.unsupported_hard_link
 file_source.unsupported_sparse
@@ -416,7 +389,7 @@ file_recover.chain_depth_limit
 | 阶段 | 故障 | 行为 |
 | --- | --- | --- |
 | 选父/认证 | 父缺失、损坏、凭据失败 | 凭据失败使 Job 失败；结构/资格问题转 Full，记录 reason |
-| USN 资格 | reset/wrap/missing/gap | 转 Full，不以 metadata 猜测 |
+| baseline 资格 | fingerprint/method 不一致 | 转 Full，不接旧链 |
 | 枚举 | 不可读/不支持对象/超限 | strict fail，Abort，无可见 RP |
 | 内容读取 | short read/identity changed | fail，Abort；VSS 视图不允许 live retry |
 | Index/finalize | spool 满/引用无效 | fail，Abort |
@@ -425,15 +398,16 @@ file_recover.chain_depth_limit
 | Restore preflight | 链/引用/能力失败 | failed_before_write |
 | Restore write | 目标盘满/取消 | 清 staging，已发布项计 partial_restore |
 
-credential 无法打开父层不是 USN 资格不足，不能静默转 Full 后绕过父认证；任务应返回 credential failure。这样避免
+credential 无法打开父层不是 baseline 不足，不能静默转 Full 后绕过父认证；任务应返回 credential failure。这样避免
 “错误口令仍产生新基线”的意外行为。
 
 ## 14. 完成标准
 
 - Schedule 可请求 file Full/Incremental，UI 展示 requested/effective type 和 downgrade reason；
-- 连续 USN 场景生成父链正确的 Incremental；tip Index 包含完整当前树；
-- create/modify/metadata-only/delete/rename/move 的 browse、Verify、restore 人工核对正确；
-- journal reset/wrap/missing、selection 改变、父缺失会生成明确的新 Full，凭据错误会失败；
+- metadata signature 场景生成父链正确的 Incremental；tip Index 包含完整当前树；
+- no-change、mtime change、size change、新文件、删除、rename/move 的 browse、Verify、restore 人工核对符合本设计；
+- 同大小同 mtime 修改被明确记录为本模式风险；
+- selection 改变、父缺失会生成明确的新 Full，凭据错误会失败；
 - reparse、hard link、sparse、ADS 在 Backup strict fail，在 Restore 写前拒绝；
 - Chain Reader、Verify、Restore、Catalog rebuild、retention/delete 均理解 file chain；
 - Debug/Release 受影响 production targets、静态/架构/格式/秘密检查通过；

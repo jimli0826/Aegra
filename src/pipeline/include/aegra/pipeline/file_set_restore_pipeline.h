@@ -29,6 +29,9 @@ struct FileSetRestoreSummary final {
     contracts::PartialRestoreStats stats;
     std::uint64_t directories_created{0};
     std::uint64_t files_published{0};
+    /// Denominator for live TaskProgress percent (sum of selected file logical sizes).
+    /// Zero means byte percent is unknown (directory-only selection).
+    std::uint64_t progress_logical_bytes{0};
 };
 
 /// Platform-agnostic file_set restore. Completes Index selection preflight before any Sink mutation.

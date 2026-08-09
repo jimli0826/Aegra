@@ -5,7 +5,7 @@ add_library(aegra_adapter_windows_filesystem STATIC
     src/windows_file_snapshot_view.cpp
     src/windows_file_tree_sink.cpp
     src/windows_file_source_browser.cpp
-    src/windows_usn_journal.cpp
+    src/windows_file_special_folders.cpp
 )
 
 add_library(Aegra::AdapterWindowsFilesystem ALIAS aegra_adapter_windows_filesystem)
@@ -20,6 +20,6 @@ target_compile_definitions(aegra_adapter_windows_filesystem PRIVATE NOMINMAX WIN
 target_link_libraries(
     aegra_adapter_windows_filesystem
     PUBLIC Aegra::Base Aegra::Contracts Aegra::Ports Aegra::Format
-    PRIVATE Advapi32
+    PRIVATE Advapi32 Shell32 Ole32
 )
 aegra_configure_target(aegra_adapter_windows_filesystem)

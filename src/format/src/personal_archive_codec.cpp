@@ -157,7 +157,7 @@ template <std::size_t Size>
         return base::Result<void>::failure(corrupt("backup content kind is invalid"));
     }
     const auto known_caps =
-        kCapabilityHasFileIndex | kCapabilityVolumeSidecarOk | kCapabilityFileUsnBaseline;
+        kCapabilityHasFileIndex | kCapabilityVolumeSidecarOk | kCapabilityFileMetadataBaseline;
     if ((header.capability_flags & ~known_caps) != 0) {
         return base::Result<void>::failure(corrupt("backup capability flags are unknown"));
     }
@@ -175,9 +175,9 @@ template <std::size_t Size>
             }
         } else if (backup_type == kBackupFlagIncremental) {
             if (is_zero_uuid(header.parent_uuid) ||
-                (header.capability_flags & kCapabilityFileUsnBaseline) == 0) {
-                return base::Result<void>::failure(
-                    corrupt("file_set incremental requires parent and USN baseline capability"));
+                (header.capability_flags & kCapabilityFileMetadataBaseline) == 0) {
+                return base::Result<void>::failure(corrupt(
+                    "file_set incremental requires parent and metadata baseline capability"));
             }
         } else {
             return base::Result<void>::failure(corrupt("file_set backup type flags are invalid"));
@@ -283,7 +283,8 @@ template <std::size_t Size>
             header.kdf_method != MetadataKdfMethod::kArgon2Id || header.nonce_size != 24 ||
             header.tag_size != 16 || header.kdf_opslimit == 0 || header.kdf_memlimit_bytes == 0 ||
             header.kdf_parameters_version != 1) {
-            return base::Result<void>::failure(corrupt("metadata envelope is not formally encrypted"));
+            return base::Result<void>::failure(
+                corrupt("metadata envelope is not formally encrypted"));
         }
         return base::Result<void>::success();
     }
@@ -323,7 +324,8 @@ template <std::size_t Size>
 
 [[nodiscard]] base::Result<void> validate_record_prefix(const ArchiveRecordPrefix& prefix) {
     if (prefix.prefix_version != kRecordPrefixVersion) {
-        return base::Result<void>::failure(unsupported("archive record prefix version unsupported"));
+        return base::Result<void>::failure(
+            unsupported("archive record prefix version unsupported"));
     }
     switch (prefix.record_kind) {
     case kRecordKindVolumeChunk:
@@ -375,8 +377,8 @@ ArchiveRecordPrefix make_file_index_page_record_prefix(const std::uint64_t body_
 }
 
 ArchiveRecordPrefix make_footer_record_prefix() noexcept {
-    return {kRecordPrefixVersion, kRecordKindFooter, kArchiveRecordPrefixSize, kBackupFooterBodySize,
-            0};
+    return {kRecordPrefixVersion, kRecordKindFooter, kArchiveRecordPrefixSize,
+            kBackupFooterBodySize, 0};
 }
 
 base::Result<EncodedBackupHeader> encode_backup_header(const BackupHeader& header) {
@@ -423,9 +425,9 @@ base::Result<BackupHeader> decode_backup_header(std::span<const std::byte> bytes
     if (read_integer<std::uint32_t>(bytes, 12) != kBackupHeaderSize) {
         return base::Result<BackupHeader>::failure(corrupt("backup header size is invalid"));
     }
-    if (std::to_integer<std::uint8_t>(bytes[107]) != 0 ||
-        !is_zero_span(bytes.subspan(128, 128))) {
-        return base::Result<BackupHeader>::failure(corrupt("backup header reserved fields are set"));
+    if (std::to_integer<std::uint8_t>(bytes[107]) != 0 || !is_zero_span(bytes.subspan(128, 128))) {
+        return base::Result<BackupHeader>::failure(
+            corrupt("backup header reserved fields are set"));
     }
     BackupHeader result;
     result.file_uuid = read_bytes<16>(bytes, 16);
@@ -668,8 +670,7 @@ base::Result<EncodedFileIndexPageHeader>
 encode_file_index_page_header(const FileIndexPageHeader& header) {
     if (header.page_format_version != kFileIndexPageFormatVersion || header.page_id == 0 ||
         header.plain_size == 0 || header.plain_size > kMaximumIndexPagePlainBytes ||
-        header.encoded_size != header.plain_size ||
-        header.protection_mode != kIndexProtectAead ||
+        header.encoded_size != header.plain_size || header.protection_mode != kIndexProtectAead ||
         !is_valid_index_page_kind(header.page_kind) || is_zero_bytes(header.nonce)) {
         return base::Result<EncodedFileIndexPageHeader>::failure(
             corrupt("file index page header fields are invalid"));

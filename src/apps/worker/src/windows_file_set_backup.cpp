@@ -87,9 +87,13 @@ namespace windows_vss = adapters::windows_vss;
             "Windows file_set backup geometry is invalid",
         });
     }
+    auto fingerprint =
+        contracts::validate_file_selection_fingerprint(request.selection_fingerprint);
+    if (!fingerprint) {
+        return fingerprint;
+    }
     if (request.effective_type == contracts::BackupType::kFull) {
-        if (!is_zero_uuid(request.parent_uuid) || request.parent_reader != nullptr ||
-            !request.parent_checkpoints.empty()) {
+        if (!is_zero_uuid(request.parent_uuid) || request.parent_reader != nullptr) {
             return base::Result<void>::failure(base::Error{
                 base::ErrorCode::kInvalidArgument,
                 "full file_set backup must not set parent fields",
@@ -102,13 +106,6 @@ namespace windows_vss = adapters::windows_vss;
                 base::ErrorCode::kInvalidArgument,
                 "incremental file_set backup requires parent identity and reader",
             });
-        }
-        if (!request.parent_checkpoints.empty()) {
-            auto checkpoints =
-                contracts::validate_file_journal_checkpoints(request.parent_checkpoints);
-            if (!checkpoints) {
-                return checkpoints;
-            }
         }
     } else {
         return base::Result<void>::failure(base::Error{
@@ -297,86 +294,8 @@ open_snapshot_view(const std::vector<VolumePlan>& volumes, const SnapshotLease& 
     return windows_filesystem::WindowsFileSnapshotView::open(open_request);
 }
 
-[[nodiscard]] base::Result<std::vector<contracts::FileJournalCheckpoint>>
-query_snapshot_journal_checkpoints(ports::IFileSnapshotView& snapshot,
-                                   const std::vector<VolumePlan>& volumes,
-                                   const base::CancellationToken& cancellation) {
-    std::vector<contracts::FileJournalCheckpoint> checkpoints;
-    checkpoints.reserve(volumes.size());
-    for (const auto& plan : volumes) {
-        auto state = snapshot.query_journal_state(plan.volume_identity, cancellation);
-        if (!state) {
-            return base::Result<std::vector<contracts::FileJournalCheckpoint>>::failure(
-                state.error());
-        }
-        if (!state.value().available) {
-            // Any unavailable volume → omit all checkpoints (baseline not usable for Incremental).
-            if (auto* log = WorkerTaskLog::active(); log != nullptr) {
-                log->field("journal_unavailable_volume", plan.volume_identity);
-                log->field_u64("journal_unavailable_reason", static_cast<std::uint64_t>(
-                                                                  state.value().unavailable_reason));
-                log->field_u64("journal_native_error_code", state.value().native_error_code);
-            }
-            return base::Result<std::vector<contracts::FileJournalCheckpoint>>::success({});
-        }
-        contracts::FileJournalCheckpoint checkpoint;
-        checkpoint.volume_identity = plan.volume_identity;
-        checkpoint.journal_id = state.value().journal_id;
-        checkpoint.next_usn = state.value().next_usn;
-        checkpoints.push_back(std::move(checkpoint));
-    }
-    std::sort(checkpoints.begin(), checkpoints.end(),
-              [](const contracts::FileJournalCheckpoint& left,
-                 const contracts::FileJournalCheckpoint& right) {
-                  return left.volume_identity < right.volume_identity;
-              });
-    return base::Result<std::vector<contracts::FileJournalCheckpoint>>::success(
-        std::move(checkpoints));
-}
-
-[[nodiscard]] const contracts::FileJournalCheckpoint*
-find_parent_checkpoint(const std::vector<contracts::FileJournalCheckpoint>& checkpoints,
-                       const std::string& volume_identity) noexcept {
-    for (const auto& checkpoint : checkpoints) {
-        if (checkpoint.volume_identity == volume_identity) {
-            return &checkpoint;
-        }
-    }
-    return nullptr;
-}
-
-/// Snapshot-side USN continuity. Returns nullopt when Incremental remains eligible.
-[[nodiscard]] std::optional<contracts::IncrementalDowngradeReason>
-evaluate_usn_eligibility(ports::IFileSnapshotView& snapshot,
-                         const std::vector<VolumePlan>& volumes,
-                         const std::vector<contracts::FileJournalCheckpoint>& parent_checkpoints,
-                         const base::CancellationToken& cancellation) {
-    for (const auto& plan : volumes) {
-        const auto* parent = find_parent_checkpoint(parent_checkpoints, plan.volume_identity);
-        if (parent == nullptr) {
-            return contracts::IncrementalDowngradeReason::kJournalMissing;
-        }
-        auto state = snapshot.query_journal_state(plan.volume_identity, cancellation);
-        if (!state) {
-            return contracts::IncrementalDowngradeReason::kJournalInaccessible;
-        }
-        if (!state.value().available) {
-            return contracts::IncrementalDowngradeReason::kJournalInaccessible;
-        }
-        if (state.value().journal_id != parent->journal_id) {
-            return contracts::IncrementalDowngradeReason::kJournalReset;
-        }
-        if (state.value().lowest_valid_usn > parent->next_usn ||
-            parent->next_usn > state.value().next_usn) {
-            return contracts::IncrementalDowngradeReason::kJournalWrapped;
-        }
-    }
-    return std::nullopt;
-}
-
 [[nodiscard]] base::Result<format::Manifest>
-make_file_manifest(const WindowsFileSetBackupRequest& request,
-                   std::vector<contracts::FileJournalCheckpoint> journal_checkpoints) {
+make_file_manifest(const WindowsFileSetBackupRequest& request) {
     format::Manifest manifest;
     manifest.content_kind = format::kManifestContentKindFileSet;
     manifest.system.hostname = request.hostname;
@@ -397,16 +316,16 @@ make_file_manifest(const WindowsFileSetBackupRequest& request,
     manifest.file_set_baseline.fingerprint_algorithm =
         contracts::kSelectionFingerprintAlgorithmSha256V1;
     manifest.file_set_baseline.selection_fingerprint = digest.value();
-    // Snapshot-consistent USN checkpoints for this Recovery Point (next Incremental baseline).
-    // Incremental requires a non-empty set (create validation + V7 rules).
-    if (request.effective_type == contracts::BackupType::kIncremental &&
-        journal_checkpoints.empty()) {
+    if (manifest.file_set_baseline.fingerprint_algorithm !=
+            request.selection_fingerprint.algorithm_id ||
+        manifest.file_set_baseline.selection_fingerprint != request.selection_fingerprint.digest) {
         return base::Result<format::Manifest>::failure(base::Error{
             base::ErrorCode::kConflict,
-            "file_backup.journal_inaccessible",
+            "file_backup.selection_fingerprint_mismatch",
         });
     }
-    manifest.file_set_baseline.journal_checkpoints = std::move(journal_checkpoints);
+    manifest.file_set_baseline.change_detection_method =
+        contracts::FileChangeDetectionMethod::kMtimeSizeV1;
     return base::Result<format::Manifest>::success(std::move(manifest));
 }
 
@@ -448,7 +367,6 @@ run_pipeline(const WindowsFileSetBackupRequest& request, ports::IFileSnapshotVie
     plan.enumerate_batch_size = 256;
     plan.effective_type = request.effective_type;
     plan.parent_reader = request.parent_reader;
-    plan.parent_checkpoints = request.parent_checkpoints;
     pipeline::FileSetBackupPipeline pipeline(snapshot, session, progress);
     return pipeline.run(plan, cancellation);
 }
@@ -480,32 +398,6 @@ backup_windows_file_set(const WindowsFileSetBackupRequest& request,
             stage.note_u64("selection_count", request.selections.size());
         }
 
-        {
-            ScopedStage stage(WorkerTaskLog::active(), "prepare_journal");
-            std::uint64_t created_count = 0;
-            std::uint64_t unavailable_count = 0;
-            for (const auto& plan : volumes) {
-                auto prepared = windows_filesystem::ensure_file_change_journal_active(
-                    path_to_utf16(plan.volume.volume_guid_path), cancellation);
-                if (!prepared) {
-                    if (prepared.error().code == base::ErrorCode::kCancelled) {
-                        stage.fail(prepared.error(), "prepare_journal", {});
-                        return base::Result<WindowsFileSetBackupResult>::failure(prepared.error());
-                    }
-                    ++unavailable_count;
-                    if (auto* log = WorkerTaskLog::active(); log != nullptr) {
-                        log->warn(prepared.error().message);
-                    }
-                    continue;
-                }
-                if (prepared.value()) {
-                    ++created_count;
-                }
-            }
-            stage.note_u64("journal_created_count", created_count);
-            stage.note_u64("journal_unavailable_count", unavailable_count);
-        }
-
         std::unique_ptr<SnapshotLease> lease;
         {
             ScopedStage stage(WorkerTaskLog::active(), "create_vss_set");
@@ -530,19 +422,7 @@ backup_windows_file_set(const WindowsFileSetBackupRequest& request,
             view = std::move(opened).value();
         }
 
-        std::vector<contracts::FileJournalCheckpoint> journal_checkpoints;
-        {
-            ScopedStage stage(WorkerTaskLog::active(), "query_journal");
-            auto queried = query_snapshot_journal_checkpoints(*view, volumes, cancellation);
-            if (!queried) {
-                stage.fail(queried.error(), "query_journal", {});
-                return base::Result<WindowsFileSetBackupResult>::failure(queried.error());
-            }
-            journal_checkpoints = std::move(queried).value();
-            stage.note_u64("journal_checkpoint_count", journal_checkpoints.size());
-        }
-
-        // Working copy: USN demotion may clear parent fields before archive create.
+        // Service may have qualified the request as a new Full baseline.
         WindowsFileSetBackupRequest effective = request;
         auto publish_downgrade = [&](const contracts::IncrementalDowngradeReason reason) {
             if (progress == nullptr) {
@@ -552,34 +432,17 @@ backup_windows_file_set(const WindowsFileSetBackupRequest& request,
                 effective.job_id, effective.trace_id, contracts::TaskPhase::kPreparing, 0, 0, 0,
                 "file_backup.incremental_downgraded_full"));
             if (auto* log = WorkerTaskLog::active(); log != nullptr) {
-                log->field_u64("incremental_downgrade_reason",
-                               static_cast<std::uint64_t>(reason));
+                log->field_u64("incremental_downgrade_reason", static_cast<std::uint64_t>(reason));
             }
         };
         if (effective.service_full_reason) {
             effective.effective_type = contracts::BackupType::kFull;
             effective.parent_uuid = {};
-            effective.parent_checkpoints.clear();
             effective.parent_reader = nullptr;
             publish_downgrade(*effective.service_full_reason);
-        } else if (effective.effective_type == contracts::BackupType::kIncremental) {
-            ScopedStage stage(WorkerTaskLog::active(), "evaluate_usn_eligibility");
-            auto demote = evaluate_usn_eligibility(*view, volumes, effective.parent_checkpoints,
-                                                   cancellation);
-            if (demote) {
-                stage.note_u64("downgrade_reason", static_cast<std::uint64_t>(*demote));
-                effective.effective_type = contracts::BackupType::kFull;
-                effective.parent_uuid = {};
-                effective.parent_checkpoints.clear();
-                effective.parent_reader = nullptr;
-                effective.service_full_reason = demote;
-                publish_downgrade(*demote);
-            } else {
-                stage.note("eligibility", "incremental");
-            }
         }
 
-        auto manifest = make_file_manifest(effective, std::move(journal_checkpoints));
+        auto manifest = make_file_manifest(effective);
         if (!manifest) {
             return base::Result<WindowsFileSetBackupResult>::failure(manifest.error());
         }
@@ -589,8 +452,9 @@ backup_windows_file_set(const WindowsFileSetBackupRequest& request,
             stage.note("destination", path_to_utf8(effective.destination));
             stage.note_bool("encryption_enabled", effective.encryption_enabled);
             stage.note_u64("effective_type", static_cast<std::uint64_t>(effective.effective_type));
-            stage.note_u64("journal_checkpoint_count",
-                           manifest.value().file_set_baseline.journal_checkpoints.size());
+            stage.note_u64("change_detection_method",
+                           static_cast<std::uint64_t>(
+                               manifest.value().file_set_baseline.change_detection_method));
             auto opened = create_file_archive(effective, manifest.value());
             if (!opened) {
                 stage.fail(opened.error(), "create_session", {});

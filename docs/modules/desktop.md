@@ -68,7 +68,7 @@ ServiceClient (QML 门面)
   ├── service_protocol           # Service V4 私有 Qt 编解码
   ├── ServiceRequestCoordinator  # correlation ID、deadline、断线清理、分页 continue
   ├── RecoveryPointModel         # 领域 QAbstractListModel（含 contentKind）
-  ├── FileBrowseModel            # BrowseFileSources lazy 树（token only）
+  ├── FileBrowseModel            # BrowseFileSources lazy 树（token only；根含特殊目录 + 卷）
   └── FileRecoverModel           # ListRecoveryPointEntries lazy 树（entry_id only）
 ```
 

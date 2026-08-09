@@ -66,7 +66,7 @@ base::Result<void> validate_backup_options(const JobRequest& request) {
                 return invalid("full file_set backup cannot carry parent or demotion fields");
             }
         } else if (request.backup->service_full_reason) {
-            // Service catalog demotion: requested Incremental, forced Full before Worker USN checks.
+            // Service catalog demotion: requested Incremental, forced Full before Worker checks.
             if (!is_known_incremental_downgrade_reason(*request.backup->service_full_reason) ||
                 *request.backup->service_full_reason == IncrementalDowngradeReason::kNone) {
                 return invalid("file_set service_full_reason is invalid");
@@ -85,13 +85,14 @@ base::Result<void> validate_backup_options(const JobRequest& request) {
         if (!request.backup->selection_fingerprint) {
             return invalid("file_set backup requires selection_fingerprint");
         }
-        auto fingerprint = validate_file_selection_fingerprint(*request.backup->selection_fingerprint);
+        auto fingerprint =
+            validate_file_selection_fingerprint(*request.backup->selection_fingerprint);
         if (!fingerprint) {
             return fingerprint;
         }
     } else {
-        if (request.backup->selection_fingerprint || !request.backup->candidate_parent_uuid.empty() ||
-            request.backup->service_full_reason) {
+        if (request.backup->selection_fingerprint ||
+            !request.backup->candidate_parent_uuid.empty() || request.backup->service_full_reason) {
             return invalid("volume_set backup cannot carry file selection baseline fields");
         }
         const bool has_parent_source = !request.backup->parent_source_ref.empty();

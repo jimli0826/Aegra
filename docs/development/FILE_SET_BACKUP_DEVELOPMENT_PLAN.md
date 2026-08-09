@@ -360,9 +360,10 @@ cmd.exe /d /c scripts\build.cmd Release
 
 ## 15. F11：文件级 Incremental 决策移交（已完成）
 
-ADR-0018 已冻结 USN baseline、完整 current namespace Index、direct-parent stream、chain reader 与安全 Full 语义。
-实际开发不再扩展 F11，统一按
-[文件集增量开发计划 FI0–FI10](FILE_SET_INCREMENTAL_DEVELOPMENT_PLAN.md) 执行。FI0 首先移除并严格拒绝
+ADR-0018 的 USN baseline 已被 [ADR-0020](../adr/0020-file-set-metadata-signature-incremental.md) 替代。
+现行文件级 Incremental 使用完整 current namespace Index、direct-parent stream、chain reader 与
+`write_time + logical_size` metadata signature。实际开发不再扩展 F11，统一按
+[metadata signature 增量改造开发计划](FILE_SET_METADATA_SIGNATURE_DEVELOPMENT_PLAN.md) 的 MS 工作包执行。FI0 首先移除并严格拒绝
 reparse、hard link、sparse、ADS；旧开发格式与接口不保留兼容路径。
 
 ## 16. Agent 交付模板

@@ -26,6 +26,60 @@ Item {
         id: fileIconComponent
         FileDocIcon { size: 16 }
     }
+    Component {
+        id: specialDesktopIconComponent
+        SpecialFolderIcon { size: 16; variant: "desktop" }
+    }
+    Component {
+        id: specialDownloadsIconComponent
+        SpecialFolderIcon { size: 16; variant: "downloads" }
+    }
+    Component {
+        id: specialDocumentsIconComponent
+        SpecialFolderIcon { size: 16; variant: "documents" }
+    }
+    Component {
+        id: specialPicturesIconComponent
+        SpecialFolderIcon { size: 16; variant: "pictures" }
+    }
+    Component {
+        id: specialMusicIconComponent
+        SpecialFolderIcon { size: 16; variant: "music" }
+    }
+    Component {
+        id: specialVideosIconComponent
+        SpecialFolderIcon { size: 16; variant: "videos" }
+    }
+
+    /// Volume roots look like "Label (C:)" / "C:"; special folders use fixed English labels.
+    function isVolumeRootLabel(name) {
+        var text = String(name || "")
+        return /\([A-Za-z]:\)$/.test(text) || /^[A-Za-z]:$/.test(text)
+    }
+    function specialFolderIconFor(name) {
+        switch (String(name || "").toLowerCase()) {
+        case "desktop": return specialDesktopIconComponent
+        case "downloads": return specialDownloadsIconComponent
+        case "documents": return specialDocumentsIconComponent
+        case "pictures": return specialPicturesIconComponent
+        case "music": return specialMusicIconComponent
+        case "videos": return specialVideosIconComponent
+        default: return null
+        }
+    }
+    function fileSourceIconFor(depth, isDirectory, displayName) {
+        if (depth === 0) {
+            var special = specialFolderIconFor(displayName)
+            if (special)
+                return special
+            if (isVolumeRootLabel(displayName))
+                return volumeIconComponent
+            return folderIconComponent
+        }
+        if (isDirectory)
+            return folderIconComponent
+        return fileIconComponent
+    }
 
     // Add Schedule wizard (drawer)
     property bool wizardOpen: false
@@ -2096,18 +2150,13 @@ Item {
                                                                    .toggleChecked(nodeToken)
                                                 }
                                             }
-                                            // Icon before name: volume root vs folder vs file.
+                                            // Icon before name: special folder / volume / folder / file.
                                             Loader {
                                                 Layout.preferredWidth: 16
                                                 Layout.preferredHeight: 16
                                                 Layout.alignment: Qt.AlignVCenter
-                                                sourceComponent: {
-                                                    if (depth === 0)
-                                                        return volumeIconComponent
-                                                    if (isDirectory)
-                                                        return folderIconComponent
-                                                    return fileIconComponent
-                                                }
+                                                sourceComponent: root.fileSourceIconFor(
+                                                    depth, isDirectory, displayName)
                                             }
                                             Text {
                                                 Layout.fillWidth: true

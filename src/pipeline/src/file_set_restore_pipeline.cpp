@@ -56,12 +56,45 @@ void publish(ports::IProgressSink* sink, const FileSetRestorePlan& plan,
     progress.job_id = plan.job_id;
     progress.trace_id = plan.trace_id;
     progress.phase = phase;
-    progress.processed_bytes = summary.stats.bytes_restored;
-    progress.stored_bytes = summary.stats.bytes_restored;
+    // Mirror file backup: Desktop percent = processed_bytes / logical_bytes.
+    // Completed must satisfy processed == logical when logical is set (contracts).
+    if (summary.progress_logical_bytes > 0) {
+        progress.logical_bytes = summary.progress_logical_bytes;
+        if (phase == contracts::TaskPhase::kCompleted) {
+            progress.processed_bytes = summary.progress_logical_bytes;
+            progress.stored_bytes = summary.stats.bytes_restored;
+        } else {
+            // Cap at denominator so partial mid-stream never exceeds planned total.
+            progress.processed_bytes =
+                (std::min)(summary.stats.bytes_restored, summary.progress_logical_bytes);
+            progress.stored_bytes = progress.processed_bytes;
+        }
+    } else {
+        progress.processed_bytes = summary.stats.bytes_restored;
+        progress.stored_bytes = summary.stats.bytes_restored;
+    }
     progress.discovered_entries = summary.stats.entries_requested;
     progress.processed_entries = summary.stats.entries_restored;
     progress.message_code = message;
     sink->publish(std::move(progress));
+}
+
+[[nodiscard]] base::Result<std::uint64_t>
+sum_file_logical_bytes(const std::vector<contracts::FileEntryDesc>& entries) {
+    std::uint64_t total = 0;
+    for (const auto& entry : entries) {
+        if (entry.kind != contracts::FileEntryKind::kFile) {
+            continue;
+        }
+        const auto size = entry.streams.size() == 1 ? entry.streams.front().logical_size
+                                                    : entry.logical_size;
+        auto next = checked_add(total, size);
+        if (!next) {
+            return next;
+        }
+        total = next.value();
+    }
+    return base::Result<std::uint64_t>::success(total);
 }
 
 [[nodiscard]] base::Result<void> validate_plan(const FileSetRestorePlan& plan) {
@@ -259,6 +292,11 @@ preflight_entries(ports::IFileTreeSink& sink, const std::vector<contracts::FileE
             return base::Result<void>::failure(err(
                 base::ErrorCode::kInvalidArgument, "file_restore.target_capability_missing"));
         }
+        if (entry.kind == contracts::FileEntryKind::kFile &&
+            entry.logical_size > caps.value().maximum_file_size_bytes) {
+            return base::Result<void>::failure(
+                err(base::ErrorCode::kInvalidArgument, "file_restore.target_file_too_large"));
+        }
     }
     return base::Result<void>::success();
 }
@@ -292,7 +330,8 @@ path_for_entry(const contracts::FileEntryDesc& entry,
 [[nodiscard]] base::Result<void>
 restore_file_content(ports::IFileRecoveryPointReader& reader, ports::IStagedFileWriter& writer,
                      const contracts::FileEntryDesc& entry, const FileSetRestorePlan& plan,
-                     FileSetRestoreSummary& summary, const base::CancellationToken& cancellation) {
+                     FileSetRestoreSummary& summary, ports::IProgressSink* progress,
+                     const base::CancellationToken& cancellation) {
     if (entry.streams.size() != 1) {
         return base::Result<void>::failure(
             err(base::ErrorCode::kCorruptData, "file_restore.unsupported_archive_semantics"));
@@ -331,6 +370,181 @@ restore_file_content(ports::IFileRecoveryPointReader& reader, ports::IStagedFile
             return base::Result<void>::failure(bytes.error());
         }
         summary.stats.bytes_restored = bytes.value();
+        // Publish after each quantum so Desktop can poll live percent while writing.
+        publish(progress, plan, contracts::TaskPhase::kWriting, summary, "file_restore.writing");
+    }
+    return base::Result<void>::success();
+}
+
+struct PartitionedEntries final {
+    std::vector<contracts::FileEntryDesc> directories;
+    std::vector<contracts::FileEntryDesc> files;
+    std::unordered_map<std::uint64_t, contracts::FileEntryDesc> by_id;
+};
+
+struct RestoreMutationContext final {
+    ports::IFileRecoveryPointReader& reader;
+    ports::IFileTreeSink& sink;
+    const FileSetRestorePlan& plan;
+    FileSetRestoreSummary& summary;
+    ports::IProgressSink* progress{nullptr};
+    const std::unordered_map<std::uint64_t, contracts::FileEntryDesc>& by_id;
+};
+
+[[nodiscard]] PartitionedEntries
+partition_selected(std::vector<contracts::FileEntryDesc> selected) {
+    PartitionedEntries parts;
+    for (auto& entry : selected) {
+        parts.by_id.emplace(entry.entry_id, entry);
+        if (entry.kind == contracts::FileEntryKind::kDirectory) {
+            parts.directories.push_back(std::move(entry));
+        } else {
+            parts.files.push_back(std::move(entry));
+        }
+    }
+    std::ranges::sort(parts.directories, [&parts](const auto& left, const auto& right) {
+        const auto left_depth = entry_depth(left, parts.by_id);
+        const auto right_depth = entry_depth(right, parts.by_id);
+        if (left_depth != right_depth) {
+            return left_depth < right_depth;
+        }
+        return left.entry_id < right.entry_id;
+    });
+    return parts;
+}
+
+[[nodiscard]] base::Result<std::unordered_set<std::uint64_t>>
+create_directories(RestoreMutationContext& ctx,
+                   const std::vector<contracts::FileEntryDesc>& directories,
+                   const base::CancellationToken& cancellation) {
+    std::unordered_set<std::uint64_t> created;
+    for (const auto& entry : directories) {
+        if (cancellation.stop_requested()) {
+            return base::Result<std::unordered_set<std::uint64_t>>::failure(
+                err(base::ErrorCode::kCancelled, "file restore cancelled"));
+        }
+        auto path = path_for_entry(entry, ctx.by_id);
+        if (!path) {
+            return base::Result<std::unordered_set<std::uint64_t>>::failure(path.error());
+        }
+        auto ok = ctx.sink.create_directory(path.value(), cancellation);
+        if (!ok) {
+            ++ctx.summary.stats.entries_failed;
+            record_stable_error(ctx.summary.stats, "file_restore.directory_create_failed");
+            continue;
+        }
+        created.insert(entry.entry_id);
+        ++ctx.summary.directories_created;
+        ++ctx.summary.stats.entries_restored;
+        publish(ctx.progress, ctx.plan, contracts::TaskPhase::kWriting, ctx.summary,
+                "file_restore.writing");
+    }
+    return base::Result<std::unordered_set<std::uint64_t>>::success(std::move(created));
+}
+
+[[nodiscard]] base::Result<void>
+restore_one_file(RestoreMutationContext& ctx, const contracts::FileEntryDesc& entry,
+                 const base::CancellationToken& cancellation) {
+    auto path = path_for_entry(entry, ctx.by_id);
+    if (!path) {
+        return base::Result<void>::failure(path.error());
+    }
+    auto writer = ctx.sink.begin_file(path.value(), entry.logical_size, cancellation);
+    if (!writer) {
+        ++ctx.summary.stats.entries_failed;
+        record_stable_error(ctx.summary.stats, "file_restore.file_create_failed");
+        return base::Result<void>::success();
+    }
+    auto content = restore_file_content(ctx.reader, *writer.value(), entry, ctx.plan, ctx.summary,
+                                        ctx.progress, cancellation);
+    if (!content) {
+        writer.value()->abort();
+        ++ctx.summary.stats.entries_failed;
+        record_stable_error(ctx.summary.stats, "file_restore.file_write_failed");
+        publish(ctx.progress, ctx.plan, contracts::TaskPhase::kWriting, ctx.summary,
+                "file_restore.writing");
+        return base::Result<void>::success();
+    }
+    contracts::FileEntryDesc meta_entry = entry;
+    if (!ctx.plan.restore_security) {
+        meta_entry.platform_metadata.clear();
+        meta_entry.flags &= ~contracts::kEntryFlagHasSecurity;
+    }
+    auto meta = writer.value()->apply_metadata(meta_entry, cancellation);
+    if (!meta) {
+        writer.value()->abort();
+        ++ctx.summary.stats.entries_failed;
+        record_stable_error(ctx.summary.stats, "file_restore.metadata_failed");
+        publish(ctx.progress, ctx.plan, contracts::TaskPhase::kWriting, ctx.summary,
+                "file_restore.writing");
+        return base::Result<void>::success();
+    }
+    auto published = writer.value()->publish(ctx.plan.conflict_policy, cancellation);
+    if (!published) {
+        writer.value()->abort();
+        ++ctx.summary.stats.entries_failed;
+        const auto& message = published.error().message;
+        if (message.starts_with("file_restore.")) {
+            record_stable_error(ctx.summary.stats, message);
+        } else {
+            record_stable_error(ctx.summary.stats, "file_restore.publish_failed");
+        }
+        publish(ctx.progress, ctx.plan, contracts::TaskPhase::kWriting, ctx.summary,
+                "file_restore.writing");
+        return base::Result<void>::success();
+    }
+    ++ctx.summary.files_published;
+    ++ctx.summary.stats.entries_restored;
+    publish(ctx.progress, ctx.plan, contracts::TaskPhase::kWriting, ctx.summary,
+            "file_restore.writing");
+    return base::Result<void>::success();
+}
+
+[[nodiscard]] base::Result<void>
+restore_files(RestoreMutationContext& ctx, const std::vector<contracts::FileEntryDesc>& files,
+              const base::CancellationToken& cancellation) {
+    for (const auto& entry : files) {
+        if (cancellation.stop_requested()) {
+            return base::Result<void>::failure(
+                err(base::ErrorCode::kCancelled, "file restore cancelled"));
+        }
+        auto one = restore_one_file(ctx, entry, cancellation);
+        if (!one) {
+            return one;
+        }
+    }
+    return base::Result<void>::success();
+}
+
+[[nodiscard]] base::Result<void>
+apply_directory_metadata(RestoreMutationContext& ctx,
+                         const std::vector<contracts::FileEntryDesc>& directories,
+                         const std::unordered_set<std::uint64_t>& created,
+                         const base::CancellationToken& cancellation) {
+    for (const auto& entry : directories) {
+        if (!created.contains(entry.entry_id)) {
+            continue;
+        }
+        auto path = path_for_entry(entry, ctx.by_id);
+        if (!path) {
+            return base::Result<void>::failure(path.error());
+        }
+        contracts::FileEntryDesc meta_entry = entry;
+        if (!ctx.plan.restore_security) {
+            meta_entry.platform_metadata.clear();
+            meta_entry.flags &= ~contracts::kEntryFlagHasSecurity;
+        }
+        auto meta = ctx.sink.apply_directory_metadata(path.value(), meta_entry, cancellation);
+        if (!meta) {
+            if (ctx.summary.stats.entries_restored > 0) {
+                --ctx.summary.stats.entries_restored;
+            }
+            if (ctx.summary.directories_created > 0) {
+                --ctx.summary.directories_created;
+            }
+            ++ctx.summary.stats.entries_failed;
+            record_stable_error(ctx.summary.stats, "file_restore.directory_metadata_failed");
+        }
     }
     return base::Result<void>::success();
 }
@@ -356,129 +570,29 @@ FileSetRestorePipeline::run(const FileSetRestorePlan& plan,
         return base::Result<FileSetRestoreSummary>::failure(selected.error());
     }
     summary.stats.entries_requested = selected.value().size();
+    auto planned_bytes = sum_file_logical_bytes(selected.value());
+    if (!planned_bytes) {
+        return base::Result<FileSetRestoreSummary>::failure(planned_bytes.error());
+    }
+    summary.progress_logical_bytes = planned_bytes.value();
     auto caps = preflight_entries(sink_, selected.value(), plan, cancellation);
     if (!caps) {
         return base::Result<FileSetRestoreSummary>::failure(caps.error());
     }
-    std::unordered_map<std::uint64_t, contracts::FileEntryDesc> by_id;
-    for (const auto& entry : selected.value()) {
-        by_id.emplace(entry.entry_id, entry);
-    }
-    // Directories first (shallow → deep so CreateDirectory parents exist).
-    std::vector<contracts::FileEntryDesc> directories;
-    std::vector<contracts::FileEntryDesc> files;
-    for (const auto& entry : selected.value()) {
-        if (entry.kind == contracts::FileEntryKind::kDirectory) {
-            directories.push_back(entry);
-        } else {
-            files.push_back(entry);
-        }
-    }
-    std::ranges::sort(directories, [&by_id](const auto& left, const auto& right) {
-        const auto left_depth = entry_depth(left, by_id);
-        const auto right_depth = entry_depth(right, by_id);
-        if (left_depth != right_depth) {
-            return left_depth < right_depth;
-        }
-        return left.entry_id < right.entry_id;
-    });
+    auto parts = partition_selected(std::move(selected).value());
+    RestoreMutationContext ctx{reader_, sink_, plan, summary, progress_, parts.by_id};
     publish(progress_, plan, contracts::TaskPhase::kWriting, summary, "file_restore.writing");
-    std::unordered_set<std::uint64_t> created_directories;
-    for (const auto& entry : directories) {
-        if (cancellation.stop_requested()) {
-            return base::Result<FileSetRestoreSummary>::failure(
-                err(base::ErrorCode::kCancelled, "file restore cancelled"));
-        }
-        auto path = path_for_entry(entry, by_id);
-        if (!path) {
-            return base::Result<FileSetRestoreSummary>::failure(path.error());
-        }
-        auto created = sink_.create_directory(path.value(), cancellation);
-        if (!created) {
-            ++summary.stats.entries_failed;
-            record_stable_error(summary.stats, "file_restore.directory_create_failed");
-            continue;
-        }
-        created_directories.insert(entry.entry_id);
-        ++summary.directories_created;
-        ++summary.stats.entries_restored;
+    auto created = create_directories(ctx, parts.directories, cancellation);
+    if (!created) {
+        return base::Result<FileSetRestoreSummary>::failure(created.error());
     }
-    for (const auto& entry : files) {
-        if (cancellation.stop_requested()) {
-            return base::Result<FileSetRestoreSummary>::failure(
-                err(base::ErrorCode::kCancelled, "file restore cancelled"));
-        }
-        auto path = path_for_entry(entry, by_id);
-        if (!path) {
-            return base::Result<FileSetRestoreSummary>::failure(path.error());
-        }
-        auto writer = sink_.begin_file(path.value(), entry.logical_size, cancellation);
-        if (!writer) {
-            ++summary.stats.entries_failed;
-            record_stable_error(summary.stats, "file_restore.file_create_failed");
-            continue;
-        }
-        auto content =
-            restore_file_content(reader_, *writer.value(), entry, plan, summary, cancellation);
-        if (!content) {
-            writer.value()->abort();
-            ++summary.stats.entries_failed;
-            record_stable_error(summary.stats, "file_restore.file_write_failed");
-            continue;
-        }
-        // Always restore times/attributes; security descriptor only when restore_security.
-        contracts::FileEntryDesc meta_entry = entry;
-        if (!plan.restore_security) {
-            meta_entry.platform_metadata.clear();
-            meta_entry.flags &= ~contracts::kEntryFlagHasSecurity;
-        }
-        auto meta = writer.value()->apply_metadata(meta_entry, cancellation);
-        if (!meta) {
-            writer.value()->abort();
-            ++summary.stats.entries_failed;
-            record_stable_error(summary.stats, "file_restore.metadata_failed");
-            continue;
-        }
-        auto published = writer.value()->publish(plan.conflict_policy, cancellation);
-        if (!published) {
-            writer.value()->abort();
-            ++summary.stats.entries_failed;
-            const auto& message = published.error().message;
-            if (message.starts_with("file_restore.")) {
-                record_stable_error(summary.stats, message);
-            } else {
-                record_stable_error(summary.stats, "file_restore.publish_failed");
-            }
-            continue;
-        }
-        ++summary.files_published;
-        ++summary.stats.entries_restored;
+    auto files = restore_files(ctx, parts.files, cancellation);
+    if (!files) {
+        return base::Result<FileSetRestoreSummary>::failure(files.error());
     }
-    for (const auto& entry : directories) {
-        if (!created_directories.contains(entry.entry_id)) {
-            continue;
-        }
-        auto path = path_for_entry(entry, by_id);
-        if (!path) {
-            return base::Result<FileSetRestoreSummary>::failure(path.error());
-        }
-        contracts::FileEntryDesc meta_entry = entry;
-        if (!plan.restore_security) {
-            meta_entry.platform_metadata.clear();
-            meta_entry.flags &= ~contracts::kEntryFlagHasSecurity;
-        }
-        auto meta = sink_.apply_directory_metadata(path.value(), meta_entry, cancellation);
-        if (!meta) {
-            // Directory skeleton was counted restored; metadata failure reclassifies as failed.
-            if (summary.stats.entries_restored > 0) {
-                --summary.stats.entries_restored;
-            }
-            if (summary.directories_created > 0) {
-                --summary.directories_created;
-            }
-            ++summary.stats.entries_failed;
-            record_stable_error(summary.stats, "file_restore.directory_metadata_failed");
-        }
+    auto meta = apply_directory_metadata(ctx, parts.directories, created.value(), cancellation);
+    if (!meta) {
+        return base::Result<FileSetRestoreSummary>::failure(meta.error());
     }
     auto flushed = sink_.flush(cancellation);
     if (!flushed) {

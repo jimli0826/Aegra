@@ -29,13 +29,6 @@ struct WindowsFileSnapshotOpenRequest final {
     std::vector<SnapshotVolumeBinding> volumes;
 };
 
-/// Ensures an NTFS change journal exists before VSS snapshot creation.
-/// Returns true when this call created it, false when it was already active.
-/// This operation never supplies baseline state; queries and reads remain snapshot-bound.
-[[nodiscard]] base::Result<bool>
-ensure_file_change_journal_active(const std::vector<std::uint16_t>& live_volume_root_utf16,
-                  base::CancellationToken cancellation);
-
 /// Snapshot-bound file tree source implementing IFileSnapshotView.
 class WindowsFileSnapshotView final : public ports::IFileSnapshotView {
   public:
@@ -56,15 +49,6 @@ class WindowsFileSnapshotView final : public ports::IFileSnapshotView {
     open_stream_reader(std::uint64_t entry_id, std::uint32_t stream_index,
                        base::CancellationToken cancellation) override;
 
-    [[nodiscard]] base::Result<contracts::FileJournalState>
-    query_journal_state(const std::string& volume_identity,
-                        base::CancellationToken cancellation) override;
-
-    [[nodiscard]] base::Result<contracts::FileChangeBatch>
-    read_change_batch(const std::string& volume_identity, std::int64_t start_usn,
-                      std::int64_t end_usn, std::uint32_t maximum_hints,
-                      base::CancellationToken cancellation) override;
-
   private:
     struct Impl;
     explicit WindowsFileSnapshotView(std::unique_ptr<Impl> implementation) noexcept;
@@ -76,8 +60,8 @@ struct WindowsFileTreeSinkOpenRequest final {
     std::vector<std::uint16_t> target_root_utf16;
 };
 
-/// Restore sink for a Windows NTFS/ReFS target root.
-/// FI0 capabilities: security descriptors + free space only (no reparse/hard-link/sparse/ADS).
+/// Restore sink for a Windows NTFS/ReFS/FAT32 target root.
+/// FAT32 reports no security-descriptor support and a 4 GiB - 1 per-file limit.
 class WindowsFileTreeSink final : public ports::IFileTreeSink {
   public:
     ~WindowsFileTreeSink() override;

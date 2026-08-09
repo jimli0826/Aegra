@@ -744,7 +744,7 @@ struct FileParentSelection final {
     contracts::IncrementalDowngradeReason reason{contracts::IncrementalDowngradeReason::kNone};
 };
 
-/// Catalog tip selection only — never opens Archive or reads USN (Worker owns those).
+/// Catalog tip selection only; Worker validates the authenticated metadata baseline.
 [[nodiscard]] base::Result<FileParentSelection>
 resolve_file_incremental_parent(const ResolvedBackupPlan& plan,
                                 const ports::RepositoryConnectionRecord& repository,

@@ -788,7 +788,8 @@ namespace {
         !parse_optional_int64(object.value(QStringLiteral("incremental_downgrade_reason")),
                               incremental_downgrade_reason) ||
         (incremental_downgrade_reason &&
-         (*incremental_downgrade_reason < 1 || *incremental_downgrade_reason > 9))) {
+         *incremental_downgrade_reason != 1 && *incremental_downgrade_reason != 2 &&
+         *incremental_downgrade_reason != 3 && *incremental_downgrade_reason != 9)) {
         return false;
     }
     QVariantMap map{

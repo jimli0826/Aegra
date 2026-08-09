@@ -243,6 +243,7 @@ parse_file_restore_fingerprint(const std::string_view fingerprint) {
 struct SelectionClosureTotals final {
     std::uint64_t entry_count{0};
     std::uint64_t logical_size_bytes{0};
+    std::uint64_t maximum_file_size_bytes{0};
 };
 
 [[nodiscard]] base::Result<void>
@@ -293,6 +294,10 @@ compute_selection_closure_totals(
                 {base::ErrorCode::kInvalidArgument, "file restore logical size overflow"});
         }
         totals.logical_size_bytes += described.value().logical_size;
+        if (described.value().kind == contracts::FileEntryKind::kFile) {
+            totals.maximum_file_size_bytes =
+                (std::max)(totals.maximum_file_size_bytes, described.value().logical_size);
+        }
         ++totals.entry_count;
         if (described.value().kind == contracts::FileEntryKind::kDirectory) {
             directory_queue.push_back(entry_id.value());
@@ -333,6 +338,11 @@ compute_selection_closure_totals(
                         {base::ErrorCode::kInvalidArgument, "file restore logical size overflow"});
                 }
                 totals.logical_size_bytes += described.value().logical_size;
+                if (described.value().kind == contracts::FileEntryKind::kFile) {
+                    totals.maximum_file_size_bytes =
+                        (std::max)(totals.maximum_file_size_bytes,
+                                   described.value().logical_size);
+                }
                 ++totals.entry_count;
                 if (described.value().kind == contracts::FileEntryKind::kDirectory) {
                     directory_queue.push_back(child_id.value());
@@ -369,12 +379,12 @@ utf8_to_utf16_units(const std::string& utf8) {
     return base::Result<std::vector<std::uint16_t>>::success(std::move(units));
 }
 
-[[nodiscard]] base::Result<std::uint64_t>
-probe_target_free_bytes(const contracts::FileSourceRef& target,
-                        const base::CancellationToken cancellation) {
+[[nodiscard]] base::Result<ports::FileSinkCapabilities>
+probe_target_capabilities(const contracts::FileSourceRef& target,
+                          const base::CancellationToken cancellation) {
     auto root = utf8_to_utf16_units(target.volume_identity);
     if (!root) {
-        return base::Result<std::uint64_t>::failure(root.error());
+        return base::Result<ports::FileSinkCapabilities>::failure(root.error());
     }
     // Join volume root + relative components into sink root.
     // Volume GUID roots must keep a trailing '\\' (GetDiskFreeSpaceExW / CreateFile).
@@ -387,7 +397,7 @@ probe_target_free_bytes(const contracts::FileSourceRef& target,
     } else {
         for (const auto& component : target.relative_components) {
             if (component.bytes.empty() || (component.bytes.size() % 2U) != 0U) {
-                return base::Result<std::uint64_t>::failure(
+                return base::Result<ports::FileSinkCapabilities>::failure(
                     {base::ErrorCode::kInvalidArgument, "file restore target path is invalid"});
             }
             std::wstring piece(component.bytes.size() / 2U, L'\0');
@@ -400,17 +410,13 @@ probe_target_free_bytes(const contracts::FileSourceRef& target,
     open_request.target_root_utf16.assign(path.begin(), path.end());
     auto sink = adapters::windows_filesystem::WindowsFileTreeSink::open(open_request);
     if (!sink) {
-        return base::Result<std::uint64_t>::failure(sink.error());
+        return base::Result<ports::FileSinkCapabilities>::failure(sink.error());
     }
     auto caps = sink.value()->capabilities(cancellation);
     if (!caps) {
-        return base::Result<std::uint64_t>::failure(caps.error());
+        return base::Result<ports::FileSinkCapabilities>::failure(caps.error());
     }
-    if (!caps.value().supports_security_descriptor) {
-        return base::Result<std::uint64_t>::failure(
-            {base::ErrorCode::kInvalidArgument, "file_restore.target_capability_missing"});
-    }
-    return base::Result<std::uint64_t>::success(caps.value().free_bytes);
+    return caps;
 }
 
 [[nodiscard]] std::string file_restore_request_fingerprint(const std::string_view preflight_token) {
@@ -468,10 +474,9 @@ WorkerJobService::prepare_file_restore(const contracts::PrepareFileRestoreReques
     if (!inventory) {
         return base::Result<contracts::FileRestorePreflight>::failure(inventory.error());
     }
-    if (inventory.value().is_system) {
-        return base::Result<contracts::FileRestorePreflight>::failure(
-            {base::ErrorCode::kConflict, "file_restore.system_directory_unsupported"});
-    }
+    // Volume inventory.is_system means "hosts Windows" (volume restore PE gate). File restore
+    // writes into a chosen directory tree and must allow user folders on that volume
+    // (Documents, Desktop, Downloads, …). Do not reject the whole system volume here.
     if (inventory.value().availability != contracts::SourceAvailability::kAvailable ||
         inventory.value().is_read_only) {
         return base::Result<contracts::FileRestorePreflight>::failure(
@@ -481,9 +486,15 @@ WorkerJobService::prepare_file_restore(const contracts::PrepareFileRestoreReques
     if (!target_identity) {
         return base::Result<contracts::FileRestorePreflight>::failure(target_identity.error());
     }
-    auto free_bytes = probe_target_free_bytes(target_ref.value(), cancellation);
-    if (!free_bytes) {
-        return base::Result<contracts::FileRestorePreflight>::failure(free_bytes.error());
+    auto target_capabilities = probe_target_capabilities(target_ref.value(), cancellation);
+    if (!target_capabilities) {
+        return base::Result<contracts::FileRestorePreflight>::failure(
+            target_capabilities.error());
+    }
+    if (request.restore_security &&
+        !target_capabilities.value().supports_security_descriptor) {
+        return base::Result<contracts::FileRestorePreflight>::failure(
+            {base::ErrorCode::kInvalidArgument, "file_restore.target_capability_missing"});
     }
     // Prefer volume inventory free space (enumerator path is reliable). Sink probe can
     // under-report 0 when the path form confuses GetDiskFreeSpaceExW; take the larger
@@ -492,7 +503,7 @@ WorkerJobService::prepare_file_restore(const contracts::PrepareFileRestoreReques
                                     ? inventory.value().capacity_bytes
                                     : inventory.value().free_bytes;
     const auto free_for_capacity =
-        (std::max)(free_bytes.value(), inventory_free);
+        (std::max)(target_capabilities.value().free_bytes, inventory_free);
     auto chain = open_file_recovery_chain(control_plane_, storage_factory_,
                                           *request.repository_connection_id,
                                           request.recovery_point_id, request.archive_secret_ref,
@@ -505,6 +516,11 @@ WorkerJobService::prepare_file_restore(const contracts::PrepareFileRestoreReques
         compute_selection_closure_totals(*chain.value().reader, request.entry_ids, cancellation);
     if (!closure) {
         return base::Result<contracts::FileRestorePreflight>::failure(closure.error());
+    }
+    if (closure.value().maximum_file_size_bytes >
+        target_capabilities.value().maximum_file_size_bytes) {
+        return base::Result<contracts::FileRestorePreflight>::failure(
+            {base::ErrorCode::kInvalidArgument, "file_restore.target_file_too_large"});
     }
     const auto logical_size = closure.value().logical_size_bytes;
     if (free_for_capacity < logical_size) {

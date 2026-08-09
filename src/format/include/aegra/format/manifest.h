@@ -114,10 +114,10 @@ struct BackupJob final {
 
 /// Encrypted metadata baseline for file_set Full and Incremental (FI1).
 struct FileSetBaseline final {
-    std::uint8_t fingerprint_algorithm{contracts::kSelectionFingerprintAlgorithmSha256V1};
+    std::uint8_t fingerprint_algorithm{0};
     std::array<std::byte, contracts::kSelectionFingerprintBytes> selection_fingerprint{};
-    /// Sorted unique by volume_identity; required on Full/Incremental after successful backup.
-    std::vector<contracts::FileJournalCheckpoint> journal_checkpoints;
+    contracts::FileChangeDetectionMethod change_detection_method{
+        contracts::FileChangeDetectionMethod::kNone};
 };
 
 struct ProviderExtension final {

@@ -36,7 +36,7 @@ struct JobRow final {
     std::optional<std::int64_t> requested_backup_type;
     std::optional<std::int64_t> effective_backup_type;
     QString effective_parent_uuid;
-    /// contracts::IncrementalDowngradeReason when Incremental demoted to Full (1..9).
+    /// contracts::IncrementalDowngradeReason when Incremental demoted to Full (1, 2, 3, or 9).
     std::optional<std::int64_t> incremental_downgrade_reason;
 };
 

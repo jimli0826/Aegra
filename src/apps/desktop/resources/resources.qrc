@@ -18,6 +18,7 @@
         <file alias="qml/components/DiskChart.qml">../qml/components/DiskChart.qml</file>
         <file alias="qml/components/DiskIcon.qml">../qml/components/DiskIcon.qml</file>
         <file alias="qml/components/FolderIcon.qml">../qml/components/FolderIcon.qml</file>
+        <file alias="qml/components/SpecialFolderIcon.qml">../qml/components/SpecialFolderIcon.qml</file>
         <file alias="qml/components/FileDocIcon.qml">../qml/components/FileDocIcon.qml</file>
         <file alias="qml/components/CheckpointCalendarPanel.qml">../qml/components/CheckpointCalendarPanel.qml</file>
         <file alias="qml/components/ComboBoxIndicator.qml">../qml/components/ComboBoxIndicator.qml</file>

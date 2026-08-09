@@ -1986,6 +1986,22 @@ entries = [
         "Zeitplan konnte nicht gelöscht werden",
     ),
     (
+        "aegra.backup.schedule.delete_confirm_title",
+        "Delete schedule?",
+        "删除计划任务？",
+        "刪除排程？",
+        "スケジュールを削除しますか？",
+        "Zeitplan löschen?",
+    ),
+    (
+        "aegra.backup.schedule.delete_confirm_message",
+        "This removes the schedule only. Existing recovery points in the repository are not deleted.",
+        "仅删除计划任务。仓库中已有的恢复点不会被删除。",
+        "僅刪除排程。存放庫中既有的還原點不會被刪除。",
+        "スケジュールのみ削除します。リポジトリ内の既存リカバリポイントは削除されません。",
+        "Nur der Zeitplan wird entfernt. Vorhandene Wiederherstellungspunkte im Repository bleiben erhalten.",
+    ),
+    (
         "aegra.backup.destination.empty",
         "No repository connection yet. Add a location in Repository first.",
         "尚无 Repository 连接。请先在 Repository 页面添加目标。",

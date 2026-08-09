@@ -1301,6 +1301,14 @@ Server: %1</translation>
         <source>Could not delete schedule</source>
         <translation>Zeitplan konnte nicht gelöscht werden</translation>
     </message>
+    <message id="aegra.backup.schedule.delete_confirm_title">
+        <source>Delete schedule?</source>
+        <translation>Zeitplan löschen?</translation>
+    </message>
+    <message id="aegra.backup.schedule.delete_confirm_message">
+        <source>This removes the schedule only. Existing recovery points in the repository are not deleted.</source>
+        <translation>Nur der Zeitplan wird entfernt. Vorhandene Wiederherstellungspunkte im Repository bleiben erhalten.</translation>
+    </message>
     <message id="aegra.backup.destination.empty">
         <source>No repository connection yet. Add a location in Repository first.</source>
         <translation>Noch keine Repository-Verbindung. Zuerst unter Repository ein Ziel hinzufügen.</translation>

@@ -568,6 +568,82 @@ Item {
         }
     }
 
+    // Confirm before permanently removing a schedule.
+    Popup {
+        id: deleteScheduleConfirm
+        parent: Overlay.overlay
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        anchors.centerIn: Overlay.overlay
+        width: Math.min(420, Overlay.overlay ? Overlay.overlay.width - 48 : 420)
+        padding: 20
+        property bool committing: false
+
+        onClosed: {
+            if (!deleteScheduleConfirm.committing)
+                root.cancelDeleteSchedule()
+            deleteScheduleConfirm.committing = false
+        }
+
+        background: Rectangle {
+            color: Theme.colorPopup
+            radius: 16
+            border.width: 1
+            border.color: Theme.colorBorder
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 16
+
+            Text {
+                Layout.fillWidth: true
+                //% "Delete schedule?"
+                text: qsTrId("aegra.backup.schedule.delete_confirm_title")
+                color: Theme.colorTextWhite
+                font.pixelSize: 16
+                font.bold: true
+                font.family: Theme.fontFamily
+                wrapMode: Text.WordWrap
+            }
+            Text {
+                Layout.fillWidth: true
+                //% "This removes the schedule only. Existing recovery points in the repository are not deleted."
+                text: qsTrId("aegra.backup.schedule.delete_confirm_message")
+                color: Theme.colorTextGrey
+                font.pixelSize: 13
+                font.family: Theme.fontFamily
+                wrapMode: Text.WordWrap
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 10
+                Item { Layout.fillWidth: true }
+                AppButton {
+                    //% "Cancel"
+                    text: qsTrId("aegra.common.cancel")
+                    Layout.preferredHeight: 36
+                    onClicked: {
+                        deleteScheduleConfirm.committing = true
+                        root.cancelDeleteSchedule()
+                        deleteScheduleConfirm.close()
+                    }
+                }
+                AppButton {
+                    //% "Delete"
+                    text: qsTrId("aegra.common.delete")
+                    primary: true
+                    Layout.preferredHeight: 36
+                    onClicked: {
+                        deleteScheduleConfirm.committing = true
+                        root.confirmDeleteSchedule()
+                        deleteScheduleConfirm.close()
+                    }
+                }
+            }
+        }
+    }
+
     /// Run schedule now. backupType: 1 = full, 2 = incremental (service_protocol).
     function runSchedule(item, backupType) {
         if (!item || !item.enabled) {
@@ -610,14 +686,30 @@ Item {
         }
     }
 
-    function deleteSchedule(id) {
+    property string pendingDeleteScheduleId: ""
+
+    /// Open confirm dialog before deleting a schedule (menu → Delete).
+    function requestDeleteSchedule(id) {
         var sid = (id === undefined || id === null) ? "" : ("" + id)
+        if (sid.length === 0)
+            return
+        root.pendingDeleteScheduleId = sid
+        deleteScheduleConfirm.open()
+    }
+
+    function confirmDeleteSchedule() {
+        var sid = root.pendingDeleteScheduleId
+        root.pendingDeleteScheduleId = ""
         if (sid.length === 0)
             return
         if (!serviceClient.deleteSchedule(sid)) {
             //% "Could not delete schedule"
             serviceClient.showToast(qsTrId("aegra.backup.schedule.delete_failed"), true)
         }
+    }
+
+    function cancelDeleteSchedule() {
+        root.pendingDeleteScheduleId = ""
     }
 
     // ==================== LIST ====================
@@ -1523,7 +1615,7 @@ Item {
                                                     verticalAlignment: Text.AlignVCenter
                                                     elide: Text.ElideRight
                                                 }
-                                                onTriggered: root.deleteSchedule(modelData.id)
+                                                onTriggered: root.requestDeleteSchedule(modelData.id)
                                             }
                                         }
                                     }

@@ -1301,6 +1301,14 @@ Server: %1</source>
         <source>Could not delete schedule</source>
         <translation>スケジュールを削除できませんでした</translation>
     </message>
+    <message id="aegra.backup.schedule.delete_confirm_title">
+        <source>Delete schedule?</source>
+        <translation>スケジュールを削除しますか？</translation>
+    </message>
+    <message id="aegra.backup.schedule.delete_confirm_message">
+        <source>This removes the schedule only. Existing recovery points in the repository are not deleted.</source>
+        <translation>スケジュールのみ削除します。リポジトリ内の既存リカバリポイントは削除されません。</translation>
+    </message>
     <message id="aegra.backup.destination.empty">
         <source>No repository connection yet. Add a location in Repository first.</source>
         <translation>リポジトリ接続がありません。先に Repository で接続を追加してください。</translation>

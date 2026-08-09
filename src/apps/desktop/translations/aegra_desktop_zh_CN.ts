@@ -1301,6 +1301,14 @@ Server: %1</source>
         <source>Could not delete schedule</source>
         <translation>无法删除计划任务</translation>
     </message>
+    <message id="aegra.backup.schedule.delete_confirm_title">
+        <source>Delete schedule?</source>
+        <translation>删除计划任务？</translation>
+    </message>
+    <message id="aegra.backup.schedule.delete_confirm_message">
+        <source>This removes the schedule only. Existing recovery points in the repository are not deleted.</source>
+        <translation>仅删除计划任务。仓库中已有的恢复点不会被删除。</translation>
+    </message>
     <message id="aegra.backup.destination.empty">
         <source>No repository connection yet. Add a location in Repository first.</source>
         <translation>尚无 Repository 连接。请先在 Repository 页面添加目标。</translation>

@@ -1301,6 +1301,14 @@ Server: %1</source>
         <source>Could not delete schedule</source>
         <translation>無法刪除排程</translation>
     </message>
+    <message id="aegra.backup.schedule.delete_confirm_title">
+        <source>Delete schedule?</source>
+        <translation>刪除排程？</translation>
+    </message>
+    <message id="aegra.backup.schedule.delete_confirm_message">
+        <source>This removes the schedule only. Existing recovery points in the repository are not deleted.</source>
+        <translation>僅刪除排程。存放庫中既有的還原點不會被刪除。</translation>
+    </message>
     <message id="aegra.backup.destination.empty">
         <source>No repository connection yet. Add a location in Repository first.</source>
         <translation>尚無 Repository 連線。請先在 Repository 頁面新增目標。</translation>

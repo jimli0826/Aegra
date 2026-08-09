@@ -1301,6 +1301,14 @@ Server: %1</translation>
         <source>Could not delete schedule</source>
         <translation>Could not delete schedule</translation>
     </message>
+    <message id="aegra.backup.schedule.delete_confirm_title">
+        <source>Delete schedule?</source>
+        <translation>Delete schedule?</translation>
+    </message>
+    <message id="aegra.backup.schedule.delete_confirm_message">
+        <source>This removes the schedule only. Existing recovery points in the repository are not deleted.</source>
+        <translation>This removes the schedule only. Existing recovery points in the repository are not deleted.</translation>
+    </message>
     <message id="aegra.backup.destination.empty">
         <source>No repository connection yet. Add a location in Repository first.</source>
         <translation>No repository connection yet. Add a location in Repository first.</translation>

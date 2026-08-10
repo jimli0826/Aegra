@@ -36,6 +36,19 @@ struct BackupSummary final {
     std::uint64_t stored_bytes{0};
     std::uint64_t chunk_count{0};
     std::size_t peak_buffered_bytes{0};
+    std::uint64_t producer_read_microseconds{0};
+    std::uint64_t producer_payload_allocate_microseconds{0};
+    std::uint64_t producer_buffer_wait_microseconds{0};
+    std::uint64_t producer_extent_describe_microseconds{0};
+    std::uint64_t producer_source_read_microseconds{0};
+    std::uint64_t producer_source_read_bytes{0};
+    std::uint64_t producer_free_bytes{0};
+    std::uint64_t producer_extent_describe_calls{0};
+    std::uint64_t producer_source_read_calls{0};
+    std::uint64_t producer_queue_wait_microseconds{0};
+    std::uint64_t consumer_queue_wait_microseconds{0};
+    std::uint64_t consumer_write_microseconds{0};
+    std::uint64_t consumer_progress_microseconds{0};
 };
 
 class BackupPipeline final {

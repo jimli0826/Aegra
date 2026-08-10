@@ -11,15 +11,23 @@
 #include "aegra/format/personal_archive.h"
 
 #include <algorithm>
+#include <condition_variable>
 #include <cstring>
 #include <fstream>
+
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <functional>
 #include <iomanip>
 #include <limits>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -39,6 +47,7 @@ struct ChunkRecord final {
     std::uint32_t source_index{0};
     std::vector<archive::BlockEntry> entries;
     std::filesystem::path part_path;
+    std::size_t part_input_index{0};
 };
 
 struct ScanResult final {
@@ -87,6 +96,195 @@ struct EntryOutputRange final {
 [[nodiscard]] base::Error error(base::ErrorCode code, std::string message) {
     return {code, std::move(message)};
 }
+
+using PayloadReadResult = base::Result<std::vector<std::byte>>;
+
+class PayloadInput final {
+  public:
+    PayloadInput() noexcept = default;
+    PayloadInput(const PayloadInput&) = delete;
+    PayloadInput& operator=(const PayloadInput&) = delete;
+    PayloadInput(PayloadInput&& other) noexcept
+        : handle_(std::exchange(other.handle_, INVALID_HANDLE_VALUE)) {}
+    PayloadInput& operator=(PayloadInput&& other) noexcept {
+        if (this != &other) {
+            close();
+            handle_ = std::exchange(other.handle_, INVALID_HANDLE_VALUE);
+        }
+        return *this;
+    }
+    ~PayloadInput() { close(); }
+
+    [[nodiscard]] static base::Result<PayloadInput>
+    open(const std::filesystem::path& path) {
+        HANDLE handle = ::CreateFileW(path.c_str(), GENERIC_READ,
+                                      FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+                                      FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+        if (handle == INVALID_HANDLE_VALUE) {
+            return base::Result<PayloadInput>::failure(
+                error(base::ErrorCode::kIoFailure, "failed to keep personal archive part open"));
+        }
+        PayloadInput input;
+        input.handle_ = handle;
+        return base::Result<PayloadInput>::success(std::move(input));
+    }
+
+    [[nodiscard]] PayloadReadResult read_exact_at(const std::uint64_t offset,
+                                                  const std::size_t size) const {
+        if (size == 0) {
+            return PayloadReadResult::success({});
+        }
+        std::vector<std::byte> result(size);
+        const std::scoped_lock lock(io_mutex_);
+        LARGE_INTEGER position{};
+        position.QuadPart = static_cast<LONGLONG>(offset);
+        if (!::SetFilePointerEx(handle_, position, nullptr, FILE_BEGIN)) {
+            return PayloadReadResult::failure(
+                error(base::ErrorCode::kIoFailure, "failed to seek personal archive payload"));
+        }
+        std::size_t total = 0;
+        while (total < size) {
+            constexpr std::size_t maximum_request = 64ULL * 1024ULL * 1024ULL;
+            const auto request =
+                static_cast<DWORD>((std::min)(size - total, maximum_request));
+            DWORD transferred = 0;
+            if (::ReadFile(handle_, result.data() + total, request, &transferred, nullptr) == FALSE ||
+                transferred == 0) {
+                return PayloadReadResult::failure(
+                    error(base::ErrorCode::kIoFailure, "personal archive is truncated"));
+            }
+            total += transferred;
+        }
+        return PayloadReadResult::success(std::move(result));
+    }
+
+  private:
+    void close() noexcept {
+        if (handle_ != INVALID_HANDLE_VALUE) {
+            ::CloseHandle(handle_);
+            handle_ = INVALID_HANDLE_VALUE;
+        }
+    }
+
+    HANDLE handle_{INVALID_HANDLE_VALUE};
+    mutable std::mutex io_mutex_;
+};
+
+[[nodiscard]] base::Result<std::vector<PayloadInput>>
+open_payload_inputs(std::vector<ChunkRecord>& records) {
+    std::vector<std::filesystem::path> paths;
+    std::vector<PayloadInput> inputs;
+    for (auto& record : records) {
+        const auto found = std::find(paths.begin(), paths.end(), record.part_path);
+        if (found != paths.end()) {
+            record.part_input_index = static_cast<std::size_t>(found - paths.begin());
+            continue;
+        }
+        auto input = PayloadInput::open(record.part_path);
+        if (!input) {
+            return base::Result<std::vector<PayloadInput>>::failure(input.error());
+        }
+        record.part_input_index = inputs.size();
+        paths.push_back(record.part_path);
+        inputs.push_back(std::move(input).value());
+    }
+    return base::Result<std::vector<PayloadInput>>::success(std::move(inputs));
+}
+
+class PayloadPrefetcher final {
+  public:
+    using ReadFn = std::function<PayloadReadResult(std::size_t)>;
+
+    explicit PayloadPrefetcher(ReadFn read)
+        : read_(std::move(read)), worker_([this](const std::stop_token stop) { run(stop); }) {}
+
+    ~PayloadPrefetcher() {
+        worker_.request_stop();
+        state_changed_.notify_all();
+    }
+
+    [[nodiscard]] PayloadReadResult read(const std::size_t index,
+                                         const base::CancellationToken cancellation) {
+        std::unique_lock lock(mutex_);
+        const auto ready = state_changed_.wait(lock, cancellation, [this, index] {
+            return completed_index_ == index ||
+                   (!requested_index_.has_value() && !active_index_.has_value());
+        });
+        if (!ready) {
+            return PayloadReadResult::failure(
+                error(base::ErrorCode::kCancelled, "archive payload read cancelled"));
+        }
+        if (completed_index_ == index) {
+            return take_completed();
+        }
+        completed_.reset();
+        completed_index_.reset();
+        lock.unlock();
+        return read_safely(index);
+    }
+
+    [[nodiscard]] base::Result<void> prefetch(const std::size_t index) {
+        const std::scoped_lock lock(mutex_);
+        if (requested_index_.has_value() || active_index_.has_value() || completed_.has_value()) {
+            return base::Result<void>::failure(
+                error(base::ErrorCode::kInternal, "archive payload prefetch is already active"));
+        }
+        requested_index_ = index;
+        state_changed_.notify_all();
+        return base::Result<void>::success();
+    }
+
+  private:
+    [[nodiscard]] PayloadReadResult take_completed() {
+        auto result = std::move(*completed_);
+        completed_.reset();
+        completed_index_.reset();
+        return result;
+    }
+
+    [[nodiscard]] PayloadReadResult read_safely(const std::size_t index) noexcept {
+        try {
+            return read_(index);
+        } catch (...) {
+            return PayloadReadResult::failure(
+                error(base::ErrorCode::kInternal, "archive payload prefetch failed unexpectedly"));
+        }
+    }
+
+    void run(const std::stop_token stop) {
+        for (;;) {
+            std::size_t index = 0;
+            {
+                std::unique_lock lock(mutex_);
+                const auto ready = state_changed_.wait(
+                    lock, stop, [this] { return requested_index_.has_value(); });
+                if (!ready || stop.stop_requested()) {
+                    return;
+                }
+                index = *requested_index_;
+                requested_index_.reset();
+                active_index_ = index;
+            }
+            auto result = read_safely(index);
+            {
+                const std::scoped_lock lock(mutex_);
+                active_index_.reset();
+                completed_index_ = index;
+                completed_.emplace(std::move(result));
+            }
+            state_changed_.notify_all();
+        }
+    }
+
+    ReadFn read_;
+    std::mutex mutex_;
+    std::condition_variable_any state_changed_;
+    std::optional<std::size_t> requested_index_;
+    std::optional<std::size_t> active_index_;
+    std::optional<std::size_t> completed_index_;
+    std::optional<PayloadReadResult> completed_;
+    std::jthread worker_;
+};
 
 [[nodiscard]] char* as_chars(std::byte* value) noexcept {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) stream byte-buffer boundary.
@@ -777,28 +975,17 @@ make_output_ranges(const ChunkRecord& record, const std::uint32_t block_size,
 }
 
 [[nodiscard]] base::Result<std::vector<std::byte>>
-read_authenticated_payload(const ChunkRecord& record,
-                           const crypto_sodium::PayloadCipher* payload_cipher) {
-    std::ifstream input(record.part_path, std::ios::binary);
-    if (!input) {
-        return base::Result<std::vector<std::byte>>::failure(
-            error(base::ErrorCode::kIoFailure, "failed to reopen personal archive"));
-    }
-    auto ciphertext = read_exact(input, record.payload_offset,
-                                 static_cast<std::size_t>(record.stored_payload_size));
-    if (!ciphertext) {
-        return base::Result<std::vector<std::byte>>::failure(ciphertext.error());
-    }
+authenticate_payload(const ChunkRecord& record, std::vector<std::byte> ciphertext,
+                     const crypto_sodium::PayloadCipher* payload_cipher) {
     if (payload_cipher == nullptr) {
-        return base::Result<std::vector<std::byte>>::success(std::move(ciphertext).value());
+        return base::Result<std::vector<std::byte>>::success(std::move(ciphertext));
     }
     auto decrypted = detail::unprotect_archive_chunk(record.part_header, record.header,
-                                                      record.entries, ciphertext.value(),
-                                                      payload_cipher);
+                                                     record.entries, ciphertext, payload_cipher);
     if (!decrypted) {
         return base::Result<std::vector<std::byte>>::failure(decrypted.error());
     }
-    return base::Result<std::vector<std::byte>>::success(std::move(ciphertext).value());
+    return base::Result<std::vector<std::byte>>::success(std::move(ciphertext));
 }
 
 [[nodiscard]] base::Result<void>
@@ -852,17 +1039,24 @@ expand_dedup_entries(const ChunkRecord& record, const std::span<const EntryOutpu
     return base::Result<void>::success();
 }
 
+struct ChunkDecodeContext final {
+    std::uint32_t block_size{0};
+    std::uint64_t volume_size{0};
+    base::CancellationToken cancellation;
+    const crypto_sodium::PayloadCipher* payload_cipher{nullptr};
+    detail::BlockWorkerPool& workers;
+};
+
 [[nodiscard]] base::Result<std::vector<std::byte>>
-read_record_payload(const ChunkRecord& record, const std::uint32_t block_size,
-                    const std::uint64_t volume_size, const base::CancellationToken& cancellation,
-                    const crypto_sodium::PayloadCipher* payload_cipher,
-                    detail::BlockWorkerPool& workers) {
-    if (cancellation.stop_requested()) {
+read_record_payload(const ChunkRecord& record, std::vector<std::byte> stored_payload,
+                    const ChunkDecodeContext& context) {
+    if (context.cancellation.stop_requested()) {
         return base::Result<std::vector<std::byte>>::failure(
             error(base::ErrorCode::kCancelled, "restore cancelled"));
     }
     // Authenticate AEAD before releasing any current-chunk data to the sink.
-    auto plaintext = read_authenticated_payload(record, payload_cipher);
+    auto plaintext =
+        authenticate_payload(record, std::move(stored_payload), context.payload_cipher);
     if (!plaintext) {
         return base::Result<std::vector<std::byte>>::failure(plaintext.error());
     }
@@ -870,13 +1064,14 @@ read_record_payload(const ChunkRecord& record, const std::uint32_t block_size,
         return base::Result<std::vector<std::byte>>::failure(
             error(base::ErrorCode::kCorruptData, "archive chunk logical size exceeds process limit"));
     }
-    auto ranges = make_output_ranges(record, block_size, volume_size);
+    auto ranges = make_output_ranges(record, context.block_size, context.volume_size);
     if (!ranges) {
         return base::Result<std::vector<std::byte>>::failure(ranges.error());
     }
     std::vector<std::byte> result(static_cast<std::size_t>(record.descriptor.logical_size));
     auto canonicals = expand_canonical_entries(record, plaintext.value(), ranges.value(),
-                                               block_size, result, workers, cancellation);
+                                               context.block_size, result, context.workers,
+                                               context.cancellation);
     if (!canonicals) {
         return base::Result<std::vector<std::byte>>::failure(canonicals.error());
     }
@@ -893,13 +1088,42 @@ struct PersonalArchiveReader::Impl final {
     explicit Impl(std::shared_ptr<detail::BlockWorkerPool> workers)
         : block_workers(std::move(workers)) {}
 
+    [[nodiscard]] PayloadReadResult read_stored_payload(const std::size_t index) {
+        if (index >= records.size()) {
+            return PayloadReadResult::failure(
+                error(base::ErrorCode::kNotFound, "archive chunk does not exist"));
+        }
+        const auto& record = records[index];
+        if (record.part_input_index >= part_inputs.size()) {
+            return PayloadReadResult::failure(error(
+                base::ErrorCode::kCorruptData, "archive chunk part input is unavailable"));
+        }
+        return part_inputs[record.part_input_index].read_exact_at(
+            record.payload_offset, static_cast<std::size_t>(record.stored_payload_size));
+    }
+
+    [[nodiscard]] base::Result<void> initialize_payload_reader(const bool enable_prefetch) {
+        auto opened = open_payload_inputs(records);
+        if (!opened) {
+            return base::Result<void>::failure(opened.error());
+        }
+        part_inputs = std::move(opened).value();
+        if (enable_prefetch) {
+            payload_prefetcher = std::make_unique<PayloadPrefetcher>(
+                [this](const std::size_t index) { return read_stored_payload(index); });
+        }
+        return base::Result<void>::success();
+    }
+
     format::Manifest manifest;
     ArchiveIdentity identity;
     std::uint32_t block_size{0};
     std::uint64_t logical_size{0};
     std::vector<ChunkRecord> records;
+    std::vector<PayloadInput> part_inputs;
     std::unique_ptr<crypto_sodium::PayloadCipher> payload_cipher;
     std::shared_ptr<detail::BlockWorkerPool> block_workers;
+    std::unique_ptr<PayloadPrefetcher> payload_prefetcher;
 };
 
 PersonalArchiveReader::PersonalArchiveReader(std::unique_ptr<Impl> implementation) noexcept
@@ -988,6 +1212,12 @@ PersonalArchiveReader::open_with_workers(
     }
     implementation->records = std::move(scanned.records);
     implementation->payload_cipher = std::move(payload_cipher);
+    auto payload_reader =
+        implementation->initialize_payload_reader(request.sequential_payload_prefetch);
+    if (!payload_reader) {
+        return base::Result<std::unique_ptr<PersonalArchiveReader>>::failure(
+            payload_reader.error());
+    }
     return base::Result<std::unique_ptr<PersonalArchiveReader>>::success(
         std::unique_ptr<PersonalArchiveReader>(
             new PersonalArchiveReader(std::move(implementation))));
@@ -1032,10 +1262,26 @@ PersonalArchiveReader::read_chunk(const std::uint64_t chunk_index,
         return base::Result<ports::ChunkData>::failure(
             error(base::ErrorCode::kCorruptData, "archive chunk references an unknown volume"));
     }
-    auto payload =
-        read_record_payload(record, implementation_->block_size, volume->total_size, cancellation,
-                            implementation_->payload_cipher.get(),
-                            *implementation_->block_workers);
+    const auto record_index = static_cast<std::size_t>(chunk_index);
+    auto stored_payload =
+        implementation_->payload_prefetcher != nullptr
+            ? implementation_->payload_prefetcher->read(record_index, cancellation)
+            : implementation_->read_stored_payload(record_index);
+    if (!stored_payload) {
+        return base::Result<ports::ChunkData>::failure(stored_payload.error());
+    }
+    const auto next_index = record_index + 1;
+    if (implementation_->payload_prefetcher != nullptr &&
+        next_index < implementation_->records.size() && !cancellation.stop_requested()) {
+        auto prefetched = implementation_->payload_prefetcher->prefetch(next_index);
+        if (!prefetched) {
+            return base::Result<ports::ChunkData>::failure(prefetched.error());
+        }
+    }
+    const ChunkDecodeContext context{implementation_->block_size, volume->total_size, cancellation,
+                                     implementation_->payload_cipher.get(),
+                                     *implementation_->block_workers};
+    auto payload = read_record_payload(record, std::move(stored_payload).value(), context);
     if (!payload) {
         return base::Result<ports::ChunkData>::failure(payload.error());
     }

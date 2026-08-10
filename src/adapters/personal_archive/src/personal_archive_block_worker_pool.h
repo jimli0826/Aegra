@@ -3,6 +3,7 @@
 #include "aegra/adapters/compression_zstd/zstd_codec.h"
 #include "aegra/base/error.h"
 #include "aegra/base/result.h"
+#include "windows_cng_sha256.h"
 
 #include <atomic>
 #include <condition_variable>
@@ -17,8 +18,11 @@ namespace aegra::adapters::personal_archive::detail {
 
 /// Per-worker resources reused across every chunk of a PersonalArchiveSession.
 struct BlockWorkerLocal final {
+    WindowsCngSha256 hasher;
     compression_zstd::ZstdCompressor compressor;
-  compression_zstd::ZstdDecompressor decompressor;
+    compression_zstd::ZstdDecompressor decompressor;
+    /// Compression scratch sized to the block compress bound; grown once, reused per block.
+    std::vector<std::byte> scratch;
 };
 
 /// Session-scoped worker pool: threads live for the session, not per physical chunk.

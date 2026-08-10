@@ -3,6 +3,7 @@
 #include "windows_personal_backup_runtime.h"
 #include "worker_task_log.h"
 
+#include "aegra/adapters/personal_archive/personal_archive.h"
 #include "aegra/adapters/windows_disk/windows_disk.h"
 #include "aegra/contracts/service_control.h"
 #include "aegra/format/manifest.h"
@@ -400,12 +401,62 @@ run_volume_pipelines(const WindowsPersonalBackupRequest& request, PreparedVolume
         total.chunk_count += backup.value().chunk_count;
         total.peak_buffered_bytes =
             (std::max)(total.peak_buffered_bytes, backup.value().peak_buffered_bytes);
+        total.producer_read_microseconds += backup.value().producer_read_microseconds;
+        total.producer_payload_allocate_microseconds +=
+            backup.value().producer_payload_allocate_microseconds;
+        total.producer_buffer_wait_microseconds +=
+            backup.value().producer_buffer_wait_microseconds;
+        total.producer_extent_describe_microseconds +=
+            backup.value().producer_extent_describe_microseconds;
+        total.producer_source_read_microseconds +=
+            backup.value().producer_source_read_microseconds;
+        total.producer_source_read_bytes += backup.value().producer_source_read_bytes;
+        total.producer_free_bytes += backup.value().producer_free_bytes;
+        total.producer_extent_describe_calls +=
+            backup.value().producer_extent_describe_calls;
+        total.producer_source_read_calls += backup.value().producer_source_read_calls;
+        total.producer_queue_wait_microseconds +=
+            backup.value().producer_queue_wait_microseconds;
+        total.consumer_queue_wait_microseconds +=
+            backup.value().consumer_queue_wait_microseconds;
+        total.consumer_write_microseconds += backup.value().consumer_write_microseconds;
+        total.consumer_progress_microseconds += backup.value().consumer_progress_microseconds;
     }
     stage.note_bytes("logical_bytes", total.logical_bytes);
     // Pipeline "stored" tracks descriptor.stored_size (volume stage-2 == logical), not .bkf wire.
     // True archive size is projected from committed Footer / part files after commit (O3).
     stage.note_u64("chunks", total.chunk_count);
     stage.note_bytes("peak_buffer", total.peak_buffered_bytes);
+    stage.note_u64("pipeline_producer_read_us", total.producer_read_microseconds);
+    stage.note_u64("pipeline_producer_payload_allocate_us",
+                   total.producer_payload_allocate_microseconds);
+    stage.note_u64("pipeline_producer_buffer_wait_us",
+                   total.producer_buffer_wait_microseconds);
+    stage.note_u64("pipeline_producer_extent_describe_us",
+                   total.producer_extent_describe_microseconds);
+    stage.note_u64("pipeline_producer_source_read_us",
+                   total.producer_source_read_microseconds);
+    stage.note_bytes("pipeline_producer_source_read_bytes", total.producer_source_read_bytes);
+    stage.note_bytes("pipeline_producer_free_bytes", total.producer_free_bytes);
+    stage.note_u64("pipeline_producer_extent_describe_calls",
+                   total.producer_extent_describe_calls);
+    stage.note_u64("pipeline_producer_source_read_calls", total.producer_source_read_calls);
+    stage.note_u64("pipeline_producer_queue_wait_us", total.producer_queue_wait_microseconds);
+    stage.note_u64("pipeline_consumer_queue_wait_us", total.consumer_queue_wait_microseconds);
+    stage.note_u64("pipeline_consumer_session_write_us", total.consumer_write_microseconds);
+    stage.note_u64("pipeline_consumer_progress_us", total.consumer_progress_microseconds);
+    if (const auto* archive_session =
+            dynamic_cast<const adapters::personal_archive::PersonalArchiveSession*>(&session)) {
+        const auto metrics = archive_session->write_metrics();
+        stage.note_u64("archive_prepare_us", metrics.prepare_microseconds);
+        stage.note_u64("archive_persist_us", metrics.persist_microseconds);
+        stage.note_u64("archive_commit_us", metrics.commit_microseconds);
+        stage.note_u64("archive_prepare_hash_us", metrics.prepare_hash_microseconds);
+        stage.note_u64("archive_prepare_compress_us", metrics.prepare_compress_microseconds);
+        stage.note_u64("archive_write_file_us", metrics.write_file_microseconds);
+        stage.note_bytes("archive_write_file_bytes", metrics.write_file_bytes);
+        stage.note_u64("archive_write_file_calls", metrics.write_file_calls);
+    }
     return base::Result<pipeline::BackupSummary>::success(total);
 }
 

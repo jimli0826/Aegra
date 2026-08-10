@@ -78,7 +78,10 @@ false。只有 Volume 枚举本身无法启动或异常终止时，整个调用�
 - `kRawVolume`：只接受 canonical Volume GUID Path，以只读共享 Handle 打开，并要求显式非零逻辑大小。
 
 Source 独占 Handle，可以并发调用 `read()`。每次读取使用独立重叠 I/O 状态；取消会中止本次 I/O，
-不会关闭 Source Handle。`size_bytes()` 在对象生命周期内稳定。
+不会关闭 Source Handle。`size_bytes()` 在对象生命周期内稳定。`kVssSnapshot` / `kRawVolume` 对齐
+AipCopy 的源读取策略：句柄使用 `FILE_FLAG_NO_BUFFERING | FILE_FLAG_SEQUENTIAL_SCAN`，单次 `read()`
+内保持一个在途 IRP（QD1）；保留 `FILE_FLAG_OVERLAPPED` 仅用于显式 offset 和可取消等待，不增加同一
+调用的队列深度。
 
 对 `kVssSnapshot` / `kRawVolume`（对齐旧 `DiskDevice` + `BackupEngine` trailing pad）：
 
@@ -86,8 +89,10 @@ Source 独占 Handle，可以并发调用 `read()`。每次读取使用独立重
 - 打开时用 `IOCTL_DISK_GET_LENGTH_INFO`，失败再 `GetFileSizeEx` 探测设备可读长度；
   若探测值为 0 或大于逻辑长度，则按逻辑长度视为全部可读；若 `0 < readable < logical`，
   仅 **[readable, logical)** 允许零填充（trailing），并保留可读边界；
-- raw / VSS 设备读：`ReadFile` 允许 partial IRP，**循环读满**请求长度；单次 IRP 上限 1 MiB。
-  循环后仍读不满可读区间才失败（真 EOF / 设备截断），**不得**把 partial 当成致命 short read；
+- raw / VSS 设备读：无缓存 `ReadFile` 允许 partial IRP，**循环读满**请求长度；单次 IRP 上限 4 MiB，
+  同一 `read()` 同时只有一个 IRP。Adapter 使用 `VirtualAlloc` 对齐 bounce buffer，并在返回前复制到调用方
+  buffer，因此 Port 不要求调用方提供扇区对齐内存。循环后仍读不满可读区间才失败（真 EOF / 设备截断），
+  **不得**把 partial 当成致命 short read；
 - raw 与 VSS 均尝试 `FSCTL_ALLOW_EXTENDED_DASD_IO`（VSS 拒绝时继续，raw 失败则打开失败）；
 - Free-skip / 已验证排除区间的 FREE 分类由 `FreeSkipBlockSource` 负责，不与设备 short read 混用。
 
@@ -224,7 +229,8 @@ Target：`aegra_adapter_windows_vss` / `Aegra::AdapterWindowsVss`，仅在 Windo
 ## 安全与可观测性
 
 - 错误不得输出完整源路径。
-- 不请求写权限，不使用 `FILE_FLAG_NO_BUFFERING`，不要求调用方提供对齐缓冲区。
+- 不请求写权限；raw / VSS 读取使用 `FILE_FLAG_NO_BUFFERING`，对齐要求完全封装在 Adapter 内，不要求
+  调用方提供对齐缓冲区。普通稳定文件仍使用 Windows buffered I/O。
 - Application 后续接入可记录 Snapshot Set ID、Snapshot ID、阶段耗时、清理结果及诊断所需用户数据，
   但不得记录认证信息；记录范围遵循最小必要原则。
 - `apps/worker` 的个人卷备份装配见

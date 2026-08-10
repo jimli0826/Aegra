@@ -36,12 +36,22 @@ SHA-256 候选表，命中后逐字节确认，并只回指更早的 RAW/COMPRES
 认证当前 record 后解析 DEDUP，拒绝前向、越界、链式和长度不匹配引用。哈希不进入 Archive、Sidecar 或日志。
 
 `PersonalArchiveSession` 拥有持久 `BlockWorkerPool`：session 生命周期内固定 worker 线程，跨物理
-Chunk 复用；每个 worker 持有 `ZstdCompressor`（`ZSTD_CCtx` + scratch），避免 per-chunk 线程创建与
-per-block `ZSTD_compress` 临时上下文。VolumeChunk 使用 detached XChaCha20-Poly1305 原地加密 payload，
+Chunk 复用；每个 worker 持有可复用的 Windows CNG SHA-256 provider/hash object，以及
+`ZstdCompressor`（`ZSTD_CCtx` + scratch），避免 per-block provider/context 创建。CNG 保持标准 SHA-256
+摘要与 Sidecar/增量比较语义不变，并由 Windows CNG provider 自动选择平台硬件加速。VolumeChunk 使用 detached XChaCha20-Poly1305 原地加密 payload，
 避免同时保留等长 plaintext/ciphertext 缓冲；nonce、AAD、tag 和线格式不变。Session 仍是单 writer；
+调用线程完成当前 Chunk 的 hash/zstd/组装后，通过深度受限的顺序交接把 Prepared Chunk 交给 session 级
+persist worker；persist worker 独占加密、分卷状态和 Win32 输出句柄，使当前 Chunk 的 WriteFile 与下一
+Chunk 的 hash/zstd 重叠。交接要求前一 persist 完成后才能接受下一 Prepared Chunk，因此最多同时持有一个
+正在写入和一个正在准备的 Chunk；commit 等待 persist 清空，abort 停止并 join worker 后再删除 partial。
 pool 同时只服务一次 `parallel_for`。`PersonalArchiveReader` 同样在 reader 生命周期复用该 pool，Archive
 chain 的所有底层 Reader 共享一个 pool，线程数不随链深增长；每个 worker 持有 `ZstdDecompressor`
-（`ZSTD_DCtx`）。Reader 先完整认证并原地解密 VolumeChunk payload，
+（`ZSTD_DCtx`）。Reader 在生命周期内保持各 Archive part 的 Win32 顺序读取句柄打开；顺序恢复可显式
+启用深度为一的 payload 预读，使下一 Chunk 的存储读取与当前 Chunk 的认证、解压重叠，随机读取默认
+不启用预读。Volume/File Archive、分卷、sidecar、secondary index 和 index spool 的生产写路径统一使用
+持久 Win32 顺序输出句柄；Volume Chunk 的 prefix/header/BlockEntry 批量合并写入，payload 单独大块写入，
+不使用 `std::ofstream`。
+Reader 先完整认证并原地解密 VolumeChunk payload，
 再把独立 RAW/COMPRESSED canonical 并行写入最终逻辑 Chunk 的预验证、不重叠范围，最后顺序展开 DEDUP；
 不再为每个压缩 block 分配临时输出或复制到最终 Chunk。nonce、AAD、tag 与恢复输出语义不变。
 

@@ -191,7 +191,9 @@ Password 在 Service 没有对应能力时不显示。布局必须在 900x600、
   - **Step 1**：对应工作区（Source/Target + Options）；页脚 **Next**（非 Restore）进入 Summary。
     文件目标卷根显示 **可用 / 总大小**（inventory `free` + `size`）。
   - **Step 2（Summary）**：确认后点 **Restore** 启动任务并显示进度
-    （`JobModel.restoreSessionStatus`）；任务结束后显示 **Back** 返回 Step 0。
+    （`JobModel.restoreSessionStatus`）。进行中离开再进入 Restore 仍回到 Summary 展示进度；
+    无进行中 restore job 时进入页面落在 Step 0。成功完成后隐藏 **Back**，仅 **Done** 返回 Step 0；
+    失败仍可 **Back** 调整映射后重试。
   - Checkpoint 面板按类型过滤：`contentKind=1`（volume_set）仅 Disk/Volume；`contentKind=2`
     仅 Files；类型不匹配拒绝应用。
 - Restore 整盘 / 卷映射与启动：

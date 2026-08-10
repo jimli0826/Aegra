@@ -286,6 +286,20 @@ QVariantMap JobModel::restoreSessionStatus(const qint64 since_utc_ms) const {
             {QStringLiteral("anyFailed"), failed_count > 0}};
 }
 
+qint64 JobModel::earliestActiveRestoreCreatedUtcMs() const {
+    constexpr std::int64_t kOperationRestore = 2;
+    qint64 earliest = 0;
+    for (const auto& row : rows_) {
+        if (row.operation != kOperationRestore || !is_active_state(row.state)) {
+            continue;
+        }
+        if (earliest == 0 || row.created_utc_ms < earliest) {
+            earliest = row.created_utc_ms;
+        }
+    }
+    return earliest;
+}
+
 int JobModel::rowCount(const QModelIndex& parent) const {
     return parent.isValid() ? 0 : rows_.size();
 }

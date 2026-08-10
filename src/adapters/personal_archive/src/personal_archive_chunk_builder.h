@@ -26,6 +26,9 @@ struct PreparedArchiveInput final {
     std::uint64_t deduplicated_block_count{0};
     /// Expanded plaintext bytes represented by those DEDUP entries.
     std::uint64_t deduplicated_logical_bytes{0};
+    /// CPU time summed across pool workers (not wall time).
+    std::uint64_t hash_microseconds{0};
+    std::uint64_t compress_microseconds{0};
 };
 
 struct ChunkPreparationRequest final {

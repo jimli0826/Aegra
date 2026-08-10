@@ -45,7 +45,9 @@ Validate Restore Job and trusted chain-depth limit
 -> Lock and dismount target volume
 -> Preflight descriptors, capacity and memory budget
 -> Read/authenticate/decompress each Chunk for that volume only
--> Write DATA/ZERO by logical offset; skip authenticated FREE ranges without target writes
+   (persistent Archive part inputs + one-Chunk sequential base-layer payload prefetch)
+-> Write DATA/ZERO by logical offset using one overlapped request at a time;
+   skip authenticated FREE ranges without target writes
 -> Flush target
 -> Unlock and close target
 ```

@@ -57,6 +57,14 @@
 - 析构函数、释放函数和取消清理路径不得抛出异常。
 - 敏感缓冲区使用可清零封装，释放前主动清除。
 
+### 4.1 文件读写 API
+
+- Windows 生产代码中，本地文件的打开、读、写、定位、刷新与关闭必须使用 Win32 API（例如 `CreateFileW`、`ReadFile`、`WriteFile`、`SetFilePointerEx`、`FlushFileBuffers`、`CloseHandle`），句柄由 RAII 对象管理。
+- 禁止使用 `std::ifstream`、`std::ofstream` 和 `std::fstream` 进行文件读写。
+- 禁止通过 `std::filebuf` 或其他 iostream 设施绕过上述禁令访问磁盘文件。
+- `base`、`contracts`、`ports`、`pipeline` 与 `format` 不得直接调用 Win32 文件 API；需要文件访问时通过 Port 注入，由 Windows Adapter（或 Composition Root 装配的实现）完成。
+- Desktop / Qt 层若仅做 UI 配置或临时资源访问，可使用 Qt 文件 API（如 `QFile`），仍禁止 iostream 文件流。
+
 ## 5. 接口与依赖
 
 - 每个 Target 只声明直接依赖，不依赖链接目录中的偶然产物或构建顺序。
@@ -180,6 +188,7 @@
 
 - [ ] 模块依赖方向正确，没有 Adapter 泄漏到核心层。
 - [ ] 所有权、资源释放、取消和异常路径明确。
+- [ ] 文件读写使用 Win32 API（或约定的 Port/Qt 路径），未引入 `std::ifstream` / `std::ofstream` / `std::fstream`。
 - [ ] 函数、文件、复杂度、参数和嵌套未超过限制。
 - [ ] 整数、范围、偏移和长度计算已检查溢出。
 - [ ] 写入流程具有幂等、原子和崩溃恢复语义。

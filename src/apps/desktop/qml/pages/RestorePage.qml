@@ -216,13 +216,55 @@ Item {
         root.applySelectedCheckpoint(null)
     }
 
+    /// Active restore job anchor (created_utc_ms), or 0 when none are running.
+    function activeRestoreAnchorMs() {
+        if (!serviceClient.jobs
+                || typeof serviceClient.jobs.earliestActiveRestoreCreatedUtcMs !== "function")
+            return 0
+        return Number(serviceClient.jobs.earliestActiveRestoreCreatedUtcMs()) || 0
+    }
+
+    /// Reattach Summary while a restore job is active; otherwise return to step 0 on page entry.
+    /// forceIdleToTypeStep: when true (page became visible), idle sessions reset to type selection.
+    function reconcileRestoreEntry(forceIdleToTypeStep) {
+        var anchor = root.activeRestoreAnchorMs()
+        if (anchor > 0) {
+            // Prefer the earlier of local session start and Service job creation.
+            if (root.restoreSessionStartMs <= 0 || root.restoreSessionStartMs > anchor)
+                root.restoreSessionStartMs = anchor
+            root.restoreJobsSubmitted = true
+            root.restoreSessionFailed = false
+            root.restoreSessionErrorText = ""
+            root.multiRestoreActive = false
+            root.filePreflightPending = false
+            root.checkpointPanelOpen = false
+            if (root.restoreStep !== 2)
+                root.restoreStep = 2
+            return
+        }
+        if (!forceIdleToTypeStep)
+            return
+        // No running restore: landing on Restore shows the first step (type selection).
+        // Keep an in-page terminal summary only until the user leaves the page.
+        if (root.restoreStep === 0 && !root.restoreJobsSubmitted
+                && root.restoreSessionStartMs <= 0)
+            return
+        root.goBackToTypeSelection()
+    }
+
     /// True while a restore start is in-flight or jobs from this session are still active.
     /// Preflight-only (Next) busy must not block the step-bar Back button.
     readonly property bool restoreSessionRunning: {
+        // Depend on job list revisions so reattach/active anchors rebind.
+        var _rev = serviceClient.jobs ? serviceClient.jobs.revision : 0
+        var _active = serviceClient.jobs ? serviceClient.jobs.activeCount : 0
         if (root.multiRestoreActive)
             return true
         if (serviceClient.restoreCommandBusy && !root.filePreflightPending
                 && root.restoreSessionStarted)
+            return true
+        // Service-side active restore (covers reattach after page navigation).
+        if (root.activeRestoreAnchorMs() > 0)
             return true
         if (!root.restoreJobsSubmitted || root.restoreSessionFailed)
             return false
@@ -230,11 +272,12 @@ Item {
         return st && st.jobCount > 0 && st.allTerminal !== true
     }
 
-    /// One step back (Backup-aligned: simple decrement). Blocked only while restore runs.
+    /// One step back (Backup-aligned: simple decrement). Blocked only while restore runs
+    /// or after a successful restore (no Back — use Done).
     function stepBarBack() {
         if (root.restoreStep <= 0)
             return
-        if (root.restoreSessionRunning)
+        if (root.restoreSessionRunning || root.restoreProgressSucceeded)
             return
         if (root.restoreStep === 2) {
             root.clearRestoreSession()
@@ -497,7 +540,11 @@ Item {
     Timer { id: typeCardAnimTimer3; interval: 200; repeat: false; onTriggered: root.typeCardAnim3 = true }
 
     onVisibleChanged: {
-        if (visible && root.restoreStep === 0)
+        if (!visible)
+            return
+        // Re-enter Restore: show live summary if a restore job is running; else step 0.
+        root.reconcileRestoreEntry(true)
+        if (root.restoreStep === 0)
             root.playTypeCardsEntrance()
     }
     onRestoreStepChanged: {
@@ -505,10 +552,28 @@ Item {
             root.playTypeCardsEntrance()
     }
     Component.onCompleted: {
+        root.reconcileRestoreEntry(true)
         if (root.restoreStep === 0)
             root.playTypeCardsEntrance()
         if (serviceClient.connected)
             serviceClient.refreshRepository()
+    }
+
+    // Job list may arrive after navigation; attach to Summary when an active restore appears.
+    Connections {
+        target: serviceClient.jobs
+        function onRevisionChanged() {
+            if (!root.visible)
+                return
+            if (root.activeRestoreAnchorMs() > 0)
+                root.reconcileRestoreEntry(false)
+        }
+        function onCountsChanged() {
+            if (!root.visible)
+                return
+            if (root.activeRestoreAnchorMs() > 0)
+                root.reconcileRestoreEntry(false)
+        }
     }
 
     function modeMatchesContentKind(kind) {
@@ -2139,8 +2204,10 @@ Item {
                 // Keep above step content so the first press is never swallowed.
                 z: 20
 
+                // Hidden while restore runs, and after success (Done is the only exit).
                 readonly property bool backEnabled: root.restoreStep > 0
                                                     && !root.restoreSessionRunning
+                                                    && !root.restoreProgressSucceeded
 
                 Rectangle {
                     anchors.top: parent.top
@@ -3997,9 +4064,14 @@ Item {
                 id: backButton
                 Layout.preferredWidth: 100
                 Layout.preferredHeight: 40
+                // After successful restore only Done remains (no Back).
+                visible: !(root.onSummaryStep && root.restoreProgressSucceeded)
                 //% "Back"
                 text: qsTrId("aegra.common.back")
-                enabled: !root.restoreSessionRunning && !serviceClient.restoreCommandBusy && !root.filePreflightPending
+                enabled: !root.restoreSessionRunning
+                         && !root.restoreProgressSucceeded
+                         && !serviceClient.restoreCommandBusy
+                         && !root.filePreflightPending
                 onClicked: root.stepBarBack()
             }
             AppButton {

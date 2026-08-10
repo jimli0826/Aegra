@@ -15,6 +15,8 @@ add_library(aegra_adapter_personal_archive STATIC
     src/personal_archive_shape_validation.cpp
     src/personal_archive_sidecar_io.cpp
     src/whole_disk_byte_reader.cpp
+    src/win32_output_file.cpp
+    src/windows_cng_sha256.cpp
 )
 
 add_library(Aegra::AdapterPersonalArchive ALIAS aegra_adapter_personal_archive)
@@ -27,7 +29,7 @@ target_include_directories(
 target_link_libraries(
     aegra_adapter_personal_archive
     PUBLIC Aegra::Base Aegra::Format Aegra::Ports
-    PRIVATE Aegra::AdapterCompressionZstd Aegra::AdapterCryptoSodium
+    PRIVATE Aegra::AdapterCompressionZstd Aegra::AdapterCryptoSodium bcrypt
 )
 
 aegra_configure_target(aegra_adapter_personal_archive)

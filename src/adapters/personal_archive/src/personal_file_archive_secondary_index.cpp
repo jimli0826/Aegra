@@ -23,18 +23,9 @@ namespace index = format::file_index;
     return {code, std::move(message)};
 }
 
-[[nodiscard]] base::Result<void> write_bytes(std::ofstream& output,
+[[nodiscard]] base::Result<void> write_bytes(detail::Win32OutputFile& output,
                                              const std::span<const std::byte> bytes) {
-    if (!bytes.empty()) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-        output.write(reinterpret_cast<const char*>(bytes.data()),
-                     static_cast<std::streamsize>(bytes.size()));
-    }
-    if (!output) {
-        return base::Result<void>::failure(
-            error(base::ErrorCode::kIoFailure, "failed to write secondary index page"));
-    }
-    return base::Result<void>::success();
+    return output.write(bytes);
 }
 
 [[nodiscard]] base::Result<std::vector<std::byte>>
@@ -105,7 +96,7 @@ protect_page(PreparedPage prepared, const bool encryption_enabled,
 }
 
 [[nodiscard]] base::Result<void>
-emit_page(std::ofstream& output, const archive::FileIndexPageHeader& header,
+emit_page(detail::Win32OutputFile& output, const archive::FileIndexPageHeader& header,
           const std::span<const std::byte> ciphertext) {
     auto prefix = archive::encode_archive_record_prefix(
         archive::make_file_index_page_record_prefix(ciphertext.size()));
@@ -151,7 +142,7 @@ prepare_page(const std::uint16_t page_kind, const std::vector<std::byte>& plain,
 
 template <typename Record>
 [[nodiscard]] base::Result<std::vector<BuiltPage>>
-write_sorted_leaves(std::ofstream& output, std::uint64_t& next_page_id,
+write_sorted_leaves(detail::Win32OutputFile& output, std::uint64_t& next_page_id,
                     const bool encryption_enabled, crypto_sodium::PayloadCipher* index_cipher,
                     const archive::EncodedBackupHeader& part_header,
                     const std::uint16_t leaf_kind, const std::vector<Record>& records,
@@ -194,11 +185,7 @@ write_sorted_leaves(std::ofstream& output, std::uint64_t& next_page_id,
         if (!prepared) {
             return base::Result<std::vector<BuiltPage>>::failure(prepared.error());
         }
-        const auto page_offset = output.tellp();
-        if (page_offset < 0) {
-            return base::Result<std::vector<BuiltPage>>::failure(
-                error(base::ErrorCode::kIoFailure, "failed to locate secondary index page"));
-        }
+        const auto page_offset = output.position();
         auto written = emit_page(output, prepared.value().header, prepared.value().ciphertext);
         if (!written) {
             return base::Result<std::vector<BuiltPage>>::failure(written.error());
@@ -207,7 +194,7 @@ write_sorted_leaves(std::ofstream& output, std::uint64_t& next_page_id,
         built.page_id = page_id;
         built.first_key = first_key(group.front());
         built.content_digest = prepared.value().header.content_digest;
-        built.file_offset = static_cast<std::uint64_t>(page_offset);
+        built.file_offset = page_offset;
         leaves.push_back(std::move(built));
         index += take;
     }
@@ -233,7 +220,7 @@ make_internal(const std::uint16_t page_kind, const std::span<const BuiltPage> ch
 }
 
 [[nodiscard]] base::Result<BuiltPage>
-write_internal_group(std::ofstream& output, std::uint64_t& next_page_id,
+write_internal_group(detail::Win32OutputFile& output, std::uint64_t& next_page_id,
                      const bool encryption_enabled, crypto_sodium::PayloadCipher* index_cipher,
                      const archive::EncodedBackupHeader& part_header,
                      const std::uint16_t internal_kind, const std::span<const BuiltPage> children) {
@@ -253,11 +240,7 @@ write_internal_group(std::ofstream& output, std::uint64_t& next_page_id,
     if (!prepared) {
         return base::Result<BuiltPage>::failure(prepared.error());
     }
-    const auto page_offset = output.tellp();
-    if (page_offset < 0) {
-        return base::Result<BuiltPage>::failure(
-            error(base::ErrorCode::kIoFailure, "failed to locate secondary internal page"));
-    }
+    const auto page_offset = output.position();
     auto written = emit_page(output, prepared.value().header, prepared.value().ciphertext);
     if (!written) {
         return base::Result<BuiltPage>::failure(written.error());
@@ -266,12 +249,13 @@ write_internal_group(std::ofstream& output, std::uint64_t& next_page_id,
     built.page_id = page_id;
     built.first_key = children.front().first_key;
     built.content_digest = prepared.value().header.content_digest;
-    built.file_offset = static_cast<std::uint64_t>(page_offset);
+    built.file_offset = page_offset;
     return base::Result<BuiltPage>::success(std::move(built));
 }
 
 [[nodiscard]] base::Result<TreeWriteResult>
-raise_and_hash(std::ofstream& output, std::uint64_t& next_page_id, const bool encryption_enabled,
+raise_and_hash(detail::Win32OutputFile& output, std::uint64_t& next_page_id,
+               const bool encryption_enabled,
                crypto_sodium::PayloadCipher* index_cipher,
                const archive::EncodedBackupHeader& part_header, const std::string_view digest_label,
                const std::uint64_t primary_count, const std::uint16_t internal_kind,
@@ -387,7 +371,7 @@ encode_chunk_leaf(const std::vector<index::ChunkIndexRecord>& records) {
 } // namespace
 
 base::Result<TreeWriteResult>
-write_entry_id_index(std::ofstream& output, std::uint64_t& next_page_id,
+write_entry_id_index(detail::Win32OutputFile& output, std::uint64_t& next_page_id,
                      const bool encryption_enabled, crypto_sodium::PayloadCipher* index_cipher,
                      const archive::EncodedBackupHeader& part_header,
                      std::vector<index::EntryIdIndexRecord> records) {
@@ -412,7 +396,8 @@ write_entry_id_index(std::ofstream& output, std::uint64_t& next_page_id,
 }
 
 base::Result<TreeWriteResult>
-write_stream_index(std::ofstream& output, std::uint64_t& next_page_id, const bool encryption_enabled,
+write_stream_index(detail::Win32OutputFile& output, std::uint64_t& next_page_id,
+                   const bool encryption_enabled,
                    crypto_sodium::PayloadCipher* index_cipher,
                    const archive::EncodedBackupHeader& part_header,
                    std::vector<index::StreamIndexRecord> records) {
@@ -437,7 +422,8 @@ write_stream_index(std::ofstream& output, std::uint64_t& next_page_id, const boo
 }
 
 base::Result<TreeWriteResult>
-write_chunk_index(std::ofstream& output, std::uint64_t& next_page_id, const bool encryption_enabled,
+write_chunk_index(detail::Win32OutputFile& output, std::uint64_t& next_page_id,
+                  const bool encryption_enabled,
                   crypto_sodium::PayloadCipher* index_cipher,
                   const archive::EncodedBackupHeader& part_header,
                   std::vector<index::ChunkIndexRecord> records) {

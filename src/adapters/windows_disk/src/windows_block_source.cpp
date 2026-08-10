@@ -6,6 +6,7 @@
 #include <winioctl.h>
 
 #include <algorithm>
+#include <cstring>
 #include <cwctype>
 #include <limits>
 #include <string>
@@ -179,22 +180,64 @@ base::Result<void> validate_request(const WindowsBlockSourceOpenRequest& request
     return base::Result<void>::success();
 }
 
-base::Result<std::size_t> wait_for_read(const HANDLE handle, OVERLAPPED& overlapped,
-                                        const base::CancellationToken& cancellation) {
-    constexpr DWORD kPollIntervalMilliseconds = 25;
+constexpr std::uint64_t kMaxSingleRead = 4ULL * 1024ULL * 1024ULL;
+constexpr DWORD kCancellationPollMilliseconds = 25;
+constexpr std::uint32_t kFallbackDeviceAlignment = 4096;
+
+struct RangeReadRequest final {
+    HANDLE handle;
+    std::uint64_t offset;
+    std::span<std::byte> destination;
+    std::uint64_t request_size;
+    const base::CancellationToken& cancellation;
+};
+
+class VirtualReadBuffer final {
+  public:
+    VirtualReadBuffer() noexcept
+        : data_(static_cast<std::byte*>(
+              VirtualAlloc(nullptr, static_cast<SIZE_T>(kMaxSingleRead), MEM_COMMIT | MEM_RESERVE,
+                           PAGE_READWRITE))) {}
+    ~VirtualReadBuffer() {
+        if (data_ != nullptr) {
+            VirtualFree(data_, 0, MEM_RELEASE);
+        }
+    }
+
+    VirtualReadBuffer(const VirtualReadBuffer&) = delete;
+    VirtualReadBuffer& operator=(const VirtualReadBuffer&) = delete;
+
+    [[nodiscard]] std::byte* data() const noexcept { return data_; }
+    [[nodiscard]] bool valid() const noexcept { return data_ != nullptr; }
+
+  private:
+    std::byte* data_{nullptr};
+};
+
+void cancel_and_drain_read(const HANDLE handle, OVERLAPPED& overlapped) noexcept {
+    CancelIoEx(handle, &overlapped);
+    WaitForSingleObject(overlapped.hEvent, INFINITE);
+    DWORD ignored = 0;
+    GetOverlappedResult(handle, &overlapped, &ignored, FALSE);
+}
+
+base::Result<DWORD> wait_for_read(const HANDLE handle, OVERLAPPED& overlapped,
+                                 const base::CancellationToken& cancellation) {
     for (;;) {
-        const auto wait_result = WaitForSingleObject(overlapped.hEvent, kPollIntervalMilliseconds);
+        const auto wait_result =
+            WaitForSingleObject(overlapped.hEvent, kCancellationPollMilliseconds);
         if (wait_result == WAIT_OBJECT_0) {
             break;
         }
         if (wait_result != WAIT_TIMEOUT) {
-            return base::Result<std::size_t>::failure(
-                detail::win32_error(GetLastError(), "WaitForSingleObject"));
+            const auto error = GetLastError();
+            cancel_and_drain_read(handle, overlapped);
+            return base::Result<DWORD>::failure(
+                detail::win32_error(error, "WaitForSingleObject"));
         }
         if (cancellation.stop_requested()) {
-            CancelIoEx(handle, &overlapped);
-            WaitForSingleObject(overlapped.hEvent, INFINITE);
-            return base::Result<std::size_t>::failure(
+            cancel_and_drain_read(handle, overlapped);
+            return base::Result<DWORD>::failure(
                 base::Error{base::ErrorCode::kCancelled, "block read cancelled"});
         }
     }
@@ -202,83 +245,139 @@ base::Result<std::size_t> wait_for_read(const HANDLE handle, OVERLAPPED& overlap
     DWORD bytes_read = 0;
     if (!GetOverlappedResult(handle, &overlapped, &bytes_read, FALSE)) {
         const auto error = GetLastError();
-        if (error == ERROR_HANDLE_EOF) {
-            return base::Result<std::size_t>::success(0);
+        if (error != ERROR_HANDLE_EOF) {
+            return base::Result<DWORD>::failure(
+                detail::win32_error(error, "GetOverlappedResult"));
         }
-        return base::Result<std::size_t>::failure(
-            detail::win32_error(error, "GetOverlappedResult"));
     }
-    return base::Result<std::size_t>::success(static_cast<std::size_t>(bytes_read));
+    return base::Result<DWORD>::success(bytes_read);
 }
 
-// Single asynchronous ReadFile. Windows volume/VSS drivers commonly return partial
-// success (bytes_read < request) for large transfers — callers must loop.
-base::Result<std::size_t> read_device_once(const HANDLE handle, const std::uint64_t offset,
-                                          const std::span<std::byte> destination,
-                                          const std::uint64_t request_size,
-                                          const base::CancellationToken& cancellation) {
-    if (request_size == 0) {
-        return base::Result<std::size_t>::success(0);
-    }
+base::Result<DWORD> read_once(const HANDLE handle, const std::uint64_t offset,
+                             const std::span<std::byte> destination,
+                             const base::CancellationToken& cancellation) {
     detail::UniqueHandle event(CreateEventW(nullptr, TRUE, FALSE, nullptr));
     if (!event.valid()) {
-        return base::Result<std::size_t>::failure(
-            detail::win32_error(GetLastError(), "CreateEventW"));
+        return base::Result<DWORD>::failure(detail::win32_error(GetLastError(), "CreateEventW"));
     }
-
     OVERLAPPED overlapped{};
     overlapped.Offset = static_cast<DWORD>(offset & 0xFFFFFFFFULL);
     overlapped.OffsetHigh = static_cast<DWORD>(offset >> 32U);
     overlapped.hEvent = event.get();
-    // Cap a single IRP; drivers often soft-cap transfer size (1–8 MiB). Loop fills the rest.
-    constexpr std::uint64_t kMaxSingleRead = 1ULL * 1024ULL * 1024ULL;
-    const auto once =
-        (std::min)({request_size, kMaxSingleRead,
-                    static_cast<std::uint64_t>((std::numeric_limits<DWORD>::max)())});
-    const auto started =
-        ReadFile(handle, destination.data(), static_cast<DWORD>(once), nullptr, &overlapped);
+    const auto started = ReadFile(handle, destination.data(), static_cast<DWORD>(destination.size()),
+                                  nullptr, &overlapped);
     const auto start_error = started ? ERROR_SUCCESS : GetLastError();
     if (!started && start_error != ERROR_IO_PENDING) {
         if (start_error == ERROR_HANDLE_EOF) {
-            return base::Result<std::size_t>::success(0);
+            return base::Result<DWORD>::success(0);
         }
-        return base::Result<std::size_t>::failure(detail::win32_error(start_error, "ReadFile"));
+        return base::Result<DWORD>::failure(detail::win32_error(start_error, "ReadFile"));
     }
     return wait_for_read(handle, overlapped, cancellation);
 }
 
-// Fill [offset, offset+request_size) or stop at true EOF (0-byte read).
-base::Result<std::size_t> read_device_range(const HANDLE handle, const std::uint64_t offset,
-                                           const std::span<std::byte> destination,
-                                           const std::uint64_t request_size,
-                                           const base::CancellationToken& cancellation) {
-    if (request_size == 0) {
+base::Result<std::size_t> read_buffered_range(const RangeReadRequest& request) {
+    std::size_t filled = 0;
+    while (filled < static_cast<std::size_t>(request.request_size)) {
+        const auto remaining = request.request_size - static_cast<std::uint64_t>(filled);
+        const auto once_size = (std::min)(kMaxSingleRead, remaining);
+        auto once = read_once(request.handle, request.offset + filled,
+                              request.destination.subspan(filled, static_cast<std::size_t>(once_size)),
+                              request.cancellation);
+        if (!once) {
+            return base::Result<std::size_t>::failure(once.error());
+        }
+        if (once.value() == 0) {
+            break;
+        }
+        filled += once.value();
+    }
+    return base::Result<std::size_t>::success(filled);
+}
+
+[[nodiscard]] std::uint32_t device_alignment(const HANDLE handle) noexcept {
+    DISK_GEOMETRY geometry{};
+    DWORD bytes_returned = 0;
+    if (DeviceIoControl(handle, IOCTL_DISK_GET_DRIVE_GEOMETRY, nullptr, 0, &geometry,
+                        sizeof(geometry), &bytes_returned, nullptr) &&
+        bytes_returned >= sizeof(geometry) && geometry.BytesPerSector != 0) {
+        return geometry.BytesPerSector;
+    }
+    FILE_ALIGNMENT_INFO alignment{};
+    if (GetFileInformationByHandleEx(handle, FileAlignmentInfo, &alignment, sizeof(alignment))) {
+        return alignment.AlignmentRequirement + 1;
+    }
+    return kFallbackDeviceAlignment;
+}
+
+[[nodiscard]] std::uint64_t align_down(const std::uint64_t value,
+                                       const std::uint32_t alignment) noexcept {
+    return value - (value % alignment);
+}
+
+[[nodiscard]] std::uint64_t align_up(const std::uint64_t value,
+                                     const std::uint32_t alignment) noexcept {
+    const auto remainder = value % alignment;
+    return remainder == 0 ? value : value + alignment - remainder;
+}
+
+base::Result<std::size_t> read_unbuffered_range(const RangeReadRequest& request,
+                                                const std::uint64_t readable_limit) {
+    VirtualReadBuffer buffer;
+    if (!buffer.valid()) {
+        return base::Result<std::size_t>::failure(
+            detail::win32_error(GetLastError(), "VirtualAlloc"));
+    }
+    const auto alignment = device_alignment(request.handle);
+    std::size_t filled = 0;
+    while (filled < static_cast<std::size_t>(request.request_size)) {
+        const auto logical_offset = request.offset + filled;
+        const auto physical_offset = align_down(logical_offset, alignment);
+        const auto prefix = logical_offset - physical_offset;
+        const auto remaining = request.request_size - static_cast<std::uint64_t>(filled);
+        const auto copy_capacity = kMaxSingleRead - prefix;
+        const auto wanted = (std::min)(remaining, copy_capacity);
+        const auto transfer_size = align_up(prefix + wanted, alignment);
+        if (physical_offset + transfer_size > readable_limit) {
+            return base::Result<std::size_t>::failure(base::Error{
+                base::ErrorCode::kIoFailure,
+                "unbuffered block read would cross the readable device boundary",
+            });
+        }
+        auto once = read_once(request.handle, physical_offset,
+                              std::span<std::byte>(buffer.data(),
+                                                   static_cast<std::size_t>(transfer_size)),
+                              request.cancellation);
+        if (!once) {
+            return base::Result<std::size_t>::failure(once.error());
+        }
+        if (once.value() <= prefix) {
+            break;
+        }
+        const auto copied = (std::min)(wanted, static_cast<std::uint64_t>(once.value()) - prefix);
+        std::memcpy(request.destination.data() + filled, buffer.data() + prefix,
+                    static_cast<std::size_t>(copied));
+        filled += static_cast<std::size_t>(copied);
+    }
+    return base::Result<std::size_t>::success(filled);
+}
+
+base::Result<std::size_t> read_device_range(const RangeReadRequest& request,
+                                           const bool unbuffered,
+                                           const std::uint64_t readable_limit) {
+    if (request.request_size == 0) {
         return base::Result<std::size_t>::success(0);
     }
-    if (destination.size() < static_cast<std::size_t>(request_size)) {
+    if (request.destination.size() < static_cast<std::size_t>(request.request_size)) {
         return base::Result<std::size_t>::failure(base::Error{
             base::ErrorCode::kInvalidArgument,
             "block source read buffer is smaller than the request",
         });
     }
-    std::size_t filled = 0;
-    while (filled < static_cast<std::size_t>(request_size)) {
-        if (cancellation.stop_requested()) {
-            return base::Result<std::size_t>::failure(
-                base::Error{base::ErrorCode::kCancelled, "block read cancelled"});
-        }
-        const auto remaining = request_size - static_cast<std::uint64_t>(filled);
-        auto once = read_device_once(handle, offset + filled, destination.subspan(filled), remaining,
-                                    cancellation);
-        if (!once) {
-            return once;
-        }
-        if (once.value() == 0) {
-            break; // EOF
-        }
-        filled += once.value();
+    if (unbuffered) {
+        return read_unbuffered_range(request, readable_limit);
     }
-    return base::Result<std::size_t>::success(filled);
+    return read_buffered_range(request);
 }
 
 void zero_fill(const std::span<std::byte> destination) noexcept {
@@ -292,6 +391,7 @@ struct WindowsBlockSource::Impl final {
     std::uint64_t size_bytes{0};
     std::uint64_t readable_size_bytes{0};
     bool zero_fill_unreadable{false};
+    bool unbuffered{false};
 };
 
 WindowsBlockSource::WindowsBlockSource(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
@@ -309,10 +409,11 @@ WindowsBlockSource::open(const WindowsBlockSourceOpenRequest& request) {
     if (request.kind == WindowsBlockSourceKind::kRawVolume && !open_path.empty()) {
         open_path.pop_back();
     }
-    const DWORD flags = request.kind == WindowsBlockSourceKind::kRawVolume
-                            ? FILE_FLAG_OVERLAPPED
-                            : FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED |
-                                  FILE_FLAG_SEQUENTIAL_SCAN;
+    const auto is_device = request.kind != WindowsBlockSourceKind::kStableFile;
+    const DWORD flags = is_device ? FILE_FLAG_NO_BUFFERING | FILE_FLAG_SEQUENTIAL_SCAN |
+                                        FILE_FLAG_OVERLAPPED
+                                  : FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED |
+                                        FILE_FLAG_SEQUENTIAL_SCAN;
     detail::UniqueHandle handle(CreateFileW(
         open_path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         nullptr, OPEN_EXISTING, flags, nullptr));
@@ -344,6 +445,7 @@ WindowsBlockSource::open(const WindowsBlockSourceOpenRequest& request) {
     impl->size_bytes = size.value().logical_size_bytes;
     impl->readable_size_bytes = size.value().readable_size_bytes;
     impl->zero_fill_unreadable = size.value().zero_fill_unreadable;
+    impl->unbuffered = is_device;
     return base::Result<std::unique_ptr<WindowsBlockSource>>::success(
         std::unique_ptr<WindowsBlockSource>(new WindowsBlockSource(std::move(impl))));
 }
@@ -397,8 +499,9 @@ base::Result<std::size_t> WindowsBlockSource::read(const std::uint64_t offset,
         }
         const auto device_request =
             (std::min)(request_size, impl_->readable_size_bytes - offset);
-        auto read_result =
-            read_device_range(impl_->handle.get(), offset, out, device_request, cancellation);
+        auto read_result = read_device_range(
+            RangeReadRequest{impl_->handle.get(), offset, out, device_request, cancellation},
+            impl_->unbuffered, impl_->readable_size_bytes);
         if (!read_result) {
             return read_result;
         }
@@ -420,7 +523,9 @@ base::Result<std::size_t> WindowsBlockSource::read(const std::uint64_t offset,
         return base::Result<std::size_t>::success(static_cast<std::size_t>(request_size));
     }
 
-    return read_device_range(impl_->handle.get(), offset, out, request_size, cancellation);
+    return read_device_range(
+        RangeReadRequest{impl_->handle.get(), offset, out, request_size, cancellation},
+        impl_->unbuffered, impl_->readable_size_bytes);
 }
 
 } // namespace aegra::adapters::windows_disk

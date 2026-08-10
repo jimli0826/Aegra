@@ -16,6 +16,15 @@ Snapshot Session -> Block Source -> Extent Enumerator -> Chunker
 Block Source 可通过 `describe_extent()` 报告 DATA/FREE。Pipeline 只为 DATA extent 调用 `read()`；FREE
 区间在 chunk descriptor 中保留，逻辑进度照常推进，但不把该区间当作全零数据读取或散列。
 
+`BackupSummary` 提供 producer 总读取耗时及 payload 分配/清零、extent 查询、实际 Block Source 读取的
+分项耗时，并提供源读取字节、FREE 字节及调用次数。统计只在 Chunk、extent 和 Block Source 调用边界
+采样，避免在内部固定块循环中增加高频时钟开销。
+
+Volume Backup 按 `memory_budget_bytes / chunk_size_bytes` 建立有界 Chunk buffer pool。Consumer 在
+`IBackupSession::write_chunk` 返回后立即归还 payload，Producer 后续读取复用其容量；FREE 字节保持未定义
+旧内容，但仍由 descriptor 排除，不会被读取、散列或持久化。最后一个短 Chunk 只缩短 vector size，
+不释放 capacity。该 pool 同时把 producer、queue、consumer 持有的 Chunk payload 总容量限制在内存预算内。
+
 ## Restore Pipeline
 
 ```text

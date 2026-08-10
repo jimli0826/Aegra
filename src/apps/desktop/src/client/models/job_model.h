@@ -103,6 +103,10 @@ class JobModel final : public QAbstractListModel {
     /// statusKey (none|running|success|failed), allTerminal, anyFailed.
     Q_INVOKABLE [[nodiscard]] QVariantMap restoreSessionStatus(qint64 since_utc_ms = 0) const;
 
+    /// Earliest created_utc_ms among active restore jobs (operation=2, queued/running/cancelling).
+    /// Returns 0 when no restore job is active — used to reattach the Restore summary page.
+    Q_INVOKABLE [[nodiscard]] qint64 earliestActiveRestoreCreatedUtcMs() const;
+
     [[nodiscard]] int rowCount(const QModelIndex& parent = QModelIndex()) const override;
     [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
     [[nodiscard]] QHash<int, QByteArray> roleNames() const override;

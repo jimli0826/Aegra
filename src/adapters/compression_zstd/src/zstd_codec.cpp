@@ -56,6 +56,10 @@ base::Result<std::vector<std::byte>> compress(std::span<const std::byte> input,
     return compressor.compress(input, compression_level);
 }
 
+std::size_t compress_bound(const std::size_t input_size) noexcept {
+    return ZSTD_compressBound(input_size);
+}
+
 base::Result<std::vector<std::byte>> decompress(std::span<const std::byte> input,
                                                 const std::size_t expected_size,
                                                 const std::size_t maximum_output_size) {
@@ -99,6 +103,33 @@ base::Result<std::vector<std::byte>> ZstdCompressor::compress(const std::span<co
                                                              const int compression_level) {
     return compress_with_context(static_cast<ZSTD_CCtx*>(context_), scratch_, input,
                                  compression_level);
+}
+
+base::Result<std::size_t> ZstdCompressor::compress_into(const std::span<const std::byte> input,
+                                                        const std::span<std::byte> output,
+                                                        const int compression_level) {
+    if (context_ == nullptr) {
+        return base::Result<std::size_t>::failure(
+            invalid("Zstandard compressor context is not initialized"));
+    }
+    if (input.empty()) {
+        return base::Result<std::size_t>::failure(invalid("cannot compress an empty payload"));
+    }
+    const auto bound = ZSTD_compressBound(input.size());
+    if (ZSTD_isError(bound) != 0U) {
+        return base::Result<std::size_t>::failure(corrupt(bound));
+    }
+    if (output.size() < bound) {
+        return base::Result<std::size_t>::failure(
+            invalid("compression output buffer is smaller than the compression bound"));
+    }
+    const auto written = ZSTD_compressCCtx(static_cast<ZSTD_CCtx*>(context_), output.data(),
+                                           output.size(), input.data(), input.size(),
+                                           compression_level);
+    if (ZSTD_isError(written) != 0U) {
+        return base::Result<std::size_t>::failure(corrupt(written));
+    }
+    return base::Result<std::size_t>::success(written);
 }
 
 ZstdDecompressor::ZstdDecompressor() : context_(ZSTD_createDCtx()) {}

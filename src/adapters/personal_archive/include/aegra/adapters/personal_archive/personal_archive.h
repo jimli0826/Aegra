@@ -65,6 +65,8 @@ struct ArchiveOpenRequest final {
     std::uint64_t maximum_chunk_logical_size{1024ULL * 1024ULL * 1024ULL};
     std::uint32_t maximum_split_parts{10'000};
     FileArchiveIndexLoad index_load{FileArchiveIndexLoad::kEager};
+    /// Enables a bounded depth-one payload prefetch for sequential restore readers.
+    bool sequential_payload_prefetch{false};
 };
 
 struct ArchiveSidecar final {
@@ -91,6 +93,18 @@ struct ArchiveChainOpenRequest final {
 load_archive_sidecar(const std::filesystem::path& archive_path, std::string_view password,
                      std::uint64_t maximum_uncompressed_size = 256ULL * 1024ULL * 1024ULL);
 
+struct PersonalArchiveWriteMetrics final {
+    std::uint64_t prepare_microseconds{0};
+    std::uint64_t persist_microseconds{0};
+    std::uint64_t commit_microseconds{0};
+    /// CPU time summed across block workers (can exceed prepare wall time).
+    std::uint64_t prepare_hash_microseconds{0};
+    std::uint64_t prepare_compress_microseconds{0};
+    std::uint64_t write_file_microseconds{0};
+    std::uint64_t write_file_bytes{0};
+    std::uint64_t write_file_calls{0};
+};
+
 class PersonalArchiveSession final : public ports::IBackupSession {
   public:
     ~PersonalArchiveSession() override;
@@ -105,6 +119,7 @@ class PersonalArchiveSession final : public ports::IBackupSession {
     [[nodiscard]] base::Result<void> write_chunk(const ports::ChunkWriteRequest& request,
                                                  base::CancellationToken cancellation) override;
     [[nodiscard]] base::Result<void> commit(base::CancellationToken cancellation) override;
+    [[nodiscard]] PersonalArchiveWriteMetrics write_metrics() const noexcept;
     void abort() noexcept override;
 
   private:

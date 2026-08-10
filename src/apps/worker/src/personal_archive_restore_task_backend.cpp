@@ -202,12 +202,15 @@ make_chain_open_request(const PersonalArchiveRestoreBackendRequest& request,
     open_request.maximum_chain_depth = request.maximum_chain_depth;
     open_request.layers.reserve(request.layers.size());
     protected_sources.reserve(request.layers.size());
-    for (const auto& layer : request.layers) {
+    for (std::size_t index = 0; index < request.layers.size(); ++index) {
+        const auto& layer = request.layers[index];
         adapters::personal_archive::ArchiveOpenRequest layer_request;
         layer_request.source = layer.source;
         layer_request.password = layer.password;
         layer_request.maximum_chunk_payload_size = request.maximum_chunk_size;
         layer_request.maximum_chunk_logical_size = request.maximum_chunk_size;
+        // The base layer is consumed sequentially. Sparse overlays can revisit or skip records.
+        layer_request.sequential_payload_prefetch = index == 0;
         open_request.layers.push_back(std::move(layer_request));
         protected_sources.push_back(layer.source);
     }
@@ -221,6 +224,7 @@ open_chain_reader_stage(const adapters::personal_archive::ArchiveChainOpenReques
                         const std::size_t layer_count) {
     ScopedStage stage(WorkerTaskLog::active(), "open_chain_reader");
     stage.note_u64("layer_count", layer_count);
+    stage.note_bool("base_sequential_payload_prefetch", true);
     auto opened = adapters::personal_archive::PersonalArchiveChainReader::open(open_request);
     if (!opened) {
         stage.fail(opened.error(), "open_archive_chain", stage_hint(opened.error()));

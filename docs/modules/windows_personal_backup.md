@@ -84,6 +84,14 @@ Validate JobRequest and trusted options
 
 任务日志细节见 [Worker Host 与进程协议](worker_host.md#任务日志)。
 
+`backup_pipeline` 阶段记录低频累计性能字段：`pipeline_producer_read_us`，并进一步拆分为 payload
+分配/清零、extent 查询、实际 `IBlockSource::read` 耗时；同时记录源读取字节与调用次数、FREE 字节、
+extent 查询次数、buffer pool/生产/消费队列等待、`pipeline_consumer_session_write_us`、进度发布耗时，以及 Personal Archive 的 `archive_prepare_us`、
+`archive_persist_us`、`archive_commit_us`、实际 `archive_write_file_us/bytes/calls`。这些字段按 Chunk、
+`IBlockSource` 或 Win32 调用边界计时，不在每个 64 KiB block 上读取时钟；并行阶段的生产与消费耗时允许重叠，不能直接
+相加为墙钟时间。启用异步 persist 后，`archive_prepare_us` 与 `archive_persist_us` 也允许互相重叠；
+`archive_commit_us` 包含等待最后一个 persist 完成的尾部时间。
+
 - Job schema 3 的 Backup 必须包含 1 至 100 个有序且无重复的 volume source、显式 `backup.type`、`file_uuid`、
   `created_utc_ms`，全量还必须包含不同于 `file_uuid` 的 `backup_set_uuid`；
   加密 Archive 的 `credential_refs` 为 `dpapi-lm:<entropy_id>:<base64>`（Worker 用同一 entropy

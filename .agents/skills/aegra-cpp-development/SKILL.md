@@ -33,6 +33,11 @@ Before changing production code:
 - Keep production and runtime implementation in C++.
 - Keep `base`, `contracts`, `ports`, `format`, and `pipeline` independent of Windows, databases, network SDKs, UI frameworks, and vendor SDKs unless the architecture document explicitly assigns that dependency.
 - Put concrete infrastructure in `adapters`; construct it only in `apps` composition roots.
+- On Windows production paths, open/read/write/seek/flush/close local files with Win32 APIs
+  (`CreateFileW`, `ReadFile`, `WriteFile`, etc.) under RAII handles. Never use
+  `std::ifstream`, `std::ofstream`, or `std::fstream` (or `std::filebuf` workarounds) for
+  disk file I/O. Core layers must reach files only through ports; Desktop may use Qt file APIs
+  but still not iostream file streams.
 - Never expose STL types or vendor objects across a C ABI, plugin ABI, DLL ABI, or process boundary.
 - Never store plaintext secrets or log authentication material, including credentials, secret
   references, keys, passwords, authorization/session data, or tokens. Logs may contain user data

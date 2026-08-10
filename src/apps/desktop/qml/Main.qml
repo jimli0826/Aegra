@@ -199,6 +199,9 @@ Window {
                             serviceClient.refreshInventory()
                             serviceClient.refreshConnections()
                             serviceClient.refreshRepository()
+                            // Restore reattaches summary progress from the live job list.
+                            if (newIndex === 2)
+                                serviceClient.refreshJobs()
                         } else if (newIndex === 4) {
                             serviceClient.refreshConnections()
                             serviceClient.refreshRepository()
@@ -213,8 +216,11 @@ Window {
                             anchors.fill: parent
                             opacity: index === pageContainer.currentIndex ? 1 : 0
                             visible: opacity > 0
+                            // Keep Restore (index 2) alive so an in-flight restore session and
+                            // multi-mapping start queue are not torn down when navigating away.
                             active: index === pageContainer.currentIndex
                                     || index === pageContainer.previousIndex
+                                    || index === 2
 
                             Behavior on opacity {
                                 NumberAnimation { duration: 250; easing.type: Easing.OutCubic }

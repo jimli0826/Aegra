@@ -1,10 +1,10 @@
 #include "personal_archive_chunk_builder.h"
 
-#include "aegra/adapters/crypto_sodium/content_hash.h"
 #include "aegra/base/error.h"
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -18,6 +18,13 @@ namespace aegra::adapters::personal_archive::detail {
 namespace {
 
 namespace archive = format::personal_archive;
+
+[[nodiscard]] std::uint64_t elapsed_microseconds(
+    const std::chrono::steady_clock::time_point start) noexcept {
+    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                                          std::chrono::steady_clock::now() - start)
+                                          .count());
+}
 
 [[nodiscard]] base::Error invalid(std::string message) {
     return {base::ErrorCode::kInvalidArgument, std::move(message)};
@@ -107,6 +114,7 @@ void append_free_block(PreparedArchiveChunk& chunk, const std::uint64_t block_in
 
 struct PreparedBlock final {
     archive::SidecarRecord record{};
+    /// Compressed bytes when `use_compressed`; empty for RAW (emit reads the source payload).
     std::vector<std::byte> stored;
     bool changed{true};
     bool use_compressed{false};
@@ -118,24 +126,33 @@ struct PreparedBlock final {
     std::uint32_t dedup_ref{0};
     /// When dedup is on: this block is a canonical that still needs zstd.
     bool needs_compress{false};
+    std::uint64_t hash_microseconds{0};
+    std::uint64_t compress_microseconds{0};
     base::Error error{};
     bool failed{false};
 };
 
 [[nodiscard]] base::Result<void>
 compress_changed_data(PreparedBlock& block, const std::span<const std::byte> plaintext,
-                      compression_zstd::ZstdCompressor& compressor) {
-    auto compressed = compressor.compress(plaintext);
-    if (!compressed) {
-        return base::Result<void>::failure(compressed.error());
+                      BlockWorkerLocal& local) {
+    const auto compress_start = std::chrono::steady_clock::now();
+    const auto bound = compression_zstd::compress_bound(plaintext.size());
+    if (local.scratch.size() < bound) {
+        local.scratch.resize(bound);
     }
-    if (compressed.value().size() < plaintext.size()) {
+    auto written = local.compressor.compress_into(plaintext, local.scratch);
+    if (!written) {
+        return base::Result<void>::failure(written.error());
+    }
+    if (written.value() < plaintext.size()) {
         block.use_compressed = true;
-        block.stored = std::move(compressed).value();
+        block.stored.assign(local.scratch.begin(),
+                            local.scratch.begin() + static_cast<std::ptrdiff_t>(written.value()));
     } else {
         block.use_compressed = false;
-        block.stored.assign(plaintext.begin(), plaintext.end());
+        block.stored.clear();
     }
+    block.compress_microseconds += elapsed_microseconds(compress_start);
     return base::Result<void>::success();
 }
 
@@ -168,7 +185,9 @@ compress_changed_data(PreparedBlock& block, const std::span<const std::byte> pla
         out.changed = block_changed(request, out.record, block_index);
         return out;
     }
-    auto digest = crypto_sodium::sha256(block);
+    const auto hash_start = std::chrono::steady_clock::now();
+    auto digest = local.hasher.hash(block);
+    out.hash_microseconds += elapsed_microseconds(hash_start);
     if (!digest) {
         out.failed = true;
         out.error = digest.error();
@@ -183,7 +202,7 @@ compress_changed_data(PreparedBlock& block, const std::span<const std::byte> pla
     if (request.deduplication_enabled) {
         return out;
     }
-    auto compressed = compress_changed_data(out, block, local.compressor);
+    auto compressed = compress_changed_data(out, block, local);
     if (!compressed) {
         out.failed = true;
         out.error = compressed.error();
@@ -191,8 +210,11 @@ compress_changed_data(PreparedBlock& block, const std::span<const std::byte> pla
     return out;
 }
 
-void append_prepared_data(PreparedArchiveChunk& chunk, PreparedBlock& block) {
-    if (block.stored.size() > (std::numeric_limits<std::uint32_t>::max)()) {
+void append_prepared_data(PreparedArchiveChunk& chunk, PreparedBlock& block,
+                          const std::span<const std::byte> plaintext) {
+    const auto stored =
+        block.use_compressed ? std::span<const std::byte>(block.stored) : plaintext;
+    if (stored.size() > (std::numeric_limits<std::uint32_t>::max)()) {
         block.failed = true;
         block.error = invalid("archive block exceeds format limit");
         return;
@@ -200,13 +222,13 @@ void append_prepared_data(PreparedArchiveChunk& chunk, PreparedBlock& block) {
     archive::BlockEntry entry;
     entry.logical_block_index = block.block_index;
     entry.data_offset_or_reference = chunk.payload.size();
-    entry.stored_size = static_cast<std::uint32_t>(block.stored.size());
+    entry.stored_size = static_cast<std::uint32_t>(stored.size());
     // Existing volume convention: logical_size equals stored_size for RAW/COMPRESSED.
-    entry.logical_size = static_cast<std::uint32_t>(block.stored.size());
+    entry.logical_size = static_cast<std::uint32_t>(stored.size());
     entry.flags =
         block.use_compressed ? archive::kBlockFlagCompressed : archive::kBlockFlagRaw;
     chunk.entries.push_back(entry);
-    chunk.payload.insert(chunk.payload.end(), block.stored.begin(), block.stored.end());
+    chunk.payload.insert(chunk.payload.end(), stored.begin(), stored.end());
 }
 
 void append_dedup_block(PreparedArchiveChunk& chunk, const std::uint64_t block_index,
@@ -418,7 +440,7 @@ compress_canonical_blocks_parallel(const ChunkPreparationRequest& request,
             auto& block = blocks[pending[work]];
             const auto plaintext =
                 request.input.payload.subspan(block.source_offset, block.plaintext_size);
-            auto compressed = compress_changed_data(block, plaintext, local.compressor);
+            auto compressed = compress_changed_data(block, plaintext, local);
             if (!compressed) {
                 block.failed = true;
                 block.error = compressed.error();
@@ -441,7 +463,13 @@ emit_changed_data_block(PreparedArchiveChunk& current, PreparedBlock& block,
     if (current.entries.size() >= (std::numeric_limits<std::uint32_t>::max)()) {
         return base::Result<void>::failure(invalid("archive chunk entry count exceeds limit"));
     }
-    append_prepared_data(current, block);
+    // Upper bound for this chunk's stored bytes; avoids repeated growth reallocations.
+    if (current.payload.empty()) {
+        current.payload.reserve(request.input.payload.size() - block.source_offset);
+    }
+    const auto plaintext =
+        request.input.payload.subspan(block.source_offset, block.plaintext_size);
+    append_prepared_data(current, block, plaintext);
     return block.failed ? base::Result<void>::failure(block.error)
                         : base::Result<void>::success();
 }
@@ -456,6 +484,8 @@ assemble_prepared_blocks(const ChunkPreparationRequest& request,
         if (block.failed) {
             return base::Result<PreparedArchiveInput>::failure(block.error);
         }
+        result.hash_microseconds += block.hash_microseconds;
+        result.compress_microseconds += block.compress_microseconds;
         result.sidecar_records.push_back(block.record);
         if (!block.changed) {
             finish_chunk(result, current, request);

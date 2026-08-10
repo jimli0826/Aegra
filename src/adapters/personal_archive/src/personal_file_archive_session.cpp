@@ -1,6 +1,7 @@
 #include "aegra/adapters/personal_archive/personal_archive.h"
 
 #include "personal_file_archive_secondary_index.h"
+#include "win32_output_file.h"
 
 #include "aegra/adapters/compression_zstd/zstd_codec.h"
 #include "aegra/adapters/crypto_sodium/content_hash.h"
@@ -39,24 +40,14 @@ inline constexpr std::uint64_t kMaximumMetadataSize = 64ULL * 1024ULL * 1024ULL;
                        [](const std::byte item) { return item == std::byte{0}; });
 }
 
-[[nodiscard]] const char* as_chars(const std::byte* value) noexcept {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) stream byte-buffer boundary.
-    return reinterpret_cast<const char*>(value);
-}
-
 [[nodiscard]] char* as_mutable_chars(std::byte* value) noexcept {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) stream byte-buffer boundary.
     return reinterpret_cast<char*>(value);
 }
 
-[[nodiscard]] base::Result<void> write_bytes(std::ofstream& output,
+[[nodiscard]] base::Result<void> write_bytes(detail::Win32OutputFile& output,
                                              const std::span<const std::byte> bytes) {
-    output.write(as_chars(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-    if (!output) {
-        return base::Result<void>::failure(
-            error(base::ErrorCode::kIoFailure, "failed to write file archive"));
-    }
-    return base::Result<void>::success();
+    return output.write(bytes);
 }
 
 [[nodiscard]] std::filesystem::path partial_path(const std::filesystem::path& destination) {
@@ -405,12 +396,12 @@ struct NamespaceWriteResult final {
     std::vector<index::StreamIndexRecord> stream_records;
 };
 
-[[nodiscard]] base::Result<void> emit_index_page(std::ofstream& output,
+[[nodiscard]] base::Result<void> emit_index_page(detail::Win32OutputFile& output,
                                                  const archive::FileIndexPageHeader& header,
                                                  std::span<const std::byte> ciphertext);
 
 [[nodiscard]] base::Result<BuiltIndexPage>
-write_one_leaf_page(std::ofstream& output, std::uint64_t& next_page_id,
+write_one_leaf_page(detail::Win32OutputFile& output, std::uint64_t& next_page_id,
                     const bool encryption_enabled, crypto_sodium::PayloadCipher* index_cipher,
                     const archive::EncodedBackupHeader& part_header,
                     const std::vector<contracts::FileEntryDesc>& group) {
@@ -424,11 +415,7 @@ write_one_leaf_page(std::ofstream& output, std::uint64_t& next_page_id,
     if (!prepared) {
         return base::Result<BuiltIndexPage>::failure(prepared.error());
     }
-    const auto page_offset = output.tellp();
-    if (page_offset < 0) {
-        return base::Result<BuiltIndexPage>::failure(
-            error(base::ErrorCode::kIoFailure, "failed to locate file index page offset"));
-    }
+    const auto page_offset = output.position();
     auto written = emit_index_page(output, prepared.value().header, prepared.value().ciphertext);
     if (!written) {
         return base::Result<BuiltIndexPage>::failure(written.error());
@@ -437,7 +424,7 @@ write_one_leaf_page(std::ofstream& output, std::uint64_t& next_page_id,
     built.page_id = page_id;
     built.first_key = std::move(first_key).value();
     built.content_digest = prepared.value().header.content_digest;
-    built.file_offset = static_cast<std::uint64_t>(page_offset);
+    built.file_offset = page_offset;
     return base::Result<BuiltIndexPage>::success(std::move(built));
 }
 
@@ -465,7 +452,7 @@ void append_secondary_records_for_leaf(const std::vector<contracts::FileEntryDes
 
 /// Stream leaf packing: at most one leaf of FileEntryDesc resident (M5).
 [[nodiscard]] base::Result<NamespaceWriteResult> write_leaves_from_sorted_spool(
-    std::ofstream& output, std::ifstream& spool_input, std::uint64_t& next_page_id,
+    detail::Win32OutputFile& output, std::ifstream& spool_input, std::uint64_t& next_page_id,
     const bool encryption_enabled, crypto_sodium::PayloadCipher* index_cipher,
     const archive::EncodedBackupHeader& part_header, const std::vector<SpooledEntryRef>& refs) {
     if (refs.empty()) {
@@ -533,7 +520,7 @@ struct IndexTreeRoot final {
     std::uint64_t page_count{0};
 };
 
-[[nodiscard]] base::Result<void> emit_index_page(std::ofstream& output,
+[[nodiscard]] base::Result<void> emit_index_page(detail::Win32OutputFile& output,
                                                  const archive::FileIndexPageHeader& header,
                                                  const std::span<const std::byte> ciphertext) {
     const auto body_size = ciphertext.size();
@@ -627,7 +614,7 @@ choose_internal_fanout(const std::span<const BuiltIndexPage> level, const std::s
 }
 
 [[nodiscard]] base::Result<BuiltIndexPage>
-write_internal_group(std::ofstream& output, std::uint64_t& next_page_id,
+write_internal_group(detail::Win32OutputFile& output, std::uint64_t& next_page_id,
                      const bool encryption_enabled, crypto_sodium::PayloadCipher* index_cipher,
                      const archive::EncodedBackupHeader& part_header,
                      const std::span<const BuiltIndexPage> children) {
@@ -641,11 +628,7 @@ write_internal_group(std::ofstream& output, std::uint64_t& next_page_id,
     if (!prepared) {
         return base::Result<BuiltIndexPage>::failure(prepared.error());
     }
-    const auto page_offset = output.tellp();
-    if (page_offset < 0) {
-        return base::Result<BuiltIndexPage>::failure(
-            error(base::ErrorCode::kIoFailure, "failed to locate file index page offset"));
-    }
+    const auto page_offset = output.position();
     auto written = emit_index_page(output, prepared.value().header, prepared.value().ciphertext);
     if (!written) {
         return base::Result<BuiltIndexPage>::failure(written.error());
@@ -654,12 +637,12 @@ write_internal_group(std::ofstream& output, std::uint64_t& next_page_id,
     built.page_id = page_id;
     built.first_key = children.front().first_key;
     built.content_digest = prepared.value().header.content_digest;
-    built.file_offset = static_cast<std::uint64_t>(page_offset);
+    built.file_offset = page_offset;
     return base::Result<BuiltIndexPage>::success(std::move(built));
 }
 
 [[nodiscard]] base::Result<std::vector<BuiltIndexPage>>
-write_internal_level(std::ofstream& output, std::uint64_t& next_page_id,
+write_internal_level(detail::Win32OutputFile& output, std::uint64_t& next_page_id,
                      const bool encryption_enabled, crypto_sodium::PayloadCipher* index_cipher,
                      const archive::EncodedBackupHeader& part_header,
                      const std::vector<BuiltIndexPage>& children) {
@@ -692,7 +675,7 @@ write_internal_level(std::ofstream& output, std::uint64_t& next_page_id,
 
 /// Bottom-up B+tree: given written leaves, raise internal levels until a single root (depth ≤ 8).
 [[nodiscard]] base::Result<IndexTreeRoot>
-raise_index_tree_to_root(std::ofstream& output, std::uint64_t& next_page_id,
+raise_index_tree_to_root(detail::Win32OutputFile& output, std::uint64_t& next_page_id,
                          const bool encryption_enabled, crypto_sodium::PayloadCipher* index_cipher,
                          const archive::EncodedBackupHeader& part_header,
                          std::vector<BuiltIndexPage> level) {
@@ -735,8 +718,8 @@ struct PersonalFileArchiveSession::Impl final {
     std::filesystem::path destination;
     std::filesystem::path partial;
     std::filesystem::path spool_path;
-    std::ofstream output;
-    std::ofstream spool;
+    detail::Win32OutputFile output;
+    detail::Win32OutputFile spool;
     crypto_sodium::SecureString password;
     std::unique_ptr<crypto_sodium::PayloadCipher> payload_cipher;
     std::unique_ptr<crypto_sodium::PayloadCipher> index_cipher;
@@ -901,9 +884,9 @@ PersonalFileArchiveSession::create(const FileArchiveCreateRequest& request) {
         implementation->part_header = header.value();
     }
 
-    implementation->output.open(partial, std::ios::binary | std::ios::trunc);
-    implementation->spool.open(implementation->spool_path, std::ios::binary | std::ios::trunc);
-    if (!implementation->output || !implementation->spool) {
+    auto output_opened = implementation->output.open(partial);
+    auto spool_opened = implementation->spool.open(implementation->spool_path);
+    if (!output_opened || !spool_opened) {
         return base::Result<std::unique_ptr<PersonalFileArchiveSession>>::failure(
             error(base::ErrorCode::kIoFailure, "failed to create file archive partials"));
     }
@@ -973,11 +956,11 @@ PersonalFileArchiveSession::write_entry(const contracts::FileEntryDesc& entry,
     for (std::size_t i = 0; i < 4; ++i) {
         size_bytes[i] = static_cast<std::byte>((size >> (i * 8U)) & 0xFFU);
     }
-    auto written = write_bytes(implementation_->spool, size_bytes);
-    if (!written) {
-        return written;
-    }
-    written = write_bytes(implementation_->spool, encoded.value());
+    std::vector<std::byte> spool_record;
+    spool_record.reserve(size_bytes.size() + encoded.value().size());
+    spool_record.insert(spool_record.end(), size_bytes.begin(), size_bytes.end());
+    spool_record.insert(spool_record.end(), encoded.value().begin(), encoded.value().end());
+    auto written = write_bytes(implementation_->spool, spool_record);
     if (!written) {
         return written;
     }
@@ -1090,24 +1073,27 @@ PersonalFileArchiveSession::write_stream_chunk(const ports::FileChunkWriteReques
                                                     : !encoded_header ? encoded_header.error()
                                                                       : encoded_entry.error());
     }
-    const auto record_offset = implementation_->output.tellp();
-    if (record_offset < 0) {
-        return base::Result<std::uint64_t>::failure(
-            error(base::ErrorCode::kIoFailure, "failed to locate file stream chunk offset"));
+    const auto record_offset = implementation_->output.position();
+    std::vector<std::byte> record_header;
+    record_header.reserve(prefix.value().size() + encoded_header.value().size() +
+                          encoded_entry.value().size());
+    record_header.insert(record_header.end(), prefix.value().begin(), prefix.value().end());
+    record_header.insert(record_header.end(), encoded_header.value().begin(),
+                         encoded_header.value().end());
+    record_header.insert(record_header.end(), encoded_entry.value().begin(),
+                         encoded_entry.value().end());
+    auto header_written = write_bytes(implementation_->output, record_header);
+    if (!header_written) {
+        return base::Result<std::uint64_t>::failure(header_written.error());
     }
-    for (const auto bytes :
-         {std::span<const std::byte>(prefix.value()),
-          std::span<const std::byte>(encoded_header.value()),
-          std::span<const std::byte>(encoded_entry.value()), std::span<const std::byte>(payload)}) {
-        auto written = write_bytes(implementation_->output, bytes);
-        if (!written) {
-            return base::Result<std::uint64_t>::failure(written.error());
-        }
+    auto payload_written = write_bytes(implementation_->output, payload);
+    if (!payload_written) {
+        return base::Result<std::uint64_t>::failure(payload_written.error());
     }
     index::ChunkIndexRecord chunk_rec;
     chunk_rec.chunk_index = header.chunk_index;
-    chunk_rec.record_offset = static_cast<std::uint64_t>(record_offset);
-    chunk_rec.payload_offset = static_cast<std::uint64_t>(record_offset) +
+    chunk_rec.record_offset = record_offset;
+    chunk_rec.payload_offset = record_offset +
                                archive::kArchiveRecordPrefixSize +
                                archive::kFileStreamChunkHeaderSize + archive::kBlockEntrySize;
     chunk_rec.payload_size = payload.size();
@@ -1133,8 +1119,11 @@ PersonalFileArchiveSession::finalize(const base::CancellationToken cancellation)
         return base::Result<void>::failure(
             error(base::ErrorCode::kInvalidArgument, "file archive requires at least one entry"));
     }
-    implementation_->spool.flush();
+    auto spool_flushed = implementation_->spool.flush();
     implementation_->spool.close();
+    if (!spool_flushed) {
+        return base::Result<void>::failure(spool_flushed.error());
+    }
     std::ifstream spool_input(implementation_->spool_path, std::ios::binary);
     if (!spool_input) {
         return base::Result<void>::failure(
@@ -1216,11 +1205,7 @@ PersonalFileArchiveSession::finalize(const base::CancellationToken cancellation)
         page_count += chunk_tree.value().page_count;
     }
 
-    const auto footer_offset = implementation_->output.tellp();
-    if (footer_offset < 0) {
-        return base::Result<void>::failure(
-            error(base::ErrorCode::kIoFailure, "failed to locate file archive footer"));
-    }
+    const auto footer_offset = implementation_->output.position();
     archive::BackupFooter footer;
     footer.file_stream_chunk_count = implementation_->next_chunk_index;
     footer.index_page_count = page_count;
@@ -1235,7 +1220,7 @@ PersonalFileArchiveSession::finalize(const base::CancellationToken cancellation)
     footer.entry_id_root = entry_tree.value().locator;
     footer.stream_root = stream_root;
     footer.chunk_root = chunk_root;
-    footer.part_file_size = static_cast<std::uint64_t>(footer_offset) + archive::kBackupFooterSize;
+    footer.part_file_size = footer_offset + archive::kBackupFooterSize;
     footer.stored_bytes = footer.part_file_size;
     footer.file_uuid = implementation_->file_uuid;
     auto encoded_footer = archive::encode_backup_footer(footer);
@@ -1243,8 +1228,8 @@ PersonalFileArchiveSession::finalize(const base::CancellationToken cancellation)
         return base::Result<void>::failure(encoded_footer.error());
     }
     auto written = write_bytes(implementation_->output, encoded_footer.value());
-    implementation_->output.flush();
-    if (!written || !implementation_->output) {
+    auto flushed = implementation_->output.flush();
+    if (!written || !flushed) {
         return base::Result<void>::failure(
             error(base::ErrorCode::kIoFailure, "failed to write file archive footer"));
     }
@@ -1279,12 +1264,8 @@ void PersonalFileArchiveSession::abort() noexcept {
     if (!implementation_ || implementation_->complete) {
         return;
     }
-    try {
-        implementation_->output.close();
-        implementation_->spool.close();
-    } catch (...) {
-        static_cast<void>(0);
-    }
+    implementation_->output.close();
+    implementation_->spool.close();
     std::error_code ignored;
     std::filesystem::remove(implementation_->partial, ignored);
     std::filesystem::remove(implementation_->spool_path, ignored);

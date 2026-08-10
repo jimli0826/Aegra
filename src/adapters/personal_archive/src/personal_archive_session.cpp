@@ -3,6 +3,7 @@
 #include "personal_archive_block_worker_pool.h"
 #include "personal_archive_chunk_builder.h"
 #include "personal_archive_payload.h"
+#include "win32_output_file.h"
 #include "personal_archive_sidecar_io.h"
 
 #include "aegra/adapters/crypto_sodium/metadata_crypto.h"
@@ -13,13 +14,17 @@
 #include "aegra/format/personal_archive.h"
 
 #include <algorithm>
+#include <chrono>
+#include <condition_variable>
 #include <cwctype>
-#include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <limits>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -61,9 +66,11 @@ struct SourceWriteState final {
     return {code, std::move(message)};
 }
 
-[[nodiscard]] const char* as_chars(const std::byte* value) noexcept {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) stream byte-buffer boundary.
-    return reinterpret_cast<const char*>(value);
+[[nodiscard]] std::uint64_t elapsed_microseconds(
+    const std::chrono::steady_clock::time_point start) noexcept {
+    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                                          std::chrono::steady_clock::now() - start)
+                                          .count());
 }
 
 [[nodiscard]] base::Result<void> validate_create_geometry(const ArchiveCreateRequest& request) {
@@ -355,17 +362,12 @@ create_payload_cipher(const ArchiveCreateRequest& request, const ArchivePreamble
                                                 preamble.metadata.salt);
 }
 
-[[nodiscard]] base::Result<void> write_bytes(std::ofstream& output,
+[[nodiscard]] base::Result<void> write_bytes(detail::Win32OutputFile& output,
                                              std::span<const std::byte> bytes) {
-    output.write(as_chars(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-    if (!output) {
-        return base::Result<void>::failure(
-            error(base::ErrorCode::kIoFailure, "failed to write personal archive"));
-    }
-    return base::Result<void>::success();
+    return output.write(bytes);
 }
 
-[[nodiscard]] base::Result<void> write_preamble(std::ofstream& output,
+[[nodiscard]] base::Result<void> write_preamble(detail::Win32OutputFile& output,
                                                 const ArchivePreamble& preamble) {
     for (const auto bytes : {std::span<const std::byte>(preamble.header),
                              std::span<const std::byte>(preamble.envelope),
@@ -383,7 +385,7 @@ create_payload_cipher(const ArchiveCreateRequest& request, const ArchivePreamble
     return base::Result<void>::success();
 }
 
-[[nodiscard]] base::Result<void> write_prepared_chunk(std::ofstream& output,
+[[nodiscard]] base::Result<void> write_prepared_chunk(detail::Win32OutputFile& output,
                                                       const detail::PreparedArchiveChunk& chunk) {
     const auto body_size =
         static_cast<std::uint64_t>(chunk.entries.size()) * archive::kBlockEntrySize +
@@ -394,23 +396,21 @@ create_payload_cipher(const ArchiveCreateRequest& request, const ArchivePreamble
     if (!prefix || !header) {
         return base::Result<void>::failure(!prefix ? prefix.error() : header.error());
     }
-    auto written = write_bytes(output, prefix.value());
-    if (!written) {
-        return written;
-    }
-    written = write_bytes(output, header.value());
-    if (!written) {
-        return written;
-    }
+    std::vector<std::byte> record_header;
+    record_header.reserve(prefix.value().size() + header.value().size() +
+                          chunk.entries.size() * archive::kBlockEntrySize);
+    record_header.insert(record_header.end(), prefix.value().begin(), prefix.value().end());
+    record_header.insert(record_header.end(), header.value().begin(), header.value().end());
     for (const auto& entry : chunk.entries) {
         auto encoded = archive::encode_block_entry(entry);
         if (!encoded) {
             return base::Result<void>::failure(encoded.error());
         }
-        written = write_bytes(output, encoded.value());
-        if (!written) {
-            return written;
-        }
+        record_header.insert(record_header.end(), encoded.value().begin(), encoded.value().end());
+    }
+    auto written = write_bytes(output, record_header);
+    if (!written) {
+        return written;
     }
     return write_bytes(output, chunk.payload);
 }
@@ -509,7 +509,7 @@ struct PersonalArchiveSession::Impl final {
     std::filesystem::path sidecar_destination;
     std::filesystem::path sidecar_partial;
     std::vector<PartArtifact> parts;
-    std::ofstream output;
+    detail::Win32OutputFile output;
     crypto_sodium::SecureString password;
     std::unique_ptr<crypto_sodium::PayloadCipher> payload_cipher;
     bool encryption_enabled{false};
@@ -526,12 +526,24 @@ struct PersonalArchiveSession::Impl final {
     std::uint64_t deduplicated_block_count{0};
     std::uint64_t deduplicated_logical_bytes{0};
     std::uint64_t current_part_chunk_count{0};
+    std::uint64_t prepare_microseconds{0};
+    std::uint64_t persist_microseconds{0};
+    std::uint64_t commit_microseconds{0};
+    std::uint64_t prepare_hash_microseconds{0};
+    std::uint64_t prepare_compress_microseconds{0};
     std::vector<SourceWriteState> sources;
     std::size_t next_source_position{0};
     bool incremental{false};
     bool complete{false};
     /// Persistent hash/zstd workers for the session lifetime (not per physical chunk).
     detail::BlockWorkerPool block_workers;
+    std::mutex persist_mutex;
+    std::condition_variable_any persist_changed;
+    std::optional<detail::PreparedArchiveInput> pending_persist;
+    std::optional<base::Error> persist_error;
+    bool persist_active{false};
+    bool persist_stopping{false};
+    std::jthread persist_thread;
 
     [[nodiscard]] SourceWriteState* current_source(const std::uint32_t source_index) noexcept {
         while (next_source_position < sources.size() &&
@@ -569,9 +581,9 @@ struct PersonalArchiveSession::Impl final {
         }
         output.close();
         parts.push_back(std::move(artifact));
-        output.open(parts.back().partial, std::ios::binary | std::ios::trunc);
+        auto opened = output.open(parts.back().partial);
         auto written = write_bytes(output, encoded.value());
-        if (!output || !written) {
+        if (!opened || !written) {
             return base::Result<void>::failure(
                 error(base::ErrorCode::kIoFailure, "failed to create archive split part"));
         }
@@ -584,12 +596,7 @@ struct PersonalArchiveSession::Impl final {
         if (split_size_bytes == 0 || current_part_chunk_count == 0) {
             return base::Result<void>::success();
         }
-        const auto position = output.tellp();
-        if (position < 0) {
-            return base::Result<void>::failure(
-                error(base::ErrorCode::kIoFailure, "failed to determine archive part size"));
-        }
-        const auto current_size = static_cast<std::uint64_t>(position);
+        const auto current_size = output.position();
         const auto wire_size = chunk_wire_size(chunk);
         const auto reserve = wire_size + archive::kBackupFooterSize;
         if (current_size <= split_size_bytes && reserve <= split_size_bytes - current_size) {
@@ -628,11 +635,143 @@ struct PersonalArchiveSession::Impl final {
             if (!written) {
                 return written;
             }
-            ++next_archive_chunk_index;
             ++current_part_chunk_count;
             total_payload_size += chunk.payload.size();
         }
         return base::Result<void>::success();
+    }
+
+    [[nodiscard]] base::Result<void>
+    persist_safely(detail::PreparedArchiveInput& prepared) noexcept {
+        try {
+            return persist_chunks(prepared);
+        } catch (...) {
+            return base::Result<void>::failure(
+                error(base::ErrorCode::kInternal, "archive persist worker failed unexpectedly"));
+        }
+    }
+
+    void persist_worker_main(const std::stop_token stop) noexcept {
+        for (;;) {
+            std::optional<detail::PreparedArchiveInput> job;
+            {
+                std::unique_lock lock(persist_mutex);
+                const auto ready = persist_changed.wait(
+                    lock, stop, [this] { return persist_stopping || pending_persist.has_value(); });
+                if (!ready || persist_stopping) {
+                    return;
+                }
+                job.emplace(std::move(*pending_persist));
+                pending_persist.reset();
+                persist_active = true;
+            }
+            const auto persist_start = std::chrono::steady_clock::now();
+            auto persisted = persist_safely(*job);
+            const auto elapsed = elapsed_microseconds(persist_start);
+            {
+                const std::scoped_lock lock(persist_mutex);
+                persist_microseconds += elapsed;
+                persist_active = false;
+                if (!persisted) {
+                    persist_error = persisted.error();
+                    persist_stopping = true;
+                }
+            }
+            persist_changed.notify_all();
+            if (!persisted) {
+                return;
+            }
+        }
+    }
+
+    void start_persist_worker() {
+        persist_thread = std::jthread([this](const std::stop_token stop) {
+            persist_worker_main(stop);
+        });
+    }
+
+    [[nodiscard]] base::Result<void>
+    enqueue_persist(detail::PreparedArchiveInput prepared,
+                    const base::CancellationToken cancellation) {
+        std::unique_lock lock(persist_mutex);
+        const auto ready = persist_changed.wait(lock, cancellation, [this] {
+            return persist_error.has_value() ||
+                   (!persist_active && !pending_persist.has_value());
+        });
+        if (!ready) {
+            return base::Result<void>::failure(
+                error(base::ErrorCode::kCancelled, "backup cancelled"));
+        }
+        if (persist_error.has_value()) {
+            return base::Result<void>::failure(*persist_error);
+        }
+        pending_persist.emplace(std::move(prepared));
+        persist_changed.notify_all();
+        return base::Result<void>::success();
+    }
+
+    [[nodiscard]] base::Result<void>
+    wait_for_persist(const base::CancellationToken cancellation) {
+        std::unique_lock lock(persist_mutex);
+        const auto ready = persist_changed.wait(lock, cancellation, [this] {
+            return persist_error.has_value() ||
+                   (!persist_active && !pending_persist.has_value());
+        });
+        if (!ready) {
+            return base::Result<void>::failure(
+                error(base::ErrorCode::kCancelled, "backup cancelled"));
+        }
+        return persist_error.has_value() ? base::Result<void>::failure(*persist_error)
+                                         : base::Result<void>::success();
+    }
+
+    [[nodiscard]] base::Result<void>
+    accept_prepared(SourceWriteState& source, detail::PreparedArchiveInput prepared,
+                    const ports::ChunkDescriptor& descriptor,
+                    const base::CancellationToken cancellation) {
+        const auto chunk_count = static_cast<std::uint64_t>(prepared.chunks.size());
+        const auto block_count = static_cast<std::uint64_t>(prepared.sidecar_records.size());
+        if (chunk_count > (std::numeric_limits<std::uint64_t>::max)() -
+                              next_archive_chunk_index ||
+            block_count > (std::numeric_limits<std::uint64_t>::max)() - total_block_count ||
+            prepared.deduplicated_block_count >
+                (std::numeric_limits<std::uint64_t>::max)() - deduplicated_block_count ||
+            prepared.deduplicated_logical_bytes >
+                (std::numeric_limits<std::uint64_t>::max)() - deduplicated_logical_bytes) {
+            return base::Result<void>::failure(
+                error(base::ErrorCode::kInvalidArgument, "archive metrics overflow"));
+        }
+        const auto dedup_blocks = prepared.deduplicated_block_count;
+        const auto dedup_bytes = prepared.deduplicated_logical_bytes;
+        auto sidecar_records = std::move(prepared.sidecar_records);
+        auto enqueued = enqueue_persist(std::move(prepared), cancellation);
+        if (!enqueued) {
+            return enqueued;
+        }
+        next_archive_chunk_index += chunk_count;
+        total_block_count += block_count;
+        total_logical_bytes += descriptor.logical_size;
+        deduplicated_block_count += dedup_blocks;
+        deduplicated_logical_bytes += dedup_bytes;
+        ++source.next_input_chunk_index;
+        source.next_logical_offset += descriptor.logical_size;
+        source.sidecar_records.insert(source.sidecar_records.end(),
+                                      std::make_move_iterator(sidecar_records.begin()),
+                                      std::make_move_iterator(sidecar_records.end()));
+        return base::Result<void>::success();
+    }
+
+    void stop_persist_worker() noexcept {
+        {
+            const std::scoped_lock lock(persist_mutex);
+            persist_stopping = true;
+            pending_persist.reset();
+        }
+        persist_changed.notify_all();
+        persist_thread.request_stop();
+        if (persist_thread.joinable()) {
+            persist_thread.join();
+        }
     }
 };
 
@@ -695,14 +834,15 @@ PersonalArchiveSession::create(const ArchiveCreateRequest& request) {
         implementation->sources.push_back(std::move(source));
     }
     implementation->parts.push_back({request.destination, partial});
-    implementation->output.open(partial, std::ios::binary | std::ios::trunc);
-    if (!implementation->output || !write_preamble(implementation->output, preamble.value())) {
+    auto opened = implementation->output.open(partial);
+    if (!opened || !write_preamble(implementation->output, preamble.value())) {
         std::error_code filesystem_error;
         implementation->output.close();
         std::filesystem::remove(partial, filesystem_error);
         return base::Result<std::unique_ptr<PersonalArchiveSession>>::failure(
             error(base::ErrorCode::kIoFailure, "failed to create personal archive"));
     }
+    implementation->start_persist_worker();
     return base::Result<std::unique_ptr<PersonalArchiveSession>>::success(
         std::unique_ptr<PersonalArchiveSession>(
             new PersonalArchiveSession(std::move(implementation))));
@@ -739,33 +879,16 @@ base::Result<void> PersonalArchiveSession::write_chunk(const ports::ChunkWriteRe
         implementation_->deduplication_enabled,
         &implementation_->block_workers,
     };
+    const auto prepare_start = std::chrono::steady_clock::now();
     auto prepared = detail::prepare_archive_chunks(preparation);
+    implementation_->prepare_microseconds += elapsed_microseconds(prepare_start);
     if (!prepared) {
         return base::Result<void>::failure(prepared.error());
     }
-    auto persisted = implementation_->persist_chunks(prepared.value());
-    if (!persisted) {
-        return persisted;
-    }
-    ++source->next_input_chunk_index;
-    source->next_logical_offset += request.descriptor.logical_size;
-    implementation_->total_block_count += prepared.value().sidecar_records.size();
-    implementation_->total_logical_bytes += request.descriptor.logical_size;
-    if (implementation_->deduplicated_block_count >
-            (std::numeric_limits<std::uint64_t>::max)() -
-                prepared.value().deduplicated_block_count ||
-        implementation_->deduplicated_logical_bytes >
-            (std::numeric_limits<std::uint64_t>::max)() -
-                prepared.value().deduplicated_logical_bytes) {
-        return base::Result<void>::failure(
-            error(base::ErrorCode::kInvalidArgument, "archive dedup metrics overflow"));
-    }
-    implementation_->deduplicated_block_count += prepared.value().deduplicated_block_count;
-    implementation_->deduplicated_logical_bytes += prepared.value().deduplicated_logical_bytes;
-    source->sidecar_records.insert(source->sidecar_records.end(),
-                                   prepared.value().sidecar_records.begin(),
-                                   prepared.value().sidecar_records.end());
-    return base::Result<void>::success();
+    implementation_->prepare_hash_microseconds += prepared.value().hash_microseconds;
+    implementation_->prepare_compress_microseconds += prepared.value().compress_microseconds;
+    return implementation_->accept_prepared(*source, std::move(prepared).value(),
+                                            request.descriptor, cancellation);
 }
 
 base::Result<void> PersonalArchiveSession::commit(const base::CancellationToken cancellation) {
@@ -781,11 +904,13 @@ base::Result<void> PersonalArchiveSession::commit(const base::CancellationToken 
         return base::Result<void>::failure(
             error(base::ErrorCode::kConflict, "archive session cannot be committed"));
     }
-    const auto footer_offset = implementation_->output.tellp();
-    if (footer_offset < 0) {
-        return base::Result<void>::failure(
-            error(base::ErrorCode::kIoFailure, "failed to determine archive size"));
+    const auto commit_start = std::chrono::steady_clock::now();
+    auto persisted = implementation_->wait_for_persist(cancellation);
+    if (!persisted) {
+        return persisted;
     }
+    implementation_->stop_persist_worker();
+    const auto footer_offset = implementation_->output.position();
     archive::BackupFooter footer;
     footer.volume_chunk_count = implementation_->next_archive_chunk_index;
     footer.total_block_entry_count = implementation_->total_block_count;
@@ -794,7 +919,7 @@ base::Result<void> PersonalArchiveSession::commit(const base::CancellationToken 
     footer.deduplicated_block_count = implementation_->deduplicated_block_count;
     footer.deduplicated_logical_bytes = implementation_->deduplicated_logical_bytes;
     footer.part_file_size =
-        static_cast<std::uint64_t>(footer_offset) + archive::kBackupFooterSize;
+        footer_offset + archive::kBackupFooterSize;
     footer.file_uuid = implementation_->file_uuid;
     // stored_bytes is filled after all parts are sized; for single-part equals part_file_size.
     footer.stored_bytes = footer.part_file_size;
@@ -803,8 +928,8 @@ base::Result<void> PersonalArchiveSession::commit(const base::CancellationToken 
         return base::Result<void>::failure(encoded.error());
     }
     auto written = write_bytes(implementation_->output, encoded.value());
-    implementation_->output.flush();
-    if (!written || !implementation_->output) {
+    auto flushed = implementation_->output.flush();
+    if (!written || !flushed) {
         abort();
         return base::Result<void>::failure(
             error(base::ErrorCode::kIoFailure, "failed to finalize personal archive"));
@@ -840,19 +965,31 @@ base::Result<void> PersonalArchiveSession::commit(const base::CancellationToken 
     }
     implementation_->complete = true;
     implementation_->password.clear();
+    implementation_->commit_microseconds += elapsed_microseconds(commit_start);
     return base::Result<void>::success();
+}
+
+PersonalArchiveWriteMetrics PersonalArchiveSession::write_metrics() const noexcept {
+    if (!implementation_) {
+        return {};
+    }
+    const auto output = implementation_->output.statistics();
+    return {implementation_->prepare_microseconds,
+            implementation_->persist_microseconds,
+            implementation_->commit_microseconds,
+            implementation_->prepare_hash_microseconds,
+            implementation_->prepare_compress_microseconds,
+            output.write_microseconds,
+            output.write_bytes,
+            output.write_calls};
 }
 
 void PersonalArchiveSession::abort() noexcept {
     if (!implementation_ || implementation_->complete) {
         return;
     }
-    try {
-        implementation_->output.close();
-    } catch (...) {
-        // Cleanup must remain noexcept; remove the owned partial file below.
-        static_cast<void>(0);
-    }
+    implementation_->stop_persist_worker();
+    implementation_->output.close();
     std::error_code ignored;
     for (const auto& part : implementation_->parts) {
         std::filesystem::remove(part.partial, ignored);

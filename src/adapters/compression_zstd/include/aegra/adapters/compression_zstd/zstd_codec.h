@@ -19,6 +19,9 @@ compress(std::span<const std::byte> input, int compression_level = kDefaultCompr
                                                               std::size_t expected_size,
                                                               std::size_t maximum_output_size);
 
+/// Worst-case compressed size for `input_size` bytes (ZSTD_compressBound).
+[[nodiscard]] std::size_t compress_bound(std::size_t input_size) noexcept;
+
 /// Thread-local / worker-local compressor: reuses one ZSTD_CCtx and an output scratch buffer.
 /// Not thread-safe; own one instance per concurrent worker.
 class ZstdCompressor final {
@@ -34,6 +37,12 @@ class ZstdCompressor final {
     /// bytes (caller decides whether the compressed form is smaller than the source).
     [[nodiscard]] base::Result<std::vector<std::byte>>
     compress(std::span<const std::byte> input, int compression_level = kDefaultCompressionLevel);
+
+    /// Compresses `input` directly into `output` (must be at least compress_bound(input.size())
+    /// bytes) and returns the written size. Avoids the copy that `compress` makes.
+    [[nodiscard]] base::Result<std::size_t>
+    compress_into(std::span<const std::byte> input, std::span<std::byte> output,
+                  int compression_level = kDefaultCompressionLevel);
 
   private:
     void* context_{nullptr}; // ZSTD_CCtx*

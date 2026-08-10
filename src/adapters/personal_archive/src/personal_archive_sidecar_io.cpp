@@ -1,4 +1,5 @@
 #include "personal_archive_sidecar_io.h"
+#include "win32_output_file.h"
 
 #include "aegra/adapters/compression_zstd/zstd_codec.h"
 #include "aegra/adapters/crypto_sodium/sidecar_crypto.h"
@@ -32,11 +33,6 @@ struct ArchiveKeyContext final {
     return reinterpret_cast<char*>(value);
 }
 
-[[nodiscard]] const char* as_chars(const std::byte* value) noexcept {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) stream byte-buffer boundary.
-    return reinterpret_cast<const char*>(value);
-}
-
 [[nodiscard]] base::Result<std::vector<std::byte>> read_exact(std::ifstream& input,
                                                               const std::size_t size) {
     if (size > static_cast<std::size_t>((std::numeric_limits<std::streamsize>::max)())) {
@@ -52,14 +48,9 @@ struct ArchiveKeyContext final {
     return base::Result<std::vector<std::byte>>::success(std::move(result));
 }
 
-[[nodiscard]] base::Result<void> write_bytes(std::ofstream& output,
+[[nodiscard]] base::Result<void> write_bytes(detail::Win32OutputFile& output,
                                              const std::span<const std::byte> bytes) {
-    output.write(as_chars(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-    if (!output) {
-        return base::Result<void>::failure(
-            error(base::ErrorCode::kIoFailure, "failed to write sidecar file"));
-    }
-    return base::Result<void>::success();
+    return output.write(bytes);
 }
 
 [[nodiscard]] std::filesystem::path sidecar_path(const std::filesystem::path& archive_path) {
@@ -255,11 +246,12 @@ base::Result<void> write_sidecar(const SidecarWriteRequest& request) {
     if (!encoded_header) {
         return base::Result<void>::failure(encoded_header.error());
     }
-    std::ofstream output(request.destination, std::ios::binary | std::ios::trunc);
+    detail::Win32OutputFile output;
+    auto opened = output.open(request.destination);
     auto header_written = write_bytes(output, encoded_header.value());
     auto payload_written = write_bytes(output, stored_payload);
-    output.flush();
-    if (!header_written || !payload_written || !output) {
+    auto flushed = output.flush();
+    if (!opened || !header_written || !payload_written || !flushed) {
         return base::Result<void>::failure(
             error(base::ErrorCode::kIoFailure, "failed to finalize sidecar file"));
     }

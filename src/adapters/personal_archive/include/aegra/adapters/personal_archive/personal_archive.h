@@ -2,6 +2,7 @@
 
 #include "aegra/base/result.h"
 #include "aegra/format/manifest.h"
+#include "aegra/format/personal_archive.h"
 #include "aegra/format/personal_archive_sidecar.h"
 #include "aegra/ports/backup_session.h"
 #include "aegra/ports/file_backup_session.h"
@@ -88,6 +89,25 @@ struct ArchiveChainOpenRequest final {
     std::vector<ArchiveOpenRequest> layers;
     std::uint32_t maximum_chain_depth{128};
 };
+
+/// Authenticated Header/Manifest summary for composition-root dispatch (Explorer Shell, etc.).
+/// content_kind is taken from the authenticated BackupHeader (AAD-bound with metadata decrypt).
+struct AuthenticatedArchiveMetadata final {
+    /// format::personal_archive::kContentKindVolumeSet | kContentKindFileSet
+    std::uint8_t content_kind{format::personal_archive::kContentKindVolumeSet};
+    /// format::kManifestContentKindVolumeSet | kManifestContentKindFileSet
+    std::uint8_t manifest_content_kind{format::kManifestContentKindVolumeSet};
+    format::BackupType backup_type{format::BackupType::kFull};
+    std::array<std::byte, 16> file_uuid{};
+    std::array<std::byte, 16> backup_set_uuid{};
+    std::array<std::byte, 16> parent_uuid{};
+    bool encryption_enabled{false};
+};
+
+/// Decrypt/authenticate archive metadata and return content_kind for composition-root dispatch.
+/// Reader open paths re-authenticate independently and must agree with this metadata.
+[[nodiscard]] base::Result<AuthenticatedArchiveMetadata>
+authenticate_archive_metadata(const ArchiveOpenRequest& request);
 
 [[nodiscard]] base::Result<ArchiveSidecar>
 load_archive_sidecar(const std::filesystem::path& archive_path, std::string_view password,
@@ -399,6 +419,36 @@ class PersonalArchiveVolumeReader final : public ports::IRecoveryPointReader {
   private:
     struct Impl;
     explicit PersonalArchiveVolumeReader(std::unique_ptr<Impl> implementation) noexcept;
+
+    std::unique_ptr<Impl> implementation_;
+};
+
+/// Random-access view of one Manifest volume (offset 0 = volume boot sector).
+/// Builds a bounded chunk locator at open; FREE/unmapped ranges zero-fill.
+/// Does not depend on NTFS and does not modify the recovery-point reader.
+class PersonalArchiveVolumeRandomReader final : public ports::IRandomAccessReader {
+  public:
+    ~PersonalArchiveVolumeRandomReader() override;
+    PersonalArchiveVolumeRandomReader(const PersonalArchiveVolumeRandomReader&) = delete;
+    PersonalArchiveVolumeRandomReader& operator=(const PersonalArchiveVolumeRandomReader&) = delete;
+    PersonalArchiveVolumeRandomReader(PersonalArchiveVolumeRandomReader&&) = delete;
+    PersonalArchiveVolumeRandomReader& operator=(PersonalArchiveVolumeRandomReader&&) = delete;
+
+    /// inner and manifest must outlive this reader. volume_index selects Manifest.volumes.
+    [[nodiscard]] static base::Result<std::unique_ptr<PersonalArchiveVolumeRandomReader>>
+    open(ports::IRecoveryPointReader& inner, const format::Manifest& manifest,
+         std::uint32_t volume_index);
+
+    [[nodiscard]] std::uint64_t size_bytes() const noexcept override;
+    [[nodiscard]] base::Result<std::size_t>
+    read_at(std::uint64_t offset, std::span<std::byte> destination,
+            base::CancellationToken cancellation) override;
+
+    [[nodiscard]] std::uint32_t volume_index() const noexcept;
+
+  private:
+    struct Impl;
+    explicit PersonalArchiveVolumeRandomReader(std::unique_ptr<Impl> implementation) noexcept;
 
     std::unique_ptr<Impl> implementation_;
 };

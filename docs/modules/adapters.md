@@ -10,7 +10,8 @@
 - Windows：Disk、Volume、VSS、Partition、BCD/WinRE。
 - 控制面：PostgreSQL（企业版）、个人版 SQLite 控制面（`Aegra::AdapterSqlite`）。
 - 虚拟化：VMware、Hyper-V。
-- 挂载：Dokan 与虚拟磁盘格式呈现。
+- 挂载：Dokan 与虚拟磁盘格式呈现（Mount Host）。
+- NTFS：只读 `IRandomAccessReader` 卷视图解析（Shell Extension `volume_set` 浏览）。
 - 传输：HTTP/gRPC/Named Pipe。
 - 内存参考实现：Memory Block Source/Sink、Memory Backup Session/Reader。
 - 格式组合：个人版 `.bkf` Session/Reader。
@@ -167,11 +168,28 @@ S3/S4 增加 `Aegra::AdapterWindowsProcess`、`WindowsSourceInventory` 与
 Inventory 返回 opaque source ID 并在 Service 内解析为稳定设备 key；Storage Factory 只接受受信任 locator，
 打开后继续复用 Local Object Storage 的根目录安全检查。
 
+## NTFS Adapter（`aegra_adapter_ntfs`）
+
+只读解析 `IRandomAccessReader` 呈现的 NTFS 卷视图（offset 0 = Boot Sector）。依赖仅 `Aegra::Base` 与
+`Aegra::Ports`。公共入口 `NtfsVolumeReader`：
+
+- `open(IRandomAccessReader&, CancellationToken)` 借用 reader（reader 必须更长寿）；
+- `volume_info()`、`list_directory`、`describe_entry`、`read_file`；
+- 返回 DTO 不含 HANDLE、COM、Archive 类型；
+- 单实例非线程安全；调用方串行化。
+
+解析范围与边界见 [ADR-0023](../adr/0023-in-process-explorer-archive-browsing.md) 与
+[Explorer 进程内浏览](../architecture/EXPLORER_ARCHIVE_BROWSING.md)。禁止全量 MFT 扫描；MFT/Index
+使用固定容量 LRU。compressed/EFS 返回稳定 unsupported；reparse 不跟随；named ADS 不暴露为普通文件。
+
+`PersonalArchiveVolumeRandomReader` 位于 `adapters/personal_archive`：把 Archive 单卷 Chunk 视图适配为
+`IRandomAccessReader`，不知道 NTFS。
+
 ## Dokan/虚拟磁盘约束
 
 从旧项目保留以下经过验证的设计知识：
 
-- Mount Host 独立进程隔离 Dokan 回调和故障。
+- Mount Host 独立进程隔离 Dokan 回调和故障（盘符/整盘挂载用例；非 Explorer 双击浏览权威路径）。
 - 原始 backing 永远只读；写入进入独立 COW overlay 与持久化位图。
 - 读操作按 COW block 选择 overlay 或 backing，部分写执行 read-modify-write。
 - 格式层只负责 VHDX/VMDK/QCOW2 元数据与偏移翻译，数据平面通过 `IRandomAccessReader`。

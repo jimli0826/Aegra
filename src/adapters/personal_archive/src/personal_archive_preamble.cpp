@@ -133,6 +133,12 @@ make_protected_metadata(const archive::MetadataEnvelopeHeader& envelope,
         }
         return format::decode_manifest_cbor(ciphertext);
     }
+    // Empty password on encrypted metadata is an authorization problem for Shell/UI, not a
+    // caller-parameter bug — keep ErrorCode stable as kUnauthorized (shell.password_required).
+    if (password.empty()) {
+        return base::Result<format::Manifest>::failure(
+            {base::ErrorCode::kUnauthorized, "shell.password_required"});
+    }
     if (encoded.envelope.tag_size == 0 ||
         encoded.payload.size() <
             static_cast<std::size_t>(encoded.envelope.ciphertext_size + encoded.envelope.tag_size)) {
@@ -144,7 +150,12 @@ make_protected_metadata(const archive::MetadataEnvelopeHeader& envelope,
     const auto aad = make_authenticated_data(encoded.header_bytes, encoded.envelope_bytes);
     auto plaintext = crypto_sodium::unprotect_metadata(protected_metadata, password, aad);
     if (!plaintext) {
-        return base::Result<format::Manifest>::failure(plaintext.error());
+        if (plaintext.error().code != base::ErrorCode::kUnauthorized) {
+            return base::Result<format::Manifest>::failure(plaintext.error());
+        }
+        // Wrong password / AEAD failure — stable code for Shell (not localized text matching).
+        return base::Result<format::Manifest>::failure(
+            {base::ErrorCode::kUnauthorized, "shell.password_invalid"});
     }
     return format::decode_manifest_cbor(plaintext.value());
 }
@@ -208,3 +219,72 @@ base::Result<ParsedPreamble> read_archive_preamble(std::ifstream& input,
 }
 
 } // namespace aegra::adapters::personal_archive::detail
+
+namespace aegra::adapters::personal_archive {
+namespace {
+
+[[nodiscard]] base::Result<std::uint64_t> stream_size(std::ifstream& input) {
+    input.clear();
+    input.seekg(0, std::ios::end);
+    if (!input) {
+        return base::Result<std::uint64_t>::failure(
+            {base::ErrorCode::kIoFailure, "failed to size personal archive"});
+    }
+    const auto end = input.tellg();
+    if (end < 0) {
+        return base::Result<std::uint64_t>::failure(
+            {base::ErrorCode::kIoFailure, "failed to size personal archive"});
+    }
+    return base::Result<std::uint64_t>::success(static_cast<std::uint64_t>(end));
+}
+
+} // namespace
+
+base::Result<AuthenticatedArchiveMetadata>
+authenticate_archive_metadata(const ArchiveOpenRequest& request) {
+    if (request.source.empty() || request.maximum_metadata_size == 0) {
+        return base::Result<AuthenticatedArchiveMetadata>::failure(
+            {base::ErrorCode::kInvalidArgument, "archive open request is invalid"});
+    }
+    std::ifstream input(request.source, std::ios::binary);
+    if (!input) {
+        return base::Result<AuthenticatedArchiveMetadata>::failure(
+            {base::ErrorCode::kIoFailure, "failed to open personal archive"});
+    }
+    auto file_size = stream_size(input);
+    if (!file_size) {
+        return base::Result<AuthenticatedArchiveMetadata>::failure(file_size.error());
+    }
+    auto preamble = detail::read_archive_preamble(input, request, file_size.value());
+    if (!preamble) {
+        return base::Result<AuthenticatedArchiveMetadata>::failure(preamble.error());
+    }
+    AuthenticatedArchiveMetadata metadata;
+    metadata.content_kind = preamble.value().header.content_kind;
+    metadata.manifest_content_kind = preamble.value().manifest.content_kind;
+    metadata.backup_type = detail::archive_backup_type(preamble.value().header);
+    metadata.file_uuid = preamble.value().header.file_uuid;
+    metadata.backup_set_uuid = preamble.value().header.backup_set_uuid;
+    metadata.parent_uuid = preamble.value().header.parent_uuid;
+    metadata.encryption_enabled =
+        (preamble.value().header.flags & format::personal_archive::kBackupFlagEncrypted) != 0;
+    // Prefer header content_kind (AAD-authenticated); require manifest agreement.
+    if (metadata.content_kind == format::personal_archive::kContentKindVolumeSet &&
+        metadata.manifest_content_kind != format::kManifestContentKindVolumeSet) {
+        return base::Result<AuthenticatedArchiveMetadata>::failure(
+            {base::ErrorCode::kCorruptData, "shell.archive_corrupt"});
+    }
+    if (metadata.content_kind == format::personal_archive::kContentKindFileSet &&
+        metadata.manifest_content_kind != format::kManifestContentKindFileSet) {
+        return base::Result<AuthenticatedArchiveMetadata>::failure(
+            {base::ErrorCode::kCorruptData, "shell.archive_corrupt"});
+    }
+    if (metadata.content_kind != format::personal_archive::kContentKindVolumeSet &&
+        metadata.content_kind != format::personal_archive::kContentKindFileSet) {
+        return base::Result<AuthenticatedArchiveMetadata>::failure(
+            {base::ErrorCode::kUnsupportedVersion, "shell.unsupported_content_kind"});
+    }
+    return base::Result<AuthenticatedArchiveMetadata>::success(std::move(metadata));
+}
+
+} // namespace aegra::adapters::personal_archive

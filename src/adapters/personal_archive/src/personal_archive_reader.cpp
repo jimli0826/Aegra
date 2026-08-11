@@ -1163,6 +1163,13 @@ PersonalArchiveReader::open_with_workers(
     if (!preamble) {
         return base::Result<std::unique_ptr<PersonalArchiveReader>>::failure(preamble.error());
     }
+    if (preamble.value().header.content_kind != archive::kContentKindVolumeSet) {
+        return base::Result<std::unique_ptr<PersonalArchiveReader>>::failure(error(
+            base::ErrorCode::kInvalidArgument,
+            preamble.value().header.content_kind == archive::kContentKindFileSet
+                ? "shell.content_kind_file_set"
+                : "shell.unsupported_content_kind"));
+    }
     auto scan = scan_archive_parts(request.source, preamble.value(), request);
     if (!scan) {
         return base::Result<std::unique_ptr<PersonalArchiveReader>>::failure(scan.error());

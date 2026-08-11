@@ -525,7 +525,7 @@ install_file_ciphers(OpenedFileArchive& state, const std::string_view password) 
     }
     if (password.empty()) {
         return base::Result<void>::failure(
-            error(base::ErrorCode::kInvalidArgument, "encrypted file archive requires a password"));
+            error(base::ErrorCode::kUnauthorized, "shell.password_required"));
     }
     auto payload =
         crypto_sodium::PayloadCipher::create(password, state.preamble.kdf, state.preamble.salt);

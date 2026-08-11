@@ -1157,7 +1157,7 @@ Item {
                                 anchors.rightMargin: 4
                                 radius: 10
                                 color: rowHover.hovered
-                                       ? Qt.rgba(1, 1, 1, 0.65)
+                                       ? Theme.colorHover
                                        : "transparent"
                             }
 
@@ -1195,8 +1195,9 @@ Item {
                                             width: 28
                                             height: 28
                                             radius: 8
-                                            color: "#ffffff"
-                                            border.width: 0
+                                            color: Theme.colorHover
+                                            border.width: 1
+                                            border.color: Theme.colorBorder
                                             // Avoid transform-on-hover (can jitter layout under cursor)
                                             scale: 1.0
 

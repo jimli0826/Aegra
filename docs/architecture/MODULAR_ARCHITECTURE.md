@@ -55,7 +55,8 @@ src/
 │   ├── postgres/
 │   ├── vmware/
 │   ├── hyperv/
-│   └── dokan/
+│   ├── dokan/
+│   └── ntfs/
 └── apps/
     ├── service/
     ├── worker/
@@ -112,7 +113,11 @@ Task Worker -> Repository Gateway -> CAS Repository
 - Worker 每任务独立运行，组装 Pipeline，任务完成后不保留权威状态。
 - Gateway 是企业 Repository 的在线写入入口，负责提交、索引、租约和维护。
 - Connector Host 隔离 VDDK、vSphere、Hyper-V 等厂商依赖。
-- Shell Extension 保持轻量，只通过 IPC 请求 Mount Host。
+- Shell Extension 是 x64 in-process COM DLL：在 Explorer 内只读浏览 current V7 `.bkf`
+  （`volume_set` 经 NTFS Parser，`file_set` 经 V7 File Index）。不通过 IPC 请求 Mount Host，
+  不加载 Dokan/VHDX/盘符。需要盘符或整盘挂载时仍由 Service 编排独立 Mount Host。
+  权威设计见 [ADR-0023](../adr/0023-in-process-explorer-archive-browsing.md) 与
+  [Explorer 进程内浏览](EXPLORER_ARCHIVE_BROWSING.md)。
 
 ## 5. 核心端口
 

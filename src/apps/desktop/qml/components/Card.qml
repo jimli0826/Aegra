@@ -14,7 +14,7 @@ Rectangle {
     color: Theme.colorCard
     radius: 20
     border.width: 1
-    border.color: "#ffffff"
+    border.color: Theme.colorBorder
 
     // Do not use id "root" here — nested Component { onClicked: root.xxx }
     // would resolve to this Card instead of the page.

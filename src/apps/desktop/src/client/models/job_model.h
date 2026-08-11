@@ -49,6 +49,9 @@ class JobModel final : public QAbstractListModel {
     Q_PROPERTY(int failedCount READ failedCount NOTIFY countsChanged)
     Q_PROPERTY(int succeededCount READ succeededCount NOTIFY countsChanged)
     Q_PROPERTY(int activeCount READ activeCount NOTIFY countsChanged)
+    Q_PROPERTY(int backupCount READ backupCount NOTIFY countsChanged)
+    Q_PROPERTY(int restoreCount READ restoreCount NOTIFY countsChanged)
+    Q_PROPERTY(int verifyCount READ verifyCount NOTIFY countsChanged)
     /// Bumps when job rows or progress change so QML bindings can re-query status.
     Q_PROPERTY(int revision READ revision NOTIFY revisionChanged)
 
@@ -94,6 +97,9 @@ class JobModel final : public QAbstractListModel {
     [[nodiscard]] int failedCount() const noexcept;
     [[nodiscard]] int succeededCount() const noexcept;
     [[nodiscard]] int activeCount() const noexcept;
+    [[nodiscard]] int backupCount() const noexcept;
+    [[nodiscard]] int restoreCount() const noexcept;
+    [[nodiscard]] int verifyCount() const noexcept;
     [[nodiscard]] int revision() const noexcept;
     [[nodiscard]] bool has_active_jobs() const noexcept;
     [[nodiscard]] std::optional<JobRow> find_job(const QString& job_id) const;
@@ -110,6 +116,10 @@ class JobModel final : public QAbstractListModel {
     /// Earliest created_utc_ms among active restore jobs (operation=2, queued/running/cancelling).
     /// Returns 0 when no restore job is active — used to reattach the Restore summary page.
     Q_INVOKABLE [[nodiscard]] qint64 earliestActiveRestoreCreatedUtcMs() const;
+
+    /// Aggregate job counts by operation type.
+    /// Keys: backup, restore, verify, other, total.
+    Q_INVOKABLE [[nodiscard]] QVariantMap operationCounts() const;
 
     [[nodiscard]] int rowCount(const QModelIndex& parent = QModelIndex()) const override;
     [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
@@ -138,6 +148,9 @@ class JobModel final : public QAbstractListModel {
     int failed_count_{0};
     int succeeded_count_{0};
     int active_count_{0};
+    int backup_count_{0};
+    int restore_count_{0};
+    int verify_count_{0};
     int revision_{0};
 };
 

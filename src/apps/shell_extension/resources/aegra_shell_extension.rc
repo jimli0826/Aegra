@@ -1,0 +1,111 @@
+#include "resource.h"
+#include "winres.h"
+
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+
+IDR_SHELLFOLDER          REGISTRY                     "shell_folder.rgs"
+IDR_EXTENSION            REGISTRY                     "extension.rgs"
+
+IDI_BACKUP               ICON                        "backup.ico"
+
+IDD_PASSWORD DIALOGEX 0, 0, 260, 88
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Aegra Archive Password"
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    LTEXT           "This archive is encrypted. Enter the password to browse it.",
+                    IDC_PASSWORD_PROMPT, 12, 10, 236, 20
+    EDITTEXT        IDC_PASSWORD_EDIT, 12, 36, 236, 14, ES_PASSWORD | ES_AUTOHSCROLL
+    LTEXT           "", IDC_PASSWORD_ERROR, 12, 64, 120, 12, SS_LEFT | SS_NOPREFIX
+    DEFPUSHBUTTON   "OK", IDOK, 140, 62, 50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 198, 62, 50, 14
+END
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 0,1,0,0
+ PRODUCTVERSION 0,1,0,0
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x4L
+ FILETYPE 0x2L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904e4"
+        BEGIN
+            VALUE "CompanyName", "Aegra"
+            VALUE "FileDescription", "Aegra Backup Archive Shell Extension"
+            VALUE "FileVersion", "0.1.0.0"
+            VALUE "InternalName", "aegra_shell_extension.dll"
+            VALUE "LegalCopyright", "Aegra Contributors"
+            VALUE "OriginalFilename", "aegra_shell_extension.dll"
+            VALUE "ProductName", "Aegra"
+            VALUE "ProductVersion", "0.1.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1252
+    END
+END
+
+// English fallback STRINGTABLE. Runtime UI uses shell_strings.cpp (en/zh-CN/zh-TW/ja/de)
+// selected by GetUserDefaultUILanguage().
+STRINGTABLE
+BEGIN
+    IDS_SHELLEXT_NAME           "Name"
+    IDS_SHELLEXT_SIZE           "Size"
+    IDS_SHELLEXT_ERROR_CAPTION  "Aegra"
+END
+
+STRINGTABLE
+BEGIN
+    IDS_SHELLFOLDER_DELETE          "Are you sure that you want to delete '%1'?"
+    IDS_SHELLFOLDER_MULTIPLE_DELETE "Are you sure that you want to delete these %1 items?"
+    IDS_SHELLFOLDER_FILE_DELETE_CAPTION  "Confirm File Delete"
+    IDS_SHELLFOLDER_FILES_DELETE_CAPTION "Confirm Multiple File Delete"
+    IDS_SHELLFOLDER_TYPE            "Aegra Backup Archive"
+    IDS_SHELLFOLDER_CANNOT_PERFORM  "Unable to perform the requested operation, reason:\n\n"
+    IDS_SHELLFOLDER_DFM_HELP_OPEN   "Open"
+END
+
+STRINGTABLE
+BEGIN
+    IDS_PASSWORD_CAPTION            "Password required — %1"
+    IDS_PASSWORD_PROMPT             "This archive is encrypted. Enter the password to browse it."
+    IDS_PASSWORD_INCORRECT          "Password is incorrect."
+    IDS_PASSWORD_OK                 "OK"
+    IDS_PASSWORD_CANCEL             "Cancel"
+    IDS_ERR_ARCHIVE_ENCRYPTED       "This archive is encrypted. Enter the password to open it."
+    IDS_ERR_INVALID_PASSWORD        "Invalid archive password."
+    IDS_ERR_PASSWORD_CANCELLED      "Password entry cancelled."
+    IDS_ERR_PARENT_MISSING          "Parent recovery point is missing. Open this archive from its managed repository."
+    IDS_ERR_UNSUPPORTED_VERSION     "Unsupported archive version."
+    IDS_ERR_UNABLE_OPEN             "Unable to open archive."
+    IDS_ERR_NO_VOLUMES              "No volumes found in this archive."
+    IDS_ERR_PATH_EMPTY              "Archive path is empty."
+    IDS_ERR_NTFS_PARSE              "Unable to parse NTFS volume."
+    IDS_ERR_NTFS_ONLY               "Only NTFS volumes can be browsed in Explorer."
+    IDS_DISK_FORMAT                 "Disk %1"
+    IDS_VOLUME_FORMAT               "Volume %1"
+    IDS_TIP_ARCHIVE_FOLDER          "Archive folder"
+    IDS_TIP_ARCHIVE_FILE            "Archive file"
+    IDS_TIP_SIZE                    "Size: %1 bytes"
+    IDS_TIP_SOURCE                  "Source: %1"
+    IDS_COLUMN_DATE_MODIFIED        "Date modified"
+    IDS_COLUMN_TYPE                 "Type"
+    IDS_OPEN_ITEM_FAILED            "Failed to open item: %1"
+    IDS_TYPE_DISK                   "Disk"
+    IDS_TYPE_VOLUME                 "Volume"
+    IDS_TYPE_FILE_FOLDER            "File folder"
+    IDS_TYPE_FILE                   "File"
+    IDS_PASSWORD_CAPTION_DEFAULT    "Password required"
+    IDS_ERR_FILE_TOO_LARGE          "This file is larger than 1 GB and cannot be opened directly from the archive. Copy it out of the archive first, then open the copy."
+END
+
+ISOLATIONAWARE_NOSTATICIMPORT_MANIFEST_RESOURCE_ID  RT_MANIFEST  "aegra_shell_extension.manifest"

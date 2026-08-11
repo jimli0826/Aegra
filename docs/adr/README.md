@@ -41,6 +41,9 @@ FAT32 文件集 VSS 源、nullable stable identity 与能力降级恢复目标�
 个人版 Volume Set 单物理 Chunk 固定块去重、引用域与安全边界见
 [ADR-0022](0022-volume-set-chunk-local-deduplication.md)。
 
+Explorer 进程内只读浏览 `.bkf`（替代“Shell 仅 IPC 到 Mount Host”）见
+[ADR-0023](0023-in-process-explorer-archive-browsing.md)。
+
 ## 状态
 
 - `Proposed`：讨论中，不构成实现依据。

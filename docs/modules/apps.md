@@ -13,7 +13,7 @@
 - `mount_host`：Recovery Point 随机读取、Dokan 和虚拟磁盘呈现。
 - `pe_restore`：WinPE 最小离线恢复程序。
 - `desktop`：普通用户 GUI。
-- `shell_extension`：轻量 IPC 桥接。
+- `shell_extension`：Explorer 进程内只读浏览 current V7 `.bkf`（ADR-0023）；Composition Root 装配 Archive/NTFS，不请求 Mount Host。
 
 ## Composition Root 规则
 
@@ -78,10 +78,30 @@ Online Prepare -> Validate -> Build/Cache WinRE -> Write Pending Job
 
 旧设计中明文 JSON 旁放置 JobKey 的方案不直接采用；具体跨重启 Secret Envelope 需要安全 ADR。
 
+## Shell Extension
+
+`aegra_shell_extension` 是 x64 in-process COM DLL（`explorer.exe` 加载）：
+
+- 注册 Aegra 自有 CLSID/ProgID 与 `.bkf` File Root/Folder Junction（仅 HKCU）；
+- Root Folder 创建 `ArchiveShellSession`，按认证 `content_kind` 分发：
+  - `volume_set` → Volume Random Reader + `NtfsVolumeReader`；
+  - `file_set` → `PersonalFileArchiveChainReader` tip Index；
+- 统一 PIDL、Enumerator、只读 `IStream`/`IDataObject`、默认打开物化 Cache；
+- 密码认证发生在 ShellView 创建之前；Cancel 静默终止导航并停留在原 Explorer 位置；
+- 直接依赖 Personal Archive、NTFS、Local Storage、Personal Repository、Crypto、Compression；
+- **禁止**链接 Qt、Service、Worker、Application、Dokan、Mount Host；
+- 密码与 Session 为 per-open 状态，无业务全局单例；Session 只缓存 DPAPI 当前用户范围密文，
+  同步 Reader `open` 时临时解密并立即擦除明文。
+
+权威决策与数据流见 [ADR-0023](../adr/0023-in-process-explorer-archive-browsing.md) 与
+[Explorer 进程内浏览](../architecture/EXPLORER_ARCHIVE_BROWSING.md)。开发顺序见
+[Explorer Shell Extension 开发计划](../development/EXPLORER_SHELL_EXTENSION_DEVELOPMENT_PLAN.md)。
+
 ## Mount Host
 
 Mount Host 只读打开 Recovery Point，组合 `PersonalArchiveChainReader`、`WholeDiskByteReader`、Dokan/VHDX Adapter。
-每个挂载会话具有独立生命周期、取消和临时 overlay；Shell Extension 不加载这些实现。
+每个挂载会话具有独立生命周期、取消和临时 overlay。Mount Host 服务**盘符/整盘挂载**用例，由 Service
+编排；Explorer 双击浏览不以 Mount Host 为路径，Shell Extension 不加载 Dokan/VHDX 实现。
 
 ### Service 编排（S7）
 

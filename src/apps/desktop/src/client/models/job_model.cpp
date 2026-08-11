@@ -24,11 +24,14 @@ constexpr std::int64_t kStateInterrupted = 7;
 }
 
 void recompute_counts(const QVector<JobRow>& rows, int& running, int& failed, int& succeeded,
-                      int& active) {
+                      int& active, int& backup, int& restore, int& verify) {
     running = 0;
     failed = 0;
     succeeded = 0;
     active = 0;
+    backup = 0;
+    restore = 0;
+    verify = 0;
     for (const auto& row : rows) {
         if (row.state == kStateRunning) {
             ++running;
@@ -39,6 +42,19 @@ void recompute_counts(const QVector<JobRow>& rows, int& running, int& failed, in
         }
         if (row_is_active(row.state)) {
             ++active;
+        }
+        switch (row.operation) {
+        case 1:
+            ++backup;
+            break;
+        case 2:
+            ++restore;
+            break;
+        case 3:
+            ++verify;
+            break;
+        default:
+            break;
         }
     }
 }
@@ -52,7 +68,8 @@ void JobModel::set_locale_format(LocaleFormat* format) { format_ = format; }
 void JobModel::set_rows(QVector<JobRow> rows) {
     beginResetModel();
     rows_ = std::move(rows);
-    recompute_counts(rows_, running_count_, failed_count_, succeeded_count_, active_count_);
+    recompute_counts(rows_, running_count_, failed_count_, succeeded_count_, active_count_,
+                     backup_count_, restore_count_, verify_count_);
     endResetModel();
     emit countChanged();
     emit countsChanged();
@@ -65,7 +82,8 @@ void JobModel::upsert_job(JobRow row) {
             rows_[i] = std::move(row);
             const auto idx = index(i, 0);
             emit dataChanged(idx, idx);
-            recompute_counts(rows_, running_count_, failed_count_, succeeded_count_, active_count_);
+            recompute_counts(rows_, running_count_, failed_count_, succeeded_count_, active_count_,
+                             backup_count_, restore_count_, verify_count_);
             emit countsChanged();
             bump_revision();
             return;
@@ -74,7 +92,8 @@ void JobModel::upsert_job(JobRow row) {
     beginInsertRows(QModelIndex(), 0, 0);
     rows_.prepend(std::move(row));
     endInsertRows();
-    recompute_counts(rows_, running_count_, failed_count_, succeeded_count_, active_count_);
+    recompute_counts(rows_, running_count_, failed_count_, succeeded_count_, active_count_,
+                     backup_count_, restore_count_, verify_count_);
     emit countChanged();
     emit countsChanged();
     bump_revision();
@@ -119,6 +138,9 @@ void JobModel::clear() {
     failed_count_ = 0;
     succeeded_count_ = 0;
     active_count_ = 0;
+    backup_count_ = 0;
+    restore_count_ = 0;
+    verify_count_ = 0;
     endResetModel();
     emit countChanged();
     emit countsChanged();
@@ -140,6 +162,12 @@ int JobModel::failedCount() const noexcept { return failed_count_; }
 int JobModel::succeededCount() const noexcept { return succeeded_count_; }
 
 int JobModel::activeCount() const noexcept { return active_count_; }
+
+int JobModel::backupCount() const noexcept { return backup_count_; }
+
+int JobModel::restoreCount() const noexcept { return restore_count_; }
+
+int JobModel::verifyCount() const noexcept { return verify_count_; }
 
 int JobModel::revision() const noexcept { return revision_; }
 
@@ -327,6 +355,36 @@ qint64 JobModel::earliestActiveRestoreCreatedUtcMs() const {
         }
     }
     return earliest;
+}
+
+QVariantMap JobModel::operationCounts() const {
+    int backup = 0;
+    int restore = 0;
+    int verify = 0;
+    int other = 0;
+    for (const auto& row : rows_) {
+        switch (row.operation) {
+        case 1:
+            ++backup;
+            break;
+        case 2:
+            ++restore;
+            break;
+        case 3:
+            ++verify;
+            break;
+        default:
+            ++other;
+            break;
+        }
+    }
+    return {
+        {QStringLiteral("backup"), backup},
+        {QStringLiteral("restore"), restore},
+        {QStringLiteral("verify"), verify},
+        {QStringLiteral("other"), other},
+        {QStringLiteral("total"), static_cast<int>(rows_.size())}
+    };
 }
 
 int JobModel::rowCount(const QModelIndex& parent) const {

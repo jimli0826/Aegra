@@ -521,23 +521,61 @@ Item {
         return enabled ? qsTrId("aegra.common.on") : qsTrId("aegra.common.off")
     }
 
-    // Staggered entrance for type cards (Backup-style OutBack).
-    property bool typeCardAnim1: false
-    property bool typeCardAnim2: false
-    property bool typeCardAnim3: false
+    ParallelAnimation {
+        id: typeCardsEntranceAnim
 
-    function playTypeCardsEntrance() {
-        typeCardAnim1 = false
-        typeCardAnim2 = false
-        typeCardAnim3 = false
-        typeCardAnimTimer1.restart()
-        typeCardAnimTimer2.restart()
-        typeCardAnimTimer3.restart()
+        // Header entrance
+        ParallelAnimation {
+            NumberAnimation { target: restoreTypeHeader; property: "opacity"; from: 0; to: 1; duration: 360; easing.type: Easing.OutCubic }
+            NumberAnimation { target: restoreTypeHeaderTrans; property: "y"; from: 18; to: 0; duration: 420; easing.type: Easing.OutCubic }
+        }
+
+        // Card 1: Disk restore
+        SequentialAnimation {
+            PauseAnimation { duration: 20 }
+            ParallelAnimation {
+                NumberAnimation { target: restoreTypeCard1; property: "opacity"; from: 0; to: 1; duration: 380; easing.type: Easing.OutCubic }
+                NumberAnimation { target: restoreTypeCard1; property: "scale"; from: 0.88; to: 1.0; duration: 520; easing.type: Easing.OutBack; easing.overshoot: 1.25 }
+                NumberAnimation { target: restoreTypeCardTrans1; property: "y"; from: 52; to: 0; duration: 520; easing.type: Easing.OutBack; easing.overshoot: 1.25 }
+            }
+        }
+
+        // Card 2: Volume restore
+        SequentialAnimation {
+            PauseAnimation { duration: 110 }
+            ParallelAnimation {
+                NumberAnimation { target: restoreTypeCard2; property: "opacity"; from: 0; to: 1; duration: 380; easing.type: Easing.OutCubic }
+                NumberAnimation { target: restoreTypeCard2; property: "scale"; from: 0.88; to: 1.0; duration: 520; easing.type: Easing.OutBack; easing.overshoot: 1.25 }
+                NumberAnimation { target: restoreTypeCardTrans2; property: "y"; from: 52; to: 0; duration: 520; easing.type: Easing.OutBack; easing.overshoot: 1.25 }
+            }
+        }
+
+        // Card 3: Files restore
+        SequentialAnimation {
+            PauseAnimation { duration: 200 }
+            ParallelAnimation {
+                NumberAnimation { target: restoreTypeCard3; property: "opacity"; from: 0; to: 1; duration: 380; easing.type: Easing.OutCubic }
+                NumberAnimation { target: restoreTypeCard3; property: "scale"; from: 0.88; to: 1.0; duration: 520; easing.type: Easing.OutBack; easing.overshoot: 1.25 }
+                NumberAnimation { target: restoreTypeCardTrans3; property: "y"; from: 52; to: 0; duration: 520; easing.type: Easing.OutBack; easing.overshoot: 1.25 }
+            }
+        }
     }
 
-    Timer { id: typeCardAnimTimer1; interval: 40;  repeat: false; onTriggered: root.typeCardAnim1 = true }
-    Timer { id: typeCardAnimTimer2; interval: 120; repeat: false; onTriggered: root.typeCardAnim2 = true }
-    Timer { id: typeCardAnimTimer3; interval: 200; repeat: false; onTriggered: root.typeCardAnim3 = true }
+    function playTypeCardsEntrance() {
+        typeCardsEntranceAnim.stop()
+        restoreTypeHeader.opacity = 0
+        restoreTypeHeaderTrans.y = 18
+        restoreTypeCard1.opacity = 0
+        restoreTypeCard1.scale = 0.88
+        restoreTypeCardTrans1.y = 52
+        restoreTypeCard2.opacity = 0
+        restoreTypeCard2.scale = 0.88
+        restoreTypeCardTrans2.y = 52
+        restoreTypeCard3.opacity = 0
+        restoreTypeCard3.scale = 0.88
+        restoreTypeCardTrans3.y = 52
+        typeCardsEntranceAnim.restart()
+    }
 
     onVisibleChanged: {
         if (!visible)
@@ -2362,11 +2400,15 @@ Item {
                 Item { height: 8 }
 
                 ColumnLayout {
+                    id: restoreTypeHeader
                     spacing: 6
                     Layout.alignment: Qt.AlignHCenter
                     Layout.fillWidth: true
-                    opacity: root.typeCardAnim1 ? 1 : 0
-                    Behavior on opacity { NumberAnimation { duration: 360; easing.type: Easing.OutCubic } }
+                    opacity: 0
+                    transform: Translate {
+                        id: restoreTypeHeaderTrans
+                        y: 18
+                    }
                     Text {
                         //% "Choose restore type"
                         text: qsTrId("aegra.restore.type_title")
@@ -2399,6 +2441,7 @@ Item {
 
                     // Card: Disk restore
                     Rectangle {
+                        id: restoreTypeCard1
                         Layout.fillWidth: true
                         Layout.preferredWidth: 280
                         Layout.maximumWidth: 340
@@ -2407,14 +2450,14 @@ Item {
                         color: diskTypeMouse.containsMouse ? Theme.colorHover : Theme.colorCard
                         border.width: 2
                         border.color: diskTypeMouse.containsMouse ? Theme.colorAccentBlue : "#ffffff"
-                        opacity: root.typeCardAnim1 ? 1 : 0
-                        scale: root.typeCardAnim1 ? 1.0 : 0.88
+                        opacity: 0
+                        scale: 0.88
                         transformOrigin: Item.Center
-                        Behavior on color { ColorAnimation { duration: 150 } }
-                        Behavior on opacity { NumberAnimation { duration: 380; easing.type: Easing.OutCubic } }
-                        Behavior on scale {
-                            NumberAnimation { duration: 560; easing.type: Easing.OutBack; easing.overshoot: 1.35 }
+                        transform: Translate {
+                            id: restoreTypeCardTrans1
+                            y: 52
                         }
+                        Behavior on color { ColorAnimation { duration: 150 } }
                         MouseArea {
                             id: diskTypeMouse
                             anchors.fill: parent
@@ -2476,6 +2519,7 @@ Item {
 
                     // Card: Volume restore
                     Rectangle {
+                        id: restoreTypeCard2
                         Layout.fillWidth: true
                         Layout.preferredWidth: 280
                         Layout.maximumWidth: 340
@@ -2484,14 +2528,14 @@ Item {
                         color: volumeTypeMouse.containsMouse ? Theme.colorHover : Theme.colorCard
                         border.width: 2
                         border.color: volumeTypeMouse.containsMouse ? "#6366F1" : "#ffffff"
-                        opacity: root.typeCardAnim2 ? 1 : 0
-                        scale: root.typeCardAnim2 ? 1.0 : 0.88
+                        opacity: 0
+                        scale: 0.88
                         transformOrigin: Item.Center
-                        Behavior on color { ColorAnimation { duration: 150 } }
-                        Behavior on opacity { NumberAnimation { duration: 420; easing.type: Easing.OutCubic } }
-                        Behavior on scale {
-                            NumberAnimation { duration: 580; easing.type: Easing.OutBack; easing.overshoot: 1.35 }
+                        transform: Translate {
+                            id: restoreTypeCardTrans2
+                            y: 52
                         }
+                        Behavior on color { ColorAnimation { duration: 150 } }
                         MouseArea {
                             id: volumeTypeMouse
                             anchors.fill: parent
@@ -2553,6 +2597,7 @@ Item {
 
                     // Card: Files / folders restore
                     Rectangle {
+                        id: restoreTypeCard3
                         Layout.fillWidth: true
                         Layout.preferredWidth: 280
                         Layout.maximumWidth: 340
@@ -2561,14 +2606,14 @@ Item {
                         color: filesTypeMouse.containsMouse ? Theme.colorHover : Theme.colorCard
                         border.width: 2
                         border.color: filesTypeMouse.containsMouse ? Theme.colorGreen : "#ffffff"
-                        opacity: root.typeCardAnim3 ? 1 : 0
-                        scale: root.typeCardAnim3 ? 1.0 : 0.88
+                        opacity: 0
+                        scale: 0.88
                         transformOrigin: Item.Center
-                        Behavior on color { ColorAnimation { duration: 150 } }
-                        Behavior on opacity { NumberAnimation { duration: 460; easing.type: Easing.OutCubic } }
-                        Behavior on scale {
-                            NumberAnimation { duration: 600; easing.type: Easing.OutBack; easing.overshoot: 1.35 }
+                        transform: Translate {
+                            id: restoreTypeCardTrans3
+                            y: 52
                         }
+                        Behavior on color { ColorAnimation { duration: 150 } }
                         MouseArea {
                             id: filesTypeMouse
                             anchors.fill: parent

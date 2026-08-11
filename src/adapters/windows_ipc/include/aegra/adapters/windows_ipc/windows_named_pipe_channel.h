@@ -25,7 +25,7 @@ struct WindowsNamedPipeConnectRequest final {
 
 struct WindowsNamedPipeListenRequest final {
     std::string pipe_name;
-    std::uint32_t maximum_frame_bytes{64U * 1024U};
+    std::uint32_t maximum_frame_bytes{1024U * 1024U};
     WindowsNamedPipeAclProfile acl_profile{WindowsNamedPipeAclProfile::kProcessDefault};
     WindowsNamedPipeNamespace pipe_namespace{WindowsNamedPipeNamespace::kService};
 };

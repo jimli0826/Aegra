@@ -40,6 +40,8 @@ enum class ServiceRequestKind : std::uint8_t {
     kBrowseFileSources = 13,
     kListRecoveryPointEntries = 14,
     kPrepareFileRestore = 15,
+    /// Control-plane preferences (job retention, etc.).
+    kGetServiceSettings = 16,
     kAddRepositoryConnection = 32,
     kImportRepositoryConnection = 33,
     kTestRepositoryConnection = 34,
@@ -57,6 +59,8 @@ enum class ServiceRequestKind : std::uint8_t {
     kAcknowledgeEvents = 46,
     kExecuteDeletePlan = 47,
     kStartFileRestore = 48,
+    /// Persist control-plane preferences and apply retention purge.
+    kUpdateServiceSettings = 49,
 };
 
 enum class ServiceResponseKind : std::uint8_t {
@@ -88,7 +92,7 @@ using ServiceRequestPayload =
                  MountRecoveryPointCommand, UpsertScheduleCommand, EventSubscriptionRequest,
                  EventAcknowledgement, ExecuteDeletePlanCommand, BrowseFileSourcesRequest,
                  ListRecoveryPointEntriesRequest, PrepareFileRestoreRequest,
-                 StartFileRestoreCommand>;
+                 StartFileRestoreCommand, ServiceSettingsQuery, UpdateServiceSettingsCommand>;
 
 struct ServiceRequest final {
     std::uint32_t schema_version{kServiceRequestSchemaVersion};
@@ -104,7 +108,7 @@ using ServiceResponsePayload =
                  SourceInventoryPage, JobPage, SchedulePage, AuditEventPage, MountSessionPage,
                  RestorePreflight, RecoveryPointChainResult, DeletePlanSummary,
                  RecoveryPointLayout, CommandAcknowledgement, FileSourceNodePage,
-                 RecoveryPointEntryPage, FileRestorePreflight>;
+                 RecoveryPointEntryPage, FileRestorePreflight, ServiceSettings>;
 
 struct ServiceResponse final {
     std::uint32_t schema_version{kServiceResponseSchemaVersion};

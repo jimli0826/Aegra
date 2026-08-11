@@ -17,8 +17,9 @@ class IpcFrameTransport final : public QObject {
     Q_OBJECT
 
   public:
-    static constexpr quint32 kMaximumFrameBytes = 64U * 1024U;
+    static constexpr quint32 kMaximumFrameBytes = 1024U * 1024U;
     static constexpr int kDefaultReconnectDelayMilliseconds = 2'000;
+    static constexpr int kMaximumReconnectDelayMilliseconds = 30'000;
 
     explicit IpcFrameTransport(QString pipe_name, QObject* parent = nullptr);
 
@@ -32,6 +33,8 @@ class IpcFrameTransport final : public QObject {
     void disconnect_from_service();
     /// Enable auto-reconnect and schedule a connect if not already connected/connecting.
     void ensure_reconnect_scheduled();
+    /// Schedule reconnect with exponential backoff (for post-Ready failure paths).
+    void schedule_reconnect_with_backoff();
     [[nodiscard]] bool send_frame(const QByteArray& body);
 
   signals:
@@ -57,6 +60,8 @@ class IpcFrameTransport final : public QObject {
     bool intentional_disconnect_{false};
     bool auto_reconnect_enabled_{true};
     bool error_notified_{false};
+    int reconnect_delay_ms_{kDefaultReconnectDelayMilliseconds};
+    int next_reconnect_delay_ms_{kDefaultReconnectDelayMilliseconds};
 };
 
 } // namespace aegra::desktop

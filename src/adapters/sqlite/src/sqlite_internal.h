@@ -136,6 +136,23 @@ class JobStore final : public ports::IJobStore {
     [[nodiscard]] base::Result<std::uint64_t>
     mark_active_as_interrupted(std::uint64_t interrupted_utc_ms,
                                base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<std::uint64_t>
+    purge_terminal_completed_before(std::uint64_t completed_before_utc_ms,
+                                    base::CancellationToken cancellation) override;
+
+  private:
+    SqliteControlPlaneState& state_;
+    const bool* unit_of_work_active_{nullptr};
+};
+
+class ServiceSettingsStore final : public ports::IServiceSettingsStore {
+  public:
+    explicit ServiceSettingsStore(SqliteControlPlaneState& state,
+                                  const bool* unit_of_work_active = nullptr) noexcept;
+    [[nodiscard]] base::Result<ports::ServiceSettingsRecord>
+    get(base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<void> upsert(const ports::ServiceSettingsRecord& record,
+                                            base::CancellationToken cancellation) override;
 
   private:
     SqliteControlPlaneState& state_;
@@ -216,6 +233,7 @@ class ControlPlaneUnitOfWork final : public ports::IControlPlaneUnitOfWork {
     [[nodiscard]] ports::IAuditEventStore& audit_events() noexcept override;
     [[nodiscard]] ports::ICommandStore& commands() noexcept override;
     [[nodiscard]] ports::IRestorePreflightStore& restore_preflights() noexcept override;
+    [[nodiscard]] ports::IServiceSettingsStore& service_settings() noexcept override;
     [[nodiscard]] base::Result<void> commit(base::CancellationToken cancellation) override;
     void rollback() noexcept override;
 
@@ -231,6 +249,7 @@ class ControlPlaneUnitOfWork final : public ports::IControlPlaneUnitOfWork {
     AuditEventStore audit_events_;
     CommandStore commands_;
     RestorePreflightStore restore_preflights_;
+    ServiceSettingsStore service_settings_;
 };
 
 // Opaque continuation: v1|<scope>|<filter>|<created_utc_ms>|<id>, bound to list kind + filters.
@@ -246,8 +265,7 @@ struct PageCursor final {
 
 [[nodiscard]] std::string
 repository_connection_page_filter(const std::optional<contracts::RepositoryConnectionState>& state);
-[[nodiscard]] std::string job_page_filter(const std::optional<contracts::JobOperation>& operation,
-                                          const std::optional<contracts::ServiceJobState>& state);
+[[nodiscard]] std::string job_page_filter(const contracts::JobListRequest& request);
 [[nodiscard]] std::string schedule_page_filter(const std::optional<bool>& enabled);
 [[nodiscard]] std::string
 audit_event_page_filter(const std::optional<contracts::AuditSeverity>& minimum_severity,

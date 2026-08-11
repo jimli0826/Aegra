@@ -25,6 +25,7 @@ src/adapters/sqlite/
     ├── sqlite_repository_connection_store.cpp
     ├── sqlite_job_store.cpp
     ├── sqlite_schedule_store.cpp
+    ├── sqlite_service_settings_store.cpp
     └── sqlite_audit_event_store.cpp
 ```
 
@@ -38,13 +39,16 @@ src/adapters/sqlite/
 ## 端口拆分
 
 - `IRepositoryConnectionStore`：upsert/get/list/set_default/remove（仅删除控制面引用）。
-- `IJobStore`：insert/get/list/CAS `transition`/`mark_active_as_interrupted`。
+- `IJobStore`：insert/get/list/CAS `transition`/`mark_active_as_interrupted`/
+  `purge_terminal_completed_before`。
+- `IServiceSettingsStore`：get/upsert 单行控制面偏好（job retention）。
 - `IScheduleStore`：upsert/get/list/remove。
 - `IAuditEventStore`：append/list。
 - `ICommandStore`：按 idempotency key 读取/插入不可变 command record。
 - `IRestorePreflightStore`：插入/读取短期 Restore 安全快照；token 不可覆盖。
 - `IControlPlaneUnitOfWork`：同一事务内访问上述 store；显式 `commit`，析构回滚。
-- `IControlPlaneDatabase`：schema version、begin unit of work、只读查询快照。
+- `IControlPlaneDatabase`：schema version、begin unit of work、只读查询快照（含
+  `get_service_settings`）。
 
 Job 状态机为纯函数：`queued/running/cancelling/succeeded/failed/cancelled/interrupted`。
 Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_as_interrupted`；
@@ -52,10 +56,13 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
 
 ## Schema 与不变量
 
-- `schema_meta.version` 当前为 `15`（`ports::kControlPlaneSchemaVersion`）。产品未发布：
-  - 新库 `CREATE IF NOT EXISTS` 即为当前完整表结构，再写入 version=15；
+- `schema_meta.version` 当前为 `16`（`ports::kControlPlaneSchemaVersion`）。产品未发布：
+  - 新库 `CREATE IF NOT EXISTS` 即为当前完整表结构，再写入 version=16；
   - **不提供** 历史 schema 的 `ALTER` 迁移或兼容读取；旧开发库必须删除后重建；
   - 非 0 且非当前版本 → `kUnsupportedVersion`。
+- `service_settings`（schema 16）：单行 `id=1`；`job_retention_months` ∈ {1,3,6} 默认 3；
+  `updated_utc_ms`。Service 启动与 `UpdateServiceSettings` 时按 30 天/月对终端 Job 做
+  `purge_terminal_completed_before` 硬删除。
 - `jobs.schedule_id`：backup Job 必填（拥有方 Schedule）；restore/verify 等为空串。ListJobs 投影到
   JobSummary.schedule_id，供 Desktop 按 schedule 绑定运行状态（同源 Schedule 互不串台）。
 - `restore_preflight_entry_ids`（schema 12+）：file_set 选择性恢复 preflight 的 entry_id 列表

@@ -23,7 +23,7 @@
    Service 与 Desktop 在同一交互用户下运行。安装为 LocalSystem Service 前必须增加显式用户授权与连接方
    身份校验，不允许用 NULL DACL 或 Everyone full access 临时绕过。
 3. 传输使用 byte mode、4 字节 little-endian unsigned length 和 UTF-8 JSON body。零长度无效，Service API
-   默认最大 frame 为 64 KiB。Adapter 只负责连接、监听、framing、取消和 Handle 生命周期，不解析 JSON。
+   默认最大 frame 为 1 MiB（控制面 Service↔Desktop）。Adapter 只负责连接、监听、framing、取消和 Handle 生命周期，不解析 JSON。
 4. `contracts` 定义传输无关的 `ServiceRequest`、`ServiceResponse` 与 `ServiceInfo`。每个根消息携带
    `schema_version` 和 `request_id`，枚举具有显式数值。JSON codec 只存在于 `apps/service`。
 5. 阶段 13A 只支持 `GetServiceInfo`。成功响应返回 Service 版本、API 版本、`ready` 状态和 capability 列表；

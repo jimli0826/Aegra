@@ -14,6 +14,20 @@ inline constexpr quint32 kServiceSchemaVersion = 4;
 inline constexpr quint32 kServiceApiVersion = 4;
 inline constexpr quint32 kRecoveryPointPageSize = 100;
 inline constexpr quint32 kJobPageSize = 100;
+/// ListJobs scope (contracts::JobListScope).
+inline constexpr int kJobListScopeAll = 1;
+inline constexpr int kJobListScopeActive = 2;
+inline constexpr int kJobListScopeTerminal = 3;
+
+struct JobListQuery final {
+    std::optional<QString> continuation_token;
+    int scope{kJobListScopeAll};
+    std::optional<qint64> operation;
+    std::optional<qint64> state;
+    std::optional<qint64> from_utc_ms;
+    std::optional<qint64> to_utc_ms;
+    quint32 maximum_results{kJobPageSize};
+};
 inline constexpr quint32 kInventoryPageSize = 100;
 inline constexpr quint32 kConnectionPageSize = 100;
 inline constexpr quint32 kSchedulePageSize = 100;
@@ -28,6 +42,7 @@ inline constexpr int kExecuteDeletePlanRequestKind = 47;
 inline constexpr int kBrowseFileSourcesRequestKind = 13;
 inline constexpr int kListRecoveryPointEntriesRequestKind = 14;
 inline constexpr int kPrepareFileRestoreRequestKind = 15;
+inline constexpr int kGetServiceSettingsRequestKind = 16;
 inline constexpr int kAddRepositoryConnectionRequestKind = 32;
 inline constexpr int kImportRepositoryConnectionRequestKind = 33;
 inline constexpr int kTestRepositoryConnectionRequestKind = 34;
@@ -42,7 +57,13 @@ inline constexpr int kUnmountSessionRequestKind = 42;
 inline constexpr int kUpsertScheduleRequestKind = 43;
 inline constexpr int kDeleteScheduleRequestKind = 44;
 inline constexpr int kStartFileRestoreRequestKind = 48;
+inline constexpr int kUpdateServiceSettingsRequestKind = 49;
 inline constexpr int kScheduleTriggerDaily = 1;
+/// Job retention policy months (Service control-plane settings).
+inline constexpr int kJobRetentionMonths1 = 1;
+inline constexpr int kJobRetentionMonths3 = 3;
+inline constexpr int kJobRetentionMonths6 = 6;
+inline constexpr int kDefaultJobRetentionMonths = kJobRetentionMonths3;
 inline constexpr int kScheduleTriggerWeekly = 2;
 inline constexpr int kCommandAcceptedResponseKind = 2;
 inline constexpr int kRequestFailedResponseKind = 3;
@@ -98,6 +119,11 @@ struct MountSessionPage final {
     std::optional<QString> continuation_token;
 };
 
+struct ServiceSettings final {
+    int job_retention_months{kDefaultJobRetentionMonths};
+    qint64 updated_utc_ms{0};
+};
+
 struct CommandAck final {
     QString command_id;
     qint64 disposition{0};
@@ -142,7 +168,7 @@ struct FileRestorePreflightPage final {
                                                               const QString& recovery_point_id,
                                                               const QString& archive_password = {});
 [[nodiscard]] QByteArray encode_job_list_request(const QString& request_id,
-                                                 const std::optional<QString>& continuation_token);
+                                                 const JobListQuery& query);
 [[nodiscard]] QByteArray
 encode_source_inventory_request(const QString& request_id,
                                 const std::optional<QString>& continuation_token,
@@ -233,6 +259,10 @@ encode_browse_file_sources_request(const QString& request_id,
                                                             const QString& idempotency_key,
                                                             const QString& plan_token,
                                                             bool confirmed = true);
+[[nodiscard]] QByteArray encode_get_service_settings_request(const QString& request_id);
+[[nodiscard]] QByteArray encode_update_service_settings_request(const QString& request_id,
+                                                                const QString& idempotency_key,
+                                                                int job_retention_months);
 
 [[nodiscard]] bool parse_response_root(const QByteArray& body, const QString& request_id,
                                        QJsonObject& root);
@@ -247,6 +277,8 @@ encode_browse_file_sources_request(const QString& request_id,
 /// expiresUtcMs.
 [[nodiscard]] bool parse_delete_plan_response(const QJsonObject& root, QVariantMap& result);
 [[nodiscard]] bool parse_job_list_response(const QJsonObject& root, JobPage& result);
+[[nodiscard]] bool parse_service_settings_response(const QJsonObject& root, ServiceSettings& result);
+[[nodiscard]] bool is_service_settings_failure_response(const QJsonObject& root);
 [[nodiscard]] bool parse_source_inventory_response(const QJsonObject& root,
                                                    SourceInventoryPage& result);
 [[nodiscard]] bool parse_repository_connection_list_response(const QJsonObject& root,

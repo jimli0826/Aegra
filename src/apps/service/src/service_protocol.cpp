@@ -142,7 +142,13 @@ template <typename Value, typename Encoder, typename Validator>
         return base::Result<std::string>::failure(valid.error());
     }
     try {
-        return base::Result<std::string>::success(encoder(value).dump());
+        auto encoded = encoder(value).dump();
+        if (encoded.empty() || encoded.size() > kMaximumServiceFrameBytes) {
+            return base::Result<std::string>::failure(invalid_protocol(
+                base::ErrorCode::kInvalidArgument,
+                "service message exceeds maximum frame bytes"));
+        }
+        return base::Result<std::string>::success(std::move(encoded));
     } catch (const std::exception&) {
         return base::Result<std::string>::failure(
             invalid_protocol(base::ErrorCode::kInternal, failure_message));

@@ -238,6 +238,24 @@ base::Result<void> validate_job_list_request(const JobListRequest& request) {
         (request.state && !known_job_state(*request.state))) {
         return invalid("job list request is invalid");
     }
+    if (request.scope != JobListScope::kAll && request.scope != JobListScope::kActive &&
+        request.scope != JobListScope::kTerminal) {
+        return invalid("job list request is invalid");
+    }
+    if (request.state) {
+        const auto terminal = terminal_job_state(*request.state);
+        if (request.scope == JobListScope::kActive && terminal) {
+            return invalid("job list request is invalid");
+        }
+        if (request.scope == JobListScope::kTerminal && !terminal) {
+            return invalid("job list request is invalid");
+        }
+    }
+    if ((request.from_utc_ms && !valid_wire_integer(*request.from_utc_ms)) ||
+        (request.to_utc_ms && !valid_wire_integer(*request.to_utc_ms)) ||
+        (request.from_utc_ms && request.to_utc_ms && *request.from_utc_ms > *request.to_utc_ms)) {
+        return invalid("job list request is invalid");
+    }
     return base::Result<void>::success();
 }
 
@@ -871,6 +889,26 @@ base::Result<void> validate_start_file_restore_command(const StartFileRestoreCom
     if (!valid_token(command.preflight_token) || !command.confirmed ||
         (command.archive_secret_ref && command.archive_secret_ref->size() > 512)) {
         return invalid("start file restore command is invalid");
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void> validate_service_settings_query(const ServiceSettingsQuery&) {
+    return base::Result<void>::success();
+}
+
+base::Result<void> validate_service_settings(const ServiceSettings& settings) {
+    if (!is_valid_job_retention_months(settings.job_retention_months) ||
+        !valid_wire_integer(settings.updated_utc_ms)) {
+        return invalid("service settings are invalid");
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void>
+validate_update_service_settings_command(const UpdateServiceSettingsCommand& command) {
+    if (!is_valid_job_retention_months(command.job_retention_months)) {
+        return invalid("update service settings command is invalid");
     }
     return base::Result<void>::success();
 }

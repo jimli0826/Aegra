@@ -20,10 +20,12 @@ Block Source 可通过 `describe_extent()` 报告 DATA/FREE。Pipeline 只为 DA
 分项耗时，并提供源读取字节、FREE 字节及调用次数。统计只在 Chunk、extent 和 Block Source 调用边界
 采样，避免在内部固定块循环中增加高频时钟开销。
 
-Volume Backup 按 `memory_budget_bytes / chunk_size_bytes` 建立有界 Chunk buffer pool。Consumer 在
-`IBackupSession::write_chunk` 返回后立即归还 payload，Producer 后续读取复用其容量；FREE 字节保持未定义
-旧内容，但仍由 descriptor 排除，不会被读取、散列或持久化。最后一个短 Chunk 只缩短 vector size，
-不释放 capacity。该 pool 同时把 producer、queue、consumer 持有的 Chunk payload 总容量限制在内存预算内。
+Volume Backup 按 `memory_budget_bytes / chunk_size_bytes` 建立有界 Chunk buffer pool。每个底层 storage
+额外保留最多 64 KiB - 1 的对齐余量，并向 Block Source 暴露 64 KiB 对齐的有效 payload span，使 Windows
+无缓存卷读取可直接填充 Pipeline buffer。Consumer 在 `IBackupSession::write_chunk` 返回后立即归还整个
+storage，Producer 后续读取复用其容量；FREE 字节保持未定义旧内容，但仍由 descriptor 排除，不会被读取、
+散列或持久化。最后一个短 Chunk 只调整有效 span，不释放 capacity。该 pool 对 payload 字节保持原有预算，
+每个 buffer 的固定对齐余量不计入 payload budget。
 
 ## Restore Pipeline
 

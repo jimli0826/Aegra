@@ -126,7 +126,13 @@ base::Result<void> produce_all_chunks(RestoreProducerContext& context) {
         if (!chunk) {
             return base::Result<void>::failure(chunk.error());
         }
-        auto pushed = context.queue.push(std::move(chunk).value(), context.cancellation);
+        auto owned = std::move(chunk).value();
+        auto pushed = context.queue.push(
+            detail::QueuedChunk{
+                std::move(owned.descriptor),
+                detail::OwnedChunkBuffer::from_contiguous(std::move(owned.payload)),
+            },
+            context.cancellation);
         if (!pushed) {
             return pushed;
         }
@@ -174,21 +180,21 @@ void publish_progress(ports::IProgressSink* sink, const RestorePlan& plan,
     if (sink == nullptr) {
         return;
     }
-    sink->publish(contracts::make_byte_progress(
-        plan.job_id, plan.trace_id, phase, logical_size, summary.restored_bytes,
-        summary.restored_bytes, restore_phase_message(phase)));
+    sink->publish(contracts::make_byte_progress(plan.job_id, plan.trace_id, phase, logical_size,
+                                                summary.restored_bytes, summary.restored_bytes,
+                                                restore_phase_message(phase)));
 }
 
 base::Result<void> write_allocated_ranges(RestoreConsumerContext& context,
-                                          const ports::ChunkData& chunk) {
+                                          const detail::QueuedChunk& chunk) {
+    const auto payload = chunk.payload.bytes();
     std::uint64_t position = 0;
     for (const auto& free : chunk.descriptor.free_ranges) {
         if (free.offset > position) {
             const auto size = free.offset - position;
             auto written = context.sink.write(
                 chunk.descriptor.logical_offset + position,
-                std::span<const std::byte>(chunk.payload)
-                    .subspan(static_cast<std::size_t>(position), static_cast<std::size_t>(size)),
+                payload.subspan(static_cast<std::size_t>(position), static_cast<std::size_t>(size)),
                 context.cancellation);
             if (!written) {
                 return written;
@@ -199,10 +205,9 @@ base::Result<void> write_allocated_ranges(RestoreConsumerContext& context,
     if (position == chunk.descriptor.logical_size) {
         return base::Result<void>::success();
     }
-    return context.sink.write(
-        chunk.descriptor.logical_offset + position,
-        std::span<const std::byte>(chunk.payload).subspan(static_cast<std::size_t>(position)),
-        context.cancellation);
+    return context.sink.write(chunk.descriptor.logical_offset + position,
+                              payload.subspan(static_cast<std::size_t>(position)),
+                              context.cancellation);
 }
 
 base::Result<RestoreSummary> consume_chunks(RestoreConsumerContext& context) {
@@ -228,8 +233,7 @@ base::Result<RestoreSummary> consume_chunks(RestoreConsumerContext& context) {
         summary.restored_bytes += chunk.descriptor.logical_size;
         summary.disk_written_bytes += chunk.descriptor.logical_size - chunk_free_bytes;
         summary.free_skipped_bytes += chunk_free_bytes;
-        summary.free_range_count +=
-            static_cast<std::uint64_t>(chunk.descriptor.free_ranges.size());
+        summary.free_range_count += static_cast<std::uint64_t>(chunk.descriptor.free_ranges.size());
         ++summary.chunk_count;
         publish_progress(context.progress, context.plan, contracts::TaskPhase::kWriting, summary,
                          context.logical_size);

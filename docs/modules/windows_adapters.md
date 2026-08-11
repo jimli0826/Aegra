@@ -90,9 +90,9 @@ AipCopy 的源读取策略：句柄使用 `FILE_FLAG_NO_BUFFERING | FILE_FLAG_SE
   若探测值为 0 或大于逻辑长度，则按逻辑长度视为全部可读；若 `0 < readable < logical`，
   仅 **[readable, logical)** 允许零填充（trailing），并保留可读边界；
 - raw / VSS 设备读：无缓存 `ReadFile` 允许 partial IRP，**循环读满**请求长度；单次 IRP 上限 4 MiB，
-  同一 `read()` 同时只有一个 IRP。Adapter 使用 `VirtualAlloc` 对齐 bounce buffer，并在返回前复制到调用方
-  buffer，因此 Port 不要求调用方提供扇区对齐内存。循环后仍读不满可读区间才失败（真 EOF / 设备截断），
-  **不得**把 partial 当成致命 short read；
+  同一 `read()` 同时只有一个 IRP。调用方 buffer、offset 与长度满足设备对齐时直接读取；否则 Adapter 使用
+  `VirtualAlloc` 对齐 bounce buffer 并在返回前复制，因此 Port 不要求任意调用方提供对齐内存。循环后仍
+  读不满可读区间才失败（真 EOF / 设备截断），**不得**把 partial 当成致命 short read；
 - raw 与 VSS 均尝试 `FSCTL_ALLOW_EXTENDED_DASD_IO`（VSS 拒绝时继续，raw 失败则打开失败）；
 - Free-skip / 已验证排除区间的 FREE 分类由 `FreeSkipBlockSource` 负责，不与设备 short read 混用。
 

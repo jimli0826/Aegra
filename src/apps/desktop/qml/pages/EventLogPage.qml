@@ -4,33 +4,43 @@ import QtQuick.Layouts 1.15
 import ".."
 import "../components"
 
-// Visual baseline: backup/src/gui EventLogPage (filters + table + pagination).
+// Task Log: terminal (completed) jobs from ListJobs scope=terminal.
 Item {
     id: root
-    //% "Event Log"
+    //% "Task Log"
     Accessible.name: qsTrId("aegra.nav.event_log")
 
     property int timeIndex: 0
     property int typeIndex: 0
     property int statusIndex: 0
-    property int page: 1
 
-    // Demo row matching old Event Log screenshot until Service history API is wired.
-    readonly property var demoEvents: [
-        {
-            typeKey: "backup",
-            sourceName: "disk0",
-            destName: "qqqq",
-            destPath: "E:\\qqqq",
-            statusKey: "success",
-            statusText: qsTrId("aegra.eventlog.status.success"),
-            started: "2026-08-04 11:18:47"
-        }
-    ]
+    readonly property var logModel: (typeof serviceClient !== "undefined" && serviceClient)
+                                    ? serviceClient.taskLog : null
+    readonly property bool logLoading: (typeof serviceClient !== "undefined" && serviceClient)
+                                       ? serviceClient.taskLogLoading : false
+    readonly property bool logHasMore: (typeof serviceClient !== "undefined" && serviceClient)
+                                      ? serviceClient.taskLogHasMore : false
+    readonly property string logError: (typeof serviceClient !== "undefined" && serviceClient)
+                                       ? (serviceClient.taskLogErrorText || "") : ""
+    readonly property int logCount: logModel ? logModel.count : 0
 
-    function themedComboBackground(combo) {
-        return null
+    function reload() {
+        if (typeof serviceClient === "undefined" || !serviceClient || !serviceClient.jobListAvailable)
+            return
+        serviceClient.refreshTaskLog(root.timeIndex, root.typeIndex, root.statusIndex)
     }
+
+    function loadMore() {
+        if (typeof serviceClient === "undefined" || !serviceClient)
+            return
+        serviceClient.loadMoreTaskLog()
+    }
+
+    Component.onCompleted: reload()
+
+    onTimeIndexChanged: reload()
+    onTypeIndexChanged: reload()
+    onStatusIndexChanged: reload()
 
     ColumnLayout {
         anchors.fill: parent
@@ -49,7 +59,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
-                    //% "Event Log"
+                    //% "Task Log"
                     text: qsTrId("aegra.nav.event_log")
                     color: Theme.colorTextWhite
                     font.pixelSize: 18
@@ -60,18 +70,13 @@ Item {
             }
             Item { Layout.fillWidth: true }
             AppButton {
-                //% "Delete"
-                text: qsTrId("aegra.common.delete")
-                enabled: false
-            }
-            AppButton {
                 //% "Refresh"
                 text: qsTrId("aegra.common.refresh")
-                enabled: true
+                enabled: !root.logLoading
+                onClicked: root.reload()
             }
         }
 
-        // Filters row — ComboBoxes like old UI
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 48
@@ -170,7 +175,7 @@ Item {
                         qsTrId("aegra.eventlog.type.all"),
                         qsTrId("aegra.nav.backup"),
                         qsTrId("aegra.nav.restore"),
-                        qsTrId("aegra.nav.mount")
+                        qsTrId("aegra.job.operation.verify")
                     ]
                     currentIndex: root.typeIndex
                     onActivated: root.typeIndex = currentIndex
@@ -297,7 +302,6 @@ Item {
             }
         }
 
-        // Table
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -322,7 +326,7 @@ Item {
                         anchors.rightMargin: 12
                         spacing: 8
                         Text {
-                            Layout.preferredWidth: 48
+                            Layout.preferredWidth: 80
                             //% "Type"
                             text: qsTrId("aegra.home.column.type")
                             color: Theme.colorTextGrey
@@ -351,7 +355,7 @@ Item {
                             font.family: Theme.fontFamily
                         }
                         Text {
-                            Layout.preferredWidth: 90
+                            Layout.preferredWidth: 100
                             //% "Status"
                             text: qsTrId("aegra.home.column.status")
                             color: Theme.colorTextGrey
@@ -371,94 +375,118 @@ Item {
                     }
                 }
 
-                ListView {
-                    id: eventList
+                Item {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    clip: true
-                    model: root.demoEvents
-                    delegate: Rectangle {
-                        required property var modelData
-                        required property int index
-                        width: eventList.width
-                        height: 48
-                        color: index % 2 === 0 ? Theme.colorTableRow : Theme.colorTableAlt
 
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 12
-                            anchors.rightMargin: 12
-                            spacing: 8
+                    ListView {
+                        id: eventList
+                        anchors.fill: parent
+                        clip: true
+                        model: root.logModel
+                        visible: root.logCount > 0
+                        delegate: Rectangle {
+                            width: eventList.width
+                            height: 48
+                            color: index % 2 === 0 ? Theme.colorTableRow : Theme.colorTableAlt
 
-                            Item {
-                                Layout.preferredWidth: 48
-                                Layout.fillHeight: true
+                            required property int index
+                            required property string operationText
+                            required property string sourceName
+                            required property string destinationName
+                            required property string destinationPath
+                            required property string stateText
+                            required property color stateColor
+                            required property string createdText
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 12
+                                anchors.rightMargin: 12
+                                spacing: 8
+
                                 Text {
-                                    anchors.centerIn: parent
-                                    text: "\uEA35"
-                                    font.pixelSize: 16
-                                    font.family: "Segoe MDL2 Assets"
-                                    color: Theme.colorAccentBlue
+                                    Layout.preferredWidth: 80
+                                    text: operationText || ""
+                                    color: Theme.colorTextWhite
+                                    font.pixelSize: 12
+                                    font.family: Theme.fontFamily
+                                    elide: Text.ElideRight
                                 }
-                            }
-                            Text {
-                                Layout.preferredWidth: 140
-                                Layout.fillWidth: true
-                                text: modelData.sourceName || ""
-                                color: Theme.colorTextWhite
-                                font.pixelSize: 12
-                                font.family: Theme.fontFamily
-                                elide: Text.ElideMiddle
-                            }
-                            Item {
-                                Layout.preferredWidth: 180
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                Column {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    spacing: 0
-                                    Text {
-                                        width: parent.width
-                                        text: modelData.destName || ""
-                                        color: Theme.colorTextWhite
-                                        font.pixelSize: 11
-                                        font.family: Theme.fontFamily
-                                        elide: Text.ElideMiddle
-                                    }
-                                    Text {
-                                        width: parent.width
-                                        text: modelData.destPath || ""
-                                        color: Theme.colorTextGrey
-                                        font.pixelSize: 9
-                                        font.family: Theme.fontFamily
-                                        elide: Text.ElideMiddle
-                                        visible: (modelData.destPath || "").length > 0
+                                Text {
+                                    Layout.preferredWidth: 140
+                                    Layout.fillWidth: true
+                                    text: sourceName || ""
+                                    color: Theme.colorTextWhite
+                                    font.pixelSize: 12
+                                    font.family: Theme.fontFamily
+                                    elide: Text.ElideMiddle
+                                }
+                                Item {
+                                    Layout.preferredWidth: 180
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    Column {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        spacing: 0
+                                        Text {
+                                            width: parent.width
+                                            text: destinationName || ""
+                                            color: Theme.colorTextWhite
+                                            font.pixelSize: 11
+                                            font.family: Theme.fontFamily
+                                            elide: Text.ElideMiddle
+                                        }
+                                        Text {
+                                            width: parent.width
+                                            text: destinationPath || ""
+                                            color: Theme.colorTextGrey
+                                            font.pixelSize: 9
+                                            font.family: Theme.fontFamily
+                                            elide: Text.ElideMiddle
+                                            visible: (destinationPath || "").length > 0
+                                        }
                                     }
                                 }
-                            }
-                            Text {
-                                Layout.preferredWidth: 90
-                                text: modelData.statusText || ""
-                                color: modelData.statusKey === "success"
-                                       ? Theme.colorGreen : Theme.colorTextWhite
-                                font.pixelSize: 12
-                                font.family: Theme.fontFamily
-                                font.bold: modelData.statusKey === "success"
-                            }
-                            Text {
-                                Layout.preferredWidth: 150
-                                text: modelData.started || ""
-                                color: Theme.colorTextGrey
-                                font.pixelSize: 11
-                                font.family: Theme.fontFamily
+                                Text {
+                                    Layout.preferredWidth: 100
+                                    text: stateText || ""
+                                    color: stateColor
+                                    font.pixelSize: 12
+                                    font.family: Theme.fontFamily
+                                    font.bold: true
+                                }
+                                Text {
+                                    Layout.preferredWidth: 150
+                                    text: createdText || ""
+                                    color: Theme.colorTextGrey
+                                    font.pixelSize: 11
+                                    font.family: Theme.fontFamily
+                                }
                             }
                         }
                     }
+
+                    Text {
+                        anchors.centerIn: parent
+                        visible: !root.logLoading && root.logCount === 0
+                        //% "No events"
+                        text: root.logError.length > 0 ? root.logError
+                                                       : qsTrId("aegra.eventlog.empty")
+                        color: Theme.colorTextDim
+                        font.pixelSize: 13
+                        font.family: Theme.fontFamily
+                    }
+
+                    BusyIndicator {
+                        anchors.centerIn: parent
+                        running: root.logLoading && root.logCount === 0
+                        visible: running
+                    }
                 }
 
-                // Pagination footer — old style
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 40
@@ -468,44 +496,24 @@ Item {
                         anchors.leftMargin: 12
                         anchors.rightMargin: 12
                         Text {
-                            //% "%1–%2 of %3 · Page %4 / %5"
+                            //% "%1 items"
                             text: qsTrId("aegra.eventlog.page_range")
-                                  .arg(1).arg(root.demoEvents.length)
-                                  .arg(root.demoEvents.length).arg(1).arg(1)
+                                  .arg(root.logCount > 0 ? 1 : 0)
+                                  .arg(root.logCount)
+                                  .arg(root.logCount)
+                                  .arg(1)
+                                  .arg(1)
                             color: Theme.colorTextDim
                             font.pixelSize: 12
                             font.family: Theme.fontFamily
                         }
                         Item { Layout.fillWidth: true }
-                        Rectangle {
-                            width: 32
-                            height: 28
-                            radius: 4
-                            color: Theme.colorButton
-                            border.width: 1
-                            border.color: Theme.colorBorder
-                            opacity: 0.5
-                            Text {
-                                anchors.centerIn: parent
-                                text: "\u2039"
-                                color: Theme.colorTextWhite
-                                font.pixelSize: 14
-                            }
-                        }
-                        Rectangle {
-                            width: 32
-                            height: 28
-                            radius: 4
-                            color: Theme.colorButton
-                            border.width: 1
-                            border.color: Theme.colorBorder
-                            opacity: 0.5
-                            Text {
-                                anchors.centerIn: parent
-                                text: "\u203A"
-                                color: Theme.colorTextWhite
-                                font.pixelSize: 14
-                            }
+                        AppButton {
+                            //% "Load more"
+                            text: qsTrId("aegra.eventlog.next")
+                            enabled: root.logHasMore && !root.logLoading
+                            visible: root.logHasMore
+                            onClicked: root.loadMore()
                         }
                     }
                 }

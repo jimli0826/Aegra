@@ -1669,6 +1669,26 @@ Server: %1</source>
         <source>Size</source>
         <translation>大小</translation>
     </message>
+    <message id="aegra.mount.disk_name">
+        <source>Disk %1</source>
+        <translation>磁碟 %1</translation>
+    </message>
+    <message id="aegra.mount.state.mounting">
+        <source>Mounting</source>
+        <translation>掛載中</translation>
+    </message>
+    <message id="aegra.mount.state.mounted">
+        <source>Mounted</source>
+        <translation>已掛載</translation>
+    </message>
+    <message id="aegra.mount.state.unmounting">
+        <source>Unmounting</source>
+        <translation>卸載中</translation>
+    </message>
+    <message id="aegra.mount.state.failed">
+        <source>Failed</source>
+        <translation>失敗</translation>
+    </message>
     <message id="aegra.mount.drive_letter">
         <source>Drive letter</source>
         <translation>磁碟機代號</translation>
@@ -1684,6 +1704,38 @@ Server: %1</source>
     <message id="aegra.mount.unmount">
         <source>Unmount</source>
         <translation>卸載</translation>
+    </message>
+    <message id="aegra.mount.started">
+        <source>Mount started</source>
+        <translation>掛載已開始</translation>
+    </message>
+    <message id="aegra.mount.unmounted">
+        <source>Unmounted</source>
+        <translation>已卸載</translation>
+    </message>
+    <message id="aegra.mount.already_mounted_selection">
+        <source>Selected disk(s) are already mounted</source>
+        <translation>所選磁碟已掛載</translation>
+    </message>
+    <message id="aegra.mount.capability_missing">
+        <source>Service does not support mount</source>
+        <translation>服務不支援掛載</translation>
+    </message>
+    <message id="aegra.mount.busy">
+        <source>A mount command is already in progress</source>
+        <translation>掛載命令正在進行中</translation>
+    </message>
+    <message id="aegra.mount.select_required">
+        <source>Select a checkpoint and at least one source disk</source>
+        <translation>請選擇還原點並至少選擇一塊來源磁碟</translation>
+    </message>
+    <message id="aegra.mount.invalid_drive_letter">
+        <source>Preferred drive letter must be a single letter A–Z</source>
+        <translation>偏好磁碟機代號必須是單一字母 A–Z</translation>
+    </message>
+    <message id="aegra.mount.select_session">
+        <source>Select a mounted session to unmount</source>
+        <translation>請選擇要卸載的已掛載工作階段</translation>
     </message>
     <message id="aegra.mount.checkpoint_panel_empty">
         <source>Recovery point list will appear when mount Service APIs are connected</source>

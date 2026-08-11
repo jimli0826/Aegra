@@ -918,15 +918,27 @@ bool parse_job_summary_object(const QJsonObject& object, QVariantMap& result) {
     return parse_job_item_object(object, result);
 }
 
-QByteArray encode_job_list_request(const QString& request_id,
-                                   const std::optional<QString>& continuation_token) {
+QByteArray encode_job_list_request(const QString& request_id, const JobListQuery& query) {
+    const auto maximum =
+        query.maximum_results == 0
+            ? kJobPageSize
+            : (std::min)(query.maximum_results, kJobPageSize);
     const QJsonObject page{
-        {QStringLiteral("maximum_results"), static_cast<qint64>(kJobPageSize)},
+        {QStringLiteral("maximum_results"), static_cast<qint64>(maximum)},
         {QStringLiteral("continuation_token"),
-         continuation_token ? QJsonValue(*continuation_token) : QJsonValue(QJsonValue::Null)}};
-    const QJsonObject payload{{QStringLiteral("page"), page},
-                              {QStringLiteral("operation"), QJsonValue(QJsonValue::Null)},
-                              {QStringLiteral("state"), QJsonValue(QJsonValue::Null)}};
+         query.continuation_token ? QJsonValue(*query.continuation_token)
+                                  : QJsonValue(QJsonValue::Null)}};
+    const QJsonObject payload{
+        {QStringLiteral("page"), page},
+        {QStringLiteral("operation"),
+         query.operation ? QJsonValue(*query.operation) : QJsonValue(QJsonValue::Null)},
+        {QStringLiteral("state"),
+         query.state ? QJsonValue(*query.state) : QJsonValue(QJsonValue::Null)},
+        {QStringLiteral("scope"), query.scope},
+        {QStringLiteral("from_utc_ms"),
+         query.from_utc_ms ? QJsonValue(*query.from_utc_ms) : QJsonValue(QJsonValue::Null)},
+        {QStringLiteral("to_utc_ms"),
+         query.to_utc_ms ? QJsonValue(*query.to_utc_ms) : QJsonValue(QJsonValue::Null)}};
     return QJsonDocument(
                QJsonObject{
                    {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
@@ -988,6 +1000,75 @@ bool is_job_failure_response(const QJsonObject& root) {
                             kRequestFailedResponseKind, kind) &&
            integer_in_range(root.value(QStringLiteral("request_kind")), kListJobsRequestKind,
                             kListJobsRequestKind, request_kind) &&
+           integer_in_range(root.value(QStringLiteral("boundary_error_code")), 1, 11, error) &&
+           root.value(QStringLiteral("payload")).isNull();
+}
+
+QByteArray encode_get_service_settings_request(const QString& request_id) {
+    return QJsonDocument(
+               QJsonObject{
+                   {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
+                   {QStringLiteral("message_type"), 1},
+                   {QStringLiteral("request_id"), request_id},
+                   {QStringLiteral("kind"), kGetServiceSettingsRequestKind},
+                   {QStringLiteral("idempotency_key"), QJsonValue(QJsonValue::Null)},
+                   {QStringLiteral("payload"), QJsonObject{}}})
+        .toJson(QJsonDocument::Compact);
+}
+
+QByteArray encode_update_service_settings_request(const QString& request_id,
+                                                  const QString& idempotency_key,
+                                                  const int job_retention_months) {
+    const QJsonObject payload{
+        {QStringLiteral("job_retention_months"), static_cast<qint64>(job_retention_months)}};
+    return QJsonDocument(
+               QJsonObject{
+                   {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
+                   {QStringLiteral("message_type"), 1},
+                   {QStringLiteral("request_id"), request_id},
+                   {QStringLiteral("kind"), kUpdateServiceSettingsRequestKind},
+                   {QStringLiteral("idempotency_key"), idempotency_key},
+                   {QStringLiteral("payload"), payload}})
+        .toJson(QJsonDocument::Compact);
+}
+
+bool parse_service_settings_response(const QJsonObject& root, ServiceSettings& result) {
+    qint64 kind = 0;
+    qint64 request_kind = 0;
+    qint64 error = 0;
+    if (!integer_in_range(root.value(QStringLiteral("kind")), 1, 1, kind) ||
+        !integer_in_range(root.value(QStringLiteral("request_kind")),
+                          kGetServiceSettingsRequestKind, kGetServiceSettingsRequestKind,
+                          request_kind) ||
+        !integer_in_range(root.value(QStringLiteral("boundary_error_code")), 0, 0, error) ||
+        !root.value(QStringLiteral("payload")).isObject()) {
+        return false;
+    }
+    const auto payload = root.value(QStringLiteral("payload")).toObject();
+    qint64 months = 0;
+    qint64 updated = 0;
+    if (!has_exact_keys(payload, {"job_retention_months", "updated_utc_ms"}) ||
+        !integer_in_range(payload.value(QStringLiteral("job_retention_months")), 1, 6, months) ||
+        (months != kJobRetentionMonths1 && months != kJobRetentionMonths3 &&
+         months != kJobRetentionMonths6) ||
+        !integer_in_range(payload.value(QStringLiteral("updated_utc_ms")), 0,
+                          (std::numeric_limits<qint64>::max)(), updated)) {
+        return false;
+    }
+    result.job_retention_months = static_cast<int>(months);
+    result.updated_utc_ms = updated;
+    return true;
+}
+
+bool is_service_settings_failure_response(const QJsonObject& root) {
+    qint64 kind = 0;
+    qint64 request_kind = 0;
+    qint64 error = 0;
+    return integer_in_range(root.value(QStringLiteral("kind")), kRequestFailedResponseKind,
+                            kRequestFailedResponseKind, kind) &&
+           integer_in_range(root.value(QStringLiteral("request_kind")),
+                            kGetServiceSettingsRequestKind, kGetServiceSettingsRequestKind,
+                            request_kind) &&
            integer_in_range(root.value(QStringLiteral("boundary_error_code")), 1, 11, error) &&
            root.value(QStringLiteral("payload")).isNull();
 }

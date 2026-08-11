@@ -6,6 +6,7 @@
 #include "locale/locale_controller.h"
 #include "locale/message_code_map.h"
 
+#include <QDateTime>
 #include <QJsonObject>
 #include <QTimer>
 #include <QUuid>
@@ -28,7 +29,7 @@ constexpr int kJobPollIntervalMilliseconds = 500;
 } // namespace
 
 ServiceClient::ServiceClient(QObject* parent)
-    : QObject(parent), recovery_points_(this), jobs_(this), sources_(this),
+    : QObject(parent), recovery_points_(this), jobs_(this), task_log_(this), sources_(this),
       file_browse_sources_(this), file_restore_targets_(this), file_recover_entries_(this),
       connections_(this),
       transport_(std::make_unique<IpcFrameTransport>(QLatin1String(kServicePipeName))),
@@ -37,6 +38,7 @@ ServiceClient::ServiceClient(QObject* parent)
       reconnect_watchdog_(new QTimer(this)) {
     recovery_points_.set_locale_format(&format_);
     jobs_.set_locale_format(&format_);
+    task_log_.set_locale_format(&format_);
     sources_.set_locale_format(&format_);
     file_restore_targets_.setSingleDirectoryMode(true);
     connect(&file_browse_sources_, &FileBrowseModel::expandRequested, this,
@@ -156,6 +158,84 @@ bool ServiceClient::jobListAvailable() const noexcept { return job_list_availabl
 
 QString ServiceClient::jobsErrorText() const {
     return jobs_error_code_.isEmpty() ? QString{} : localize_message_code(jobs_error_code_);
+}
+
+JobModel* ServiceClient::taskLog() noexcept { return &task_log_; }
+bool ServiceClient::taskLogLoading() const noexcept { return task_log_loading_; }
+bool ServiceClient::taskLogHasMore() const noexcept { return task_log_next_token_.has_value(); }
+
+QString ServiceClient::taskLogErrorText() const {
+    return task_log_error_code_.isEmpty() ? QString{} : localize_message_code(task_log_error_code_);
+}
+
+bool ServiceClient::serviceSettingsAvailable() const noexcept {
+    return service_settings_available_;
+}
+
+bool ServiceClient::serviceSettingsLoading() const noexcept { return service_settings_loading_; }
+
+bool ServiceClient::serviceSettingsBusy() const noexcept { return service_settings_busy_; }
+
+int ServiceClient::jobRetentionMonths() const noexcept { return job_retention_months_; }
+
+QString ServiceClient::serviceSettingsErrorText() const {
+    return service_settings_error_code_.isEmpty()
+               ? QString{}
+               : localize_message_code(service_settings_error_code_);
+}
+
+void ServiceClient::refreshServiceSettings() {
+    if (state_ != State::kReady || !service_settings_available_ || service_settings_loading_ ||
+        service_settings_busy_) {
+        return;
+    }
+    service_settings_loading_ = true;
+    service_settings_error_code_.clear();
+    emit serviceSettingsChanged();
+    const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    service_settings_request_id_ = request_id;
+    const auto body = encode_get_service_settings_request(request_id);
+    if (!coordinator_->begin_request(
+            request_id, body, [this](const QByteArray& frame_body) {
+                return handle_get_service_settings_frame(frame_body);
+            })) {
+        service_settings_loading_ = false;
+        service_settings_error_code_ = QStringLiteral("service.send_failed");
+        emit serviceSettingsChanged();
+    }
+}
+
+bool ServiceClient::setJobRetentionMonths(const int months) {
+    if (state_ != State::kReady || !service_settings_available_ || service_settings_busy_ ||
+        service_settings_loading_) {
+        return false;
+    }
+    if (months != kJobRetentionMonths1 && months != kJobRetentionMonths3 &&
+        months != kJobRetentionMonths6) {
+        return false;
+    }
+    if (months == job_retention_months_) {
+        return true;
+    }
+    service_settings_busy_ = true;
+    service_settings_error_code_.clear();
+    pending_job_retention_months_ = months;
+    service_settings_update_idempotency_key_ = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    emit serviceSettingsChanged();
+    const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    service_settings_update_request_id_ = request_id;
+    const auto body = encode_update_service_settings_request(
+        request_id, service_settings_update_idempotency_key_, months);
+    if (!coordinator_->begin_request(
+            request_id, body, [this](const QByteArray& frame_body) {
+                return handle_update_service_settings_frame(frame_body);
+            })) {
+        service_settings_busy_ = false;
+        service_settings_error_code_ = QStringLiteral("service.send_failed");
+        emit serviceSettingsChanged();
+        return false;
+    }
+    return true;
 }
 
 SourceInventoryModel* ServiceClient::sources() noexcept { return &sources_; }
@@ -340,18 +420,22 @@ void ServiceClient::on_transport_error(const QString& message_code) {
 void ServiceClient::on_request_failed(const QString& message_code) {
     // Handshake-level failures drop the transport. Query failures after Ready must not tear down
     // the whole Service session (matches desktop.md: catalog errors stay on repository status).
-    if (!handshake_complete_ || message_code == QLatin1String("service.protocol_invalid") ||
-        message_code == QLatin1String("service.request_timeout") ||
-        message_code == QLatin1String("service.send_failed") ||
-        message_code == QLatin1String("service.disconnected")) {
-        // After Ready, treat query protocol/timeout as soft failures when a catalog/job request
-        // is in flight — keep the socket and mark the domain error instead of full disconnect.
-        if (handshake_complete_ && first_ready_seen_ &&
-            (repository_loading_ || recovery_point_layout_loading_ || jobs_loading_ ||
-             inventory_loading_ || connections_loading_ || schedules_loading_ ||
-             mount_sessions_loading_ || repository_command_busy_ || schedule_command_busy_ ||
-             backup_command_busy_ || cancel_command_busy_ || mount_command_busy_) &&
-            message_code == QLatin1String("service.protocol_invalid")) {
+    const bool transport_level = message_code == QLatin1String("service.protocol_invalid") ||
+                                 message_code == QLatin1String("service.request_timeout") ||
+                                 message_code == QLatin1String("service.send_failed") ||
+                                 message_code == QLatin1String("service.disconnected");
+    if (!handshake_complete_ || transport_level) {
+        // After Ready, soft-fail in-flight domain queries instead of IPC reconnect storms.
+        // protocol_invalid on a list/command keeps the socket; disconnect/send/timeout still
+        // drop the pipe but domain panels get an error and reconnect uses backoff (not 0ms).
+        const bool domain_inflight =
+            repository_loading_ || recovery_point_layout_loading_ || jobs_loading_ ||
+            task_log_loading_ || inventory_loading_ || connections_loading_ || schedules_loading_ ||
+            mount_sessions_loading_ || repository_command_busy_ || schedule_command_busy_ ||
+            backup_command_busy_ || cancel_command_busy_ || mount_command_busy_;
+        if (handshake_complete_ && first_ready_seen_ && domain_inflight &&
+            (message_code == QLatin1String("service.protocol_invalid") ||
+             message_code == QLatin1String("service.request_timeout"))) {
             if (repository_loading_) {
                 finish_repository_failure(QStringLiteral("repository.query_failed"));
             }
@@ -360,6 +444,9 @@ void ServiceClient::on_request_failed(const QString& message_code) {
             }
             if (jobs_loading_) {
                 finish_job_failure(QStringLiteral("job.query_failed"));
+            }
+            if (task_log_loading_) {
+                finish_task_log_failure(QStringLiteral("job.query_failed"));
             }
             if (inventory_loading_) {
                 finish_inventory_failure(QStringLiteral("inventory.query_failed"));
@@ -388,13 +475,17 @@ void ServiceClient::on_request_failed(const QString& message_code) {
             if (mount_command_busy_) {
                 finish_mount_command_failure(QStringLiteral("mount.command_failed"));
             }
-            return;
+            // protocol_invalid: keep the live pipe; only soft-fail the domain request.
+            if (message_code == QLatin1String("service.protocol_invalid")) {
+                return;
+            }
         }
         set_state(State::kDisconnected, message_code);
         transport_->disconnect_from_service();
         if (first_ready_seen_) {
             transport_->set_auto_reconnect_enabled(true);
-            QTimer::singleShot(0, transport_.get(), &IpcFrameTransport::connect_to_service);
+            // Backoff reconnect — never zero-delay reconnect loops after Ready.
+            transport_->schedule_reconnect_with_backoff();
         }
         return;
     }
@@ -406,6 +497,9 @@ void ServiceClient::on_request_failed(const QString& message_code) {
     }
     if (jobs_loading_) {
         finish_job_failure(QStringLiteral("job.query_failed"));
+    }
+    if (task_log_loading_) {
+        finish_task_log_failure(QStringLiteral("job.query_failed"));
     }
     if (inventory_loading_) {
         finish_inventory_failure(QStringLiteral("inventory.query_failed"));
@@ -440,12 +534,14 @@ void ServiceClient::on_locale_changed() {
     update_format_locale();
     recovery_points_.retranslate();
     jobs_.retranslate();
+    task_log_.retranslate();
     sources_.retranslate();
     connections_.retranslate();
     update_active_backup_observe();
     emit stateChanged();
     emit repositoryChanged();
     emit jobsChanged();
+    emit taskLogChanged();
     emit inventoryChanged();
     emit connectionsChanged();
     emit repositoryCommandChanged();
@@ -478,10 +574,38 @@ void ServiceClient::send_service_info_request() {
     }
 }
 
+JobListQuery ServiceClient::make_active_job_query(
+    const std::optional<QString>& continuation_token) const {
+    JobListQuery query;
+    query.scope = kJobListScopeActive;
+    query.continuation_token = continuation_token;
+    query.maximum_results = kJobPageSize;
+    return query;
+}
+
+JobListQuery ServiceClient::make_terminal_seed_query() const {
+    JobListQuery query;
+    query.scope = kJobListScopeTerminal;
+    query.maximum_results = kJobPageSize;
+    return query;
+}
+
+JobListQuery ServiceClient::make_task_log_query(
+    const std::optional<QString>& continuation_token) const {
+    auto query = task_log_query_;
+    query.continuation_token = continuation_token;
+    return query;
+}
+
 void ServiceClient::start_job_query() {
-    if (!job_list_available_) {
+    if (!job_list_available_ || task_log_loading_) {
         return;
     }
+    if (jobs_loading_ ||
+        (!job_request_id_.isEmpty() && coordinator_->has_pending_request(job_request_id_))) {
+        return;
+    }
+    job_query_purpose_ = JobQueryPurpose::kActive;
     jobs_error_code_.clear();
     jobs_loading_ = true;
     pending_jobs_.clear();
@@ -491,7 +615,7 @@ void ServiceClient::start_job_query() {
 
     const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     job_request_id_ = request_id;
-    const auto body = encode_job_list_request(request_id, std::nullopt);
+    const auto body = encode_job_list_request(request_id, make_active_job_query(std::nullopt));
     const auto started =
         coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
             return handle_job_list_frame(frame_body);
@@ -499,6 +623,110 @@ void ServiceClient::start_job_query() {
     if (!started) {
         finish_job_failure(QStringLiteral("job.query_failed"));
     }
+}
+
+void ServiceClient::start_terminal_job_seed() {
+    if (!job_list_available_ || task_log_loading_) {
+        return;
+    }
+    if (jobs_loading_ ||
+        (!job_request_id_.isEmpty() && coordinator_->has_pending_request(job_request_id_))) {
+        return;
+    }
+    job_query_purpose_ = JobQueryPurpose::kTerminalSeed;
+    jobs_error_code_.clear();
+    jobs_loading_ = true;
+    pending_jobs_.clear();
+    job_requested_token_.reset();
+    emit jobsChanged();
+    emit loadingChanged();
+
+    const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    job_request_id_ = request_id;
+    const auto body = encode_job_list_request(request_id, make_terminal_seed_query());
+    const auto started =
+        coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
+            return handle_job_list_frame(frame_body);
+        });
+    if (!started) {
+        finish_job_failure(QStringLiteral("job.query_failed"));
+    }
+}
+
+void ServiceClient::start_task_log_query(const bool append) {
+    if (!job_list_available_ || jobs_loading_) {
+        return;
+    }
+    if (task_log_loading_ ||
+        (!task_log_request_id_.isEmpty() &&
+         coordinator_->has_pending_request(task_log_request_id_))) {
+        return;
+    }
+    if (!append) {
+        pending_task_log_.clear();
+        task_log_requested_token_.reset();
+        task_log_next_token_.reset();
+        task_log_append_ = false;
+    } else if (!task_log_next_token_) {
+        return;
+    } else {
+        task_log_append_ = true;
+        pending_task_log_.clear();
+    }
+    job_query_purpose_ = JobQueryPurpose::kTaskLog;
+    task_log_error_code_.clear();
+    task_log_loading_ = true;
+    emit taskLogChanged();
+
+    const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    task_log_request_id_ = request_id;
+    const auto token = append ? task_log_next_token_ : std::nullopt;
+    const auto body = encode_job_list_request(request_id, make_task_log_query(token));
+    const auto started =
+        coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
+            return handle_job_list_frame(frame_body);
+        });
+    if (!started) {
+        finish_task_log_failure(QStringLiteral("job.query_failed"));
+    }
+}
+
+void ServiceClient::refreshTaskLog(const int time_index, const int type_index,
+                                   const int status_index) {
+    JobListQuery query;
+    query.scope = kJobListScopeTerminal;
+    query.maximum_results = kJobPageSize;
+    const auto now_ms = QDateTime::currentMSecsSinceEpoch();
+    if (time_index == 1) {
+        query.from_utc_ms = now_ms - 24LL * 60 * 60 * 1000;
+    } else if (time_index == 2) {
+        query.from_utc_ms = now_ms - 7LL * 24 * 60 * 60 * 1000;
+    } else if (time_index == 3) {
+        query.from_utc_ms = now_ms - 30LL * 24 * 60 * 60 * 1000;
+    }
+    if (type_index == 1) {
+        query.operation = 1; // backup
+    } else if (type_index == 2) {
+        query.operation = 2; // restore
+    } else if (type_index == 3) {
+        query.operation = 3; // verify
+    }
+    if (status_index == 1) {
+        query.state = 4; // succeeded
+    } else if (status_index == 2) {
+        query.state = 5; // failed
+    } else if (status_index == 3) {
+        query.state = 6; // cancelled
+    }
+    task_log_query_ = std::move(query);
+    start_task_log_query(false);
+}
+
+void ServiceClient::loadMoreTaskLog() {
+    if (!task_log_next_token_ || task_log_loading_) {
+        return;
+    }
+    start_task_log_query(true);
 }
 
 RequestDisposition ServiceClient::handle_service_info_frame(const QByteArray& body) {
@@ -515,6 +743,7 @@ RequestDisposition ServiceClient::handle_service_info_frame(const QByteArray& bo
     api_version_ = kServiceApiVersion;
     capabilities_ = std::move(service.capabilities);
     job_list_available_ = capabilities_.contains(QStringLiteral("job.list"));
+    service_settings_available_ = capabilities_.contains(QStringLiteral("service.settings"));
     inventory_available_ = capabilities_.contains(QStringLiteral("source.inventory"));
     connections_available_ = capabilities_.contains(QStringLiteral("repository.connection"));
     schedules_available_ = capabilities_.contains(QStringLiteral("schedule"));
@@ -541,7 +770,8 @@ RequestDisposition ServiceClient::handle_service_info_frame(const QByteArray& bo
             start_repository_query();
         }
         if (job_list_available_) {
-            start_job_query();
+            // Terminal seed first (schedule status / toast baseline), then active poll.
+            start_terminal_job_seed();
         }
         if (inventory_available_) {
             start_inventory_query();
@@ -555,6 +785,9 @@ RequestDisposition ServiceClient::handle_service_info_frame(const QByteArray& bo
         if (mount_list_available_) {
             start_mount_session_query();
         }
+        if (service_settings_available_) {
+            refreshServiceSettings();
+        }
     });
     return RequestDisposition::kFinished;
 }
@@ -565,20 +798,31 @@ RequestDisposition ServiceClient::handle_job_list_frame(const QByteArray& body) 
     if (!parse_response_root(body, request_id, root)) {
         return RequestDisposition::kProtocolError;
     }
+    const auto purpose = job_query_purpose_;
     if (is_job_failure_response(root)) {
-        finish_job_failure(QStringLiteral("job.query_failed"));
+        if (purpose == JobQueryPurpose::kTaskLog) {
+            finish_task_log_failure(QStringLiteral("job.query_failed"));
+        } else {
+            finish_job_failure(QStringLiteral("job.query_failed"));
+        }
         return RequestDisposition::kFinished;
     }
     JobPage page;
     if (!parse_job_list_response(root, page)) {
         return RequestDisposition::kProtocolError;
     }
-    if ((page.continuation_token && page.continuation_token == job_requested_token_) ||
-        pending_jobs_.size() + page.items.size() > kMaximumJobs) {
+
+    auto& pending =
+        purpose == JobQueryPurpose::kTaskLog ? pending_task_log_ : pending_jobs_;
+    auto& requested_token = purpose == JobQueryPurpose::kTaskLog ? task_log_requested_token_
+                                                                   : job_requested_token_;
+
+    if ((page.continuation_token && page.continuation_token == requested_token) ||
+        pending.size() + page.items.size() > kMaximumJobs) {
         return RequestDisposition::kProtocolError;
     }
     QSet<QString> seen_ids;
-    for (const auto& existing : pending_jobs_) {
+    for (const auto& existing : pending) {
         seen_ids.insert(existing.toMap().value(QStringLiteral("jobId")).toString());
     }
     for (auto& item : page.items) {
@@ -587,29 +831,87 @@ RequestDisposition ServiceClient::handle_job_list_frame(const QByteArray& body) 
             return RequestDisposition::kProtocolError;
         }
         seen_ids.insert(job_id);
-        pending_jobs_.push_back(std::move(item));
+        pending.push_back(std::move(item));
     }
-    if (page.continuation_token) {
-        job_requested_token_ = page.continuation_token;
+
+    // Active / Task Log: follow continuation. Terminal seed: one page only (schedule status).
+    if (page.continuation_token && purpose != JobQueryPurpose::kTerminalSeed) {
+        requested_token = page.continuation_token;
         const auto next_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        const auto next_body = encode_job_list_request(next_id, job_requested_token_);
+        JobListQuery next_query;
+        if (purpose == JobQueryPurpose::kActive) {
+            next_query = make_active_job_query(requested_token);
+        } else if (purpose == JobQueryPurpose::kTaskLog) {
+            next_query = make_task_log_query(requested_token);
+        }
+        const auto next_body = encode_job_list_request(next_id, next_query);
         if (!coordinator_->continue_request(request_id, next_id, next_body)) {
             return RequestDisposition::kProtocolError;
         }
-        job_request_id_ = next_id;
+        if (purpose == JobQueryPurpose::kTaskLog) {
+            task_log_request_id_ = next_id;
+        } else {
+            job_request_id_ = next_id;
+        }
         return RequestDisposition::kContinue;
     }
-    auto rows = jobs_from_variant_list(pending_jobs_);
+
+    auto rows = jobs_from_variant_list(pending);
     for (auto& row : rows) {
         enrich_job_row(row);
     }
-    if (!jobs_baseline_seeded_) {
-        seed_terminal_toast_baseline(rows);
-        jobs_baseline_seeded_ = true;
-    } else {
-        publish_terminal_toasts(rows);
+
+    if (purpose == JobQueryPurpose::kTaskLog) {
+        task_log_next_token_ = page.continuation_token;
+        if (task_log_append_) {
+            for (auto& row : rows) {
+                task_log_.upsert_job(std::move(row));
+            }
+        } else {
+            task_log_.set_rows(std::move(rows));
+        }
+        pending_task_log_.clear();
+        task_log_loading_ = false;
+        task_log_append_ = false;
+        task_log_request_id_.clear();
+        task_log_requested_token_.reset();
+        emit taskLogChanged();
+        return RequestDisposition::kFinished;
     }
-    jobs_.set_rows(std::move(rows));
+
+    if (purpose == JobQueryPurpose::kTerminalSeed) {
+        if (!jobs_baseline_seeded_) {
+            seed_terminal_toast_baseline(rows);
+            jobs_baseline_seeded_ = true;
+        } else {
+            publish_terminal_toasts(rows);
+        }
+        jobs_.merge_terminal_jobs(std::move(rows));
+        pending_jobs_.clear();
+        jobs_loading_ = false;
+        job_request_id_.clear();
+        job_requested_token_.reset();
+        emit jobsChanged();
+        emit loadingChanged();
+        update_job_polling();
+        update_active_backup_observe();
+        // After first seed (or toast refresh), always sync active jobs.
+        start_job_query();
+        return RequestDisposition::kFinished;
+    }
+
+    // Active snapshot.
+    const bool had_active = jobs_.has_active_jobs();
+    jobs_.replace_active_jobs(std::move(rows));
+    if (had_active && !jobs_.has_active_jobs() && jobs_baseline_seeded_) {
+        QTimer::singleShot(0, this, [this]() {
+            if (state_ == State::kReady && job_list_available_ && !jobs_loading_ &&
+                !task_log_loading_) {
+                start_terminal_job_seed();
+            }
+        });
+    }
+
     pending_jobs_.clear();
     jobs_loading_ = false;
     job_request_id_.clear();
@@ -632,6 +934,96 @@ void ServiceClient::finish_job_failure(const QString& message_code) {
     update_job_polling();
 }
 
+void ServiceClient::finish_task_log_failure(const QString& message_code) {
+    pending_task_log_.clear();
+    task_log_requested_token_.reset();
+    task_log_loading_ = false;
+    task_log_append_ = false;
+    task_log_request_id_.clear();
+    task_log_error_code_ = message_code;
+    emit taskLogChanged();
+}
+
+void ServiceClient::reset_task_log() {
+    task_log_.clear();
+    pending_task_log_.clear();
+    task_log_requested_token_.reset();
+    task_log_next_token_.reset();
+    task_log_loading_ = false;
+    task_log_error_code_.clear();
+    task_log_request_id_.clear();
+    task_log_query_ = JobListQuery{};
+    task_log_query_.scope = kJobListScopeTerminal;
+    emit taskLogChanged();
+}
+
+RequestDisposition ServiceClient::handle_get_service_settings_frame(const QByteArray& body) {
+    QJsonObject root;
+    if (!parse_response_root(body, extract_response_request_id(body), root)) {
+        return RequestDisposition::kProtocolError;
+    }
+    if (is_service_settings_failure_response(root)) {
+        finish_service_settings_failure(root.value(QStringLiteral("message_code")).toString());
+        return RequestDisposition::kFinished;
+    }
+    ServiceSettings settings;
+    if (!parse_service_settings_response(root, settings)) {
+        return RequestDisposition::kProtocolError;
+    }
+    job_retention_months_ = settings.job_retention_months;
+    service_settings_loading_ = false;
+    service_settings_error_code_.clear();
+    service_settings_request_id_.clear();
+    emit serviceSettingsChanged();
+    return RequestDisposition::kFinished;
+}
+
+RequestDisposition ServiceClient::handle_update_service_settings_frame(const QByteArray& body) {
+    QJsonObject root;
+    if (!parse_response_root(body, extract_response_request_id(body), root)) {
+        return RequestDisposition::kProtocolError;
+    }
+    if (is_command_failure_response(root, kUpdateServiceSettingsRequestKind)) {
+        finish_service_settings_failure(root.value(QStringLiteral("message_code")).toString());
+        return RequestDisposition::kFinished;
+    }
+    CommandAck ack;
+    if (!parse_command_ack_response(root, kUpdateServiceSettingsRequestKind, ack)) {
+        return RequestDisposition::kProtocolError;
+    }
+    job_retention_months_ = pending_job_retention_months_;
+    service_settings_busy_ = false;
+    service_settings_error_code_.clear();
+    service_settings_update_request_id_.clear();
+    service_settings_update_idempotency_key_.clear();
+    emit serviceSettingsChanged();
+    return RequestDisposition::kFinished;
+}
+
+void ServiceClient::finish_service_settings_failure(const QString& message_code) {
+    service_settings_loading_ = false;
+    service_settings_busy_ = false;
+    service_settings_error_code_ =
+        message_code.isEmpty() ? QStringLiteral("service.settings_failed") : message_code;
+    service_settings_request_id_.clear();
+    service_settings_update_request_id_.clear();
+    service_settings_update_idempotency_key_.clear();
+    emit serviceSettingsChanged();
+}
+
+void ServiceClient::reset_service_settings() {
+    service_settings_available_ = false;
+    service_settings_loading_ = false;
+    service_settings_busy_ = false;
+    job_retention_months_ = kDefaultJobRetentionMonths;
+    pending_job_retention_months_ = kDefaultJobRetentionMonths;
+    service_settings_error_code_.clear();
+    service_settings_request_id_.clear();
+    service_settings_update_request_id_.clear();
+    service_settings_update_idempotency_key_.clear();
+    emit serviceSettingsChanged();
+}
+
 void ServiceClient::reset_jobs() {
     jobs_.clear();
     pending_jobs_.clear();
@@ -642,6 +1034,7 @@ void ServiceClient::reset_jobs() {
     jobs_baseline_seeded_ = false;
     toasted_job_keys_.clear();
     job_poll_timer_->stop();
+    reset_task_log();
     emit jobsChanged();
     emit loadingChanged();
     update_active_backup_observe();
@@ -718,6 +1111,7 @@ void ServiceClient::set_state(const State state, QString error_code) {
             reset_backup_command();
             reset_mount_sessions();
             reset_mount_command();
+            reset_service_settings();
         } else {
             // Pre-ready connect churn: clear handshake only (avoid model/signal storms).
             handshake_complete_ = false;

@@ -140,10 +140,23 @@ struct JobSummary final {
     std::optional<std::uint8_t> incremental_downgrade_reason;
 };
 
+/// Which job states ListJobs returns when `state` is null.
+enum class JobListScope : std::uint8_t {
+    kAll = 1,
+    kActive = 2,    // queued, running, cancelling — operational hot path
+    kTerminal = 3,  // succeeded, failed, cancelled, interrupted — Task Log
+};
+
 struct JobListRequest final {
     ServicePageRequest page;
     std::optional<JobOperation> operation;
+    /// When set, returns only this state (must be compatible with `scope`).
     std::optional<ServiceJobState> state;
+    JobListScope scope{JobListScope::kAll};
+    /// Inclusive lower bound on `created_utc_ms` (Task Log time filter).
+    std::optional<std::uint64_t> from_utc_ms;
+    /// Inclusive upper bound on `created_utc_ms`.
+    std::optional<std::uint64_t> to_utc_ms;
 };
 
 enum class ScheduleTriggerKind : std::uint8_t {
@@ -552,6 +565,28 @@ struct StartFileRestoreCommand final {
     std::optional<std::string> archive_secret_ref;
 };
 
+/// Allowed job history retention windows (calendar months approximated as 30 days).
+inline constexpr std::uint8_t kDefaultJobRetentionMonths = 3;
+inline constexpr std::uint64_t kMillisecondsPerRetentionMonth =
+    30ULL * 24ULL * 60ULL * 60ULL * 1000ULL;
+
+[[nodiscard]] constexpr bool is_valid_job_retention_months(const std::uint8_t months) noexcept {
+    return months == 1 || months == 3 || months == 6;
+}
+
+/// Empty body for GetServiceSettings (exact_keys {}).
+struct ServiceSettingsQuery final {};
+
+/// Wire projection of control-plane service preferences.
+struct ServiceSettings final {
+    std::uint8_t job_retention_months{kDefaultJobRetentionMonths};
+    std::uint64_t updated_utc_ms{0};
+};
+
+struct UpdateServiceSettingsCommand final {
+    std::uint8_t job_retention_months{kDefaultJobRetentionMonths};
+};
+
 using FileSourceNodePage = ServicePage<FileSourceNode>;
 
 struct EventSubscriptionRequest final {
@@ -655,6 +690,10 @@ validate_prepare_file_restore_request(const PrepareFileRestoreRequest& request);
 validate_file_restore_preflight(const FileRestorePreflight& preflight);
 [[nodiscard]] base::Result<void>
 validate_start_file_restore_command(const StartFileRestoreCommand& command);
+[[nodiscard]] base::Result<void> validate_service_settings_query(const ServiceSettingsQuery& query);
+[[nodiscard]] base::Result<void> validate_service_settings(const ServiceSettings& settings);
+[[nodiscard]] base::Result<void>
+validate_update_service_settings_command(const UpdateServiceSettingsCommand& command);
 
 [[nodiscard]] base::Result<void>
 validate_repository_connection_page(const RepositoryConnectionPage& page);

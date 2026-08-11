@@ -41,7 +41,7 @@
 | L22 | active node tokens / connection | 4096 | `file_browse.token_limit` |
 | L23 | preflight token TTL | 30 min | `file_restore.preflight_expired` |
 | L24 | CBOR metadata plaintext | 64 MiB | `format.metadata_size_limit` |
-| L25 | Service frame | 64 KiB | framing reject |
+| L25 | Service frame | 1 MiB | framing reject |
 | L26 | 相对组件段数 / selection | 64 | `file_source.path_limit` |
 | L27 | Pipeline entry metadata queue | 8192 items | 背压等待；取消→`job.cancelled` |
 | L28 | Pipeline content queue | 256 MiB | 背压等待 |

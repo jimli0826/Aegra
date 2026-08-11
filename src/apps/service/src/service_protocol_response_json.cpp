@@ -1110,6 +1110,11 @@ Json encode_response_payload(const contracts::ServiceResponse& response) {
                     {"restore_eligible", preflight.restore_eligible},
                     {"message_code", preflight.message_code}};
     }
+    case contracts::ServiceRequestKind::kGetServiceSettings: {
+        const auto& settings = std::get<contracts::ServiceSettings>(response.payload);
+        return Json{{"job_retention_months", settings.job_retention_months},
+                    {"updated_utc_ms", settings.updated_utc_ms}};
+    }
     default:
         throw std::invalid_argument("service query response kind is invalid");
     }
@@ -1233,6 +1238,17 @@ parse_response_payload(const contracts::ServiceResponseKind response_kind,
         preflight.restore_eligible = payload.at("restore_eligible").get<bool>();
         preflight.message_code = payload.at("message_code").get<std::string>();
         return preflight;
+    }
+    case contracts::ServiceRequestKind::kGetServiceSettings: {
+        constexpr std::array<std::string_view, 2> keys{"job_retention_months", "updated_utc_ms"};
+        if (!exact_keys(payload, keys)) {
+            throw std::invalid_argument("service settings fields are invalid");
+        }
+        contracts::ServiceSettings settings;
+        settings.job_retention_months =
+            unsigned_value<std::uint8_t>(payload, "job_retention_months");
+        settings.updated_utc_ms = unsigned_value<std::uint64_t>(payload, "updated_utc_ms");
+        return settings;
     }
     default:
         throw std::invalid_argument("service query response kind is invalid");

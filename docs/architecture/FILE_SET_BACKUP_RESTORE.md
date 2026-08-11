@@ -163,7 +163,7 @@ unreadable_policy, display_label
 
 ## 6. Service V4 契约
 
-V4 保持现有 Named Pipe framing 和 64 KiB frame 上限，但根 `schema_version`、API version 和所有消费者同步
+V4 保持现有 Named Pipe framing；frame 上限为 1 MiB。根 `schema_version`、API version 和所有消费者同步
 升级为 4。现有 kind 数值保持业务含义，新 kind 从未占用范围分配：
 
 | Kind | 类型 | 名称 | 关键输入/输出 |

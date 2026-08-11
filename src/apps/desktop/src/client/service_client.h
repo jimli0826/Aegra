@@ -6,6 +6,7 @@
 #include "client/models/recovery_point_model.h"
 #include "client/models/repository_connection_model.h"
 #include "client/models/source_inventory_model.h"
+#include "client/service_protocol.h"
 #include "client/service_request_coordinator.h"
 #include "locale/locale_format.h"
 
@@ -47,6 +48,11 @@ class ServiceClient final : public QObject {
     Q_PROPERTY(bool jobsLoading READ jobsLoading NOTIFY jobsChanged)
     Q_PROPERTY(bool jobListAvailable READ jobListAvailable NOTIFY stateChanged)
     Q_PROPERTY(QString jobsErrorText READ jobsErrorText NOTIFY jobsChanged)
+    /// Completed jobs for Task Log (terminal scope ListJobs).
+    Q_PROPERTY(aegra::desktop::JobModel* taskLog READ taskLog CONSTANT)
+    Q_PROPERTY(bool taskLogLoading READ taskLogLoading NOTIFY taskLogChanged)
+    Q_PROPERTY(QString taskLogErrorText READ taskLogErrorText NOTIFY taskLogChanged)
+    Q_PROPERTY(bool taskLogHasMore READ taskLogHasMore NOTIFY taskLogChanged)
     Q_PROPERTY(aegra::desktop::SourceInventoryModel* sources READ sources CONSTANT)
     Q_PROPERTY(bool inventoryLoading READ inventoryLoading NOTIFY inventoryChanged)
     Q_PROPERTY(bool inventoryAvailable READ inventoryAvailable NOTIFY stateChanged)
@@ -109,6 +115,13 @@ class ServiceClient final : public QObject {
     Q_PROPERTY(bool deletePlanBusy READ deletePlanBusy NOTIFY deletePlanChanged)
     Q_PROPERTY(QVariantMap deletePlan READ deletePlan NOTIFY deletePlanChanged)
     Q_PROPERTY(QString deletePlanErrorText READ deletePlanErrorText NOTIFY deletePlanChanged)
+    /// Service-owned job history retention (1/3/6 months). Hard-deletes expired terminal jobs.
+    Q_PROPERTY(bool serviceSettingsAvailable READ serviceSettingsAvailable NOTIFY stateChanged)
+    Q_PROPERTY(bool serviceSettingsLoading READ serviceSettingsLoading NOTIFY serviceSettingsChanged)
+    Q_PROPERTY(bool serviceSettingsBusy READ serviceSettingsBusy NOTIFY serviceSettingsChanged)
+    Q_PROPERTY(int jobRetentionMonths READ jobRetentionMonths NOTIFY serviceSettingsChanged)
+    Q_PROPERTY(QString serviceSettingsErrorText READ serviceSettingsErrorText NOTIFY
+                   serviceSettingsChanged)
 
   public:
     explicit ServiceClient(QObject* parent = nullptr);
@@ -133,6 +146,22 @@ class ServiceClient final : public QObject {
     [[nodiscard]] bool jobsLoading() const noexcept;
     [[nodiscard]] bool jobListAvailable() const noexcept;
     [[nodiscard]] QString jobsErrorText() const;
+    [[nodiscard]] JobModel* taskLog() noexcept;
+    [[nodiscard]] bool taskLogLoading() const noexcept;
+    [[nodiscard]] QString taskLogErrorText() const;
+    [[nodiscard]] bool taskLogHasMore() const noexcept;
+    /// Reload Task Log: time_index 0=all,1=24h,2=7d,3=30d; type 0=all,1=backup,2=restore,3=verify;
+    /// status 0=all,1=succeeded,2=failed,3=cancelled(+interrupted grouped as cancelled filter uses cancelled only).
+    Q_INVOKABLE void refreshTaskLog(int time_index, int type_index, int status_index);
+    Q_INVOKABLE void loadMoreTaskLog();
+    [[nodiscard]] bool serviceSettingsAvailable() const noexcept;
+    [[nodiscard]] bool serviceSettingsLoading() const noexcept;
+    [[nodiscard]] bool serviceSettingsBusy() const noexcept;
+    [[nodiscard]] int jobRetentionMonths() const noexcept;
+    [[nodiscard]] QString serviceSettingsErrorText() const;
+    Q_INVOKABLE void refreshServiceSettings();
+    /// Persist retention months (1, 3, or 6). Service purges expired terminal jobs immediately.
+    Q_INVOKABLE bool setJobRetentionMonths(int months);
     [[nodiscard]] SourceInventoryModel* sources() noexcept;
     [[nodiscard]] bool inventoryLoading() const noexcept;
     [[nodiscard]] bool inventoryAvailable() const noexcept;
@@ -319,6 +348,7 @@ class ServiceClient final : public QObject {
     void repositoryChanged();
     void recoveryPointLayoutChanged();
     void jobsChanged();
+    void taskLogChanged();
     void inventoryChanged();
     void schedulesChanged();
     void connectionsChanged();
@@ -349,6 +379,7 @@ class ServiceClient final : public QObject {
     void deletePlanReady();
     void deleteExecuted();
     void deletePlanFailed(const QString& message);
+    void serviceSettingsChanged();
 
   private:
     enum class State : std::uint8_t {
@@ -366,7 +397,19 @@ class ServiceClient final : public QObject {
     void send_service_info_request();
     void start_repository_query();
     void start_job_query();
+    void start_terminal_job_seed();
+    void start_task_log_query(bool append);
     void start_inventory_query();
+    enum class JobQueryPurpose : std::uint8_t {
+        kActive = 1,
+        kTerminalSeed = 2,
+        kTaskLog = 3,
+    };
+    [[nodiscard]] JobListQuery make_active_job_query(
+        const std::optional<QString>& continuation_token) const;
+    [[nodiscard]] JobListQuery make_terminal_seed_query() const;
+    [[nodiscard]] JobListQuery make_task_log_query(
+        const std::optional<QString>& continuation_token) const;
     void start_connection_query();
     void start_schedule_query();
     [[nodiscard]] RequestDisposition handle_service_info_frame(const QByteArray& body);
@@ -398,9 +441,15 @@ class ServiceClient final : public QObject {
     void finish_recovery_point_layout_failure(const QString& message_code);
     [[nodiscard]] RequestDisposition handle_plan_delete_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_execute_delete_plan_frame(const QByteArray& body);
+    [[nodiscard]] RequestDisposition handle_get_service_settings_frame(const QByteArray& body);
+    [[nodiscard]] RequestDisposition handle_update_service_settings_frame(const QByteArray& body);
+    void finish_service_settings_failure(const QString& message_code);
+    void reset_service_settings();
     void finish_plan_delete_failure(const QString& message_code);
     void finish_execute_delete_failure(const QString& message_code);
     void finish_job_failure(const QString& message_code);
+    void finish_task_log_failure(const QString& message_code);
+    void reset_task_log();
     void finish_inventory_failure(const QString& message_code);
     void finish_connection_failure(const QString& message_code);
     void finish_schedule_failure(const QString& message_code);
@@ -446,6 +495,7 @@ class ServiceClient final : public QObject {
     LocaleFormat format_;
     RecoveryPointModel recovery_points_;
     JobModel jobs_;
+    JobModel task_log_;
     SourceInventoryModel sources_;
     FileBrowseModel file_browse_sources_;
     FileBrowseModel file_restore_targets_;
@@ -493,6 +543,7 @@ class ServiceClient final : public QObject {
     QString pending_backup_connection_id_;
     QVariantList pending_recovery_points_;
     QVariantList pending_jobs_;
+    QVariantList pending_task_log_;
     QVariantList pending_sources_;
     QVariantList pending_schedules_;
     QVariantList schedules_;
@@ -500,6 +551,11 @@ class ServiceClient final : public QObject {
     QSet<QString> toasted_job_keys_;
     std::optional<QString> requested_token_;
     std::optional<QString> job_requested_token_;
+    std::optional<QString> task_log_requested_token_;
+    std::optional<QString> task_log_next_token_;
+    JobListQuery task_log_query_{};
+    JobQueryPurpose job_query_purpose_{JobQueryPurpose::kActive};
+    bool task_log_append_{false};
     std::optional<QString> inventory_requested_token_;
     std::optional<QString> schedule_requested_token_;
     std::optional<QString> connection_requested_token_;
@@ -518,7 +574,19 @@ class ServiceClient final : public QObject {
     bool repository_loading_{false};
     bool recovery_point_layout_loading_{false};
     bool jobs_loading_{false};
+    bool task_log_loading_{false};
     bool job_list_available_{false};
+    bool service_settings_available_{false};
+    bool service_settings_loading_{false};
+    bool service_settings_busy_{false};
+    int job_retention_months_{kDefaultJobRetentionMonths};
+    int pending_job_retention_months_{kDefaultJobRetentionMonths};
+    QString service_settings_error_code_;
+    QString service_settings_request_id_;
+    QString service_settings_update_request_id_;
+    QString service_settings_update_idempotency_key_;
+    QString task_log_error_code_;
+    QString task_log_request_id_;
     bool inventory_loading_{false};
     bool inventory_available_{false};
     bool file_browse_available_{false};

@@ -281,55 +281,178 @@ Item {
                 }
             }
 
-            // ── Service card ──────────────────────────────────────
+            // ── Job retention card ────────────────────────────────
             Rectangle {
                 Layout.fillWidth: true
                 radius: 16
                 color: Theme.colorCard
                 border.width: 0
-                implicitHeight: serviceInner.implicitHeight + 40
+                implicitHeight: retentionInner.implicitHeight + 40
+                enabled: typeof serviceClient !== "undefined" && serviceClient
+                         && serviceClient.serviceSettingsAvailable
 
                 ColumnLayout {
-                    id: serviceInner
+                    id: retentionInner
                     anchors.left: parent.left
                     anchors.right: parent.right
                     anchors.top: parent.top
                     anchors.margins: 20
-                    spacing: 8
+                    spacing: 10
 
                     Text {
-                        //% "Service"
-                        text: qsTrId("aegra.home.card.service")
+                        //% "Job history retention"
+                        text: qsTrId("aegra.settings.job_retention")
                         color: Theme.colorTextWhite
                         font.pixelSize: 15
                         font.bold: true
                         font.family: Theme.fontFamily
                     }
                     Text {
-                        //% "Connection"
-                        text: qsTrId("aegra.settings.service.connection")
+                        Layout.fillWidth: true
+                        //% "Completed jobs older than this period are permanently deleted from the service."
+                        text: qsTrId("aegra.settings.job_retention_desc")
                         color: Theme.colorTextGrey
                         font.pixelSize: 12
                         font.family: Theme.fontFamily
+                        wrapMode: Text.WordWrap
+                    }
+                    ComboBox {
+                        id: retentionCombo
+                        Layout.preferredWidth: 280
+                        Layout.preferredHeight: 36
+                        enabled: typeof serviceClient !== "undefined" && serviceClient
+                                 && serviceClient.serviceSettingsAvailable
+                                 && !serviceClient.serviceSettingsLoading
+                                 && !serviceClient.serviceSettingsBusy
+                        model: [
+                            { months: 1, label: qsTrId("aegra.settings.job_retention.1_month") },
+                            { months: 3, label: qsTrId("aegra.settings.job_retention.3_months") },
+                            { months: 6, label: qsTrId("aegra.settings.job_retention.6_months") }
+                        ]
+                        textRole: "label"
+                        currentIndex: {
+                            if (typeof serviceClient === "undefined" || !serviceClient)
+                                return 1
+                            const months = serviceClient.jobRetentionMonths
+                            if (months === 1)
+                                return 0
+                            if (months === 6)
+                                return 2
+                            return 1
+                        }
+                        onActivated: function(index) {
+                            if (typeof serviceClient === "undefined" || !serviceClient)
+                                return
+                            const item = model[index]
+                            if (!item)
+                                return
+                            if (!serviceClient.setJobRetentionMonths(item.months)) {
+                                // Revert combo if the request was not sent.
+                                const months = serviceClient.jobRetentionMonths
+                                if (months === 1)
+                                    currentIndex = 0
+                                else if (months === 6)
+                                    currentIndex = 2
+                                else
+                                    currentIndex = 1
+                            }
+                        }
+                        background: Rectangle {
+                            color: Theme.colorInput
+                            radius: 6
+                            border.width: 1
+                            border.color: retentionCombo.activeFocus || retentionCombo.popup.visible
+                                          ? Theme.colorAccentBlue : Theme.colorBorder
+                        }
+                        contentItem: Text {
+                            leftPadding: 12
+                            rightPadding: 24
+                            text: retentionCombo.displayText
+                            color: Theme.colorTextWhite
+                            font.pixelSize: 14
+                            font.family: Theme.fontFamily
+                            verticalAlignment: Text.AlignVCenter
+                            elide: Text.ElideRight
+                        }
+                        popup: Popup {
+                            y: retentionCombo.height + 2
+                            width: retentionCombo.width
+                            implicitHeight: contentItem.implicitHeight
+                            padding: 1
+                            contentItem: ListView {
+                                clip: true
+                                implicitHeight: contentHeight
+                                model: retentionCombo.popup.visible
+                                       ? retentionCombo.delegateModel : null
+                                currentIndex: retentionCombo.highlightedIndex
+                            }
+                            background: Rectangle {
+                                color: Theme.colorPopup
+                                border.color: Theme.colorBorder
+                                radius: 6
+                            }
+                        }
+                        delegate: ItemDelegate {
+                            width: retentionCombo.width
+                            height: 32
+                            contentItem: Text {
+                                text: modelData.label
+                                color: Theme.colorTextWhite
+                                font.pixelSize: 13
+                                font.family: Theme.fontFamily
+                                elide: Text.ElideRight
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                color: parent.highlighted ? Theme.colorHover : "transparent"
+                            }
+                        }
                     }
                     Text {
-                        text: serviceClient.statusText
-                              + (serviceClient.serviceVersion.length > 0
-                                 ? (" · V" + serviceClient.serviceVersion) : "")
-                        color: Theme.colorTextWhite
-                        font.pixelSize: 14
-                        font.bold: true
+                        Layout.fillWidth: true
+                        visible: typeof serviceClient !== "undefined" && serviceClient
+                                 && serviceClient.serviceSettingsErrorText.length > 0
+                        text: (typeof serviceClient !== "undefined" && serviceClient)
+                              ? serviceClient.serviceSettingsErrorText : ""
+                        color: Theme.colorAccentRed
+                        font.pixelSize: 12
                         font.family: Theme.fontFamily
-                    }
-                    AppButton {
-                        //% "Reconnect"
-                        text: qsTrId("aegra.common.reconnect")
-                        onClicked: serviceClient.reconnect()
+                        wrapMode: Text.WordWrap
                     }
                 }
             }
 
             Item { Layout.preferredHeight: 8 }
+        }
+    }
+
+    Connections {
+        target: typeof serviceClient !== "undefined" ? serviceClient : null
+        function onServiceSettingsChanged() {
+            if (typeof serviceClient === "undefined" || !serviceClient)
+                return
+            const months = serviceClient.jobRetentionMonths
+            if (months === 1)
+                retentionCombo.currentIndex = 0
+            else if (months === 6)
+                retentionCombo.currentIndex = 2
+            else
+                retentionCombo.currentIndex = 1
+        }
+        function onStateChanged() {
+            if (typeof serviceClient !== "undefined" && serviceClient
+                    && serviceClient.serviceSettingsAvailable
+                    && !serviceClient.serviceSettingsLoading
+                    && !serviceClient.serviceSettingsBusy) {
+                serviceClient.refreshServiceSettings()
+            }
+        }
+    }
+
+    Component.onCompleted: {
+        if (typeof serviceClient !== "undefined" && serviceClient
+                && serviceClient.serviceSettingsAvailable) {
+            serviceClient.refreshServiceSettings()
         }
     }
 }

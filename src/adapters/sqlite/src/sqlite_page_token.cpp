@@ -118,14 +118,20 @@ std::string repository_connection_page_filter(
     return "s=" + std::to_string(static_cast<std::uint32_t>(*state));
 }
 
-std::string job_page_filter(const std::optional<contracts::JobOperation>& operation,
-                            const std::optional<contracts::ServiceJobState>& state) {
+std::string job_page_filter(const contracts::JobListRequest& request) {
     const std::optional<std::uint32_t> op =
-        operation ? std::optional<std::uint32_t>{static_cast<std::uint32_t>(*operation)}
-                  : std::nullopt;
+        request.operation
+            ? std::optional<std::uint32_t>{static_cast<std::uint32_t>(*request.operation)}
+            : std::nullopt;
     const std::optional<std::uint32_t> st =
-        state ? std::optional<std::uint32_t>{static_cast<std::uint32_t>(*state)} : std::nullopt;
-    return optional_enum_filter("o", op) + "&" + optional_enum_filter("s", st);
+        request.state ? std::optional<std::uint32_t>{static_cast<std::uint32_t>(*request.state)}
+                      : std::nullopt;
+    std::string filter = optional_enum_filter("o", op) + "&" + optional_enum_filter("s", st);
+    filter += "&sc=" + std::to_string(static_cast<std::uint32_t>(request.scope));
+    filter +=
+        "&f=" + (request.from_utc_ms ? std::to_string(*request.from_utc_ms) : std::string{"*"});
+    filter += "&t=" + (request.to_utc_ms ? std::to_string(*request.to_utc_ms) : std::string{"*"});
+    return filter;
 }
 
 std::string schedule_page_filter(const std::optional<bool>& enabled) {

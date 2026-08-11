@@ -205,11 +205,14 @@ Window {
                         } else if (newIndex === 4) {
                             serviceClient.refreshConnections()
                             serviceClient.refreshRepository()
+                        } else if (newIndex === 5) {
+                            // Task Log: terminal jobs via ListJobs scope=terminal.
+                            if (serviceClient.jobListAvailable)
+                                serviceClient.refreshTaskLog(0, 0, 0)
                         }
-                        // Event Log: no Service catalog query yet.
                     }
 
-                    // 0 Home, 1 Backup, 2 Restore, 3 Mount, 4 Repository, 5 Event Log
+                    // 0 Home, 1 Backup, 2 Restore, 3 Mount, 4 Repository, 5 Task Log
                     Repeater {
                         model: 6
                         Loader {

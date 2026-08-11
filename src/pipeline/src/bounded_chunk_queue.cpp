@@ -18,9 +18,9 @@ bool BoundedChunkQueue::can_push(const std::size_t bytes) const noexcept {
     return bytes <= byte_budget_ && bytes <= byte_budget_ - buffered_bytes_;
 }
 
-base::Result<void> BoundedChunkQueue::push(ports::ChunkData chunk,
+base::Result<void> BoundedChunkQueue::push(QueuedChunk chunk,
                                            const base::CancellationToken& cancellation) {
-    const auto bytes = chunk.payload.size();
+    const auto bytes = chunk.payload.bytes().size();
     if (bytes > byte_budget_) {
         return base::Result<void>::failure(base::Error{
             base::ErrorCode::kInsufficientSpace,
@@ -50,26 +50,26 @@ base::Result<void> BoundedChunkQueue::push(ports::ChunkData chunk,
     return base::Result<void>::success();
 }
 
-base::Result<std::optional<ports::ChunkData>>
+base::Result<std::optional<QueuedChunk>>
 BoundedChunkQueue::pop(const base::CancellationToken& cancellation) {
     std::unique_lock lock(mutex_);
     const auto ready = state_changed_.wait(
         lock, cancellation, [this] { return failure_.has_value() || closed_ || !chunks_.empty(); });
     if (!ready) {
-        return base::Result<std::optional<ports::ChunkData>>::failure(cancelled_error());
+        return base::Result<std::optional<QueuedChunk>>::failure(cancelled_error());
     }
     if (failure_) {
-        return base::Result<std::optional<ports::ChunkData>>::failure(*failure_);
+        return base::Result<std::optional<QueuedChunk>>::failure(*failure_);
     }
     if (chunks_.empty()) {
-        return base::Result<std::optional<ports::ChunkData>>::success(std::nullopt);
+        return base::Result<std::optional<QueuedChunk>>::success(std::nullopt);
     }
 
     auto chunk = std::move(chunks_.front());
     chunks_.pop_front();
-    buffered_bytes_ -= chunk.payload.size();
+    buffered_bytes_ -= chunk.payload.bytes().size();
     state_changed_.notify_all();
-    return base::Result<std::optional<ports::ChunkData>>::success(std::move(chunk));
+    return base::Result<std::optional<QueuedChunk>>::success(std::move(chunk));
 }
 
 void BoundedChunkQueue::close() noexcept {

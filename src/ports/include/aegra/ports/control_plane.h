@@ -19,7 +19,8 @@ namespace aegra::ports {
 // Not Recovery Point / Archive / Chunk Index authority.
 // v11: content_kind on jobs/schedules + schedule_file_selections (file_set).
 // v12: restore_preflight_entry_ids for file_set selective restore preflight.
-inline constexpr std::uint32_t kControlPlaneSchemaVersion = 15;
+// v16: service_settings (job retention months) + terminal job purge support.
+inline constexpr std::uint32_t kControlPlaneSchemaVersion = 16;
 
 // ---- Durable records (control-plane only; no plaintext secrets, no RP authority) ----
 
@@ -113,6 +114,12 @@ struct AuditEventRecord final {
     std::string message_code;
     contracts::MessageArguments message_arguments;
     std::string correlation_id;
+};
+
+/// Single-row control-plane preferences (id = 1).
+struct ServiceSettingsRecord final {
+    std::uint8_t job_retention_months{contracts::kDefaultJobRetentionMonths};
+    std::uint64_t updated_utc_ms{0};
 };
 
 struct CommandRecord final {
@@ -263,6 +270,28 @@ class IJobStore {
     [[nodiscard]] virtual base::Result<std::uint64_t>
     mark_active_as_interrupted(std::uint64_t interrupted_utc_ms,
                                base::CancellationToken cancellation) = 0;
+
+    // Hard-delete terminal jobs whose completed_utc_ms is strictly less than the cutoff.
+    // Active (queued/running/cancelling) rows are never removed. Returns deleted row count.
+    [[nodiscard]] virtual base::Result<std::uint64_t>
+    purge_terminal_completed_before(std::uint64_t completed_before_utc_ms,
+                                    base::CancellationToken cancellation) = 0;
+};
+
+class IServiceSettingsStore {
+  public:
+    IServiceSettingsStore() = default;
+    virtual ~IServiceSettingsStore() = default;
+    IServiceSettingsStore(const IServiceSettingsStore&) = delete;
+    IServiceSettingsStore& operator=(const IServiceSettingsStore&) = delete;
+    IServiceSettingsStore(IServiceSettingsStore&&) = delete;
+    IServiceSettingsStore& operator=(IServiceSettingsStore&&) = delete;
+
+    [[nodiscard]] virtual base::Result<ServiceSettingsRecord>
+    get(base::CancellationToken cancellation) = 0;
+
+    [[nodiscard]] virtual base::Result<void> upsert(const ServiceSettingsRecord& record,
+                                                    base::CancellationToken cancellation) = 0;
 };
 
 class IScheduleStore {
@@ -353,6 +382,7 @@ class IControlPlaneUnitOfWork {
     [[nodiscard]] virtual IAuditEventStore& audit_events() noexcept = 0;
     [[nodiscard]] virtual ICommandStore& commands() noexcept = 0;
     [[nodiscard]] virtual IRestorePreflightStore& restore_preflights() noexcept = 0;
+    [[nodiscard]] virtual IServiceSettingsStore& service_settings() noexcept = 0;
 
     [[nodiscard]] virtual base::Result<void> commit(base::CancellationToken cancellation) = 0;
     virtual void rollback() noexcept = 0;
@@ -403,6 +433,8 @@ class IControlPlaneDatabase {
     [[nodiscard]] virtual base::Result<std::optional<RestorePreflightRecord>>
     get_restore_preflight(std::string_view preflight_token,
                           base::CancellationToken cancellation) = 0;
+    [[nodiscard]] virtual base::Result<ServiceSettingsRecord>
+    get_service_settings(base::CancellationToken cancellation) = 0;
 };
 
 } // namespace aegra::ports

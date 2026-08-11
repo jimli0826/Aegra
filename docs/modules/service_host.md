@@ -17,6 +17,7 @@ src/apps/service/
 ├── include/aegra/apps/service/
 │   ├── service_host.h
 │   ├── service_protocol.h
+│   ├── service_response_fit.h
 │   ├── service_security_host.h
 │   ├── windows_service_control.h
 │   ├── windows_service_scm_host.h
@@ -31,6 +32,7 @@ src/apps/service/
     ├── service_protocol.cpp
     ├── service_protocol_request_json.cpp
     ├── service_protocol_response_json.cpp
+    ├── service_response_fit.cpp           # list 响应按 1 MiB 帧预算收口
     ├── service_security_host.cpp
     ├── windows_service_control.cpp
     ├── windows_service_control_win32.cpp
@@ -74,9 +76,14 @@ Accept -> Receive Frame -> Decode/Validate -> Dispatch -> Encode -> Send -> Rece
   `source_ids[]`，一个命令只创建一个 Job。Recovery Point chain、delete plan/execute 与 Verify start 的
   handler 已接线，但 S5 完成门禁前不在 runtime capability 列表中；dispatcher 必须在调用 handler 前返回
   `service.capability_unavailable`。尚未接入的 Restore/Mount/Event 命令同样返回 capability unavailable。
+- `service.settings`：kind 16 `GetServiceSettings` / kind 49 `UpdateServiceSettings`。控制面持久化
+  `job_retention_months`（1/3/6，默认 3）；启动与更新后硬删除过期终端 Job（30 天/月）。
 - Repository 响应只包含 Repository UUID 和不含客户 Metadata 的 Catalog 摘要，不包含根路径、Archive key、
   主机名、SID、SecretRef 或原始 Adapter 错误。
-- frame 最大 64 KiB，JSON 根必须是 object，整数必须先检查范围。
+- frame 最大 1 MiB，JSON 根必须是 object，整数必须先检查范围。
+- 含数组的 list 查询经 `service_response_fit` 按编码大小收口：接近 1 MiB 时减少本页项数并设
+  `continuation_token`。`encode_service_response` 对超限帧明确失败。
+- Job list 只合并 Worker 监督器缓存中的真实 progress；无缓存时 `progress` 为 null（不注入 1/1）。
 - 错误响应使用稳定 `ErrorCode` 和 message code，不返回 JSON/Win32 异常文本。
 - Service 控制 Pipe 在交互模式和 LocalSystem 正式模式都使用 `kLocalEveryoneControl`：允许本机
   Everyone 读写，同时拒绝远程 Client，并在连接后执行调用方 SID/session 授权。见
@@ -94,7 +101,7 @@ Accept -> Receive Frame -> Decode/Validate -> Dispatch -> Encode -> Send -> Rece
 - `--worker-path` 接受绝对路径。缺省为 `aegra_service.exe` 同目录的 `aegra_personal_worker.exe`，不回退到
   当前工作目录。
 - Worker session listener 使用独立 `aegra-worker-*` namespace、1 MiB frame limit 和每 session 一个
-  `std::jthread`；Service control pipe 继续使用 Service namespace 与 64 KiB frame limit。
+  `std::jthread`；Service control pipe 继续使用 Service namespace 与 1 MiB frame limit。
 - `--repository-root` 仅保留为显式开发诊断直连查询；常规路径通过持久化 Repository connection 打开。
 
 ## 日志与交互追踪
@@ -110,7 +117,7 @@ Accept -> Receive Frame -> Decode/Validate -> Dispatch -> Encode -> Send -> Rece
   Logger 最低级别为 `trace`；日志仍携带稳定 `event` code，便于机器筛选。
 - `info/warning/error` 使用完整请求名称、自然语言结果、可读 response/error/message 名称，不输出裸
   `kind_value`、`response_kind` 或 `error_code` 数字。Job 终态同样输出 `Succeeded/Failed/Cancelled` 等名称。
-- 每个 64 KiB 内的 Service IPC 请求和响应在编解码边界记录一条 `trace` JSON 到 `trace.log`，分别标记
+- 每个 1 MiB 内的 Service IPC 请求和响应在编解码边界记录一条 `trace` JSON 到 `trace.log`，分别标记
   `Inbound` 和 `Outbound`，用于关联 `request_id` 并检查实际交互字段。
 - trace JSON 在写盘前使用结构化解析递归脱敏：credential、password、secret、token、`*_key` 等认证、
   授权或会话材料的值替换为 `[REDACTED]`。路径、locator、显示名、卷标签、主机名和 message arguments

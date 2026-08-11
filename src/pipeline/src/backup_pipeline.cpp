@@ -33,8 +33,8 @@ struct BackupPipelineTimings final {
     std::atomic<std::uint64_t> consumer_progress{0};
 };
 
-[[nodiscard]] std::uint64_t elapsed_microseconds(
-    const std::chrono::steady_clock::time_point start) noexcept {
+[[nodiscard]] std::uint64_t
+elapsed_microseconds(const std::chrono::steady_clock::time_point start) noexcept {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
                                           std::chrono::steady_clock::now() - start)
                                           .count());
@@ -61,8 +61,7 @@ constexpr std::uint64_t kMaximumWireInteger =
     return base::Result<std::uint64_t>::success(left + right);
 }
 
-[[nodiscard]] base::Result<void> require_wire_range(const std::uint64_t value,
-                                                    const char* field) {
+[[nodiscard]] base::Result<void> require_wire_range(const std::uint64_t value, const char* field) {
     if (value > kMaximumWireInteger) {
         return base::Result<void>::failure(base::Error{
             base::ErrorCode::kInvalidArgument,
@@ -115,7 +114,7 @@ struct BackupConsumerContext final {
 };
 
 struct ReadRangeResult final {
-    std::vector<std::byte> payload;
+    detail::OwnedChunkBuffer payload;
     std::vector<ports::ChunkFreeRange> free_ranges;
 };
 
@@ -207,7 +206,7 @@ base::Result<void> read_data_extent(ports::IBlockSource& source, const std::uint
 base::Result<ReadRangeResult> read_range(ports::IBlockSource& source, const ChunkRange& range,
                                          const base::CancellationToken& cancellation,
                                          BackupPipelineTimings& timings,
-                                         std::vector<std::byte> payload) {
+                                         detail::OwnedChunkBuffer payload) {
     ReadRangeResult result;
     result.payload = std::move(payload);
     std::uint64_t consumed = 0;
@@ -232,12 +231,11 @@ base::Result<ReadRangeResult> read_range(ports::IBlockSource& source, const Chun
             timings.producer_free_bytes.fetch_add(extent.value().logical_size,
                                                   std::memory_order_relaxed);
         } else if (extent.value().state == ports::BlockExtentState::kData) {
-            const auto output = std::span<std::byte>(result.payload)
-                                    .subspan(static_cast<std::size_t>(consumed),
-                                             static_cast<std::size_t>(extent.value().logical_size));
-            auto read =
-                read_data_extent(source, extent.value().logical_offset, output, cancellation,
-                                 timings);
+            const auto output = result.payload.bytes().subspan(
+                static_cast<std::size_t>(consumed),
+                static_cast<std::size_t>(extent.value().logical_size));
+            auto read = read_data_extent(source, extent.value().logical_offset, output,
+                                         cancellation, timings);
             if (!read) {
                 return base::Result<ReadRangeResult>::failure(read.error());
             }
@@ -250,29 +248,29 @@ base::Result<ReadRangeResult> read_range(ports::IBlockSource& source, const Chun
     return base::Result<ReadRangeResult>::success(std::move(result));
 }
 
-base::Result<ports::ChunkData> read_next_chunk(BackupProducerContext& context,
-                                               const ChunkRange& range) {
+base::Result<detail::QueuedChunk> read_next_chunk(BackupProducerContext& context,
+                                                  const ChunkRange& range) {
     auto buffer = context.buffer_pool.acquire(static_cast<std::size_t>(range.logical_size),
                                               context.cancellation);
     if (!buffer) {
-        return base::Result<ports::ChunkData>::failure(buffer.error());
+        return base::Result<detail::QueuedChunk>::failure(buffer.error());
     }
     context.timings.producer_buffer_wait.fetch_add(buffer.value().wait_microseconds,
                                                    std::memory_order_relaxed);
     context.timings.producer_payload_allocate.fetch_add(buffer.value().allocate_microseconds,
                                                         std::memory_order_relaxed);
     auto payload = read_range(context.source, range, context.cancellation, context.timings,
-                              std::move(buffer.value().payload));
+                              std::move(buffer.value().buffer));
     if (!payload) {
-        return base::Result<ports::ChunkData>::failure(payload.error());
+        return base::Result<detail::QueuedChunk>::failure(payload.error());
     }
     ports::ChunkDescriptor descriptor{
         range.chunk_index,    range.logical_offset,
-        range.logical_size,   static_cast<std::uint64_t>(payload.value().payload.size()),
+        range.logical_size,   static_cast<std::uint64_t>(payload.value().payload.bytes().size()),
         context.source_index, std::move(payload.value().free_ranges),
     };
-    return base::Result<ports::ChunkData>::success(
-        ports::ChunkData{std::move(descriptor), std::move(payload.value().payload)});
+    return base::Result<detail::QueuedChunk>::success(
+        detail::QueuedChunk{std::move(descriptor), std::move(payload.value().payload)});
 }
 
 base::Result<void> produce_all_chunks(BackupProducerContext& context) {
@@ -350,8 +348,7 @@ base::Result<void> publish_progress(ports::IProgressSink* sink, const BackupPlan
     if (sink == nullptr) {
         return base::Result<void>::success();
     }
-    auto processed =
-        checked_add_wire(plan.progress_base_processed_bytes, volume_processed_bytes);
+    auto processed = checked_add_wire(plan.progress_base_processed_bytes, volume_processed_bytes);
     if (!processed) {
         return base::Result<void>::failure(processed.error());
     }
@@ -430,7 +427,8 @@ base::Result<BackupSummary> consume_chunks(BackupConsumerContext& context) {
         auto chunk = std::move(chunk_optional).value();
         const auto write_start = std::chrono::steady_clock::now();
         auto written = context.session.write_chunk(
-            ports::ChunkWriteRequest{chunk.descriptor, chunk.payload}, context.cancellation);
+            ports::ChunkWriteRequest{chunk.descriptor, chunk.payload.bytes()},
+            context.cancellation);
         context.timings.consumer_write.fetch_add(elapsed_microseconds(write_start),
                                                  std::memory_order_relaxed);
         context.buffer_pool.release(std::move(chunk.payload));
@@ -537,10 +535,12 @@ base::Result<BackupSummary> BackupPipeline::run(const BackupPlan& plan,
     std::stop_source local_stop;
     std::stop_callback external_cancel(cancellation, [&local_stop] { local_stop.request_stop(); });
     BackupPipelineTimings timings;
-    BackupProducerContext producer_context{source_, chunker_result.value(), queue, buffer_pool,
-                                           local_stop.get_token(), plan.source_index, timings};
-    BackupConsumerContext consumer_context{plan, session_, progress_, queue, buffer_pool,
-                                           local_stop.get_token(), source_size, timings};
+    BackupProducerContext producer_context{source_,     chunker_result.value(), queue,
+                                           buffer_pool, local_stop.get_token(), plan.source_index,
+                                           timings};
+    BackupConsumerContext consumer_context{plan,        session_,    progress_,
+                                           queue,       buffer_pool, local_stop.get_token(),
+                                           source_size, timings};
     std::jthread producer([&producer_context] { produce_chunks(producer_context); });
 
     return consume_safely(consumer_context, local_stop);

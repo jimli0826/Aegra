@@ -12,6 +12,7 @@ add_library(aegra_app_service STATIC
     src/service_protocol.cpp
     src/service_protocol_request_json.cpp
     src/service_protocol_response_json.cpp
+    src/service_response_fit.cpp
     src/service_security_host.cpp
     src/windows_service_control.cpp
     src/windows_service_control_win32.cpp

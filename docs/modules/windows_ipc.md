@@ -21,8 +21,8 @@ Service 协议、不启动 SCM。
 - Worker：`\\.\pipe\aegra-worker-<name>`
 - Service：`\\.\pipe\aegra-service-<name>`
 
-传输：byte mode、4 字节 little-endian 长度前缀、UTF-8 body；零长度非法。默认最大帧 Worker 1 MiB、
-Service Listener 默认 64 KiB（可配置，上限 1 MiB）。
+传输：byte mode、4 字节 little-endian 长度前缀、UTF-8 body；零长度非法。默认最大帧 1 MiB
+（Service 控制面与 Worker session 均为此上限；Listener 可配置，硬上限 1 MiB）。
 
 `peer_identity()` 在已连接句柄上查询客户端进程 token，返回 SID、session ID、process ID 与
 interactive/admin 标志。

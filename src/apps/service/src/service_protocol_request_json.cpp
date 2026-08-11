@@ -93,17 +93,25 @@ encode_source_list_request(const contracts::SourceInventoryListRequest& request)
 [[nodiscard]] Json encode_job_list_request(const contracts::JobListRequest& request) {
     return Json{{"page", encode_page_request(request.page)},
                 {"operation", optional_enum_json(request.operation)},
-                {"state", optional_enum_json(request.state)}};
+                {"state", optional_enum_json(request.state)},
+                {"scope", static_cast<std::uint8_t>(request.scope)},
+                {"from_utc_ms", optional_uint64_json(request.from_utc_ms)},
+                {"to_utc_ms", optional_uint64_json(request.to_utc_ms)}};
 }
 
 [[nodiscard]] contracts::JobListRequest parse_job_list_request(const Json& payload) {
-    constexpr std::array<std::string_view, 3> keys{"page", "operation", "state"};
+    constexpr std::array<std::string_view, 6> keys{"page",         "operation",   "state",
+                                                   "scope",        "from_utc_ms", "to_utc_ms"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("job list request fields are invalid");
     }
+    const auto scope_raw = unsigned_value<std::uint8_t>(payload, "scope");
     return {parse_page_request(payload.at("page")),
             parse_optional_enum<contracts::JobOperation>(payload.at("operation")),
-            parse_optional_enum<contracts::ServiceJobState>(payload.at("state"))};
+            parse_optional_enum<contracts::ServiceJobState>(payload.at("state")),
+            static_cast<contracts::JobListScope>(scope_raw),
+            optional_uint64(payload.at("from_utc_ms")),
+            optional_uint64(payload.at("to_utc_ms"))};
 }
 
 [[nodiscard]] Json encode_schedule_list_request(const contracts::ScheduleListRequest& request) {
@@ -668,6 +676,13 @@ Json encode_request_payload(const contracts::ServiceRequest& request) {
                     {"confirmed", body.confirmed},
                     {"archive_secret_ref", optional_string_json(body.archive_secret_ref)}};
     }
+    case contracts::ServiceRequestKind::kGetServiceSettings:
+        (void)std::get<contracts::ServiceSettingsQuery>(request.payload);
+        return Json::object();
+    case contracts::ServiceRequestKind::kUpdateServiceSettings: {
+        const auto& body = std::get<contracts::UpdateServiceSettingsCommand>(request.payload);
+        return Json{{"job_retention_months", body.job_retention_months}};
+    }
     }
     throw std::invalid_argument("service request kind is invalid");
 }
@@ -786,6 +801,22 @@ contracts::ServiceRequestPayload parse_request_payload(const contracts::ServiceR
         command.preflight_token = payload.at("preflight_token").get<std::string>();
         command.confirmed = payload.at("confirmed").get<bool>();
         command.archive_secret_ref = optional_string(payload.at("archive_secret_ref"));
+        return command;
+    }
+    case contracts::ServiceRequestKind::kGetServiceSettings: {
+        constexpr std::array<std::string_view, 0> keys{};
+        if (!exact_keys(payload, keys)) {
+            throw std::invalid_argument("service settings query fields are invalid");
+        }
+        return contracts::ServiceSettingsQuery{};
+    }
+    case contracts::ServiceRequestKind::kUpdateServiceSettings: {
+        constexpr std::array<std::string_view, 1> keys{"job_retention_months"};
+        if (!exact_keys(payload, keys)) {
+            throw std::invalid_argument("update service settings fields are invalid");
+        }
+        contracts::UpdateServiceSettingsCommand command;
+        command.job_retention_months = unsigned_value<std::uint8_t>(payload, "job_retention_months");
         return command;
     }
     }

@@ -156,6 +156,14 @@ CREATE TABLE IF NOT EXISTS restore_preflight_entry_ids (
 );
 CREATE INDEX IF NOT EXISTS ix_restore_preflight_entry_ids_token
     ON restore_preflight_entry_ids(preflight_token, ordinal);
+CREATE TABLE IF NOT EXISTS service_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    job_retention_months INTEGER NOT NULL DEFAULT 3
+        CHECK (job_retention_months IN (1, 3, 6)),
+    updated_utc_ms INTEGER NOT NULL CHECK (updated_utc_ms >= 0)
+);
+INSERT OR IGNORE INTO service_settings(id, job_retention_months, updated_utc_ms)
+VALUES (1, 3, 0);
 )sql";
     return exec_sql(db, kSchema);
 }

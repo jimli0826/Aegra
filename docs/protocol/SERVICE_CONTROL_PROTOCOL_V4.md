@@ -30,7 +30,7 @@
 | --- | --- |
 | 通道 | Windows Named Pipe（逻辑名 `control`，物理名见 ADR-0011） |
 | 帧 | 4 字节 little-endian 长度前缀 + UTF-8 JSON body |
-| 最大 frame | 64 KiB |
+| 最大 frame | 1 MiB |
 | 会话 | 一连接可多请求；event 异步发送见 capability |
 | 身份 / ACL | ADR-0014 |
 
@@ -105,7 +105,10 @@
 | `maximum_results` | 1–100 |
 | token | opaque，≤1024 字节；禁止解析/拼接/跨 query 复用 |
 | 绑定 | caller、kind、filter、排序、（文件浏览）session |
-| frame | 达 64 KiB 时可返回更少项 |
+| frame | **编码后整帧 ≤ 1 MiB**。所有返回 `items[]`（或等价数组）的查询必须按编码大小收口：若按 `maximum_results` 取出的一页编码后超限，Service 必须减少本页项数并设置 `continuation_token`，使后续页可续读 |
+| encode 失败 | 编码结果仍超过 1 MiB（例如单条记录过大）时，`encode_service_response` 必须明确失败，不得在 send 时静默断连 |
+
+Job list 的 `progress`：仅合并 Worker 监督器缓存中的真实 progress；无缓存时保持 `null`，**不得**注入 synthetic `1/1` 完成进度。
 
 ### 3.4 安全与脱敏
 
@@ -132,6 +135,7 @@
 | 13 | BrowseFileSources | Query |
 | 14 | ListRecoveryPointEntries | Query |
 | 15 | PrepareFileRestore | Query |
+| 16 | GetServiceSettings | Query |
 | 32 | AddRepositoryConnection | Command |
 | 33 | ImportRepositoryConnection | Command |
 | 34 | TestRepositoryConnection | Command |
@@ -149,6 +153,7 @@
 | 46 | AcknowledgeEvents | Command |
 | 47 | ExecuteDeletePlan | Command |
 | 48 | StartFileRestore | Command |
+| 49 | UpdateServiceSettings | Command |
 
 ---
 
@@ -336,12 +341,27 @@ Footer，其它任务为 0。file_set backup 成功时 `requested_backup_type` /
 | 1 GetServiceInfo | api 仅 4；capabilities 可含 `file.*` |
 | 2 ListRecoveryPoints | item 含 `content_kind` |
 | 4 ListSourceInventory | 仍以 Volume 为主；不返回任意文件系统树 |
-| 5 ListJobs | summary 含 `content_kind` 与 requested/effective backup 投影（FI7） |
+| 5 ListJobs | summary 含 `content_kind` 与 requested/effective backup 投影（FI7）；请求增加 `scope`（1=all / 2=active / 3=terminal）与可选 `from_utc_ms`/`to_utc_ms`（按 `created_utc_ms`）。热路径用 active；Task Log 用 terminal + 时间窗 |
 | 6 ListSchedules | summary 含 `content_kind` 与 file selection 安全摘要 |
 | 9 PrepareRestore | **仅 volume_set** RP；file_set RP 必须用 kind 15 |
 | 12 GetRecoveryPointLayout | volume geometry；file_set 返回稳定 unsupported |
+| 16 GetServiceSettings | 控制面偏好：`job_retention_months` ∈ {1,3,6}，默认 3；`updated_utc_ms` |
 
 非法对 file_set 使用 volume-only API → `service.content_kind_mismatch`。
+
+### Job retention（kind 16 / 49）
+
+| 规则 | 说明 |
+| --- | --- |
+| 存储 | 控制面 SQLite `service_settings` 单行（`id=1`），非 Desktop 本地 QSettings |
+| 取值 | `job_retention_months` 仅允许 `1`、`3`、`6`；默认 `3` |
+| 月长 | 保留窗口按 **30 天/月** 计算（`months * 30 * 86400000` ms），便于确定性 cutoff |
+| 删除对象 | 仅终端 Job（succeeded/failed/cancelled/interrupted）且 `completed_utc_ms < cutoff`；**不**删除 queued/running/cancelling |
+| 触发 | Service 启动时 purge；`UpdateServiceSettings` 成功后同事务 purge |
+| Get 请求 | kind 16，payload `{}`，capability `service.settings` |
+| Get 响应 | `{ "job_retention_months": 3, "updated_utc_ms": 0 }` |
+| Update 请求 | kind 49 命令，`idempotency_key` 必填，payload `{ "job_retention_months": 1\|3\|6 }` |
+| Update 响应 | `CommandAcknowledgement`；message_code `service.settings_updated` |
 
 ---
 
@@ -623,7 +643,7 @@ event kind 仍为 TaskProgress=1、TaskCompleted=2、MountSessionChanged=3。
 
 ## 10. Frame 上限示例
 
-单 frame ≤ 65536 字节。Browse 页在 `maximum_results=100` 时若 display_name 较大，Service 必须减少
+单 frame ≤ 1 MiB（1048576 字节）。Browse 页在 `maximum_results=100` 时若 display_name 较大，Service 必须减少
 items 保证 framing。token 与 UUID 字段计入 frame。
 
 ---

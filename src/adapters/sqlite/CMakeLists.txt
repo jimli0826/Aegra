@@ -8,6 +8,7 @@ add_library(aegra_adapter_sqlite STATIC
     src/sqlite_restore_preflight_store.cpp
     src/sqlite_schedule_store.cpp
     src/sqlite_schema.cpp
+    src/sqlite_service_settings_store.cpp
     src/sqlite_support.cpp
 )
 

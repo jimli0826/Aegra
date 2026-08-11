@@ -431,11 +431,25 @@ create_service_log(const std::filesystem::path& data_dir, const bool service_mod
     auto unit = components.control_plane->begin_unit_of_work({});
     if (!unit)
         return aegra::base::Result<void>::failure(unit.error());
-    auto interrupted =
-        unit.value()->jobs().mark_active_as_interrupted(components.clock->now_utc_ms(), {});
+    const auto now_signed = components.clock->now_utc_ms();
+    const auto now_utc_ms = now_signed > 0 ? static_cast<std::uint64_t>(now_signed) : 0ULL;
+    auto interrupted = unit.value()->jobs().mark_active_as_interrupted(now_utc_ms, {});
     if (!interrupted) {
         unit.value()->rollback();
         return aegra::base::Result<void>::failure(interrupted.error());
+    }
+    auto settings = unit.value()->service_settings().get({});
+    if (!settings) {
+        unit.value()->rollback();
+        return aegra::base::Result<void>::failure(settings.error());
+    }
+    const auto window = static_cast<std::uint64_t>(settings.value().job_retention_months) *
+                        aegra::contracts::kMillisecondsPerRetentionMonth;
+    const auto cutoff = now_utc_ms > window ? now_utc_ms - window : 0ULL;
+    auto purged = unit.value()->jobs().purge_terminal_completed_before(cutoff, {});
+    if (!purged) {
+        unit.value()->rollback();
+        return aegra::base::Result<void>::failure(purged.error());
     }
     return unit.value()->commit({});
 }
@@ -460,11 +474,12 @@ runtime_capabilities(const bool file_browse_enabled) {
     // Chain/delete stay off until durable delete resume meets S5 Definition of Done.
     // F8 enables file.restore (PrepareFileRestore + StartFileRestore) when browse is available.
     std::vector<std::string> capabilities{
-        "backup.start",          "job.cancel",           "job.list",
-        "mount.list",            "mount.start",          "mount.unmount",
+        "backup.start",          "job.cancel",            "job.list",
+        "mount.list",            "mount.start",           "mount.unmount",
         "recovery_point.verify", "repository.connection", "repository.list",
-        "restore.preflight",     "restore.start",        "schedule",
-        "service.info",          "source.inventory",     "file.recover_browse",
+        "restore.preflight",     "restore.start",         "schedule",
+        "service.info",          "service.settings",      "source.inventory",
+        "file.recover_browse",
     };
     if (file_browse_enabled) {
         capabilities.push_back("file.browse");

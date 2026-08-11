@@ -57,7 +57,8 @@ src/apps/desktop/
 - 首次启动跟随系统 locale；无效保存值回退 `en_US`。缺失或损坏的 `.qm` 不得阻止启动。
 - Service 只返回稳定 `message_code`；Desktop 通过 `message_code_map` 转为翻译 ID，未知 code 使用通用安全文本。
 - 日期、容量等通过 `LocaleFormat`/`QLocale` 格式化，不在 QML 拼接固定英文单位。
-- Settings 页面（D8）落地前，标题栏提供最小语言切换入口。
+- Settings 页面：语言/主题为 Desktop 本地 `QSettings`；**任务历史保留**（1/3/6 个月）走 Service
+  `service.settings`（kind 16/49），由控制面 SQLite 持久化并硬删除过期终端 Job，不落在 Desktop 本地。
 - 构建时用 `lrelease` 从 `translations/*.ts` 生成 `.qm`，并由 `resources.qrc` 嵌入 `:/Aegra/i18n/`。
 
 ## 客户端分层（D1 / F9）
@@ -89,7 +90,9 @@ ServiceClient (QML 门面)
 ## ServiceClient 行为
 
 - 使用 `QLocalSocket` 连接 `aegra-service-control`。
-- 发送和接收与 ADR-0011 相同的 4 字节长度帧，最大 64 KiB。
+- 发送和接收与 ADR-0011 相同的 4 字节长度帧，最大 1 MiB。
+- `ListJobs` 使用 `scope`：热路径仅 `active`（queued/running/cancelling）轮询；Task Log 使用
+  `terminal` + 可选时间窗/`operation`/`state` 过滤。不再在 500ms 轮询中拉全历史。
 - 连接后生成新的 request ID 并发送 schema 3 `GetServiceInfo`，协商 API V3 后分页发送
   `ListRecoveryPoints`。
 - 只接受 schema、kind、request ID、字段类型和范围全部合法的响应。

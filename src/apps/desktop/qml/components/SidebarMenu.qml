@@ -48,7 +48,7 @@ Rectangle {
         { label: qsTrId("aegra.nav.mount"), icon: "mount", index: 3, enabled: root.mountEnabled },
         //% "Repository"
         { label: qsTrId("aegra.nav.repository"), icon: "repository", index: 4, enabled: root.repositoryEnabled },
-        //% "Event Log"
+        //% "Task Log"
         { label: qsTrId("aegra.nav.event_log"), icon: "event_log", index: 5, enabled: root.eventLogEnabled }
     ]
 

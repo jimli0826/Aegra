@@ -80,6 +80,35 @@ void JobModel::upsert_job(JobRow row) {
     bump_revision();
 }
 
+void JobModel::replace_active_jobs(QVector<JobRow> active) {
+    QVector<JobRow> next;
+    next.reserve(rows_.size() + active.size());
+    for (auto& row : rows_) {
+        if (!row_is_active(row.state)) {
+            next.push_back(std::move(row));
+        }
+    }
+    for (auto& row : active) {
+        next.push_back(std::move(row));
+    }
+    std::stable_sort(next.begin(), next.end(), [](const JobRow& a, const JobRow& b) {
+        if (a.created_utc_ms != b.created_utc_ms) {
+            return a.created_utc_ms > b.created_utc_ms;
+        }
+        return a.job_id < b.job_id;
+    });
+    set_rows(std::move(next));
+}
+
+void JobModel::merge_terminal_jobs(QVector<JobRow> terminals) {
+    for (auto& terminal : terminals) {
+        if (row_is_active(terminal.state)) {
+            continue;
+        }
+        upsert_job(std::move(terminal));
+    }
+}
+
 void JobModel::clear() {
     if (rows_.isEmpty()) {
         return;

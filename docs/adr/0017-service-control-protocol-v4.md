@@ -26,7 +26,8 @@ ADR-0013 将控制面冻结为 schema/API 3，覆盖 Volume 备份、Repository�
 
 ### 1. 版本与传输
 
-- Named Pipe、4 字节 LE 长度前缀、UTF-8 JSON、64 KiB frame 上限不变。
+- Named Pipe、4 字节 LE 长度前缀、UTF-8 JSON；frame 上限为 1 MiB（见当前
+  [SERVICE_CONTROL_PROTOCOL_V4](../protocol/SERVICE_CONTROL_PROTOCOL_V4.md)）。
 - 所有根消息 `schema_version = 4`。
 - `GetServiceInfo` 仅接受 `minimum_api_version..maximum_api_version` 覆盖 **4**；Service 固定
   `api_version = 4`。范围不含 4 时返回 `UnsupportedVersion` / `service.api_version_unsupported`。

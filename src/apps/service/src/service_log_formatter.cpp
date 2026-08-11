@@ -84,6 +84,8 @@ void redact(Json& value) {
         return "List recovery point entries";
     case contracts::ServiceRequestKind::kPrepareFileRestore:
         return "Prepare file restore";
+    case contracts::ServiceRequestKind::kGetServiceSettings:
+        return "Get service settings";
     default:
         return "Unknown query";
     }
@@ -125,6 +127,8 @@ void redact(Json& value) {
         return "Execute recovery point deletion";
     case contracts::ServiceRequestKind::kStartFileRestore:
         return "Start file restore";
+    case contracts::ServiceRequestKind::kUpdateServiceSettings:
+        return "Update service settings";
     default:
         return "Unknown command";
     }

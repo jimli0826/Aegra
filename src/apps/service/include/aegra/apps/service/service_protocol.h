@@ -8,7 +8,7 @@
 
 namespace aegra::apps::service {
 
-inline constexpr std::size_t kMaximumServiceFrameBytes = 64U * 1024U;
+inline constexpr std::size_t kMaximumServiceFrameBytes = 1024U * 1024U;
 
 [[nodiscard]] base::Result<std::string>
 encode_service_request(const contracts::ServiceRequest& request);

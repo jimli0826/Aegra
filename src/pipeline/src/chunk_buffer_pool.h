@@ -3,6 +3,8 @@
 #include "aegra/base/cancellation.h"
 #include "aegra/base/result.h"
 
+#include "owned_chunk_buffer.h"
+
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -12,7 +14,7 @@
 namespace aegra::pipeline::detail {
 
 struct AcquiredChunkBuffer final {
-    std::vector<std::byte> payload;
+    OwnedChunkBuffer buffer;
     std::uint64_t wait_microseconds{0};
     std::uint64_t allocate_microseconds{0};
 };
@@ -23,7 +25,7 @@ class ChunkBufferPool final {
 
     [[nodiscard]] base::Result<AcquiredChunkBuffer>
     acquire(std::size_t required_size, const base::CancellationToken& cancellation);
-    void release(std::vector<std::byte> payload) noexcept;
+    void release(OwnedChunkBuffer buffer) noexcept;
 
     ChunkBufferPool(const ChunkBufferPool&) = delete;
     ChunkBufferPool& operator=(const ChunkBufferPool&) = delete;

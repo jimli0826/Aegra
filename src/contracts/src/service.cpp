@@ -98,6 +98,8 @@ template <typename Payload, typename Validator>
     case ServiceRequestKind::kPrepareFileRestore:
         return validate_payload<PrepareFileRestoreRequest>(request,
                                                            validate_prepare_file_restore_request);
+    case ServiceRequestKind::kGetServiceSettings:
+        return validate_payload<ServiceSettingsQuery>(request, validate_service_settings_query);
     default:
         return invalid("service query kind is invalid");
     }
@@ -138,6 +140,9 @@ template <typename Payload, typename Validator>
     case ServiceRequestKind::kStartFileRestore:
         return validate_payload<StartFileRestoreCommand>(request,
                                                          validate_start_file_restore_command);
+    case ServiceRequestKind::kUpdateServiceSettings:
+        return validate_payload<UpdateServiceSettingsCommand>(
+            request, validate_update_service_settings_command);
     default:
         return invalid("service command kind is invalid");
     }
@@ -190,6 +195,8 @@ template <typename Payload, typename Validator>
     case ServiceRequestKind::kPrepareFileRestore:
         return validate_response_payload<FileRestorePreflight>(response,
                                                                validate_file_restore_preflight);
+    case ServiceRequestKind::kGetServiceSettings:
+        return validate_response_payload<ServiceSettings>(response, validate_service_settings);
     default:
         return invalid("service query response kind is invalid");
     }
@@ -220,13 +227,14 @@ template <typename Payload, typename Validator>
 
 bool is_service_query_kind(const ServiceRequestKind kind) noexcept {
     return kind >= ServiceRequestKind::kGetServiceInfo &&
-           kind <= ServiceRequestKind::kPrepareFileRestore;
+           kind <= ServiceRequestKind::kGetServiceSettings;
 }
 
 bool is_service_command_kind(const ServiceRequestKind kind) noexcept {
     return (kind >= ServiceRequestKind::kAddRepositoryConnection &&
             kind <= ServiceRequestKind::kExecuteDeletePlan) ||
-           kind == ServiceRequestKind::kStartFileRestore;
+           kind == ServiceRequestKind::kStartFileRestore ||
+           kind == ServiceRequestKind::kUpdateServiceSettings;
 }
 
 base::Result<void> validate_service_request(const ServiceRequest& request) {

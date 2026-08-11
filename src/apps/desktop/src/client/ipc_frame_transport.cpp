@@ -3,6 +3,8 @@
 #include <QLocalSocket>
 #include <QTimer>
 
+#include <algorithm>
+
 namespace aegra::desktop {
 namespace {
 
@@ -40,7 +42,9 @@ IpcFrameTransport::IpcFrameTransport(QString pipe_name, QObject* parent)
 }
 
 void IpcFrameTransport::set_reconnect_delay_milliseconds(const int delay_ms) {
-    reconnect_timer_->setInterval(delay_ms);
+    reconnect_delay_ms_ = delay_ms > 0 ? delay_ms : kDefaultReconnectDelayMilliseconds;
+    next_reconnect_delay_ms_ = reconnect_delay_ms_;
+    reconnect_timer_->setInterval(reconnect_delay_ms_);
 }
 
 void IpcFrameTransport::set_auto_reconnect_enabled(const bool enabled) {
@@ -119,6 +123,8 @@ void IpcFrameTransport::on_connected() {
     input_.clear();
     expected_frame_bytes_ = 0;
     error_notified_ = false;
+    next_reconnect_delay_ms_ = reconnect_delay_ms_;
+    reconnect_timer_->setInterval(reconnect_delay_ms_);
     emit connected();
 }
 
@@ -182,8 +188,26 @@ void IpcFrameTransport::schedule_reconnect() {
         return;
     }
     if (!reconnect_timer_->isActive()) {
+        reconnect_timer_->setInterval(next_reconnect_delay_ms_);
         reconnect_timer_->start();
     }
+}
+
+void IpcFrameTransport::schedule_reconnect_with_backoff() {
+    intentional_disconnect_ = false;
+    auto_reconnect_enabled_ = true;
+    if (is_connected() || socket_->state() == QLocalSocket::ConnectingState) {
+        return;
+    }
+    if (reconnect_timer_->isActive()) {
+        return;
+    }
+    reconnect_timer_->setInterval(next_reconnect_delay_ms_);
+    reconnect_timer_->start();
+    // Exponential backoff for the next failure (cap at 30s).
+    next_reconnect_delay_ms_ =
+        (std::min)(kMaximumReconnectDelayMilliseconds,
+                   (std::max)(reconnect_delay_ms_, next_reconnect_delay_ms_ * 2));
 }
 
 void IpcFrameTransport::ensure_reconnect_scheduled() {
@@ -195,12 +219,13 @@ void IpcFrameTransport::ensure_reconnect_scheduled() {
     if (socket_->state() == QLocalSocket::ConnectingState) {
         return;
     }
-    // Prefer an immediate attempt; fall back to the timer if already in flight.
+    // Use current backoff delay — never zero-delay reconnect storms.
     if (!reconnect_timer_->isActive()) {
-        // Zero-delay single-shot: coalesce with the event loop instead of re-entering connect.
-        reconnect_timer_->setInterval(0);
+        reconnect_timer_->setInterval(next_reconnect_delay_ms_);
         reconnect_timer_->start();
-        reconnect_timer_->setInterval(kDefaultReconnectDelayMilliseconds);
+        next_reconnect_delay_ms_ =
+            (std::min)(kMaximumReconnectDelayMilliseconds,
+                       (std::max)(reconnect_delay_ms_, next_reconnect_delay_ms_ * 2));
     }
 }
 

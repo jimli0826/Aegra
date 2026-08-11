@@ -201,7 +201,7 @@ base::Result<contracts::JobPage> JobStore::list(const contracts::JobListRequest&
     if (!valid_page) {
         return base::Result<contracts::JobPage>::failure(valid_page.error());
     }
-    const auto filter = job_page_filter(request.operation, request.state);
+    const auto filter = job_page_filter(request);
     auto token = decode_page_token(request.page.continuation_token, kPageScopeJobs, filter);
     if (!token) {
         return base::Result<contracts::JobPage>::failure(token.error());
@@ -220,6 +220,16 @@ base::Result<contracts::JobPage> JobStore::list(const contracts::JobListRequest&
     }
     if (request.state) {
         sql += " AND state = ?";
+    } else if (request.scope == contracts::JobListScope::kActive) {
+        sql += " AND state IN (1, 2, 3)";
+    } else if (request.scope == contracts::JobListScope::kTerminal) {
+        sql += " AND state IN (4, 5, 6, 7)";
+    }
+    if (request.from_utc_ms) {
+        sql += " AND created_utc_ms >= ?";
+    }
+    if (request.to_utc_ms) {
+        sql += " AND created_utc_ms <= ?";
     }
     if (token.value()) {
         sql += " AND (created_utc_ms < ? OR (created_utc_ms = ? AND job_id > ?))";
@@ -240,6 +250,20 @@ base::Result<contracts::JobPage> JobStore::list(const contracts::JobListRequest&
     if (request.state) {
         if (auto bound = statement.value().bind_int64(bind_index++,
                                                       static_cast<std::int64_t>(*request.state));
+            !bound) {
+            return base::Result<contracts::JobPage>::failure(bound.error());
+        }
+    }
+    if (request.from_utc_ms) {
+        if (auto bound = statement.value().bind_int64(
+                bind_index++, static_cast<std::int64_t>(*request.from_utc_ms));
+            !bound) {
+            return base::Result<contracts::JobPage>::failure(bound.error());
+        }
+    }
+    if (request.to_utc_ms) {
+        if (auto bound = statement.value().bind_int64(
+                bind_index++, static_cast<std::int64_t>(*request.to_utc_ms));
             !bound) {
             return base::Result<contracts::JobPage>::failure(bound.error());
         }
@@ -483,6 +507,62 @@ JobStore::mark_active_as_interrupted(const std::uint64_t interrupted_utc_ms,
     }
     if (auto bound =
             stmt.bind_int64(6, static_cast<std::int64_t>(contracts::ServiceJobState::kCancelling));
+        !bound) {
+        return base::Result<std::uint64_t>::failure(bound.error());
+    }
+    auto stepped = stmt.step();
+    if (!stepped) {
+        return base::Result<std::uint64_t>::failure(stepped.error());
+    }
+    return base::Result<std::uint64_t>::success(
+        static_cast<std::uint64_t>(sqlite3_changes(state_.db)));
+}
+
+base::Result<std::uint64_t>
+JobStore::purge_terminal_completed_before(const std::uint64_t completed_before_utc_ms,
+                                          const base::CancellationToken cancellation) {
+    if (auto active = check_unit_of_work_active(unit_of_work_active_); !active) {
+        return base::Result<std::uint64_t>::failure(active.error());
+    }
+    auto cancelled = check_cancelled(cancellation);
+    if (!cancelled) {
+        return base::Result<std::uint64_t>::failure(cancelled.error());
+    }
+    if (completed_before_utc_ms >
+        static_cast<std::uint64_t>((std::numeric_limits<std::int64_t>::max)())) {
+        return base::Result<std::uint64_t>::failure(
+            make_error(base::ErrorCode::kInvalidArgument, "purge cutoff timestamp is invalid"));
+    }
+    // Terminal only: succeeded/failed/cancelled/interrupted. Never delete active jobs.
+    auto statement = SqliteStatement::prepare(
+        state_.db,
+        "DELETE FROM jobs WHERE state IN (?, ?, ?, ?) AND completed_utc_ms IS NOT NULL "
+        "AND completed_utc_ms < ?");
+    if (!statement) {
+        return base::Result<std::uint64_t>::failure(statement.error());
+    }
+    auto& stmt = statement.value();
+    if (auto bound =
+            stmt.bind_int64(1, static_cast<std::int64_t>(contracts::ServiceJobState::kSucceeded));
+        !bound) {
+        return base::Result<std::uint64_t>::failure(bound.error());
+    }
+    if (auto bound =
+            stmt.bind_int64(2, static_cast<std::int64_t>(contracts::ServiceJobState::kFailed));
+        !bound) {
+        return base::Result<std::uint64_t>::failure(bound.error());
+    }
+    if (auto bound =
+            stmt.bind_int64(3, static_cast<std::int64_t>(contracts::ServiceJobState::kCancelled));
+        !bound) {
+        return base::Result<std::uint64_t>::failure(bound.error());
+    }
+    if (auto bound =
+            stmt.bind_int64(4, static_cast<std::int64_t>(contracts::ServiceJobState::kInterrupted));
+        !bound) {
+        return base::Result<std::uint64_t>::failure(bound.error());
+    }
+    if (auto bound = stmt.bind_int64(5, static_cast<std::int64_t>(completed_before_utc_ms));
         !bound) {
         return base::Result<std::uint64_t>::failure(bound.error());
     }

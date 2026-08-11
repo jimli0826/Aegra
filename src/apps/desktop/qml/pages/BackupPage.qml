@@ -1139,8 +1139,13 @@ Item {
                                 anchors.leftMargin: 10
                                 anchors.rightMargin: 10
                                 height: 1
-                                color: Theme.colorBorder
-                                opacity: 0.55
+                                gradient: Gradient {
+                                    orientation: Gradient.Horizontal
+                                    GradientStop { position: 0.00; color: "transparent" }
+                                    GradientStop { position: 0.15; color: Theme.colorBorder }
+                                    GradientStop { position: 0.85; color: Theme.colorBorder }
+                                    GradientStop { position: 1.00; color: "transparent" }
+                                }
                             }
 
                             // HoverHandler does not steal events from child controls (toggle / menu),
@@ -1508,8 +1513,8 @@ Item {
                                     Layout.fillHeight: true
                                     Rectangle {
                                         id: moreBtn
-                                        width: 28
-                                        height: 28
+                                        width: 32
+                                        height: 32
                                         radius: 8
                                         anchors.centerIn: parent
                                         color: (moreHover.containsMouse || scheduleMenu.visible)
@@ -1519,8 +1524,9 @@ Item {
                                         Text {
                                             anchors.centerIn: parent
                                             text: "\u22EE"
-                                            color: Theme.colorTextGrey
-                                            font.pixelSize: 15
+                                            color: (moreHover.containsMouse || scheduleMenu.visible)
+                                                   ? Theme.colorTextWhite : Theme.colorTextGrey
+                                            font.pixelSize: 20
                                             font.bold: true
                                             font.family: Theme.fontFamily
                                         }

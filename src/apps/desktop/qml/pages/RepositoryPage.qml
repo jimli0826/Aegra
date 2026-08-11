@@ -685,8 +685,13 @@ Item {
                             anchors.right: parent.right
                             anchors.bottom: parent.bottom
                             height: 1
-                            color: Theme.colorBorder
-                            opacity: 0.5
+                            gradient: Gradient {
+                                orientation: Gradient.Horizontal
+                                GradientStop { position: 0.00; color: "transparent" }
+                                GradientStop { position: 0.15; color: Theme.colorBorder }
+                                GradientStop { position: 0.85; color: Theme.colorBorder }
+                                GradientStop { position: 1.00; color: "transparent" }
+                            }
                         }
                     }
 

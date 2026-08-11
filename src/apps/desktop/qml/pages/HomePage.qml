@@ -719,10 +719,8 @@ Item {
                                 width: 136
                                 height: 32
                                 radius: 16
-                                color: bannerBtnMouse.containsMouse
-                                       ? (Theme.themeId === "dark" ? Theme.colorHover : "#F0FAF8")
-                                       : (Theme.themeId === "dark" ? Theme.colorCard : "#ffffff")
-                                border.width: Theme.themeId === "dark" ? 1 : 0
+                                color: bannerBtnMouse.containsMouse ? Theme.colorHover : Theme.colorCard
+                                border.width: 1
                                 border.color: Theme.colorBorder
                                 Behavior on color { ColorAnimation { duration: 150 } }
 

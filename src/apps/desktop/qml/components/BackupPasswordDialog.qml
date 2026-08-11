@@ -22,8 +22,12 @@ Popup {
     signal cancelled()
 
     background: Rectangle {
-        color: Theme.colorPopup
-        radius: 8
+        gradient: Gradient {
+            orientation: Gradient.Vertical
+            GradientStop { position: 0.0; color: Theme.colorCard }
+            GradientStop { position: 1.0; color: Theme.colorCardEnd }
+        }
+        radius: 12
         border.width: 1
         border.color: Theme.colorBorder
     }

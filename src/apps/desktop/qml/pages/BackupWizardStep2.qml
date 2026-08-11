@@ -416,7 +416,7 @@ Item {
                                                                minCombo.currentText)
                                 background: Rectangle {
                                     color: Theme.colorInput
-                                    radius: 4
+                                    radius: 8
                                     border.width: 1
                                     border.color: Theme.colorBorder
                                 }
@@ -447,7 +447,7 @@ Item {
                                     background: Rectangle {
                                         color: Theme.colorPopup
                                         border.color: Theme.colorBorder
-                                        radius: 4
+                                        radius: 8
                                     }
                                 }
                                 delegate: ItemDelegate {
@@ -491,7 +491,7 @@ Item {
                                                                minCombo.currentText)
                                 background: Rectangle {
                                     color: Theme.colorInput
-                                    radius: 4
+                                    radius: 8
                                     border.width: 1
                                     border.color: Theme.colorBorder
                                 }
@@ -522,7 +522,7 @@ Item {
                                     background: Rectangle {
                                         color: Theme.colorPopup
                                         border.color: Theme.colorBorder
-                                        radius: 4
+                                        radius: 8
                                     }
                                 }
                                 delegate: ItemDelegate {

@@ -31,7 +31,7 @@ QtObject {
     property color colorTableHeader: "#CBE0E3"
     property color colorTableRow: "#DBE9EA"
     property color colorTableAlt: "#D2E3E5"
-    property color colorPopup: "#ffffff"
+    property color colorPopup: "#EFF7F5"
     property color colorInput: "#ffffff"
     property color colorListItem: "#CCE0E2"
     property color colorListItemAlt: "#DBE9EA"
@@ -266,7 +266,7 @@ QtObject {
             colorTableHeader: "#CBE0E3",
             colorTableRow: "#DBE9EA",
             colorTableAlt: "#D2E3E5",
-            colorPopup: "#ffffff",
+            colorPopup: "#EFF7F5",
             colorInput: "#ffffff",
             colorListItem: "#CCE0E2",
             colorListItemAlt: "#DBE9EA",

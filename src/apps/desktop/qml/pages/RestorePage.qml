@@ -1789,7 +1789,7 @@ Item {
 
                     background: Rectangle {
                         color: Theme.colorInput
-                        radius: 4
+                        radius: 8
                         border.width: 1
                         border.color: Theme.colorBorder
                     }
@@ -1817,8 +1817,8 @@ Item {
                             ScrollIndicator.vertical: ScrollIndicator { }
                         }
                         background: Rectangle {
-                            color: Theme.colorCard
-                            radius: 4
+                            color: Theme.colorPopup
+                            radius: 8
                             border.width: 1
                             border.color: Theme.colorBorder
                         }
@@ -2164,7 +2164,7 @@ Item {
                     }
                     background: Rectangle {
                         color: Theme.colorInput
-                        radius: 4
+                        radius: 8
                         border.width: 1
                         border.color: Theme.colorBorder
                     }
@@ -2192,8 +2192,8 @@ Item {
                             ScrollIndicator.vertical: ScrollIndicator { }
                         }
                         background: Rectangle {
-                            color: Theme.colorCard
-                            radius: 4
+                            color: Theme.colorPopup
+                            radius: 8
                             border.width: 1
                             border.color: Theme.colorBorder
                         }
@@ -3761,11 +3761,9 @@ Item {
                         font.family: Theme.fontFamily
                         background: Rectangle {
                             color: Theme.colorInput
-                            radius: 4
+                            radius: 8
                             border.width: 1
-                            border.color: fileConflictCombo.activeFocus
-                                          || fileConflictCombo.popup.visible
-                                          ? Theme.colorAccentBlue : Theme.colorBorder
+                            border.color: Theme.colorBorder
                         }
                         indicator: ComboBoxIndicator { combo: fileConflictCombo }
                         contentItem: Text {
@@ -3793,8 +3791,8 @@ Item {
                                 ScrollIndicator.vertical: ScrollIndicator { }
                             }
                             background: Rectangle {
-                                color: Theme.colorCard
-                                radius: 4
+                                color: Theme.colorPopup
+                                radius: 8
                                 border.width: 1
                                 border.color: Theme.colorBorder
                             }

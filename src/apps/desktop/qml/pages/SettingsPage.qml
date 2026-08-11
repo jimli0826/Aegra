@@ -96,7 +96,7 @@ Item {
                     ComboBox {
                         id: languageCombo
                         Layout.preferredWidth: 280
-                        Layout.preferredHeight: 36
+                        Layout.preferredHeight: 34
                         model: localeController.availableLanguages
                         textRole: "label"
                         currentIndex: {
@@ -114,17 +114,17 @@ Item {
                         }
                         background: Rectangle {
                             color: Theme.colorInput
-                            radius: 6
+                            radius: 8
                             border.width: 1
-                            border.color: languageCombo.activeFocus || languageCombo.popup.visible
-                                          ? Theme.colorAccentBlue : Theme.colorBorder
+                            border.color: Theme.colorBorder
                         }
+                        indicator: ComboBoxIndicator { combo: languageCombo }
                         contentItem: Text {
                             leftPadding: 12
                             rightPadding: 24
                             text: languageCombo.displayText
                             color: Theme.colorTextWhite
-                            font.pixelSize: 14
+                            font.pixelSize: 13
                             font.family: Theme.fontFamily
                             verticalAlignment: Text.AlignVCenter
                             elide: Text.ElideRight
@@ -132,8 +132,8 @@ Item {
                         popup: Popup {
                             y: languageCombo.height + 2
                             width: languageCombo.width
-                            implicitHeight: contentItem.implicitHeight
-                            padding: 1
+                            padding: 4
+                            implicitHeight: Math.min(200, contentItem.implicitHeight + 8)
                             contentItem: ListView {
                                 clip: true
                                 implicitHeight: contentHeight
@@ -144,16 +144,17 @@ Item {
                             background: Rectangle {
                                 color: Theme.colorPopup
                                 border.color: Theme.colorBorder
-                                radius: 6
+                                radius: 8
                             }
                         }
                         delegate: ItemDelegate {
                             id: langItemDel
-                            width: languageCombo.width
+                            width: languageCombo.width - 8
                             height: 32
                             hoverEnabled: true
                             highlighted: languageCombo.highlightedIndex === index
                             contentItem: Text {
+                                leftPadding: 10
                                 text: modelData.label
                                 color: Theme.colorTextWhite
                                 font.pixelSize: 13
@@ -162,7 +163,7 @@ Item {
                                 verticalAlignment: Text.AlignVCenter
                             }
                             background: Rectangle {
-                                radius: 4
+                                radius: 6
                                 color: (langItemDel.hovered || langItemDel.highlighted) ? Theme.colorHover : "transparent"
                             }
                         }
@@ -335,7 +336,7 @@ Item {
                     ComboBox {
                         id: retentionCombo
                         Layout.preferredWidth: 280
-                        Layout.preferredHeight: 36
+                        Layout.preferredHeight: 34
                         enabled: typeof serviceClient !== "undefined" && serviceClient
                                  && serviceClient.serviceSettingsAvailable
                                  && !serviceClient.serviceSettingsLoading
@@ -375,17 +376,17 @@ Item {
                         }
                         background: Rectangle {
                             color: Theme.colorInput
-                            radius: 6
+                            radius: 8
                             border.width: 1
-                            border.color: retentionCombo.activeFocus || retentionCombo.popup.visible
-                                          ? Theme.colorAccentBlue : Theme.colorBorder
+                            border.color: Theme.colorBorder
                         }
+                        indicator: ComboBoxIndicator { combo: retentionCombo }
                         contentItem: Text {
                             leftPadding: 12
                             rightPadding: 24
                             text: retentionCombo.displayText
                             color: Theme.colorTextWhite
-                            font.pixelSize: 14
+                            font.pixelSize: 13
                             font.family: Theme.fontFamily
                             verticalAlignment: Text.AlignVCenter
                             elide: Text.ElideRight
@@ -393,8 +394,8 @@ Item {
                         popup: Popup {
                             y: retentionCombo.height + 2
                             width: retentionCombo.width
-                            implicitHeight: contentItem.implicitHeight
-                            padding: 1
+                            padding: 4
+                            implicitHeight: Math.min(200, contentItem.implicitHeight + 8)
                             contentItem: ListView {
                                 clip: true
                                 implicitHeight: contentHeight
@@ -405,16 +406,17 @@ Item {
                             background: Rectangle {
                                 color: Theme.colorPopup
                                 border.color: Theme.colorBorder
-                                radius: 6
+                                radius: 8
                             }
                         }
                         delegate: ItemDelegate {
                             id: retItemDel
-                            width: retentionCombo.width
+                            width: retentionCombo.width - 8
                             height: 32
                             hoverEnabled: true
                             highlighted: retentionCombo.highlightedIndex === index
                             contentItem: Text {
+                                leftPadding: 10
                                 text: modelData.label
                                 color: Theme.colorTextWhite
                                 font.pixelSize: 13
@@ -423,7 +425,7 @@ Item {
                                 verticalAlignment: Text.AlignVCenter
                             }
                             background: Rectangle {
-                                radius: 4
+                                radius: 6
                                 color: (retItemDel.hovered || retItemDel.highlighted) ? Theme.colorHover : "transparent"
                             }
                         }

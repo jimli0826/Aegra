@@ -783,8 +783,13 @@ Item {
                                 anchors.leftMargin: 10
                                 anchors.rightMargin: 10
                                 height: 1
-                                color: Theme.colorBorder
-                                opacity: 0.55
+                                gradient: Gradient {
+                                    orientation: Gradient.Horizontal
+                                    GradientStop { position: 0.00; color: "transparent" }
+                                    GradientStop { position: 0.15; color: Theme.colorBorder }
+                                    GradientStop { position: 0.85; color: Theme.colorBorder }
+                                    GradientStop { position: 1.00; color: "transparent" }
+                                }
                             }
 
                             HoverHandler {
@@ -957,8 +962,13 @@ Item {
                         anchors.left: parent.left
                         anchors.right: parent.right
                         height: 1
-                        color: Theme.colorBorder
-                        opacity: 0.55
+                        gradient: Gradient {
+                            orientation: Gradient.Horizontal
+                            GradientStop { position: 0.00; color: "transparent" }
+                            GradientStop { position: 0.15; color: Theme.colorBorder }
+                            GradientStop { position: 0.85; color: Theme.colorBorder }
+                            GradientStop { position: 1.00; color: "transparent" }
+                        }
                     }
 
                     RowLayout {

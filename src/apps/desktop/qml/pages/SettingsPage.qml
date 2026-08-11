@@ -144,8 +144,11 @@ Item {
                             }
                         }
                         delegate: ItemDelegate {
+                            id: langItemDel
                             width: languageCombo.width
                             height: 32
+                            hoverEnabled: true
+                            highlighted: languageCombo.highlightedIndex === index
                             contentItem: Text {
                                 text: modelData.label
                                 color: Theme.colorTextWhite
@@ -155,7 +158,8 @@ Item {
                                 verticalAlignment: Text.AlignVCenter
                             }
                             background: Rectangle {
-                                color: parent.highlighted ? Theme.colorHover : "transparent"
+                                radius: 4
+                                color: (langItemDel.hovered || langItemDel.highlighted) ? Theme.colorHover : "transparent"
                             }
                         }
                     }
@@ -393,8 +397,11 @@ Item {
                             }
                         }
                         delegate: ItemDelegate {
+                            id: retItemDel
                             width: retentionCombo.width
                             height: 32
+                            hoverEnabled: true
+                            highlighted: retentionCombo.highlightedIndex === index
                             contentItem: Text {
                                 text: modelData.label
                                 color: Theme.colorTextWhite
@@ -404,7 +411,8 @@ Item {
                                 verticalAlignment: Text.AlignVCenter
                             }
                             background: Rectangle {
-                                color: parent.highlighted ? Theme.colorHover : "transparent"
+                                radius: 4
+                                color: (retItemDel.hovered || retItemDel.highlighted) ? Theme.colorHover : "transparent"
                             }
                         }
                     }

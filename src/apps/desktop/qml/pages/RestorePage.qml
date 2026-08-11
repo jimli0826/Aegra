@@ -1827,8 +1827,10 @@ Item {
                         }
                     }
                     delegate: ItemDelegate {
+                        id: mapItemDel
                         width: mapCombo.width
                         height: 28
+                        hoverEnabled: true
                         enabled: modelData && modelData.enabled !== false
                         highlighted: mapCombo.highlightedIndex === index
                         contentItem: Text {
@@ -1840,8 +1842,8 @@ Item {
                             verticalAlignment: Text.AlignVCenter
                         }
                         background: Rectangle {
-                            color: parent.highlighted ? Theme.colorHover
-                                                      : "transparent"
+                            radius: 4
+                            color: (mapItemDel.hovered || mapItemDel.highlighted) ? Theme.colorHover : "transparent"
                         }
                     }
                 }
@@ -2200,8 +2202,10 @@ Item {
                         }
                     }
                     delegate: ItemDelegate {
+                        id: volMapItemDel
                         width: volMapCombo.width
                         height: 28
+                        hoverEnabled: true
                         enabled: modelData && modelData.enabled !== false
                         highlighted: volMapCombo.highlightedIndex === index
                         contentItem: Text {
@@ -2213,7 +2217,8 @@ Item {
                             verticalAlignment: Text.AlignVCenter
                         }
                         background: Rectangle {
-                            color: parent.highlighted ? Theme.colorHover : "transparent"
+                            radius: 4
+                            color: (volMapItemDel.hovered || volMapItemDel.highlighted) ? Theme.colorHover : "transparent"
                         }
                     }
                 }
@@ -2297,7 +2302,7 @@ Item {
                     width: restoreStepBar.lineSpan
                     height: 3
                     radius: 1.5
-                    color: Theme.colorBorder
+                    color: Theme.colorProgressTrack
                 }
                 Rectangle {
                     x: restoreStepBar.lineLeft
@@ -2448,8 +2453,8 @@ Item {
                         implicitHeight: 300
                         radius: 20
                         color: diskTypeMouse.containsMouse ? Theme.colorHover : Theme.colorCard
-                        border.width: 2
-                        border.color: diskTypeMouse.containsMouse ? Theme.colorAccentBlue : "#ffffff"
+                        border.width: 1
+                        border.color: diskTypeMouse.containsMouse ? Theme.colorAccentBlue : Theme.colorBorder
                         opacity: 0
                         scale: 0.88
                         transformOrigin: Item.Center
@@ -2526,8 +2531,8 @@ Item {
                         implicitHeight: 300
                         radius: 20
                         color: volumeTypeMouse.containsMouse ? Theme.colorHover : Theme.colorCard
-                        border.width: 2
-                        border.color: volumeTypeMouse.containsMouse ? "#6366F1" : "#ffffff"
+                        border.width: 1
+                        border.color: volumeTypeMouse.containsMouse ? "#6366F1" : Theme.colorBorder
                         opacity: 0
                         scale: 0.88
                         transformOrigin: Item.Center
@@ -2604,8 +2609,8 @@ Item {
                         implicitHeight: 300
                         radius: 20
                         color: filesTypeMouse.containsMouse ? Theme.colorHover : Theme.colorCard
-                        border.width: 2
-                        border.color: filesTypeMouse.containsMouse ? Theme.colorGreen : "#ffffff"
+                        border.width: 1
+                        border.color: filesTypeMouse.containsMouse ? Theme.colorGreen : Theme.colorBorder
                         opacity: 0
                         scale: 0.88
                         transformOrigin: Item.Center
@@ -3708,8 +3713,10 @@ Item {
                             }
                         }
                         delegate: ItemDelegate {
+                            id: conflictItemDel
                             width: fileConflictCombo.width
                             height: 30
+                            hoverEnabled: true
                             highlighted: fileConflictCombo.highlightedIndex === index
                             contentItem: Text {
                                 text: modelData
@@ -3720,7 +3727,8 @@ Item {
                                 verticalAlignment: Text.AlignVCenter
                             }
                             background: Rectangle {
-                                color: parent.highlighted ? Theme.colorHover : "transparent"
+                                radius: 4
+                                color: (conflictItemDel.hovered || conflictItemDel.highlighted) ? Theme.colorHover : "transparent"
                             }
                         }
                     }

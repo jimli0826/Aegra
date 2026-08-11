@@ -1783,7 +1783,7 @@ Item {
                             width: stepBar.lineSpan
                             height: 3
                             radius: 1.5
-                            color: Theme.colorBorder
+                            color: Theme.colorProgressTrack
                         }
                         // Progress fill between step centers
                         Rectangle {
@@ -1925,8 +1925,8 @@ Item {
                                 implicitHeight: 300
                                 radius: 20
                                 color: diskCardMouse.containsMouse ? Theme.colorHover : Theme.colorCard
-                                border.width: 2
-                                border.color: diskCardMouse.containsMouse ? Theme.colorAccentBlue : "#ffffff"
+                                border.width: 1
+                                border.color: diskCardMouse.containsMouse ? Theme.colorAccentBlue : Theme.colorBorder
                                 Behavior on color { ColorAnimation { duration: 150 } }
 
                                 MouseArea {
@@ -2003,8 +2003,8 @@ Item {
                                 implicitHeight: 300
                                 radius: 20
                                 color: filesCardMouse.containsMouse ? Theme.colorHover : Theme.colorCard
-                                border.width: 2
-                                border.color: filesCardMouse.containsMouse ? Theme.colorGreen : "#ffffff"
+                                border.width: 1
+                                border.color: filesCardMouse.containsMouse ? Theme.colorGreen : Theme.colorBorder
                                 Behavior on color { ColorAnimation { duration: 150 } }
 
                                 MouseArea {

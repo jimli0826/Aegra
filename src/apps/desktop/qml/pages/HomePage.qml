@@ -120,11 +120,11 @@ Item {
                                     width: 130
                                     height: 24
                                     radius: 12
-                                    color: "#e2f2ef"
+                                    color: Theme.colorHover
                                     Text {
                                         anchors.centerIn: parent
                                         text: "🛡️ 系统与数据卷增量"
-                                        color: "#2A7982"
+                                        color: Theme.colorAccentBlue
                                         font.pixelSize: 11
                                         font.bold: true
                                         font.family: Theme.fontFamily
@@ -132,7 +132,7 @@ Item {
                                 }
                                 Text {
                                     text: "今晚 21:00 · 目标: Local Vault"
-                                    color: "#7A9190"
+                                    color: Theme.colorTextGrey
                                     font.pixelSize: 12
                                     font.family: Theme.fontFamily
                                     Layout.alignment: Qt.AlignVCenter
@@ -152,12 +152,14 @@ Item {
                                     width: 170
                                     height: 52
                                     radius: 14
-                                    color: "#F7FAF9"
+                                    color: Theme.colorInput
+                                    border.width: 1
+                                    border.color: Theme.colorBorder
                                     Row {
                                         anchors.centerIn: parent
                                         spacing: 10
                                         Text { text: "💾"; font.pixelSize: 20; anchors.verticalCenter: parent.verticalCenter }
-                                        Text { text: "C: & D: 盘"; color: "#111111"; font.pixelSize: 14; font.bold: true; font.family: Theme.fontFamily; anchors.verticalCenter: parent.verticalCenter }
+                                        Text { text: "C: & D: 盘"; color: Theme.colorTextWhite; font.pixelSize: 14; font.bold: true; font.family: Theme.fontFamily; anchors.verticalCenter: parent.verticalCenter }
                                     }
                                 }
 
@@ -187,12 +189,14 @@ Item {
                                     width: 170
                                     height: 52
                                     radius: 14
-                                    color: "#F7FAF9"
+                                    color: Theme.colorInput
+                                    border.width: 1
+                                    border.color: Theme.colorBorder
                                     Row {
                                         anchors.centerIn: parent
                                         spacing: 10
                                         Text { text: "🗄️"; font.pixelSize: 20; anchors.verticalCenter: parent.verticalCenter }
-                                        Text { text: "Local Vault (E:)"; color: "#111111"; font.pixelSize: 14; font.bold: true; font.family: Theme.fontFamily; anchors.verticalCenter: parent.verticalCenter }
+                                        Text { text: "Local Vault (E:)"; color: Theme.colorTextWhite; font.pixelSize: 14; font.bold: true; font.family: Theme.fontFamily; anchors.verticalCenter: parent.verticalCenter }
                                     }
                                 }
 
@@ -230,14 +234,14 @@ Item {
                             RowLayout {
                                 Layout.fillWidth: true
                                 height: 26
-                                Text { text: "#"; color: "#7A9190"; font.pixelSize: 11; font.bold: true; Layout.preferredWidth: 24 }
-                                Text { text: "VAULT REPOSITORY"; color: "#7A9190"; font.pixelSize: 11; font.bold: true; Layout.fillWidth: true }
-                                Text { text: "MP"; color: "#7A9190"; font.pixelSize: 11; font.bold: true; Layout.preferredWidth: 32; horizontalAlignment: Text.AlignHCenter }
-                                Text { text: "W"; color: "#7A9190"; font.pixelSize: 11; font.bold: true; Layout.preferredWidth: 32; horizontalAlignment: Text.AlignHCenter }
-                                Text { text: "D"; color: "#7A9190"; font.pixelSize: 11; font.bold: true; Layout.preferredWidth: 32; horizontalAlignment: Text.AlignHCenter }
-                                Text { text: "L"; color: "#7A9190"; font.pixelSize: 11; font.bold: true; Layout.preferredWidth: 32; horizontalAlignment: Text.AlignHCenter }
-                                Text { text: "G"; color: "#7A9190"; font.pixelSize: 11; font.bold: true; Layout.preferredWidth: 48; horizontalAlignment: Text.AlignHCenter }
-                                Text { text: "PTS"; color: "#7A9190"; font.pixelSize: 11; font.bold: true; Layout.preferredWidth: 35; horizontalAlignment: Text.AlignRight }
+                                Text { text: "#"; color: Theme.colorTextGrey; font.pixelSize: 11; font.bold: true; Layout.preferredWidth: 24 }
+                                Text { text: "VAULT REPOSITORY"; color: Theme.colorTextGrey; font.pixelSize: 11; font.bold: true; Layout.fillWidth: true }
+                                Text { text: "MP"; color: Theme.colorTextGrey; font.pixelSize: 11; font.bold: true; Layout.preferredWidth: 32; horizontalAlignment: Text.AlignHCenter }
+                                Text { text: "W"; color: Theme.colorTextGrey; font.pixelSize: 11; font.bold: true; Layout.preferredWidth: 32; horizontalAlignment: Text.AlignHCenter }
+                                Text { text: "D"; color: Theme.colorTextGrey; font.pixelSize: 11; font.bold: true; Layout.preferredWidth: 32; horizontalAlignment: Text.AlignHCenter }
+                                Text { text: "L"; color: Theme.colorTextGrey; font.pixelSize: 11; font.bold: true; Layout.preferredWidth: 32; horizontalAlignment: Text.AlignHCenter }
+                                Text { text: "G"; color: Theme.colorTextGrey; font.pixelSize: 11; font.bold: true; Layout.preferredWidth: 48; horizontalAlignment: Text.AlignHCenter }
+                                Text { text: "PTS"; color: Theme.colorTextGrey; font.pixelSize: 11; font.bold: true; Layout.preferredWidth: 35; horizontalAlignment: Text.AlignRight }
                             }
 
                             // Table Rows matching CoachPro mockup with staggered entrance
@@ -249,7 +253,7 @@ Item {
                                     Layout.fillWidth: true
                                     height: 48
                                     radius: 10
-                                    color: rowMouse.containsMouse ? "#F7FAF9" : "transparent"
+                                    color: rowMouse.containsMouse ? Theme.colorHover : "transparent"
                                     Behavior on color { ColorAnimation { duration: 150 } }
 
                                     opacity: root.animStage2 ? 1 : 0
@@ -268,7 +272,7 @@ Item {
                                         anchors.leftMargin: 4
                                         anchors.rightMargin: 4
 
-                                        Text { text: modelData.rank; color: "#7A9190"; font.pixelSize: 13; font.bold: true; Layout.preferredWidth: 24 }
+                                        Text { text: modelData.rank; color: Theme.colorTextGrey; font.pixelSize: 13; font.bold: true; Layout.preferredWidth: 24 }
 
                                         Row {
                                             Layout.fillWidth: true
@@ -277,20 +281,20 @@ Item {
                                                 width: 26
                                                 height: 26
                                                 radius: 8
-                                                color: "#ffffff"
+                                                color: Theme.colorHover
                                                 border.width: 1
-                                                border.color: "#ebf3f2"
+                                                border.color: Theme.colorBorder
                                                 anchors.verticalCenter: parent.verticalCenter
                                                 
                                                 Rectangle {
                                                     anchors.centerIn: parent
                                                     width: 10; height: 10; radius: 5
-                                                    color: modelData.iconType === "juventus" ? "#111111" : (modelData.iconType === "atalanta" ? "#2A7982" : (modelData.iconType === "inter" ? "#1E5C64" : (modelData.iconType === "napoli" ? "#0080FF" : (modelData.iconType === "milan" ? "#EE6476" : "#FF8F00"))))
+                                                    color: modelData.iconType === "juventus" ? Theme.colorTextWhite : (modelData.iconType === "atalanta" ? Theme.colorMenuActive : (modelData.iconType === "inter" ? Theme.colorMenuActiveEnd : (modelData.iconType === "napoli" ? "#0080FF" : (modelData.iconType === "milan" ? Theme.colorAccentRed : "#FF8F00"))))
                                                 }
                                             }
                                             Text {
                                                 text: modelData.name
-                                                color: "#111111"
+                                                color: Theme.colorTextWhite
                                                 font.pixelSize: 13
                                                 font.bold: true
                                                 font.family: Theme.fontFamily
@@ -298,12 +302,12 @@ Item {
                                             }
                                         }
 
-                                        Text { text: modelData.mp; color: "#7A9190"; font.pixelSize: 12; font.bold: true; Layout.preferredWidth: 32; horizontalAlignment: Text.AlignHCenter }
-                                        Text { text: modelData.w; color: "#7A9190"; font.pixelSize: 12; font.bold: true; Layout.preferredWidth: 32; horizontalAlignment: Text.AlignHCenter }
-                                        Text { text: modelData.d; color: "#7A9190"; font.pixelSize: 12; font.bold: true; Layout.preferredWidth: 32; horizontalAlignment: Text.AlignHCenter }
-                                        Text { text: modelData.l; color: "#7A9190"; font.pixelSize: 12; font.bold: true; Layout.preferredWidth: 32; horizontalAlignment: Text.AlignHCenter }
-                                        Text { text: modelData.g; color: "#7A9190"; font.pixelSize: 12; font.bold: true; Layout.preferredWidth: 48; horizontalAlignment: Text.AlignHCenter }
-                                        Text { text: modelData.pts; color: "#111111"; font.pixelSize: 14; font.bold: true; Layout.preferredWidth: 35; horizontalAlignment: Text.AlignRight }
+                                        Text { text: modelData.mp; color: Theme.colorTextGrey; font.pixelSize: 12; font.bold: true; Layout.preferredWidth: 32; horizontalAlignment: Text.AlignHCenter }
+                                        Text { text: modelData.w; color: Theme.colorTextGrey; font.pixelSize: 12; font.bold: true; Layout.preferredWidth: 32; horizontalAlignment: Text.AlignHCenter }
+                                        Text { text: modelData.d; color: Theme.colorTextGrey; font.pixelSize: 12; font.bold: true; Layout.preferredWidth: 32; horizontalAlignment: Text.AlignHCenter }
+                                        Text { text: modelData.l; color: Theme.colorTextGrey; font.pixelSize: 12; font.bold: true; Layout.preferredWidth: 32; horizontalAlignment: Text.AlignHCenter }
+                                        Text { text: modelData.g; color: Theme.colorTextGrey; font.pixelSize: 12; font.bold: true; Layout.preferredWidth: 48; horizontalAlignment: Text.AlignHCenter }
+                                        Text { text: modelData.pts; color: Theme.colorTextWhite; font.pixelSize: 14; font.bold: true; Layout.preferredWidth: 35; horizontalAlignment: Text.AlignRight }
                                     }
                                 }
                             }
@@ -351,7 +355,7 @@ Item {
                                 Layout.fillWidth: true
                                 height: 10
                                 radius: 5
-                                color: "#EBF3F2"
+                                color: Theme.colorProgressTrack
                                 clip: true
 
                                 Row {
@@ -359,19 +363,19 @@ Item {
                                     Rectangle {
                                         width: root.animStage3 ? parent.width * 0.72 : 0
                                         height: parent.height
-                                        color: "#2A7982"
+                                        color: Theme.colorMenuActive
                                         Behavior on width { NumberAnimation { duration: 900; easing.type: Easing.OutBack; easing.overshoot: 1.15 } }
                                     }
                                     Rectangle {
                                         width: root.animStage3 ? parent.width * 0.18 : 0
                                         height: parent.height
-                                        color: "#84CBB8"
+                                        color: Theme.colorGreen
                                         Behavior on width { NumberAnimation { duration: 900; easing.type: Easing.OutBack; easing.overshoot: 1.15 } }
                                     }
                                     Rectangle {
                                         width: root.animStage3 ? parent.width * 0.10 : 0
                                         height: parent.height
-                                        color: "#EE6877"
+                                        color: Theme.colorAccentRed
                                         Behavior on width { NumberAnimation { duration: 900; easing.type: Easing.OutBack; easing.overshoot: 1.15 } }
                                     }
                                 }
@@ -384,26 +388,26 @@ Item {
                                 ColumnLayout {
                                     Layout.fillWidth: true
                                     spacing: 4
-                                    Text { text: "TOTAL"; color: "#7A9190"; font.pixelSize: 10; font.bold: true; horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignHCenter }
-                                    Text { text: "28"; color: "#111111"; font.pixelSize: 24; font.bold: true; font.family: Theme.fontFamily; horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignHCenter }
+                                    Text { text: "TOTAL"; color: Theme.colorTextDim; font.pixelSize: 10; font.bold: true; horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignHCenter }
+                                    Text { text: "28"; color: Theme.colorTextWhite; font.pixelSize: 24; font.bold: true; font.family: Theme.fontFamily; horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignHCenter }
                                 }
                                 ColumnLayout {
                                     Layout.fillWidth: true
                                     spacing: 4
-                                    Text { text: "SUCCESS"; color: "#7A9190"; font.pixelSize: 10; font.bold: true; horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignHCenter }
-                                    Text { text: "25"; color: "#111111"; font.pixelSize: 24; font.bold: true; font.family: Theme.fontFamily; horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignHCenter }
+                                    Text { text: "SUCCESS"; color: Theme.colorTextDim; font.pixelSize: 10; font.bold: true; horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignHCenter }
+                                    Text { text: "25"; color: Theme.colorTextWhite; font.pixelSize: 24; font.bold: true; font.family: Theme.fontFamily; horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignHCenter }
                                 }
                                 ColumnLayout {
                                     Layout.fillWidth: true
                                     spacing: 4
-                                    Text { text: "RUNNING"; color: "#7A9190"; font.pixelSize: 10; font.bold: true; horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignHCenter }
-                                    Text { text: "2"; color: "#111111"; font.pixelSize: 24; font.bold: true; font.family: Theme.fontFamily; horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignHCenter }
+                                    Text { text: "RUNNING"; color: Theme.colorTextDim; font.pixelSize: 10; font.bold: true; horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignHCenter }
+                                    Text { text: "2"; color: Theme.colorTextWhite; font.pixelSize: 24; font.bold: true; font.family: Theme.fontFamily; horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignHCenter }
                                 }
                                 ColumnLayout {
                                     Layout.fillWidth: true
                                     spacing: 4
-                                    Text { text: "WARNING"; color: "#7A9190"; font.pixelSize: 10; font.bold: true; horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignHCenter }
-                                    Text { text: "1"; color: "#111111"; font.pixelSize: 24; font.bold: true; font.family: Theme.fontFamily; horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignHCenter }
+                                    Text { text: "WARNING"; color: Theme.colorTextDim; font.pixelSize: 10; font.bold: true; horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignHCenter }
+                                    Text { text: "1"; color: Theme.colorTextWhite; font.pixelSize: 24; font.bold: true; font.family: Theme.fontFamily; horizontalAlignment: Text.AlignHCenter; Layout.alignment: Qt.AlignHCenter }
                                 }
                             }
                         }
@@ -470,8 +474,8 @@ Item {
 
                                 ColumnLayout {
                                     spacing: 2
-                                    Text { text: "已保护数据量"; color: "#7A9190"; font.pixelSize: 10; font.bold: true }
-                                    Text { text: "1.84 TB"; color: "#111111"; font.pixelSize: 20; font.bold: true; font.family: Theme.fontFamily }
+                                    Text { text: "已保护数据量"; color: Theme.colorTextGrey; font.pixelSize: 10; font.bold: true }
+                                    Text { text: "1.84 TB"; color: Theme.colorTextWhite; font.pixelSize: 20; font.bold: true; font.family: Theme.fontFamily }
                                 }
                             }
                         }
@@ -530,8 +534,8 @@ Item {
 
                                 ColumnLayout {
                                     spacing: 2
-                                    Text { text: "存储总占用"; color: "#7A9190"; font.pixelSize: 10; font.bold: true }
-                                    Text { text: "690 GB"; color: "#111111"; font.pixelSize: 20; font.bold: true; font.family: Theme.fontFamily }
+                                    Text { text: "存储总占用"; color: Theme.colorTextGrey; font.pixelSize: 10; font.bold: true }
+                                    Text { text: "690 GB"; color: Theme.colorTextWhite; font.pixelSize: 20; font.bold: true; font.family: Theme.fontFamily }
                                 }
                             }
                         }
@@ -590,8 +594,8 @@ Item {
 
                                 ColumnLayout {
                                     spacing: 2
-                                    Text { text: "重删与压缩率"; color: "#7A9190"; font.pixelSize: 10; font.bold: true }
-                                    Text { text: "2.67 : 1"; color: "#111111"; font.pixelSize: 20; font.bold: true; font.family: Theme.fontFamily }
+                                    Text { text: "重删与压缩率"; color: Theme.colorTextGrey; font.pixelSize: 10; font.bold: true }
+                                    Text { text: "2.67 : 1"; color: Theme.colorTextWhite; font.pixelSize: 20; font.bold: true; font.family: Theme.fontFamily }
                                 }
                             }
                         }
@@ -650,8 +654,8 @@ Item {
 
                                 ColumnLayout {
                                     spacing: 2
-                                    Text { text: "平均传输速度"; color: "#7A9190"; font.pixelSize: 10; font.bold: true }
-                                    Text { text: "248 MB/s"; color: "#111111"; font.pixelSize: 20; font.bold: true; font.family: Theme.fontFamily }
+                                    Text { text: "平均传输速度"; color: Theme.colorTextGrey; font.pixelSize: 10; font.bold: true }
+                                    Text { text: "248 MB/s"; color: Theme.colorTextWhite; font.pixelSize: 20; font.bold: true; font.family: Theme.fontFamily }
                                 }
                             }
                         }
@@ -701,13 +705,17 @@ Item {
                                 width: 136
                                 height: 32
                                 radius: 16
-                                color: bannerBtnMouse.containsMouse ? "#F0FAF8" : "#ffffff"
+                                color: bannerBtnMouse.containsMouse
+                                       ? (Theme.themeId === "dark" ? Theme.colorHover : "#F0FAF8")
+                                       : (Theme.themeId === "dark" ? Theme.colorCard : "#ffffff")
+                                border.width: Theme.themeId === "dark" ? 1 : 0
+                                border.color: Theme.colorBorder
                                 Behavior on color { ColorAnimation { duration: 150 } }
 
                                 Text {
                                     anchors.centerIn: parent
                                     text: "前往新建备份计划"
-                                    color: Theme.colorMenuActiveEnd
+                                    color: Theme.themeId === "dark" ? Theme.colorTextWhite : Theme.colorMenuActiveEnd
                                     font.pixelSize: 11
                                     font.bold: true
                                     font.family: Theme.fontFamily

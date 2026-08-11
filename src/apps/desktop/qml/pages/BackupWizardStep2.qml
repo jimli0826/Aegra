@@ -451,8 +451,11 @@ Item {
                                     }
                                 }
                                 delegate: ItemDelegate {
+                                    id: hourItemDel
                                     width: hourCombo.width
                                     height: 30
+                                    hoverEnabled: true
+                                    highlighted: hourCombo.highlightedIndex === index
                                     contentItem: Text {
                                         text: modelData
                                         color: Theme.colorTextWhite
@@ -462,8 +465,9 @@ Item {
                                         verticalAlignment: Text.AlignVCenter
                                     }
                                     background: Rectangle {
-                                        color: parent.highlighted ? Theme.colorAccentBlue
-                                                                  : "transparent"
+                                        radius: 4
+                                        color: (hourItemDel.hovered || hourItemDel.highlighted)
+                                               ? Theme.colorHover : "transparent"
                                     }
                                 }
                             }
@@ -522,8 +526,11 @@ Item {
                                     }
                                 }
                                 delegate: ItemDelegate {
+                                    id: minItemDel
                                     width: minCombo.width
                                     height: 30
+                                    hoverEnabled: true
+                                    highlighted: minCombo.highlightedIndex === index
                                     contentItem: Text {
                                         text: modelData
                                         color: Theme.colorTextWhite
@@ -533,8 +540,9 @@ Item {
                                         verticalAlignment: Text.AlignVCenter
                                     }
                                     background: Rectangle {
-                                        color: parent.highlighted ? Theme.colorAccentBlue
-                                                                  : "transparent"
+                                        radius: 4
+                                        color: (minItemDel.hovered || minItemDel.highlighted)
+                                               ? Theme.colorHover : "transparent"
                                     }
                                 }
                             }

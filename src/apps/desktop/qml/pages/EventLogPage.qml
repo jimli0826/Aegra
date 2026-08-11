@@ -290,7 +290,7 @@ Item {
                                 }
 
                                 var segs = [
-                                    { count: bCount, color: "#2A7982" },
+                                    { count: bCount, color: Theme.colorMenuActive },
                                     { count: rCount, color: "#3B82F6" },
                                     { count: vCount, color: "#8B5CF6" }
                                 ]
@@ -348,7 +348,7 @@ Item {
                         Row {
                             spacing: 6
                             Rectangle {
-                                width: 8; height: 8; radius: 4; color: "#2A7982"
+                                width: 8; height: 8; radius: 4; color: Theme.colorMenuActive
                                 anchors.verticalCenter: parent.verticalCenter
                             }
                             Text {
@@ -477,8 +477,11 @@ Item {
                             }
                         }
                         delegate: ItemDelegate {
+                            id: timeItemDel
                             width: timeCombo.width
                             height: 28
+                            hoverEnabled: true
+                            highlighted: timeCombo.highlightedIndex === index
                             contentItem: Text {
                                 text: modelData
                                 color: Theme.colorTextWhite
@@ -489,7 +492,7 @@ Item {
                             }
                             background: Rectangle {
                                 radius: 4
-                                color: parent.highlighted ? Theme.colorHover : "transparent"
+                                color: (timeItemDel.hovered || timeItemDel.highlighted) ? Theme.colorHover : "transparent"
                             }
                         }
                     }
@@ -547,8 +550,11 @@ Item {
                             }
                         }
                         delegate: ItemDelegate {
+                            id: typeItemDel
                             width: typeCombo.width
                             height: 28
+                            hoverEnabled: true
+                            highlighted: typeCombo.highlightedIndex === index
                             contentItem: Text {
                                 text: modelData
                                 color: Theme.colorTextWhite
@@ -559,7 +565,7 @@ Item {
                             }
                             background: Rectangle {
                                 radius: 4
-                                color: parent.highlighted ? Theme.colorHover : "transparent"
+                                color: (typeItemDel.hovered || typeItemDel.highlighted) ? Theme.colorHover : "transparent"
                             }
                         }
                     }
@@ -617,8 +623,11 @@ Item {
                             }
                         }
                         delegate: ItemDelegate {
+                            id: statusItemDel
                             width: statusCombo.width
                             height: 28
+                            hoverEnabled: true
+                            highlighted: statusCombo.highlightedIndex === index
                             contentItem: Text {
                                 text: modelData
                                 color: Theme.colorTextWhite
@@ -629,7 +638,7 @@ Item {
                             }
                             background: Rectangle {
                                 radius: 4
-                                color: parent.highlighted ? Theme.colorHover : "transparent"
+                                color: (statusItemDel.hovered || statusItemDel.highlighted) ? Theme.colorHover : "transparent"
                             }
                         }
                     }
@@ -835,7 +844,7 @@ Item {
                                                 radius: 5
                                                 color: {
                                                     var op = (logRow.operationText || "").toLowerCase()
-                                                    if (op.indexOf("backup") >= 0) return "#2A7982"
+                                                    if (op.indexOf("backup") >= 0) return Theme.colorMenuActive
                                                     if (op.indexOf("restore") >= 0) return "#3B82F6"
                                                     if (op.indexOf("verify") >= 0) return "#8B5CF6"
                                                     return "#10B981"

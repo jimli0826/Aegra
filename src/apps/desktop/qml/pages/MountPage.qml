@@ -1408,8 +1408,10 @@ Item {
                                 }
                             }
                             delegate: ItemDelegate {
+                                id: driveItemDel
                                 width: driveLetterCombo.width
                                 height: 30
+                                hoverEnabled: true
                                 highlighted: driveLetterCombo.highlightedIndex === index
                                 contentItem: Text {
                                     text: modelData.label || ""
@@ -1420,8 +1422,9 @@ Item {
                                     verticalAlignment: Text.AlignVCenter
                                 }
                                 background: Rectangle {
-                                    color: parent.highlighted
-                                           ? Theme.colorAccentBlue : "transparent"
+                                    radius: 4
+                                    color: (driveItemDel.hovered || driveItemDel.highlighted)
+                                           ? Theme.colorHover : "transparent"
                                 }
                             }
                         }

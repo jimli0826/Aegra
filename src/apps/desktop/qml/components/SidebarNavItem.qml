@@ -93,8 +93,8 @@ Item {
                 }
                 gradient: Gradient {
                     orientation: Gradient.Horizontal
-                    GradientStop { position: 0.0; color: nav.hovered ? "#328B96" : Theme.colorMenuActive }
-                    GradientStop { position: 1.0; color: nav.hovered ? "#246F78" : Theme.colorMenuActiveEnd }
+                    GradientStop { position: 0.0; color: nav.hovered ? Qt.lighter(Theme.colorMenuActive, 1.1) : Theme.colorMenuActive }
+                    GradientStop { position: 1.0; color: nav.hovered ? Qt.lighter(Theme.colorMenuActiveEnd, 1.1) : Theme.colorMenuActiveEnd }
                 }
             }
 

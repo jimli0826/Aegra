@@ -95,8 +95,8 @@ Rectangle {
                     radius: 10
                     anchors.verticalCenter: parent.verticalCenter
                     gradient: Gradient {
-                        GradientStop { position: 0.0; color: "#1a6b72" }
-                        GradientStop { position: 1.0; color: "#2a9aa3" }
+                        GradientStop { position: 0.0; color: Theme.colorMenuActive }
+                        GradientStop { position: 1.0; color: Theme.colorMenuActiveEnd }
                     }
                     Rectangle {
                         x: 8; y: 7; width: 16; height: 5; radius: 2

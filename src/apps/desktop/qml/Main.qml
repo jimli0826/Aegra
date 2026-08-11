@@ -118,7 +118,11 @@ Window {
         id: shell
         anchors.fill: parent
         radius: window.chromeRadius
-        color: Theme.colorBg
+        gradient: Gradient {
+            orientation: Gradient.Vertical
+            GradientStop { position: 0.0; color: Theme.colorBg }
+            GradientStop { position: 1.0; color: Theme.colorBgEnd }
+        }
         border.width: window.chromeRadius > 0 ? 1 : 0
         border.color: Theme.colorBorder
         clip: true

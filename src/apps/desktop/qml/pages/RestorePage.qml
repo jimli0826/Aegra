@@ -90,16 +90,15 @@ Item {
     property int panelCheckpointsEpoch: 0
     /// 0 = restore type; 1 = source & destination workspace; 2 = summary + progress.
     property int restoreStep: 0
-    /// "disk" | "volume" | "files" — fixed after type card selection (not a mid-page toggle).
+    /// "disk" | "volume" | "files" — fixed after type card selection.
     property string restoreMode: "disk"
     readonly property bool isVolumeMode: root.restoreMode === "volume"
     readonly property bool isFileMode: root.restoreMode === "files"
     readonly property bool onTypeStep: root.restoreStep === 0
     readonly property bool onWorkspaceStep: root.restoreStep === 1
     readonly property bool onSummaryStep: root.restoreStep === 2
-    /// Step labels for the progress header (aligned with Backup wizard).
+    /// Step labels for the progress bar (Source & destination + Summary only; type selection has stat cards instead).
     readonly property var restoreStepLabels: [
-        qsTrId("aegra.restore.wizard.step.type"),
         qsTrId("aegra.restore.wizard.step.source_dest"),
         qsTrId("aegra.restore.wizard.step.summary")
     ]
@@ -272,8 +271,7 @@ Item {
         return st && st.jobCount > 0 && st.allTerminal !== true
     }
 
-    /// One step back (Backup-aligned: simple decrement). Blocked only while restore runs
-    /// or after a successful restore (no Back — use Done).
+    /// One step back (Backup-aligned). Blocked while restore runs or after success.
     function stepBarBack() {
         if (root.restoreStep <= 0)
             return
@@ -284,7 +282,7 @@ Item {
             root.restoreStep = 1
             return
         }
-        // step 1 → type selection
+        // step 1 → type selection (step 0)
         root.goBackToTypeSelection()
     }
 
@@ -580,7 +578,6 @@ Item {
     onVisibleChanged: {
         if (!visible)
             return
-        // Re-enter Restore: show live summary if a restore job is running; else step 0.
         root.reconcileRestoreEntry(true)
         if (root.restoreStep === 0)
             root.playTypeCardsEntrance()
@@ -1075,7 +1072,7 @@ Item {
         root.restoreSessionErrorText = ""
         root.filePreflightPending = false
         if (root.restoreStep !== 2)
-            root.restoreStep = 2
+                root.restoreStep = 2
     }
 
     function startNextQueuedRestore() {
@@ -2234,30 +2231,132 @@ Item {
         anchors.bottomMargin: 16
         spacing: 12
 
-        // Header: back + 3-step progress bar (Backup-aligned; no page title / type badges)
+        // Header row A: stat cards — visible only on step 0
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 64
+            Layout.preferredHeight: root.restoreStep === 0 ? 80 : 0
+            visible: root.restoreStep === 0
+            spacing: 12
+
+            // Stat card: Volume Sets
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 72
+                radius: 14
+                gradient: Gradient {
+                    orientation: Gradient.Vertical
+                    GradientStop { position: 0.0; color: Theme.colorCard }
+                    GradientStop { position: 1.0; color: Theme.colorCardEnd }
+                }
+                border.width: 1
+                border.color: Theme.colorBorder
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 18
+                    anchors.rightMargin: 18
+                    spacing: 14
+
+                    Rectangle {
+                        width: 40; height: 40; radius: 12
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: "#3B82F6" }
+                            GradientStop { position: 1.0; color: "#2563EB" }
+                        }
+                        DiskIcon { anchors.centerIn: parent; size: 22; variant: "hdd" }
+                    }
+                    ColumnLayout {
+                        spacing: 2
+                        Layout.fillWidth: true
+                        Text {
+                            //% "Volume Sets"
+                            text: qsTrId("aegra.restore.stat.volume_sets")
+                            color: Theme.colorTextGrey
+                            font.pixelSize: 11
+                            font.family: Theme.fontFamily
+                        }
+                        Text {
+                            text: serviceClient.recoveryPoints
+                                  ? serviceClient.recoveryPoints.volumeSetCount.toString()
+                                  : "0"
+                            color: Theme.colorTextWhite
+                            font.pixelSize: 22; font.bold: true
+                            font.family: Theme.fontFamily
+                        }
+                    }
+                }
+            }
+
+            // Stat card: File Sets
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 72
+                radius: 14
+                gradient: Gradient {
+                    orientation: Gradient.Vertical
+                    GradientStop { position: 0.0; color: Theme.colorCard }
+                    GradientStop { position: 1.0; color: Theme.colorCardEnd }
+                }
+                border.width: 1
+                border.color: Theme.colorBorder
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 18
+                    anchors.rightMargin: 18
+                    spacing: 14
+
+                    Rectangle {
+                        width: 40; height: 40; radius: 12
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: "#10B981" }
+                            GradientStop { position: 1.0; color: "#059669" }
+                        }
+                        FolderIcon { anchors.centerIn: parent; size: 22 }
+                    }
+                    ColumnLayout {
+                        spacing: 2
+                        Layout.fillWidth: true
+                        Text {
+                            //% "File Sets"
+                            text: qsTrId("aegra.restore.stat.file_sets")
+                            color: Theme.colorTextGrey
+                            font.pixelSize: 11
+                            font.family: Theme.fontFamily
+                        }
+                        Text {
+                            text: serviceClient.recoveryPoints
+                                  ? serviceClient.recoveryPoints.fileSetCount.toString()
+                                  : "0"
+                            color: Theme.colorTextWhite
+                            font.pixelSize: 22; font.bold: true
+                            font.family: Theme.fontFamily
+                        }
+                    }
+                }
+            }
+        }
+
+        // Header row B: back button + step progress bar — visible on steps 1 and 2
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.preferredHeight: root.restoreStep > 0 ? 64 : 0
+            visible: root.restoreStep > 0
             spacing: 8
 
             Item {
                 Layout.preferredWidth: 40
                 Layout.preferredHeight: 40
                 Layout.alignment: Qt.AlignTop
-                // Keep above step content so the first press is never swallowed.
                 z: 20
 
-                // Hidden while restore runs, and after success (Done is the only exit).
-                readonly property bool backEnabled: root.restoreStep > 0
-                                                    && !root.restoreSessionRunning
+                readonly property bool backEnabled: !root.restoreSessionRunning
                                                     && !root.restoreProgressSucceeded
 
                 Rectangle {
                     anchors.top: parent.top
                     anchors.horizontalCenter: parent.horizontalCenter
-                    width: 32
-                    height: 32
-                    radius: 16
+                    width: 32; height: 32; radius: 16
                     opacity: parent.backEnabled ? 1 : 0
                     color: restoreBackMouse.containsMouse && parent.backEnabled
                            ? Theme.colorHover : "transparent"
@@ -2268,7 +2367,6 @@ Item {
                         color: Theme.colorTextGrey
                     }
                 }
-                // Full slot hit-target (not nested under opacity-gated Rectangle).
                 MouseArea {
                     id: restoreBackMouse
                     anchors.fill: parent
@@ -2290,31 +2388,24 @@ Item {
                 Layout.preferredHeight: 56
                 Layout.alignment: Qt.AlignVCenter
 
-                readonly property int stepCount: 3
+                readonly property int stepCount: 2
                 readonly property real slotW: width / stepCount
                 readonly property real lineY: 14
                 readonly property real lineLeft: slotW * 0.5
                 readonly property real lineSpan: slotW * (stepCount - 1)
 
                 Rectangle {
-                    x: restoreStepBar.lineLeft
-                    y: restoreStepBar.lineY
-                    width: restoreStepBar.lineSpan
-                    height: 3
-                    radius: 1.5
+                    x: restoreStepBar.lineLeft; y: restoreStepBar.lineY
+                    width: restoreStepBar.lineSpan; height: 3; radius: 1.5
                     color: Theme.colorProgressTrack
                 }
                 Rectangle {
-                    x: restoreStepBar.lineLeft
-                    y: restoreStepBar.lineY
+                    x: restoreStepBar.lineLeft; y: restoreStepBar.lineY
                     width: restoreStepBar.lineSpan
-                         * (root.restoreStep / Math.max(1, restoreStepBar.stepCount - 1))
-                    height: 3
-                    radius: 1.5
+                         * ((root.restoreStep - 1) / Math.max(1, restoreStepBar.stepCount - 1))
+                    height: 3; radius: 1.5
                     color: Theme.colorAccentBlue
-                    Behavior on width {
-                        NumberAnimation { duration: 280; easing.type: Easing.OutCubic }
-                    }
+                    Behavior on width { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
                 }
 
                 Repeater {
@@ -2325,39 +2416,27 @@ Item {
                         x: index * restoreStepBar.slotW
                         y: 0
 
-                        readonly property bool done: index < root.restoreStep
-                        readonly property bool current: index === root.restoreStep
+                        readonly property bool done: index < (root.restoreStep - 1)
+                        readonly property bool current: index === (root.restoreStep - 1)
 
                         Rectangle {
                             id: restoreStepDot
                             anchors.horizontalCenter: parent.horizontalCenter
-                            y: 2
-                            width: 26
-                            height: 26
-                            radius: 13
+                            y: 2; width: 26; height: 26; radius: 13
                             border.width: (parent.done || parent.current) ? 0 : 2
                             border.color: Theme.colorBorder
                             color: (parent.done || parent.current)
-                                   ? Theme.colorAccentBlue
-                                   : Theme.colorCard
-                            Behavior on color {
-                                ColorAnimation { duration: 200 }
-                            }
-
+                                   ? Theme.colorAccentBlue : Theme.colorCard
+                            Behavior on color { ColorAnimation { duration: 200 } }
                             Text {
                                 anchors.centerIn: parent
-                                text: parent.parent.done
-                                      ? "\u2713"
-                                      : ("" + (index + 1))
+                                text: parent.parent.done ? "\u2713" : ("" + (index + 1))
                                 color: (parent.parent.done || parent.parent.current)
-                                       ? "#ffffff"
-                                       : Theme.colorTextDim
+                                       ? "#ffffff" : Theme.colorTextDim
                                 font.pixelSize: parent.parent.done ? 12 : 11
-                                font.bold: true
-                                font.family: Theme.fontFamily
+                                font.bold: true; font.family: Theme.fontFamily
                             }
                         }
-
                         Text {
                             anchors.horizontalCenter: parent.horizontalCenter
                             anchors.top: restoreStepDot.bottom
@@ -2367,8 +2446,7 @@ Item {
                             elide: Text.ElideRight
                             text: root.restoreStepLabels[index] || ""
                             color: parent.current ? Theme.colorTextWhite
-                                   : (parent.done ? Theme.colorAccentBlue
-                                                  : Theme.colorTextDim)
+                                   : (parent.done ? Theme.colorAccentBlue : Theme.colorTextDim)
                             font.pixelSize: 11
                             font.bold: parent.current
                             font.family: Theme.fontFamily
@@ -2451,8 +2529,12 @@ Item {
                         Layout.preferredWidth: 280
                         Layout.maximumWidth: 340
                         implicitHeight: 300
-                        radius: 20
-                        color: diskTypeMouse.containsMouse ? Theme.colorHover : Theme.colorCard
+                        radius: Theme.radiusCard
+                        gradient: Gradient {
+                            orientation: Gradient.Vertical
+                            GradientStop { position: 0.0; color: Theme.colorCard }
+                            GradientStop { position: 1.0; color: Theme.colorCardEnd }
+                        }
                         border.width: 1
                         border.color: diskTypeMouse.containsMouse ? Theme.colorAccentBlue : Theme.colorBorder
                         opacity: 0
@@ -2462,7 +2544,6 @@ Item {
                             id: restoreTypeCardTrans1
                             y: 52
                         }
-                        Behavior on color { ColorAnimation { duration: 150 } }
                         MouseArea {
                             id: diskTypeMouse
                             anchors.fill: parent
@@ -2529,8 +2610,12 @@ Item {
                         Layout.preferredWidth: 280
                         Layout.maximumWidth: 340
                         implicitHeight: 300
-                        radius: 20
-                        color: volumeTypeMouse.containsMouse ? Theme.colorHover : Theme.colorCard
+                        radius: Theme.radiusCard
+                        gradient: Gradient {
+                            orientation: Gradient.Vertical
+                            GradientStop { position: 0.0; color: Theme.colorCard }
+                            GradientStop { position: 1.0; color: Theme.colorCardEnd }
+                        }
                         border.width: 1
                         border.color: volumeTypeMouse.containsMouse ? "#6366F1" : Theme.colorBorder
                         opacity: 0
@@ -2540,7 +2625,6 @@ Item {
                             id: restoreTypeCardTrans2
                             y: 52
                         }
-                        Behavior on color { ColorAnimation { duration: 150 } }
                         MouseArea {
                             id: volumeTypeMouse
                             anchors.fill: parent
@@ -2607,8 +2691,12 @@ Item {
                         Layout.preferredWidth: 280
                         Layout.maximumWidth: 340
                         implicitHeight: 300
-                        radius: 20
-                        color: filesTypeMouse.containsMouse ? Theme.colorHover : Theme.colorCard
+                        radius: Theme.radiusCard
+                        gradient: Gradient {
+                            orientation: Gradient.Vertical
+                            GradientStop { position: 0.0; color: Theme.colorCard }
+                            GradientStop { position: 1.0; color: Theme.colorCardEnd }
+                        }
                         border.width: 1
                         border.color: filesTypeMouse.containsMouse ? Theme.colorGreen : Theme.colorBorder
                         opacity: 0
@@ -2618,7 +2706,6 @@ Item {
                             id: restoreTypeCardTrans3
                             y: 52
                         }
-                        Behavior on color { ColorAnimation { duration: 150 } }
                         MouseArea {
                             id: filesTypeMouse
                             anchors.fill: parent

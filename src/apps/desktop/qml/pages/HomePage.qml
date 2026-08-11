@@ -672,6 +672,20 @@ Item {
                             GradientStop { position: 1.0; color: Theme.colorMenuActiveEnd }
                         }
 
+                        // Very light subtle bottom-only shadow
+                        Rectangle {
+                            z: -1
+                            anchors.fill: parent
+                            anchors.topMargin: 14
+                            anchors.bottomMargin: -4
+                            anchors.leftMargin: 8
+                            anchors.rightMargin: 8
+                            radius: parent.radius
+                            color: Theme.colorCardShadow
+                            opacity: 0.22
+                            visible: Theme.colorCardShadow.a > 0
+                        }
+
                         opacity: root.animStage5 ? 1 : 0
                         transform: Translate { y: root.animStage5 ? 0 : 36 }
                         scale: root.animStage5 ? 1.0 : 0.95

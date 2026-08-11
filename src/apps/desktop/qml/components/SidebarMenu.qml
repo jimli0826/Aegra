@@ -28,13 +28,41 @@ Rectangle {
     color: "transparent"
     clip: true
 
-    Rectangle {
+    // 2px blurred soft-edge divider line with vertical fade gradient
+    Item {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.right: parent.right
-        width: 1
-        color: Theme.colorBorder
-        opacity: 0.55
+        width: 2
+
+        // Soft outer feather blur with vertical gradient
+        Rectangle {
+            anchors.fill: parent
+            gradient: Gradient {
+                orientation: Gradient.Vertical
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 0.20; color: Theme.colorSidebarDivider }
+                GradientStop { position: 0.80; color: Theme.colorSidebarDivider }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+            opacity: 0.12
+        }
+
+        // Inner core line with vertical gradient
+        Rectangle {
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: 1
+            gradient: Gradient {
+                orientation: Gradient.Vertical
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 0.15; color: Theme.colorSidebarDivider }
+                GradientStop { position: 0.85; color: Theme.colorSidebarDivider }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+            opacity: 0.20
+        }
     }
 
     readonly property var menuItems: [
@@ -145,12 +173,41 @@ Rectangle {
         Item {
             Layout.fillWidth: true
             Layout.preferredHeight: 28
-            Rectangle {
+
+            // 2px blurred soft-edge horizontal divider with fade gradient
+            Item {
                 anchors.centerIn: parent
                 width: parent.width - (root.collapsed ? 4 : 16)
-                height: 1
-                color: Theme.colorBorder
-                opacity: 0.7
+                height: 2
+
+                // Soft outer feather blur with horizontal gradient
+                Rectangle {
+                    anchors.fill: parent
+                    gradient: Gradient {
+                        orientation: Gradient.Horizontal
+                        GradientStop { position: 0.0; color: "transparent" }
+                        GradientStop { position: 0.20; color: Theme.colorSidebarDivider }
+                        GradientStop { position: 0.80; color: Theme.colorSidebarDivider }
+                        GradientStop { position: 1.0; color: "transparent" }
+                    }
+                    opacity: 0.12
+                }
+
+                // Inner core line with horizontal gradient
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    height: 1
+                    gradient: Gradient {
+                        orientation: Gradient.Horizontal
+                        GradientStop { position: 0.0; color: "transparent" }
+                        GradientStop { position: 0.15; color: Theme.colorSidebarDivider }
+                        GradientStop { position: 0.85; color: Theme.colorSidebarDivider }
+                        GradientStop { position: 1.0; color: "transparent" }
+                    }
+                    opacity: 0.20
+                }
             }
         }
 

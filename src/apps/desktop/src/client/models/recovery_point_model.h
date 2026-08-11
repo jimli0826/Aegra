@@ -33,6 +33,8 @@ struct RecoveryPointRow final {
 class RecoveryPointModel final : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(int count READ rowCount NOTIFY countChanged)
+    Q_PROPERTY(int volumeSetCount READ volumeSetCount NOTIFY countChanged)
+    Q_PROPERTY(int fileSetCount READ fileSetCount NOTIFY countChanged)
 
   public:
     enum Role : int {
@@ -71,6 +73,10 @@ class RecoveryPointModel final : public QAbstractListModel {
     [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
 
     /// Local calendar dates (YYYY-MM-DD) that have at least one recovery point.
+    /// Number of recovery points whose content_kind is 1 (volume set).
+    [[nodiscard]] int volumeSetCount() const;
+    /// Number of recovery points whose content_kind is 2 (file set).
+    [[nodiscard]] int fileSetCount() const;
     Q_INVOKABLE [[nodiscard]] QStringList backupDateYmds() const;
     /// Checkpoints for a local date, newest first. Each map: fileUuid, timeText, backupType,
     /// contentKind, sizeText, logicalSizeBytes, sourceCount, createdUtcMs, createdText,

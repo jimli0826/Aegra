@@ -216,6 +216,26 @@ int RecoveryPointModel::chain_depth_for(const RecoveryPointRow& row) const {
     return depth;
 }
 
+int RecoveryPointModel::volumeSetCount() const {
+    int n = 0;
+    for (const auto& row : rows_) {
+        if (row.content_kind == 1) {
+            ++n;
+        }
+    }
+    return n;
+}
+
+int RecoveryPointModel::fileSetCount() const {
+    int n = 0;
+    for (const auto& row : rows_) {
+        if (row.content_kind == 2) {
+            ++n;
+        }
+    }
+    return n;
+}
+
 QVariantMap RecoveryPointModel::recoveryPointDetails(const QString& file_uuid) const {
     const auto* row = find_row(file_uuid);
     if (row == nullptr) {

@@ -10,11 +10,29 @@ Rectangle {
     property Component headerRightComponent: null
     signal actionClicked()
 
-    // Soft ice mint color tint matching CoachPro reference image
-    color: Theme.colorCard
-    radius: 20
+    // Soft subtle top-to-bottom gradient
+    gradient: Gradient {
+        orientation: Gradient.Vertical
+        GradientStop { position: 0.0; color: Theme.colorCard }
+        GradientStop { position: 1.0; color: Theme.colorCardEnd }
+    }
+    radius: Theme.radiusCard
     border.width: 1
     border.color: Theme.colorBorder
+
+    // Very light subtle bottom-only shadow
+    Rectangle {
+        z: -1
+        anchors.fill: parent
+        anchors.topMargin: 14
+        anchors.bottomMargin: -4
+        anchors.leftMargin: 8
+        anchors.rightMargin: 8
+        radius: card.radius
+        color: Theme.colorCardShadow
+        opacity: 0.22
+        visible: Theme.colorCardShadow.a > 0
+    }
 
     // Do not use id "root" here — nested Component { onClicked: root.xxx }
     // would resolve to this Card instead of the page.

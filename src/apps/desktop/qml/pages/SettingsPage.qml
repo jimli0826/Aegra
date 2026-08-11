@@ -60,7 +60,11 @@ Item {
             Rectangle {
                 Layout.fillWidth: true
                 radius: 16
-                color: Theme.colorCard
+                gradient: Gradient {
+                    orientation: Gradient.Vertical
+                    GradientStop { position: 0.0; color: Theme.colorCard }
+                    GradientStop { position: 1.0; color: Theme.colorCardEnd }
+                }
                 border.width: 0
                 implicitHeight: langInner.implicitHeight + 40
 
@@ -170,7 +174,11 @@ Item {
             Rectangle {
                 Layout.fillWidth: true
                 radius: 16
-                color: Theme.colorCard
+                gradient: Gradient {
+                    orientation: Gradient.Vertical
+                    GradientStop { position: 0.0; color: Theme.colorCard }
+                    GradientStop { position: 1.0; color: Theme.colorCardEnd }
+                }
                 border.width: 0
                 implicitHeight: themeInner.implicitHeight + 40
 
@@ -289,7 +297,11 @@ Item {
             Rectangle {
                 Layout.fillWidth: true
                 radius: 16
-                color: Theme.colorCard
+                gradient: Gradient {
+                    orientation: Gradient.Vertical
+                    GradientStop { position: 0.0; color: Theme.colorCard }
+                    GradientStop { position: 1.0; color: Theme.colorCardEnd }
+                }
                 border.width: 0
                 implicitHeight: retentionInner.implicitHeight + 40
                 enabled: typeof serviceClient !== "undefined" && serviceClient

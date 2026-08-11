@@ -17,50 +17,53 @@ QtObject {
 
     // ---- Live palette (bound by UI); defaults match glass (blueExtra) ----
     // Page bg matches sidebar so shell looks one continuous surface.
-    property color colorBg: "#dceeea"
-    property color colorBgEnd: "#dceeea"
-    property color colorCard: "#e7f3f1"
-    property color colorBorder: "#ffffff"
-    property color colorHeader: "#dceeea"
-    property color colorSidebar: "#dceeea"
+    property color colorBg: "#DFECE9"
+    property color colorBgEnd: "#C8DFDC"
+    property color colorCard: "#EFF7F5"
+    property color colorCardEnd: "#E4F2EF"
+    property color colorBorder: Qt.rgba(1.0, 1.0, 1.0, 0.90)
+    property color colorCardShadow: Qt.rgba(0.08, 0.22, 0.24, 0.16)
+    property color colorHeader: "#DFECE9"
+    property color colorSidebar: "#DCE8EA"
+    property color colorSidebarDivider: Qt.rgba(0.08, 0.22, 0.24, 0.15)
     /// Outer window chrome radius (0 when maximized). Tightened to 14 for clean DWM window corners.
     property int radiusWindow: 14
-    property color colorTableHeader: "#e2f0ed"
-    property color colorTableRow: "#f7fbfa"
-    property color colorTableAlt: "#eef6f4"
+    property color colorTableHeader: "#CBE0E3"
+    property color colorTableRow: "#DBE9EA"
+    property color colorTableAlt: "#D2E3E5"
     property color colorPopup: "#ffffff"
     property color colorInput: "#ffffff"
-    property color colorListItem: "#e8f4f2"
-    property color colorListItemAlt: "#f7fbfa"
+    property color colorListItem: "#CCE0E2"
+    property color colorListItemAlt: "#DBE9EA"
 
-    property color colorAccentRed: "#ef7d78"
-    property color colorAccentBlue: "#2a9aa3"
-    property color colorGreen: "#3db87a"
+    property color colorAccentRed: "#FF6F85"
+    property color colorAccentBlue: "#248894"
+    property color colorGreen: "#2CB378"
     // Nav active: CoachPro / index.html primary teal gradient ends
-    property color colorMenuActive: "#2A7982"
-    property color colorMenuActiveEnd: "#1E5C64"
+    property color colorMenuActive: "#3798A3"
+    property color colorMenuActiveEnd: "#237A85"
     property color colorMenuActiveText: "#ffffff"
     // Nav idle / hover (index.html .nav-item)
-    property color colorMenuIdle: "#557773"
-    property color colorMenuHoverText: "#2A7982"
-    property color colorMenuHoverBg: "#E4F1F2"
+    property color colorMenuIdle: "#4D7577"
+    property color colorMenuHoverText: "#122C30"
+    property color colorMenuHoverBg: "#C4DADB"
     property color colorOnAccent: "#ffffff"
-    property color colorLinkHover: "#1f7a82"
+    property color colorLinkHover: "#186770"
 
-    property color colorTextWhite: "#1a2f2c"
-    property color colorTextGrey: "#5a7572"
-    property color colorTextDim: "#8a9f9c"
+    property color colorTextWhite: "#122C30"
+    property color colorTextGrey: "#587E7B"
+    property color colorTextDim: "#7D9F9C"
 
-    property color colorHover: "#E4F1F2"
-    property color colorHoverClose: "#ef7d78"
+    property color colorHover: "#CBE0E2"
+    property color colorHoverClose: "#FF6F85"
 
-    property color colorButton: "#e0eeeb"
-    property color colorButtonHover: "#cfe4e0"
-    property color colorButtonDisabled: "#eef4f3"
-    property color colorButtonDisabledText: "#a0b5b2"
-    property color colorProgressTrack: "#d5e8e4"
-    property color colorCalendarMuted: "#a0b5b2"
-    property color colorCalendarHasBackup: "#d0ece9"
+    property color colorButton: "#C4D8DA"
+    property color colorButtonHover: "#B4CDD0"
+    property color colorButtonDisabled: "#D6E4E6"
+    property color colorButtonDisabledText: "#8EA5A8"
+    property color colorProgressTrack: "#BDD1D4"
+    property color colorCalendarMuted: "#8EA5A8"
+    property color colorCalendarHasBackup: "#CCE0E2"
 
     property color colorToastSuccessBg: "#e5f6ed"
     property color colorToastSuccessBorder: "#3db87a"
@@ -100,10 +103,10 @@ QtObject {
         {
             id: "blueExtra",
             labelKey: "aegra.settings.theme.blue_extra",
-            previewBg: "#eef7f5",
-            previewCard: "#f7fbfa",
-            previewAccent: "#2a9aa3",
-            previewText: "#1a2f2c"
+            previewBg: "#C4D6D8",
+            previewCard: "#DBE9EA",
+            previewAccent: "#3798A3",
+            previewText: "#122C30"
         },
         {
             id: "oceanBlue",
@@ -134,11 +137,14 @@ QtObject {
     readonly property var _palettes: ({
         "dark": {
             colorBg: "#1c1d22",
-            colorBgEnd: "#16171a",
-            colorCard: "#24262d",
+            colorBgEnd: "#141518",
+            colorCard: "#22242c",
+            colorCardEnd: "#1a1b22",
             colorBorder: "#363942",
+            colorCardShadow: Qt.rgba(0, 0, 0, 0.40),
             colorHeader: "#1c1d22",
             colorSidebar: "#1c1d22",
+            colorSidebarDivider: "#363942",
             colorTableHeader: "#2a2d36",
             colorTableRow: "#24262d",
             colorTableAlt: "#272931",
@@ -192,9 +198,12 @@ QtObject {
             colorBg: "#EBF3FC",
             colorBgEnd: "#E3EEFB",
             colorCard: "#F5F9FE",
+            colorCardEnd: "#EBF3FC",
             colorBorder: "#ffffff",
+            colorCardShadow: Qt.rgba(0.08, 0.18, 0.35, 0.10),
             colorHeader: "#EBF3FC",
             colorSidebar: "#EBF3FC",
+            colorSidebarDivider: Qt.rgba(0.10, 0.20, 0.40, 0.12),
             colorTableHeader: "#DEECFC",
             colorTableRow: "#F5F9FE",
             colorTableAlt: "#EBF3FC",
@@ -244,57 +253,60 @@ QtObject {
             radiusButton: 10
         },
         "blueExtra": {
-            // Glass / CoachPro-inspired mint-teal (default product look)
-            colorBg: "#eef7f5",
-            colorBgEnd: "#eef7f5",
-            colorCard: "#f7fbfa",
-            colorBorder: "#ffffff",
-            colorHeader: "#eef7f5",
-            colorSidebar: "#eef7f5",
-            colorTableHeader: "#e2f0ed",
-            colorTableRow: "#f7fbfa",
-            colorTableAlt: "#eef6f4",
+            // Glass / CoachPro-inspired mint-teal (concept background)
+            colorBg: "#DFECE9",
+            colorBgEnd: "#C8DFDC",
+            colorCard: "#EFF7F5",
+            colorCardEnd: "#E4F2EF",
+            colorBorder: Qt.rgba(1.0, 1.0, 1.0, 0.90),
+            colorCardShadow: Qt.rgba(0.08, 0.22, 0.24, 0.16),
+            colorHeader: "#DFECE9",
+            colorSidebar: "#DCE8EA",
+            colorSidebarDivider: Qt.rgba(0.08, 0.22, 0.24, 0.15),
+            colorTableHeader: "#CBE0E3",
+            colorTableRow: "#DBE9EA",
+            colorTableAlt: "#D2E3E5",
             colorPopup: "#ffffff",
             colorInput: "#ffffff",
-            colorListItem: "#e8f4f2",
-            colorListItemAlt: "#f7fbfa",
-            colorAccentRed: "#ef7d78",
-            colorAccentBlue: "#2a9aa3",
-            colorGreen: "#3db87a",
-            colorMenuActive: "#2A7982",
-            colorMenuActiveEnd: "#1E5C64",
+            colorListItem: "#CCE0E2",
+            colorListItemAlt: "#DBE9EA",
+            colorAccentRed: "#FF6F85",
+            colorAccentBlue: "#248894",
+            colorGreen: "#2CB378",
+            colorMenuActive: "#3798A3",
+            colorMenuActiveEnd: "#237A85",
             colorMenuActiveText: "#ffffff",
-            colorMenuIdle: "#557773",
-            colorMenuHoverText: "#2A7982",
-            colorMenuHoverBg: "#E4F1F2",
+            colorMenuIdle: "#4D7577",
+            colorMenuHoverText: "#122C30",
+            colorMenuHoverBg: "#C4DADB",
             colorOnAccent: "#ffffff",
-            colorLinkHover: "#1f7a82",
-            colorTextWhite: "#1a2f2c",
-            colorTextGrey: "#5a7572",
-            colorTextDim: "#8a9f9c",
-            colorHover: "#E4F1F2",
-            colorHoverClose: "#ef7d78",
-            colorButton: "#e0eeeb",
-            colorButtonHover: "#cfe4e0",
-            colorButtonDisabled: "#eef4f3",
-            colorButtonDisabledText: "#a0b5b2",
-            colorProgressTrack: "#d5e8e4",
-            colorCalendarMuted: "#a0b5b2",
-            colorCalendarHasBackup: "#d0ece9",
-            colorToastSuccessBg: "#e5f6ed",
-            colorToastSuccessBorder: "#3db87a",
-            colorToastErrorBg: "#fdecea",
-            colorToastErrorBorder: "#ef7d78",
+            colorLinkHover: "#186770",
+            colorTextWhite: "#122C30",
+            colorTextGrey: "#587E7B",
+            colorTextDim: "#7D9F9C",
+            colorHover: "#CBE0E2",
+            colorHoverClose: "#FF6F85",
+            colorButton: "#C4D8DA",
+            colorButtonHover: "#B4CDD0",
+            colorButtonDisabled: "#D6E4E6",
+            colorButtonDisabledText: "#8EA5A8",
+            colorProgressTrack: "#BDD1D4",
+            colorCalendarMuted: "#8EA5A8",
+            colorCalendarHasBackup: "#CCE0E2",
+            colorToastSuccessBg: "#E5F6ED",
+            colorToastSuccessBorder: "#2CB378",
+            colorToastErrorBg: "#FDECEA",
+            colorToastErrorBorder: "#FF6F85",
             colorScrim: "#66000000",
             volumeColors: [
                 "#7fc4b4", "#6a9fd4", "#c4a06a", "#8b7fd9",
                 "#e87ba8", "#5ba8c9", "#3ab0a8", "#e9a85c"
             ],
-            colorVolumeText: "#1a2f2c",
-            colorUnallocated: "#e8eeec",
-            colorUnallocatedHatch: "#c5d4d0",
-            colorUnallocatedText: "#7a9190",
-            radiusCard: 14,
+            colorVolumeText: "#122C30",
+            colorUnallocated: "#C8DADC",
+            colorUnallocatedHatch: "#A8C4C7",
+            colorUnallocatedText: "#587E7B",
+            radiusCard: 20,
             radiusControl: 10,
             radiusMenu: 14,
             radiusButton: 10
@@ -302,11 +314,14 @@ QtObject {
         "light": {
             // Modern Clean Light theme (Fluent / Slate)
             colorBg: "#F1F5F9",
-            colorBgEnd: "#E2E8F0",
+            colorBgEnd: "#E0EFFE",
             colorCard: "#ffffff",
+            colorCardEnd: "#EEF5FD",
             colorBorder: "#CBD5E1",
+            colorCardShadow: Qt.rgba(0.08, 0.12, 0.20, 0.08),
             colorHeader: "#F1F5F9",
             colorSidebar: "#F1F5F9",
+            colorSidebarDivider: "#E2E8F0",
             colorTableHeader: "#E2E8F0",
             colorTableRow: "#ffffff",
             colorTableAlt: "#F8FAFC",
@@ -373,9 +388,17 @@ QtObject {
         if (p.colorBgEnd !== undefined)
             colorBgEnd = p.colorBgEnd
         colorCard = p.colorCard
+        if (p.colorCardEnd !== undefined)
+            colorCardEnd = p.colorCardEnd
+        else
+            colorCardEnd = p.colorCard
         colorBorder = p.colorBorder
+        if (p.colorCardShadow !== undefined)
+            colorCardShadow = p.colorCardShadow
         colorHeader = p.colorHeader
         colorSidebar = p.colorSidebar
+        if (p.colorSidebarDivider !== undefined)
+            colorSidebarDivider = p.colorSidebarDivider
         colorTableHeader = p.colorTableHeader
         colorTableRow = p.colorTableRow
         colorTableAlt = p.colorTableAlt

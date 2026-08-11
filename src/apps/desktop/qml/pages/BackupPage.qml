@@ -1923,11 +1923,14 @@ Item {
                                 Layout.fillWidth: true
                                 Layout.preferredWidth: 320
                                 implicitHeight: 300
-                                radius: 20
-                                color: diskCardMouse.containsMouse ? Theme.colorHover : Theme.colorCard
+                                radius: Theme.radiusCard
+                                gradient: Gradient {
+                                    orientation: Gradient.Vertical
+                                    GradientStop { position: 0.0; color: Theme.colorCard }
+                                    GradientStop { position: 1.0; color: Theme.colorCardEnd }
+                                }
                                 border.width: 1
                                 border.color: diskCardMouse.containsMouse ? Theme.colorAccentBlue : Theme.colorBorder
-                                Behavior on color { ColorAnimation { duration: 150 } }
 
                                 MouseArea {
                                     id: diskCardMouse
@@ -2001,11 +2004,14 @@ Item {
                                 Layout.fillWidth: true
                                 Layout.preferredWidth: 320
                                 implicitHeight: 300
-                                radius: 20
-                                color: filesCardMouse.containsMouse ? Theme.colorHover : Theme.colorCard
+                                radius: Theme.radiusCard
+                                gradient: Gradient {
+                                    orientation: Gradient.Vertical
+                                    GradientStop { position: 0.0; color: Theme.colorCard }
+                                    GradientStop { position: 1.0; color: Theme.colorCardEnd }
+                                }
                                 border.width: 1
                                 border.color: filesCardMouse.containsMouse ? Theme.colorGreen : Theme.colorBorder
-                                Behavior on color { ColorAnimation { duration: 150 } }
 
                                 MouseArea {
                                     id: filesCardMouse

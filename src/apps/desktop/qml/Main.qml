@@ -31,7 +31,8 @@ Window {
                                       && visibility !== Window.Maximized
                                       && visibility !== Window.FullScreen
     readonly property real chromeRadius: (visibility === Window.Maximized
-                                          || visibility === Window.FullScreen)
+                                          || visibility === Window.FullScreen
+                                          || Theme.hasAcrylicBlur)
                                          ? 0 : Theme.radiusWindow
     /// Settings opens as right drawer (old Main.qml pattern)
     property bool settingsPanelOpen: false
@@ -112,8 +113,8 @@ Window {
         }
     }
 
-    // Rounded shell without QtQuick.Effects (not always present in run environments).
-    // Transparent HWND + alpha buffer (main.cpp) + Rectangle.radius = visible corners.
+    // Shell container: on Win11 DWM clips window corners natively (chromeRadius=0).
+    // On Win10/Server2022 without DWM clipping, QML renders smooth rounded corners (chromeRadius=14).
     Rectangle {
         id: shell
         anchors.fill: parent
@@ -130,7 +131,6 @@ Window {
         // Full-height body (no system/title brand strip — brand lives in sidebar only).
         RowLayout {
             anchors.fill: parent
-            // Inset so solid children do not paint over the rounded corner pixels.
             anchors.margins: window.chromeRadius > 0 ? 1 : 0
             spacing: 0
             // Hidden under splash; fade in once when ready (never re-hide → no flicker).

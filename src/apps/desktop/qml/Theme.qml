@@ -15,7 +15,7 @@ QtObject {
     // blueExtra (glass default) | dark | light
     property string themeId: "blueExtra"
 
-    readonly property bool hasAcrylicBlur: typeof hasAcrylicBlur !== "undefined" && hasAcrylicBlur
+    readonly property bool hasAcrylicBlur: typeof nativeAcrylicBlur !== "undefined" && nativeAcrylicBlur
 
     function _withAlpha(c, a) {
         var col = Qt.color(c)
@@ -28,7 +28,7 @@ QtObject {
     property color colorBgEnd: hasAcrylicBlur ? Qt.rgba(0.784, 0.875, 0.863, 0.80) : Qt.rgba(0.784, 0.875, 0.863, 1.0)
     property color colorCard: hasAcrylicBlur ? Qt.rgba(0.937, 0.969, 0.961, 0.85) : Qt.rgba(0.937, 0.969, 0.961, 1.0)
     property color colorCardEnd: hasAcrylicBlur ? Qt.rgba(0.894, 0.949, 0.937, 0.82) : Qt.rgba(0.894, 0.949, 0.937, 1.0)
-    property color colorBorder: hasAcrylicBlur ? Qt.rgba(1.0, 1.0, 1.0, 0.65) : Qt.rgba(1.0, 1.0, 1.0, 0.90)
+    property color colorBorder: hasAcrylicBlur ? Qt.rgba(1.0, 1.0, 1.0, 0.65) : Qt.rgba(0.08, 0.22, 0.24, 0.18)
     property color colorCardShadow: Qt.rgba(0.08, 0.22, 0.24, 0.16)
     property color colorHeader: hasAcrylicBlur ? Qt.rgba(0.875, 0.925, 0.914, 0.82) : Qt.rgba(0.875, 0.925, 0.914, 1.0)
     property color colorSidebar: hasAcrylicBlur ? Qt.rgba(0.863, 0.910, 0.918, 0.75) : Qt.rgba(0.863, 0.910, 0.918, 1.0)

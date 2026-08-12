@@ -10,7 +10,7 @@ Rectangle {
     id: root
     visible: !windowAppReady
     anchors.fill: parent
-    radius: Theme.radiusWindow
+    radius: Theme.hasAcrylicBlur ? 0 : Theme.radiusWindow
     color: Theme.colorCard
     z: 1000
     focus: visible

@@ -1671,7 +1671,7 @@ Item {
             y: topInset
             // Off-canvas when closed; slide in flush to the right when open.
             x: root.wizardOpen ? (parent.width - width) : parent.width
-            color: Theme.colorBg
+            color: Qt.rgba(Theme.colorCard.r, Theme.colorCard.g, Theme.colorCard.b, 0.95)
             radius: 16
             border.width: 1
             border.color: Theme.colorBorder

@@ -78,7 +78,7 @@ using PfnRtlGetVersion = LONG(WINAPI*)(PRTL_OSVERSIONINFOW);
 }
 #endif
 
-/// Enable per-pixel alpha so a frameless QML shell can show true rounded corners.
+/// Enable per-pixel alpha so frameless windows show true rounded corners.
 void configure_transparent_quick_surface() {
     QSurfaceFormat format = QSurfaceFormat::defaultFormat();
     format.setAlphaBufferSize(8);
@@ -86,7 +86,9 @@ void configure_transparent_quick_surface() {
     QQuickWindow::setDefaultAlphaBuffer(true);
 }
 
-/// Windows DWM chrome: rounded corners, backdrop acrylic blur on Win11+, and extended client area.
+/// Windows DWM chrome: native rounded corners and backdrop acrylic blur on Win11+.
+/// On older Windows, the Qt ARGB alpha buffer already provides transparent corners;
+/// extending DWM frame fully would overpaint the QML surface with an opaque DWM layer.
 void apply_frameless_platform_chrome(QWindow* window) {
     if (window == nullptr) {
         return;
@@ -99,19 +101,23 @@ void apply_frameless_platform_chrome(QWindow* window) {
     if (hwnd == nullptr) {
         return;
     }
-    const int preference = DWMWCP_ROUND;
-    DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &preference,
-                          sizeof(preference));
-
     if (is_windows_11_or_greater()) {
+        const int preference = DWMWCP_ROUND;
+        DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &preference,
+                              sizeof(preference));
+
         // Enable Windows 11 Acrylic blur behind the frameless window
         const int backdrop = DWMSBT_TRANSIENTWINDOW;
         DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop));
 
-        // Extend frame into client area so DWM backdrop renders across the whole window
+        // Extend DWM frame across the entire client area so Acrylic renders behind QML.
         const MARGINS margins = {-1, -1, -1, -1};
         DwmExtendFrameIntoClientArea(hwnd, &margins);
     }
+    // On Windows Server 2022 / Windows 10: no DwmExtendFrameIntoClientArea needed.
+    // The ARGB alpha surface configured by configure_transparent_quick_surface()
+    // makes the per-pixel alpha channel work directly so QML-painted rounded corners
+    // are transparent without DWM overpainting with its own opaque layer.
 #endif
 }
 
@@ -228,7 +234,9 @@ int main(int argument_count, char* arguments[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("localeController"),
                                              &locale_controller);
     engine.rootContext()->setContextProperty(QStringLiteral("serviceClient"), &service_client);
-    engine.rootContext()->setContextProperty(QStringLiteral("hasAcrylicBlur"),
+    // Named 'nativeAcrylicBlur' (not 'hasAcrylicBlur') so it does not shadow
+    // the Theme.hasAcrylicBlur QML property and cause a self-referencing binding.
+    engine.rootContext()->setContextProperty(QStringLiteral("nativeAcrylicBlur"),
                                              is_windows_11_or_greater());
     QObject::connect(&engine, &QQmlApplicationEngine::warnings, &application, &write_qml_errors);
     const QUrl root(QStringLiteral("qrc:/Aegra/qml/Main.qml"));

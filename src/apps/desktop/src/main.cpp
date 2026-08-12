@@ -29,6 +29,12 @@
 #  ifndef DWMWCP_ROUND
 #    define DWMWCP_ROUND 2
 #  endif
+#  ifndef DWMWA_SYSTEMBACKDROP_TYPE
+#    define DWMWA_SYSTEMBACKDROP_TYPE 38
+#  endif
+#  ifndef DWMSBT_TRANSIENTWINDOW
+#    define DWMSBT_TRANSIENTWINDOW 3 // Acrylic
+#  endif
 #endif
 
 namespace {
@@ -45,6 +51,33 @@ constexpr char kSingleInstanceServerName[] = "Aegra.Desktop.IPC";
     return icon;
 }
 
+#if defined(Q_OS_WIN)
+using PfnRtlGetVersion = LONG(WINAPI*)(PRTL_OSVERSIONINFOW);
+
+[[nodiscard]] bool is_windows_11_or_greater() {
+    const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    if (ntdll == nullptr) {
+        return false;
+    }
+    const auto rtl_get_version = reinterpret_cast<PfnRtlGetVersion>(
+        GetProcAddress(ntdll, "RtlGetVersion"));
+    if (rtl_get_version == nullptr) {
+        return false;
+    }
+    RTL_OSVERSIONINFOW osvi{};
+    osvi.dwOSVersionInfoSize = sizeof(osvi);
+    if (rtl_get_version(&osvi) != 0) {
+        return false;
+    }
+    return (osvi.dwMajorVersion > 10) ||
+           (osvi.dwMajorVersion == 10 && osvi.dwBuildNumber >= 22000);
+}
+#else
+[[nodiscard]] constexpr bool is_windows_11_or_greater() {
+    return false;
+}
+#endif
+
 /// Enable per-pixel alpha so a frameless QML shell can show true rounded corners.
 void configure_transparent_quick_surface() {
     QSurfaceFormat format = QSurfaceFormat::defaultFormat();
@@ -53,7 +86,7 @@ void configure_transparent_quick_surface() {
     QQuickWindow::setDefaultAlphaBuffer(true);
 }
 
-/// Windows DWM corner preference: set DWMWCP_ROUND (2) for rounded window borders.
+/// Windows DWM chrome: rounded corners, backdrop acrylic blur on Win11+, and extended client area.
 void apply_frameless_platform_chrome(QWindow* window) {
     if (window == nullptr) {
         return;
@@ -69,6 +102,16 @@ void apply_frameless_platform_chrome(QWindow* window) {
     const int preference = DWMWCP_ROUND;
     DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &preference,
                           sizeof(preference));
+
+    if (is_windows_11_or_greater()) {
+        // Enable Windows 11 Acrylic blur behind the frameless window
+        const int backdrop = DWMSBT_TRANSIENTWINDOW;
+        DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop));
+
+        // Extend frame into client area so DWM backdrop renders across the whole window
+        const MARGINS margins = {-1, -1, -1, -1};
+        DwmExtendFrameIntoClientArea(hwnd, &margins);
+    }
 #endif
 }
 
@@ -185,6 +228,8 @@ int main(int argument_count, char* arguments[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("localeController"),
                                              &locale_controller);
     engine.rootContext()->setContextProperty(QStringLiteral("serviceClient"), &service_client);
+    engine.rootContext()->setContextProperty(QStringLiteral("hasAcrylicBlur"),
+                                             is_windows_11_or_greater());
     QObject::connect(&engine, &QQmlApplicationEngine::warnings, &application, &write_qml_errors);
     const QUrl root(QStringLiteral("qrc:/Aegra/qml/Main.qml"));
     QObject::connect(

@@ -15,16 +15,23 @@ QtObject {
     // blueExtra (glass default) | dark | light
     property string themeId: "blueExtra"
 
+    readonly property bool hasAcrylicBlur: typeof hasAcrylicBlur !== "undefined" && hasAcrylicBlur
+
+    function _withAlpha(c, a) {
+        var col = Qt.color(c)
+        return Qt.rgba(col.r, col.g, col.b, a)
+    }
+
     // ---- Live palette (bound by UI); defaults match glass (blueExtra) ----
     // Page bg matches sidebar so shell looks one continuous surface.
-    property color colorBg: "#DFECE9"
-    property color colorBgEnd: "#C8DFDC"
-    property color colorCard: "#EFF7F5"
-    property color colorCardEnd: "#E4F2EF"
-    property color colorBorder: Qt.rgba(1.0, 1.0, 1.0, 0.90)
+    property color colorBg: hasAcrylicBlur ? Qt.rgba(0.875, 0.925, 0.914, 0.82) : Qt.rgba(0.875, 0.925, 0.914, 1.0)
+    property color colorBgEnd: hasAcrylicBlur ? Qt.rgba(0.784, 0.875, 0.863, 0.80) : Qt.rgba(0.784, 0.875, 0.863, 1.0)
+    property color colorCard: hasAcrylicBlur ? Qt.rgba(0.937, 0.969, 0.961, 0.85) : Qt.rgba(0.937, 0.969, 0.961, 1.0)
+    property color colorCardEnd: hasAcrylicBlur ? Qt.rgba(0.894, 0.949, 0.937, 0.82) : Qt.rgba(0.894, 0.949, 0.937, 1.0)
+    property color colorBorder: hasAcrylicBlur ? Qt.rgba(1.0, 1.0, 1.0, 0.65) : Qt.rgba(1.0, 1.0, 1.0, 0.90)
     property color colorCardShadow: Qt.rgba(0.08, 0.22, 0.24, 0.16)
-    property color colorHeader: "#DFECE9"
-    property color colorSidebar: "#DCE8EA"
+    property color colorHeader: hasAcrylicBlur ? Qt.rgba(0.875, 0.925, 0.914, 0.82) : Qt.rgba(0.875, 0.925, 0.914, 1.0)
+    property color colorSidebar: hasAcrylicBlur ? Qt.rgba(0.863, 0.910, 0.918, 0.75) : Qt.rgba(0.863, 0.910, 0.918, 1.0)
     property color colorSidebarDivider: Qt.rgba(0.08, 0.22, 0.24, 0.15)
     /// Outer window chrome radius (0 when maximized). Tightened to 14 for clean DWM window corners.
     property int radiusWindow: 14
@@ -384,19 +391,35 @@ QtObject {
     }
 
     function applyPalette(p) {
-        colorBg = p.colorBg
-        if (p.colorBgEnd !== undefined)
-            colorBgEnd = p.colorBgEnd
-        colorCard = p.colorCard
-        if (p.colorCardEnd !== undefined)
-            colorCardEnd = p.colorCardEnd
-        else
-            colorCardEnd = p.colorCard
-        colorBorder = p.colorBorder
-        if (p.colorCardShadow !== undefined)
-            colorCardShadow = p.colorCardShadow
-        colorHeader = p.colorHeader
-        colorSidebar = p.colorSidebar
+        if (hasAcrylicBlur) {
+            colorBg = _withAlpha(p.colorBg, 0.82)
+            if (p.colorBgEnd !== undefined)
+                colorBgEnd = _withAlpha(p.colorBgEnd, 0.80)
+            else
+                colorBgEnd = colorBg
+            colorCard = _withAlpha(p.colorCard, 0.85)
+            if (p.colorCardEnd !== undefined)
+                colorCardEnd = _withAlpha(p.colorCardEnd, 0.82)
+            else
+                colorCardEnd = colorCard
+            colorHeader = _withAlpha(p.colorHeader, 0.82)
+            colorSidebar = _withAlpha(p.colorSidebar, 0.75)
+            colorBorder = _withAlpha(p.colorBorder, 0.65)
+        } else {
+            colorBg = p.colorBg
+            if (p.colorBgEnd !== undefined)
+                colorBgEnd = p.colorBgEnd
+            else
+                colorBgEnd = colorBg
+            colorCard = p.colorCard
+            if (p.colorCardEnd !== undefined)
+                colorCardEnd = p.colorCardEnd
+            else
+                colorCardEnd = colorCard
+            colorHeader = p.colorHeader
+            colorSidebar = p.colorSidebar
+            colorBorder = p.colorBorder
+        }
         if (p.colorSidebarDivider !== undefined)
             colorSidebarDivider = p.colorSidebarDivider
         colorTableHeader = p.colorTableHeader

@@ -301,10 +301,11 @@ Window {
                         property real slideProgress: window.settingsPanelOpen ? 0 : 1
                         x: parent.width - width + slideProgress * width
                         visible: slideProgress < 0.999 || window.settingsPanelOpen
-                        color: Theme.colorBg
+                        color: Theme.colorCard
                         radius: 16
                         clip: true
-                        border.width: 0
+                        border.width: 1
+                        border.color: Theme.colorBorder
                         Behavior on slideProgress {
                             NumberAnimation {
                                 duration: 280

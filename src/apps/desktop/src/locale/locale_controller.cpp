@@ -203,8 +203,8 @@ void LocaleController::save_language(const QString& language_tag) const {
 }
 
 bool LocaleController::is_supported_theme(const QString& theme_id) {
-    return theme_id == QLatin1String("blueExtra") || theme_id == QLatin1String("dark") ||
-           theme_id == QLatin1String("light");
+    return theme_id == QLatin1String("blueExtra") || theme_id == QLatin1String("oceanBlue") ||
+           theme_id == QLatin1String("dark") || theme_id == QLatin1String("light");
 }
 
 void LocaleController::load_saved_theme() {

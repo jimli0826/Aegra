@@ -1671,8 +1671,12 @@ Item {
             y: topInset
             // Off-canvas when closed; slide in flush to the right when open.
             x: root.wizardOpen ? (parent.width - width) : parent.width
-            color: Qt.rgba(Theme.colorCard.r, Theme.colorCard.g, Theme.colorCard.b, 0.95)
-            radius: 16
+            gradient: Gradient {
+                orientation: Gradient.Vertical
+                GradientStop { position: 0.0; color: Qt.rgba(Theme.colorCard.r, Theme.colorCard.g, Theme.colorCard.b, 0.95) }
+                GradientStop { position: 1.0; color: Qt.rgba(Theme.colorCardEnd.r, Theme.colorCardEnd.g, Theme.colorCardEnd.b, 0.95) }
+            }
+            radius: Theme.radiusCard
             border.width: 1
             border.color: Theme.colorBorder
             clip: true

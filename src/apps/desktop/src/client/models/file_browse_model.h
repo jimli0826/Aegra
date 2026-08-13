@@ -3,6 +3,7 @@
 #include <QAbstractListModel>
 #include <QHash>
 #include <QString>
+#include <QStringList>
 #include <QVariantList>
 #include <QVector>
 
@@ -40,6 +41,9 @@ class FileBrowseModel final : public QAbstractListModel {
     /// When true, only one directory may be checked (restore target).
     Q_PROPERTY(bool singleDirectoryMode READ singleDirectoryMode WRITE setSingleDirectoryMode
                    NOTIFY singleDirectoryModeChanged)
+    /// When true, checkboxes are display-only (schedule edit).
+    Q_PROPERTY(bool selectionLocked READ selectionLocked WRITE setSelectionLocked
+                   NOTIFY selectionLockedChanged)
 
   public:
     enum Role : int {
@@ -56,6 +60,8 @@ class FileBrowseModel final : public QAbstractListModel {
         CheckStateRole,
         IsSelectableRole,
         DisabledReasonRole,
+        /// True when every ancestor is expanded (roots always true).
+        RowVisibleRole,
     };
 
     explicit FileBrowseModel(QObject* parent = nullptr);
@@ -74,6 +80,10 @@ class FileBrowseModel final : public QAbstractListModel {
     [[nodiscard]] QString selectionSummary() const;
     [[nodiscard]] bool singleDirectoryMode() const noexcept;
     void setSingleDirectoryMode(bool enabled);
+    [[nodiscard]] bool selectionLocked() const noexcept;
+    Q_INVOKABLE void setSelectionLocked(bool locked);
+    /// Volume-relative display-name chains from ScheduleSummary.display_chain.
+    Q_INVOKABLE void setLockedDisplayChains(const QVariantList& chains);
 
     /// Selections for UpsertSchedule file_set (nodeToken, recursion, displayLabel).
     [[nodiscard]] QVariantList selected_file_selections() const;
@@ -83,6 +93,7 @@ class FileBrowseModel final : public QAbstractListModel {
 
     Q_INVOKABLE void toggleExpanded(const QString& node_token);
     Q_INVOKABLE void toggleChecked(const QString& node_token);
+    Q_INVOKABLE void clearChecks();
 
     [[nodiscard]] int rowCount(const QModelIndex& parent = QModelIndex()) const override;
     [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
@@ -93,6 +104,7 @@ class FileBrowseModel final : public QAbstractListModel {
     void selectionChanged();
     void loadingChanged();
     void singleDirectoryModeChanged();
+    void selectionLockedChanged();
     /// QML/ServiceClient should load children when a node expands and children are not loaded.
     void expandRequested(const QString& nodeToken);
 
@@ -102,11 +114,22 @@ class FileBrowseModel final : public QAbstractListModel {
     void apply_check_to_descendants(int index, int check_state);
     void emit_row(int index);
     void refresh_selection_cache();
+    void apply_locked_selection();
+    void collapse_locked_view();
+    void remove_descendants(int parent_index);
+    void prune_locked_hydrate_dead_ends(const QVector<bool>& chain_resolved);
+    void notify_row_visibility();
+    [[nodiscard]] bool is_row_visible(int index) const;
+    [[nodiscard]] QStringList display_path(int index) const;
 
     QVector<FileBrowseNode> rows_;
     QHash<QString, int> token_index_;
+    QVector<QStringList> locked_chains_;
     bool loading_{false};
     bool single_directory_mode_{false};
+    bool selection_locked_{false};
+    /// True while locked edit is loading children only to compute checks (UI stays collapsed).
+    bool locked_hydrate_in_progress_{false};
     QString error_text_;
     int selected_count_{0};
     QString selection_summary_;

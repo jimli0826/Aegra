@@ -54,8 +54,8 @@ Button {
 
         MouseArea {
             anchors.fill: parent
+            acceptedButtons: Qt.NoButton
             cursorShape: Qt.PointingHandCursor
-            onClicked: root.clicked()
         }
     }
 }

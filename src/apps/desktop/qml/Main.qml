@@ -38,7 +38,8 @@ Window {
     property bool settingsPanelOpen: false
     /// Latched once splash dismisses so main opacity/animation never re-toggles.
     property bool appReady: false
-    // App loading overlay is for heavy blocking commands (not background catalog refreshes).
+    // App loading overlay is for heavy blocking commands (not background catalog refreshes
+    // and not schedule enable/disable row toggles — those must not flash the whole window).
     readonly property bool appLoading: {
         if (!window.appReady || !serviceClient.connected)
             return false
@@ -46,6 +47,7 @@ Window {
                 || serviceClient.backupCommandBusy
                 || serviceClient.cancelCommandBusy
                 || serviceClient.mountCommandBusy
+                || serviceClient.scheduleCommandBlocksUi
     }
 
     // Old Main.qml LoadingOverlay: always the same "Loading" string (never per-page text).
@@ -302,7 +304,7 @@ Window {
                         x: parent.width - width + slideProgress * width
                         visible: slideProgress < 0.999 || window.settingsPanelOpen
                         color: Theme.colorCard
-                        radius: 16
+                        radius: Theme.radiusWindow
                         clip: true
                         border.width: 1
                         border.color: Theme.colorBorder
@@ -417,7 +419,7 @@ Window {
         // Global loading overlay (old Main.qml): menu switch / catalog reload / busy commands.
         LoadingOverlay {
             anchors.fill: parent
-            z: 500
+            z: 8000
             visible: window.appLoading
             //% "Loading"
             message: window.appLoadingMessage

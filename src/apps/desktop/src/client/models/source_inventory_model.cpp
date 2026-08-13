@@ -2,7 +2,13 @@
 
 #include "locale/locale_format.h"
 
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
 #include <QHash>
+#include <QSet>
+#include <QStringList>
+#include <QTextStream>
 #include <QVariantMap>
 
 #include <algorithm>
@@ -46,6 +52,58 @@ void SourceInventoryModel::retranslate() {
 }
 
 int SourceInventoryModel::selectableCount() const noexcept { return selectable_count_; }
+
+QVariantMap SourceInventoryModel::checkedStateForSourceIds(const QVariantList& source_ids) const {
+    QSet<QString> wanted;
+    wanted.reserve(static_cast<int>(source_ids.size()));
+    QStringList wanted_log;
+    for (const auto& value : source_ids) {
+        const auto id = value.toString().trimmed();
+        if (id.isEmpty()) {
+            continue;
+        }
+        wanted.insert(id);
+        wanted_log.push_back(id);
+    }
+    QStringList volume_key_list;
+    QVariantList expanded_disk_list;
+    QStringList inventory_ids;
+    QSet<int> expanded_seen;
+    const auto tree = disksTree();
+    for (int disk_index = 0; disk_index < tree.size(); ++disk_index) {
+        const auto volumes = tree.at(disk_index).toMap().value(QStringLiteral("volumes")).toList();
+        for (int volume_index = 0; volume_index < volumes.size(); ++volume_index) {
+            const auto source_id =
+                volumes.at(volume_index).toMap().value(QStringLiteral("sourceId")).toString();
+            if (!source_id.isEmpty()) {
+                inventory_ids.push_back(source_id);
+            }
+            if (!wanted.contains(source_id)) {
+                continue;
+            }
+            volume_key_list.push_back(
+                QStringLiteral("d%1v%2").arg(disk_index).arg(volume_index));
+            if (expanded_seen.contains(disk_index)) {
+                continue;
+            }
+            expanded_seen.insert(disk_index);
+            expanded_disk_list.push_back(disk_index);
+        }
+    }
+    QDir().mkpath(QStringLiteral("D:/Work/OpenSource/Aegra/out"));
+    QFile file(QStringLiteral("D:/Work/OpenSource/Aegra/out/schedule-edit-debug.log"));
+    if (file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+        QTextStream stream(&file);
+        stream << QDateTime::currentDateTime().toString(Qt::ISODateWithMs)
+               << " match wanted=[" << wanted_log.join(QLatin1Char(',')) << "] inventory=["
+               << inventory_ids.join(QLatin1Char(',')) << "] keys=["
+               << volume_key_list.join(QLatin1Char(',')) << "] disks=" << tree.size()
+               << " matches=" << volume_key_list.size() << "\n";
+    }
+    return {{QStringLiteral("matchCount"), volume_key_list.size()},
+            {QStringLiteral("volumeKeyList"), volume_key_list},
+            {QStringLiteral("expandedDiskList"), expanded_disk_list}};
+}
 
 bool SourceInventoryModel::contains_selectable(const QString& source_id) const {
     for (const auto& row : rows_) {

@@ -5,8 +5,10 @@
 
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QRegularExpression>
 #include <QUuid>
 
+#include <algorithm>
 #include <utility>
 
 namespace aegra::desktop {
@@ -221,13 +223,10 @@ bool ServiceClient::createFileSetSchedule(const QString& connection_id, const QS
                                           const bool encryption_enabled,
                                           const QString& archive_password,
                                           const bool start_full_backup_after_create,
-                                          const int backup_type) {
+                                          const int weekday_mask,
+                                          const unsigned int day_of_month_mask) {
     if (state_ != State::kReady || !schedules_available_ || !file_browse_available_ ||
         schedule_command_busy_ || connection_id.isEmpty()) {
-        return false;
-    }
-    // file_set: Full or Incremental only (never Differential).
-    if (backup_type != kBackupTypeFull && backup_type != kBackupTypeIncremental) {
         return false;
     }
     const auto selections = file_browse_sources_.selected_file_selections();
@@ -246,40 +245,123 @@ bool ServiceClient::createFileSetSchedule(const QString& connection_id, const QS
         labels.push_back(item.toMap().value(QStringLiteral("displayLabel")).toString());
     }
     const auto display_name = labels.join(QStringLiteral(", "));
-    const auto trigger_kind =
-        frequency.compare(QStringLiteral("weekly"), Qt::CaseInsensitive) == 0
-            ? kScheduleTriggerWeekly
-            : kScheduleTriggerDaily;
-    int local_minute = 2 * 60;
+    int trigger_kind = kScheduleTriggerDaily;
+    if (frequency.compare(QStringLiteral("weekly"), Qt::CaseInsensitive) == 0) {
+        trigger_kind = kScheduleTriggerWeekly;
+    } else if (frequency.compare(QStringLiteral("monthly"), Qt::CaseInsensitive) == 0) {
+        trigger_kind = kScheduleTriggerMonthly;
+    }
+    QList<int> local_minutes;
     {
-        const auto parts = time_of_day.split(QLatin1Char(':'));
-        if (parts.size() == 2) {
+        const auto chunks =
+            time_of_day.split(QRegularExpression(QStringLiteral("[,;]")), Qt::SkipEmptyParts);
+        for (const auto& chunk : chunks) {
+            const auto parts = chunk.trimmed().split(QLatin1Char(':'));
+            if (parts.size() != 2) {
+                continue;
+            }
             bool ok_h = false;
             bool ok_m = false;
             const int hour = parts[0].toInt(&ok_h);
             const int minute = parts[1].toInt(&ok_m);
             if (ok_h && ok_m && hour >= 0 && hour < 24 && minute >= 0 && minute < 60) {
-                local_minute = hour * 60 + minute;
+                const auto value = hour * 60 + minute;
+                if (!local_minutes.contains(value)) {
+                    local_minutes.push_back(value);
+                }
+            }
+            if (local_minutes.size() >= 8) {
+                break;
             }
         }
+        if (local_minutes.isEmpty()) {
+            local_minutes.push_back(2 * 60);
+        }
+        std::sort(local_minutes.begin(), local_minutes.end());
     }
     const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     const auto idempotency_key = QUuid::createUuid().toString(QUuid::WithoutBraces);
     schedule_command_request_id_ = request_id;
     schedule_command_idempotency_key_ = idempotency_key;
     schedule_command_kind_ = kUpsertScheduleRequestKind;
-    schedule_command_busy_ = true;
+    set_schedule_command_busy(true);
     start_full_backup_after_schedule_create_ = start_full_backup_after_create;
     const auto body = encode_upsert_file_set_schedule_request(
         request_id, idempotency_key, {}, display_name, true, selections, connection_id,
-        backup_type, trigger_kind, local_minute, 0, QStringLiteral("UTC"),
-        exclude_page_and_hibernation_files, false, encryption_enabled, archive_password);
+        kBackupTypeIncremental, trigger_kind, local_minutes, weekday_mask, QStringLiteral("UTC"),
+        exclude_page_and_hibernation_files, false, encryption_enabled, archive_password,
+        day_of_month_mask);
     const auto started =
         coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
             return handle_schedule_command_frame(frame_body);
         });
     if (!started) {
         start_full_backup_after_schedule_create_ = false;
+        finish_schedule_command_failure(QStringLiteral("schedule.command_failed"));
+        return false;
+    }
+    return true;
+}
+
+bool ServiceClient::updateFileSetSchedule(const QString& schedule_id, const QString& display_name,
+                                          const bool enabled, const QString& connection_id,
+                                          const QString& frequency, const QString& time_of_day,
+                                          const bool exclude_page_and_hibernation_files,
+                                          const bool encryption_enabled, const int weekday_mask,
+                                          const unsigned int day_of_month_mask) {
+    if (state_ != State::kReady || !schedules_available_ || schedule_command_busy_ ||
+        schedule_id.isEmpty() || display_name.isEmpty() || connection_id.isEmpty()) {
+        return false;
+    }
+    int trigger_kind = kScheduleTriggerDaily;
+    if (frequency.compare(QStringLiteral("weekly"), Qt::CaseInsensitive) == 0) {
+        trigger_kind = kScheduleTriggerWeekly;
+    } else if (frequency.compare(QStringLiteral("monthly"), Qt::CaseInsensitive) == 0) {
+        trigger_kind = kScheduleTriggerMonthly;
+    }
+    QList<int> local_minutes;
+    {
+        const auto chunks =
+            time_of_day.split(QRegularExpression(QStringLiteral("[,;]")), Qt::SkipEmptyParts);
+        for (const auto& chunk : chunks) {
+            const auto parts = chunk.trimmed().split(QLatin1Char(':'));
+            if (parts.size() != 2) {
+                continue;
+            }
+            bool ok_h = false;
+            bool ok_m = false;
+            const int hour = parts[0].toInt(&ok_h);
+            const int minute = parts[1].toInt(&ok_m);
+            if (ok_h && ok_m && hour >= 0 && hour < 24 && minute >= 0 && minute < 60) {
+                const auto value = hour * 60 + minute;
+                if (!local_minutes.contains(value)) {
+                    local_minutes.push_back(value);
+                }
+            }
+            if (local_minutes.size() >= 8) {
+                break;
+            }
+        }
+        if (local_minutes.isEmpty()) {
+            local_minutes.push_back(2 * 60);
+        }
+        std::sort(local_minutes.begin(), local_minutes.end());
+    }
+    const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const auto idempotency_key = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    schedule_command_request_id_ = request_id;
+    schedule_command_idempotency_key_ = idempotency_key;
+    schedule_command_kind_ = kUpsertScheduleRequestKind;
+    set_schedule_command_busy(true);
+    const auto body = encode_upsert_file_set_schedule_request(
+        request_id, idempotency_key, schedule_id, display_name, enabled, {}, connection_id,
+        kBackupTypeIncremental, trigger_kind, local_minutes, weekday_mask, QStringLiteral("UTC"),
+        exclude_page_and_hibernation_files, false, encryption_enabled, {}, day_of_month_mask);
+    const auto started =
+        coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
+            return handle_schedule_command_frame(frame_body);
+        });
+    if (!started) {
         finish_schedule_command_failure(QStringLiteral("schedule.command_failed"));
         return false;
     }

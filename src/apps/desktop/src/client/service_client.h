@@ -5,6 +5,7 @@
 #include "client/models/job_model.h"
 #include "client/models/recovery_point_model.h"
 #include "client/models/repository_connection_model.h"
+#include "client/models/schedule_list_model.h"
 #include "client/models/source_inventory_model.h"
 #include "client/service_protocol.h"
 #include "client/service_request_coordinator.h"
@@ -64,7 +65,13 @@ class ServiceClient final : public QObject {
     Q_PROPERTY(aegra::desktop::FileBrowseModel* fileRestoreTargets READ fileRestoreTargets CONSTANT)
     Q_PROPERTY(aegra::desktop::FileRecoverModel* fileRecoverEntries READ fileRecoverEntries CONSTANT)
     Q_PROPERTY(QVariantList schedules READ schedules NOTIFY schedulesChanged)
+    /// Stable ListView model; enable toggle uses dataChanged (no full table reset).
+    Q_PROPERTY(aegra::desktop::ScheduleListModel* scheduleList READ scheduleList CONSTANT)
     Q_PROPERTY(bool schedulesLoading READ schedulesLoading NOTIFY schedulesChanged)
+    Q_PROPERTY(bool scheduleCommandBusy READ scheduleCommandBusy NOTIFY scheduleCommandChanged)
+    /// True when a schedule command should show the full-window loading overlay.
+    /// Enable/disable toggle is busy but must not block/flash the main window.
+    Q_PROPERTY(bool scheduleCommandBlocksUi READ scheduleCommandBlocksUi NOTIFY scheduleCommandChanged)
     Q_PROPERTY(bool schedulesAvailable READ schedulesAvailable NOTIFY stateChanged)
     Q_PROPERTY(QString schedulesErrorText READ schedulesErrorText NOTIFY schedulesChanged)
     Q_PROPERTY(aegra::desktop::RepositoryConnectionModel* connections READ connections CONSTANT)
@@ -173,7 +180,10 @@ class ServiceClient final : public QObject {
     [[nodiscard]] FileBrowseModel* fileRestoreTargets() noexcept;
     [[nodiscard]] FileRecoverModel* fileRecoverEntries() noexcept;
     [[nodiscard]] QVariantList schedules() const;
+    [[nodiscard]] ScheduleListModel* scheduleList() noexcept;
     [[nodiscard]] bool schedulesLoading() const noexcept;
+    [[nodiscard]] bool scheduleCommandBusy() const noexcept;
+    [[nodiscard]] bool scheduleCommandBlocksUi() const noexcept;
     [[nodiscard]] bool schedulesAvailable() const noexcept;
     [[nodiscard]] QString schedulesErrorText() const;
     [[nodiscard]] RepositoryConnectionModel* connections() noexcept;
@@ -244,11 +254,10 @@ class ServiceClient final : public QObject {
                                      bool deduplication_enabled = true,
                                      bool encryption_enabled = false,
                                      const QString& archive_password = {},
-                                     int backup_type = 1);
+                                     int backup_type = 2, int weekday_mask = 0,
+                                     unsigned int day_of_month_mask = 0);
     /// Creates one schedule containing all selected volumes.
-    /// When start_full_backup_after_create is true, a Full StartBackup runs after create ack
-    /// (establishes a baseline even if the durable schedule type is Incremental).
-    /// backup_type: 1 full, 2 incremental (wizard never offers Differential).
+    /// After-create StartBackup requests Incremental; Service demotes the first run to Full.
     Q_INVOKABLE bool createSchedule(const QVariantList& sources, const QString& connection_id,
                                     const QString& frequency, const QString& time_of_day,
                                     bool exclude_page_and_hibernation_files = true,
@@ -256,9 +265,8 @@ class ServiceClient final : public QObject {
                                     bool encryption_enabled = false,
                                     const QString& archive_password = {},
                                     bool start_full_backup_after_create = false,
-                                    int backup_type = 1);
+                                    int weekday_mask = 0, unsigned int day_of_month_mask = 0);
     /// Creates a file_set schedule from the current fileBrowseSources selection (opaque tokens).
-    /// backup_type: 1 full, 2 incremental (Differential is not offered for file_set).
     /// deduplication_enabled is always forced false for file_set.
     Q_INVOKABLE bool createFileSetSchedule(const QString& connection_id, const QString& frequency,
                                            const QString& time_of_day,
@@ -266,9 +274,22 @@ class ServiceClient final : public QObject {
                                            bool encryption_enabled = false,
                                            const QString& archive_password = {},
                                            bool start_full_backup_after_create = false,
-                                           int backup_type = 1);
+                                           int weekday_mask = 0,
+                                           unsigned int day_of_month_mask = 0);
+    /// Updates a file_set schedule (source frozen; file_selections omitted).
+    Q_INVOKABLE bool updateFileSetSchedule(const QString& schedule_id, const QString& display_name,
+                                           bool enabled, const QString& connection_id,
+                                           const QString& frequency, const QString& time_of_day,
+                                           bool exclude_page_and_hibernation_files,
+                                           bool encryption_enabled, int weekday_mask,
+                                           unsigned int day_of_month_mask = 0);
     Q_INVOKABLE bool deleteSchedule(const QString& schedule_id);
     Q_INVOKABLE bool setScheduleEnabled(const QString& schedule_id, bool enabled);
+    /// Authoritative source_ids for a listed schedule (avoids QML modelData list loss).
+    Q_INVOKABLE QVariantList sourceIdsForSchedule(const QString& schedule_id) const;
+    /// file_set display_chain lists from the Service schedule store (not QML modelData).
+    Q_INVOKABLE QVariantList displayChainsForSchedule(const QString& schedule_id) const;
+    Q_INVOKABLE void logScheduleEdit(const QString& message);
     Q_INVOKABLE void selectRepositoryConnection(const QString& connection_id);
     Q_INVOKABLE void addRepositoryConnection(const QString& display_name, const QString& locator);
     Q_INVOKABLE void importRepositoryConnection(const QString& display_name,
@@ -351,6 +372,11 @@ class ServiceClient final : public QObject {
     void taskLogChanged();
     void inventoryChanged();
     void schedulesChanged();
+    void scheduleCommandChanged();
+    /// Upsert/delete schedule accepted by Service.
+    void scheduleCommandSucceeded();
+    /// Upsert/delete schedule failed (localized toast already shown).
+    void scheduleCommandFailed(const QString& message);
     void connectionsChanged();
     void repositoryCommandChanged();
     void backupCommandChanged();
@@ -454,7 +480,11 @@ class ServiceClient final : public QObject {
     void finish_connection_failure(const QString& message_code);
     void finish_schedule_failure(const QString& message_code);
     void finish_schedule_command_failure(const QString& message_code);
+    void set_schedule_command_busy(bool busy);
     void enrich_schedules_with_connections();
+    /// Patch one schedule's enabled flag via ScheduleListModel::dataChanged (no list reset).
+    [[nodiscard]] bool patch_schedule_enabled(const QString& schedule_id, bool enabled);
+    void publish_schedules(QVariantList items);
     void enrich_job_row(JobRow& row) const;
     void finish_repository_command_failure(const QString& message_code);
     void finish_backup_command_failure(const QString& message_code);
@@ -532,6 +562,11 @@ class ServiceClient final : public QObject {
     QString schedule_command_request_id_;
     QString schedule_command_idempotency_key_;
     int schedule_command_kind_{0};
+    /// When true, command success patches local enabled only (toggle), no full list reload.
+    bool schedule_enable_patch_active_{false};
+    QString schedule_enable_patch_id_;
+    bool schedule_enable_patch_previous_{false};
+    bool schedule_enable_patch_target_{false};
     bool start_full_backup_after_schedule_create_{false};
     QString start_backup_request_id_;
     QString cancel_job_request_id_;
@@ -547,6 +582,7 @@ class ServiceClient final : public QObject {
     QVariantList pending_sources_;
     QVariantList pending_schedules_;
     QVariantList schedules_;
+    ScheduleListModel schedule_list_;
     QVariantList pending_connections_;
     QSet<QString> toasted_job_keys_;
     std::optional<QString> requested_token_;

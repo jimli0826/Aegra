@@ -71,15 +71,19 @@ Rectangle {
         }
 
         Text {
+            id: actionLabel
             visible: card.headerRightComponent === null && card.actionText.length > 0
             text: card.actionText
-            color: Theme.colorAccentBlue
-            font.pixelSize: 12
+            color: actionMouse.containsMouse ? Theme.colorLinkHover : Theme.colorAccentBlue
+            font.pixelSize: 13
             font.bold: true
             font.family: Theme.fontFamily
             Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
             MouseArea {
+                id: actionMouse
                 anchors.fill: parent
+                anchors.margins: -4
+                hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: card.actionClicked()
             }

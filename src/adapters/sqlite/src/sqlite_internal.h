@@ -59,6 +59,9 @@ class SqliteStatement final {
 
 [[nodiscard]] std::string encode_string_list(const std::vector<std::string>& values);
 [[nodiscard]] base::Result<std::vector<std::string>> decode_string_list(std::string_view encoded);
+[[nodiscard]] std::string encode_local_minutes_of_day(const std::vector<std::uint16_t>& minutes);
+[[nodiscard]] base::Result<std::vector<std::uint16_t>>
+decode_local_minutes_of_day(std::string_view encoded);
 [[nodiscard]] std::string encode_message_arguments(const contracts::MessageArguments& arguments);
 [[nodiscard]] base::Result<contracts::MessageArguments>
 decode_message_arguments(std::string_view encoded);
@@ -306,10 +309,10 @@ inline constexpr const char* kSelectCommandSql =
 
 inline constexpr const char* kSelectScheduleSql =
     "SELECT schedule_id, display_name, enabled, content_kind, source_ids, owner_sid, "
-    "repository_connection_id, backup_type, trigger_kind, local_minute_of_day, weekday_mask, "
-    "timezone_id, next_run_utc_ms, exclude_page_and_hibernation_files, deduplication_enabled, "
-    "encryption_enabled, archive_password_protected, backup_set_uuid, last_recovery_point_id, "
-    "created_utc_ms, updated_utc_ms FROM schedules WHERE schedule_id = ?";
+    "repository_connection_id, backup_type, trigger_kind, local_minutes_of_day, weekday_mask, "
+    "day_of_month_mask, timezone_id, next_run_utc_ms, exclude_page_and_hibernation_files, "
+    "deduplication_enabled, encryption_enabled, archive_password_protected, backup_set_uuid, "
+    "last_recovery_point_id, created_utc_ms, updated_utc_ms FROM schedules WHERE schedule_id = ?";
 
 [[nodiscard]] std::string encode_relative_path_blob(
     const std::vector<contracts::EncodedName>& components);

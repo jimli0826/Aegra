@@ -30,6 +30,7 @@
         <file alias="qml/components/SidebarMenu.qml">../qml/components/SidebarMenu.qml</file>
         <file alias="qml/components/SidebarNavItem.qml">../qml/components/SidebarNavItem.qml</file>
         <file alias="qml/components/NavIcon.qml">../qml/components/NavIcon.qml</file>
+        <file alias="qml/components/ScheduleTypeIcon.qml">../qml/components/ScheduleTypeIcon.qml</file>
         <file alias="qml/components/SplashOverlay.qml">../qml/components/SplashOverlay.qml</file>
         <file alias="qml/components/TaskProgressBar.qml">../qml/components/TaskProgressBar.qml</file>
         <file alias="qml/components/ToastBanner.qml">../qml/components/ToastBanner.qml</file>

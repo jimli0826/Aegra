@@ -44,6 +44,8 @@ set(AEGRA_DESKTOP_SOURCES
     src/client/models/source_inventory_model.h
     src/client/models/repository_connection_model.cpp
     src/client/models/repository_connection_model.h
+    src/client/models/schedule_list_model.cpp
+    src/client/models/schedule_list_model.h
     src/locale/locale_controller.cpp
     src/locale/locale_controller.h
     src/locale/locale_format.cpp

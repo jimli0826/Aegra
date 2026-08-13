@@ -88,6 +88,18 @@ QString RepositoryConnectionModel::connectionIdAt(const int row) const {
     return rows_.at(row).connection_id;
 }
 
+int RepositoryConnectionModel::indexOfConnectionId(const QString& connection_id) const {
+    if (connection_id.isEmpty()) {
+        return -1;
+    }
+    for (int index = 0; index < rows_.size(); ++index) {
+        if (rows_.at(index).connection_id == connection_id) {
+            return index;
+        }
+    }
+    return -1;
+}
+
 bool RepositoryConnectionModel::isAvailableAt(const int row) const {
     if (row < 0 || row >= rows_.size()) {
         return false;

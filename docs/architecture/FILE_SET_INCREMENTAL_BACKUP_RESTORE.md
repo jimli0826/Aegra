@@ -92,14 +92,17 @@ parent path index 与 metadata signature 比较。Archive Adapter 解析物理 p
 
 ### 4.1 Schedule
 
-`file_set` Schedule 支持 `full` 和 `incremental`。Schedule 创建时冻结：
+`file_set` Schedule 的请求类型固定为 Incremental（不是用户选项）。首次运行或没有合格父时降为 Full。
+用户可对单次 Job 请求 Full。Schedule 创建时冻结：
 
 - `backup_set_uuid`；
 - 规范化 selection roots、recursion、exclusion、metadata/security 选项；
 - selection fingerprint 算法及其版本；
 - change detection method（当前固定 `mtime_size_v1`）；
 - chain depth policy；
-- Repository connection 和 credential reference。
+- credential reference。
+
+Repository connection 可改；改后清空 tip，下次增量降 Full。
 
 更新任何进入 fingerprint 的字段必须创建新的 backup set 或明确重置为 Full 基线，不能继续旧链。显示名称、运行
 时间、保留窗口等不影响内容选择的字段不进入 fingerprint。

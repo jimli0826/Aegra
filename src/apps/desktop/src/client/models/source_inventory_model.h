@@ -3,6 +3,7 @@
 #include <QAbstractListModel>
 #include <QString>
 #include <QVariantList>
+#include <QVariantMap>
 #include <QVector>
 
 #include <cstdint>
@@ -68,6 +69,10 @@ class SourceInventoryModel final : public QAbstractListModel {
     [[nodiscard]] bool contains_selectable(const QString& source_id) const;
     [[nodiscard]] std::optional<SourceInventoryRow> find(const QString& source_id) const;
     [[nodiscard]] QVariantList disksTree() const;
+    /// Maps schedule source_ids onto the current disksTree.
+    /// Returns matchCount, volumeKeyList ("dNvM"), expandedDiskList (disk indexes).
+    Q_INVOKABLE [[nodiscard]] QVariantMap checkedStateForSourceIds(
+        const QVariantList& source_ids) const;
 
     [[nodiscard]] int rowCount(const QModelIndex& parent = QModelIndex()) const override;
     [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;

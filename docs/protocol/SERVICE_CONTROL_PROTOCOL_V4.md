@@ -206,10 +206,16 @@ Job list 的 `progress`：仅合并 Worker 监督器缓存中的真实 progress�
 
 ### 4.7 既有枚举
 
-`ServiceState`、`BackupType`、`JobOperation`、`ServiceJobState`、`ScheduleTriggerKind`、
+`ServiceState`、`BackupType`、`JobOperation`、`ServiceJobState`、
 `RepositoryConnectionState`、`RepositoryCatalogState`、`RecoveryPointChainState`、`SourceKind`、
 `SourceAvailability`、`AuditSeverity`、`MountSessionState`、`TaskPhase`、`TaskOutcome`、
 `ServiceEventKind` 数值与 V3 相同。
+
+`ScheduleTriggerKind` 在 V3 Daily(1)/Weekly(2) 上增加 Monthly(3)。`ScheduleTrigger` 增加
+`day_of_month_mask`（bit0=每月 1 日 … bit30=31 日），并将 `local_minute_of_day` 替换为
+`local_minutes_of_day`（1–8 个 0–1439 的分钟值，排序去重；任意两时刻间隔 ≥ 30 分钟，含跨午夜）。
+Daily/Weekly 的 `day_of_month_mask` 必须为 0；Monthly 必须非 0，且 `weekday_mask` 必须为 0。
+所选日在当月不存在时（如 31 日对 2 月）跳到下一个含该日的月份。下次运行取各时刻中最早的候选。
 
 `SourceKind` 扩展：
 
@@ -261,7 +267,7 @@ Job list 的 `progress`：仅合并 Worker 监督器缓存中的真实 progress�
 | node_token | 1..512 字节 opaque |
 | display_label | 1..256 UTF-8 字节；非权威 |
 | 更新 Schedule | `file_set` 必须 null 或省略变更；不得提交新 token 改源 |
-| 查询 Schedule | 只返回 `selection_id`、`display_label`、`entry_kind`、`recursion` |
+| 查询 Schedule | 返回 `selection_id`、`display_label`、`entry_kind`、`recursion`、`display_chain` |
 
 `unreadable_policy` 固定 `1=fail_job`。其它值拒绝。FI0 已删除 `reparse_policy`（reparse 一律 backup strict fail）。
 
@@ -410,11 +416,15 @@ Footer，其它任务为 0。file_set backup 成功时 `requested_backup_type` /
 - `display_name` 来自 UTF-16LE 的可展示投影，可含替换字符；**不是**恢复权威名称；
 - 不返回绝对路径、volume path、file id；
 - token TTL 默认 15 分钟；绑定 caller SID + connection session；
-- 最大 active tokens / connection：4096；
+- 最大 active tokens / connection：4096（按 session 计数，不是进程全局）；
+- 根列表首页（`parent_node_token=null` 且 `page.continuation_token=null`）必须先清空该
+  session 上已有 node tokens，再 mint 本页；续页保留本轮根列表已发 token。Desktop 折叠/
+  重载树不单独释放 token，依赖根列表重置与 TTL/断连清理；
 - 根列表（`parent_node_token=null`）：先返回当前用户可映射的特殊目录（固定英文 label：
   Desktop、Downloads、Documents、Pictures、Music、Videos），再返回授权盘符卷；无法映射到授权卷
   的特殊目录省略。子目录排序仍为 `entry_kind`（dir first）+ display_name 二进制序 + token 次序稳定化；
 - 过期/错绑 token → `file_browse.token_invalid`；
+- 单 connection 超过 4096 active tokens → `file_browse.token_limit`；
 - 未授权 volume → 不出现或 `availability=Unavailable`。
 
 **示例请求：**
@@ -559,10 +569,12 @@ payload 保持 repository/schedule/job 引用形状；若 Schedule 为 file_set�
 
 创建 file_set：解析 token → durable selection；规范化/去重；事务写入。  
 更新：保护源冻结；改变 `protection` 选择 → Conflict `schedule.source_frozen`。volume_set 更新不得改变
-`deduplication_enabled`；该字段必须进入幂等请求指纹。
+`deduplication_enabled`；该字段必须进入幂等请求指纹。Service 将 `backup_type` 一律写为 Incremental。
+更换 `repository_connection_id` 清空增量 tip。
 
 **列表 ScheduleSummary** 增加：`content_kind`, `deduplication_enabled`, `selection_summaries`（`selection_id`,
-`display_label`, `entry_kind`, `recursion` only）。file_set 的 `deduplication_enabled` 固定 false。
+`display_label`, `entry_kind`, `recursion`, `display_chain`）。`display_chain` 为 volume-relative UI 名
+（整卷选择则为 `[display_label]`），不是路径。file_set 的 `deduplication_enabled` 固定 false。
 
 ### 7.3 kind 48 — StartFileRestore
 

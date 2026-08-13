@@ -72,19 +72,21 @@ Volume schedule 创建/更新：
 
 - **创建**（无 `schedule_id`）：`protection.volume_source_ids`、Backup options、加密与 1–32 字符口令；
   口令经 Service 用 DPAPI `CRYPTPROTECT_LOCAL_MACHINE` 保护（`pOptionalEntropy` = `schedule_id`）
-  并以 Base64 写入 SQLite。
-- **更新**（有 `schedule_id`）：不得携带 `archive_password`；保护源、`backup_type`、
+  并以 Base64 写入 SQLite。`backup_type` 一律存 Incremental；定时与 Run now 请求增量，无父则降 Full。
+- **更新**（有 `schedule_id`）：不得携带 `archive_password`；保护源、
   `exclude_page_and_hibernation_files`、`deduplication_enabled`、`encryption_enabled` 与保护口令创建后冻结。
-  允许修改 `display_name`、`enabled`、`repository_connection_id`、`trigger`。
+  允许修改 `display_name`、`enabled`、`repository_connection_id`、`trigger`
+  （Daily/Weekly/Monthly；Monthly 携带 `day_of_month_mask`）。
+  更换 destination 清空 `last_recovery_point_id`（下次增量降 Full）。
 
 file_set schedule（F6）：
 
 - **创建**：`protection.file_selections[]` 携带短期 browse `node_token`；Service 在调用方 SID/session 下
   解析为 durable `FileSourceRef`（canonical `selection_id` UUID + `volume_identity` + 相对组件），
-  规范化/去重后写入控制面；`owner_sid` 记录创建者。
+  规范化/去重后写入控制面；`owner_sid` 记录创建者。同样固定 Incremental。
 - **更新**：不得更换 `content_kind` 或重新提交 file selections（`schedule.source_frozen`）；
-  与 volume 相同，`backup_type` / 加密选项冻结。
-- Desktop 永不发送绝对路径；列表摘要只含 display label，不含路径或 volume GUID。
+  加密选项冻结。
+- Desktop 永不发送绝对路径；列表摘要含 `display_label` 与 volume-relative `display_chain`（UI 名，不是路径）。
 
 Volume Restore：Prepare 必须携带 Repository connection、Recovery Point 和 opaque target source ID；
 Start 只接受 opaque preflight token 且 `confirmed=true`。file_set 恢复使用 kind 15/48，不得走 volume

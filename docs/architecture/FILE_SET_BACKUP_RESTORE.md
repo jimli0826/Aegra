@@ -174,8 +174,9 @@ V4 保持现有 Named Pipe framing；frame 上限为 1 MiB。根 `schema_version
 | 48 | Command | `StartFileRestore` | preflight token、confirmed、Archive credential input |
 
 `UpsertScheduleCommand` 改为携带 `ProtectionSpecInput`。对于 `file_set`，创建请求携带 node token 和明确规则；
-更新请求不得改变解析后的 selection。查询 Schedule 只返回 `selection_id + display_label + entry_kind`，不返回
-内部 Volume identity 或路径。
+更新请求不得改变解析后的 selection。查询 Schedule 返回
+`selection_id + display_label + entry_kind + recursion + display_chain`，不返回
+内部 Volume identity 或路径。`display_chain` 仅用于编辑页把已选项勾回 browse 树。
 
 `ListRecoveryPointEntries` 必须先认证 Archive metadata 与 File Index；continuation token 绑定 Repository
 UUID、file UUID、index root digest、parent entry ID 和调用者。每页最多 100，结果稳定排序，token 不前进、

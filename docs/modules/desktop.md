@@ -171,10 +171,19 @@ Password 在 Service 没有对应能力时不显示。布局必须在 900x600、
   选中并提交该 Disk 下所有具备稳定 identity 和可靠非零容量的 Volume。系统卷、只读卷、EFI/FAT、RAW
   和未知文件系统卷都可勾选；读取方式由 Worker 决定，Desktop 不按 VSS 能力过滤。
   **Schedule 创建后变更规则**（与 Service 不变量一致）：
+  - Schedule 创建 / 更新 / 删除是异步 Service 命令。命令进行中 Desktop 显示全局 Loading
+    overlay；成功后再关闭向导并刷新列表，失败保留向导并由 toast 报告。
+  - 行菜单 **Edit** 打开同一向导（跳过类型步），回填当前设置。
+  - 源只读：volume 按 `source_ids` 勾选并锁定；file_set 从 ServiceClient 的 schedule 列表读取
+    `display_chain`（不走 QML `modelData`），清掉上次勾选后再回填并锁定。树默认折叠：后台加载
+    匹配路径以计算磁盘半选/勾选，界面只显示根行，用户展开后再看到子项。
   - 创建时若开启加密并设置密码：之后不可关闭加密、不可改/清空密码；更新命令不得再带 `archive_password`。
-  - 备份源 `source_ids[]` 创建后不可变。
-  - Repository connection 可改为其它已连接目标。
-  - Schedule settings（频率、时间、星期等）可修改；`enabled` 可切换。
+  - 备份源 `source_ids[]` / file selections 创建后不可变。
+  - Repository connection 可改为其它已连接目标；改目标时确认下次备份为 Full（Service 清 tip）。
+  - Schedule settings（Daily/Weekly/Monthly、时间、星期或每月日期）可修改；`enabled` 可切换。
+    Monthly 使用 `day_of_month_mask`（可多选 1–31）；当月无该日则顺延到下一个有该日的月份。
+    Time of day 可配置 1–8 个时刻（`local_minutes_of_day`）；禁止重复，任意两时刻间隔 ≥ 30 分钟。
+  - 向导不再提供 Backup type。每次运行默认增量；首次或无父降 Full；菜单 **Run now**（增量）与 **Run full**。
   - Backup options 中除 “完成后关机”（shutdown）可改外，其余（含 exclude pagefile、加密、去重/分卷/压缩
     等向导选项）创建后不可改；Desktop 更新路径必须回传已有冻结字段，不得静默改写加密标志。
   - ADR-0022 的 `deduplication_enabled` 只在 Volume Set 创建流程显示，默认开启并进入 UpsertSchedule；
@@ -208,6 +217,8 @@ Password 在 Service 没有对应能力时不显示。布局必须在 900x600、
     15 PrepareFileRestore、48 StartFileRestore；UpsertSchedule `file_set` 选择。
   - `FileBrowseModel` / `FileRecoverModel` 只保存 opaque `node_token` / `entry_id`，不本地枚举路径、
     不向 Service 发送绝对路径。
+  - 特殊目录根（Desktop/Downloads/Documents/Pictures/Music/Videos）的 edit rehydrate 使用产品短
+    label 匹配 browse 根行；不得把卷相对路径链展开进特殊根子树（否则 SOURCE 会列出该目录内容）。
   - Backup 向导 step 0 选 Files 后绑定 `file.browse` lazy 树与 tri-state 勾选；创建
     `createFileSetSchedule`；Schedule 列表展示 `selection_summaries` 安全 label。
   - Restore Files 类型：归档文件树 + 目标目录 + `startFileRestore`；Options 含

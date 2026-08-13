@@ -342,6 +342,7 @@ RequestDisposition ServiceClient::handle_connection_list_frame(const QByteArray&
     emit loadingChanged();
     if (!schedules_.isEmpty()) {
         enrich_schedules_with_connections();
+        schedule_list_.set_items(schedules_);
         emit schedulesChanged();
     }
     if (selected_repository_connection_id_.isEmpty()) {

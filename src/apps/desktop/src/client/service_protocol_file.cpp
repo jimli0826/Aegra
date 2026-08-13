@@ -235,9 +235,10 @@ QByteArray encode_upsert_file_set_schedule_request(
     const QString& request_id, const QString& idempotency_key, const QString& schedule_id,
     const QString& display_name, const bool enabled, const QVariantList& file_selections,
     const QString& repository_connection_id, const int backup_type, const int trigger_kind,
-    const int local_minute_of_day, const int weekday_mask, const QString& timezone_id,
+    const QList<int>& local_minutes_of_day, const int weekday_mask, const QString& timezone_id,
     const bool exclude_page_and_hibernation_files, const bool /*deduplication_enabled*/,
-    const bool encryption_enabled, const QString& archive_password) {
+    const bool encryption_enabled, const QString& archive_password,
+    const quint32 day_of_month_mask) {
     QJsonArray selections;
     for (const auto& item : file_selections) {
         const auto map = item.toMap();
@@ -252,9 +253,15 @@ QByteArray encode_upsert_file_set_schedule_request(
     const QJsonObject protection{{QStringLiteral("content_kind"), 2},
                                  {QStringLiteral("volume_set"), QJsonValue(QJsonValue::Null)},
                                  {QStringLiteral("file_set"), file_set}};
+    QJsonArray minutes_json;
+    for (const auto minute : local_minutes_of_day) {
+        minutes_json.push_back(minute);
+    }
     const QJsonObject trigger{{QStringLiteral("kind"), trigger_kind},
-                              {QStringLiteral("local_minute_of_day"), local_minute_of_day},
+                              {QStringLiteral("local_minutes_of_day"), minutes_json},
                               {QStringLiteral("weekday_mask"), weekday_mask},
+                              {QStringLiteral("day_of_month_mask"),
+                               static_cast<qint64>(day_of_month_mask)},
                               {QStringLiteral("timezone_id"), timezone_id}};
     const QJsonObject payload{
         {QStringLiteral("schedule_id"),

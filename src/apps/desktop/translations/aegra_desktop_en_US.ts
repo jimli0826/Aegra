@@ -28,8 +28,8 @@
         <translation>Repository</translation>
     </message>
     <message id="aegra.nav.event_log">
-        <source>Task Log</source>
-        <translation>Task Log</translation>
+        <source>Event Log</source>
+        <translation>Event Log</translation>
     </message>
     <message id="aegra.nav.settings">
         <source>Settings</source>
@@ -103,6 +103,10 @@
         <source>Delete</source>
         <translation>Delete</translation>
     </message>
+    <message id="aegra.common.remove">
+        <source>Remove</source>
+        <translation>Remove</translation>
+    </message>
     <message id="aegra.common.cancel">
         <source>Cancel</source>
         <translation>Cancel</translation>
@@ -114,6 +118,14 @@
     <message id="aegra.common.create">
         <source>Create</source>
         <translation>Create</translation>
+    </message>
+    <message id="aegra.common.save">
+        <source>Save</source>
+        <translation>Save</translation>
+    </message>
+    <message id="aegra.common.edit">
+        <source>Edit</source>
+        <translation>Edit</translation>
     </message>
     <message id="aegra.common.not_available">
         <source>N/A</source>
@@ -657,6 +669,14 @@ Server: %1</translation>
         <source>Unable to browse local files</source>
         <translation>Unable to browse local files</translation>
     </message>
+    <message id="aegra.error.file_browse.token_limit">
+        <source>Too many folders were opened. Close the dialog and try again.</source>
+        <translation>Too many folders were opened. Close the dialog and try again.</translation>
+    </message>
+    <message id="aegra.error.file_browse.token_invalid">
+        <source>This folder list expired. Refresh and try again.</source>
+        <translation>This folder list expired. Refresh and try again.</translation>
+    </message>
     <message id="aegra.error.file_recover.query_failed">
         <source>Unable to list files in this recovery point</source>
         <translation>Unable to list files in this recovery point</translation>
@@ -1029,6 +1049,22 @@ Server: %1</translation>
         <source>Time of day</source>
         <translation>Time of day</translation>
     </message>
+    <message id="aegra.backup.add_time">
+        <source>Add time</source>
+        <translation>Add time</translation>
+    </message>
+    <message id="aegra.backup.time.duplicate">
+        <source>Each time of day must be unique.</source>
+        <translation>Each time of day must be unique.</translation>
+    </message>
+    <message id="aegra.backup.time.min_interval">
+        <source>Times of day must be at least 30 minutes apart.</source>
+        <translation>Times of day must be at least 30 minutes apart.</translation>
+    </message>
+    <message id="aegra.backup.time.no_slot">
+        <source>No available time slot with at least 30 minutes gap.</source>
+        <translation>No available time slot with at least 30 minutes gap.</translation>
+    </message>
     <message id="aegra.backup.weekday.mon">
         <source>Mon</source>
         <translation>Mon</translation>
@@ -1132,6 +1168,10 @@ Server: %1</translation>
     <message id="aegra.backup.action.run_incremental">
         <source>Run incremental</source>
         <translation>Run incremental</translation>
+    </message>
+    <message id="aegra.backup.action.run_now">
+        <source>Run now</source>
+        <translation>Run now</translation>
     </message>
     <message id="aegra.backup.run.started">
         <source>Backup started</source>
@@ -1278,8 +1318,8 @@ Server: %1</translation>
         <translation>Start first backup?</translation>
     </message>
     <message id="aegra.backup.schedule.first_backup_message">
-        <source>The schedule will be saved. Do you want to start the first full backup now?</source>
-        <translation>The schedule will be saved. Do you want to start the first full backup now?</translation>
+        <source>The schedule will be saved. Do you want to start the first backup now?</source>
+        <translation>The schedule will be saved. Do you want to start the first backup now?</translation>
     </message>
     <message id="aegra.backup.schedule.first_backup_now">
         <source>Start now</source>
@@ -1292,6 +1332,26 @@ Server: %1</translation>
     <message id="aegra.backup.schedule.save_failed">
         <source>Could not save schedule</source>
         <translation>Could not save schedule</translation>
+    </message>
+    <message id="aegra.backup.schedule.dest_change_title">
+        <source>Change destination?</source>
+        <translation>Change destination?</translation>
+    </message>
+    <message id="aegra.backup.schedule.dest_change_message">
+        <source>The next backup will run as a full backup because the incremental chain will be reset.</source>
+        <translation>The next backup will run as a full backup because the incremental chain will be reset.</translation>
+    </message>
+    <message id="aegra.backup.opt.password_frozen">
+        <source>Password is set and cannot be changed.</source>
+        <translation>Password is set and cannot be changed.</translation>
+    </message>
+    <message id="aegra.backup.file.incremental_default_note">
+        <source>Each run is incremental. The first backup, or a run with no usable parent, becomes a full backup automatically.</source>
+        <translation>Each run is incremental. The first backup, or a run with no usable parent, becomes a full backup automatically.</translation>
+    </message>
+    <message id="aegra.backup.schedule.edit_busy">
+        <source>Wait for the backup to finish before editing this schedule</source>
+        <translation>Wait for the backup to finish before editing this schedule</translation>
     </message>
     <message id="aegra.backup.schedule.update_failed">
         <source>Could not update schedule</source>
@@ -1669,26 +1729,6 @@ Server: %1</translation>
         <source>Size</source>
         <translation>Size</translation>
     </message>
-    <message id="aegra.mount.disk_name">
-        <source>Disk %1</source>
-        <translation>Disk %1</translation>
-    </message>
-    <message id="aegra.mount.state.mounting">
-        <source>Mounting</source>
-        <translation>Mounting</translation>
-    </message>
-    <message id="aegra.mount.state.mounted">
-        <source>Mounted</source>
-        <translation>Mounted</translation>
-    </message>
-    <message id="aegra.mount.state.unmounting">
-        <source>Unmounting</source>
-        <translation>Unmounting</translation>
-    </message>
-    <message id="aegra.mount.state.failed">
-        <source>Failed</source>
-        <translation>Failed</translation>
-    </message>
     <message id="aegra.mount.drive_letter">
         <source>Drive letter</source>
         <translation>Drive letter</translation>
@@ -1704,38 +1744,6 @@ Server: %1</translation>
     <message id="aegra.mount.unmount">
         <source>Unmount</source>
         <translation>Unmount</translation>
-    </message>
-    <message id="aegra.mount.started">
-        <source>Mount started</source>
-        <translation>Mount started</translation>
-    </message>
-    <message id="aegra.mount.unmounted">
-        <source>Unmounted</source>
-        <translation>Unmounted</translation>
-    </message>
-    <message id="aegra.mount.already_mounted_selection">
-        <source>Selected disk(s) are already mounted</source>
-        <translation>Selected disk(s) are already mounted</translation>
-    </message>
-    <message id="aegra.mount.capability_missing">
-        <source>Service does not support mount</source>
-        <translation>Service does not support mount</translation>
-    </message>
-    <message id="aegra.mount.busy">
-        <source>A mount command is already in progress</source>
-        <translation>A mount command is already in progress</translation>
-    </message>
-    <message id="aegra.mount.select_required">
-        <source>Select a checkpoint and at least one source disk</source>
-        <translation>Select a checkpoint and at least one source disk</translation>
-    </message>
-    <message id="aegra.mount.invalid_drive_letter">
-        <source>Preferred drive letter must be a single letter A–Z</source>
-        <translation>Preferred drive letter must be a single letter A–Z</translation>
-    </message>
-    <message id="aegra.mount.select_session">
-        <source>Select a mounted session to unmount</source>
-        <translation>Select a mounted session to unmount</translation>
     </message>
     <message id="aegra.mount.checkpoint_panel_empty">
         <source>Recovery point list will appear when mount Service APIs are connected</source>
@@ -1828,26 +1836,6 @@ Server: %1</translation>
     <message id="aegra.settings.service.connection">
         <source>Connection</source>
         <translation>Connection</translation>
-    </message>
-    <message id="aegra.settings.job_retention">
-        <source>Job history retention</source>
-        <translation>Job history retention</translation>
-    </message>
-    <message id="aegra.settings.job_retention_desc">
-        <source>Completed jobs older than this period are permanently deleted from the service.</source>
-        <translation>Completed jobs older than this period are permanently deleted from the service.</translation>
-    </message>
-    <message id="aegra.settings.job_retention.1_month">
-        <source>1 month</source>
-        <translation>1 month</translation>
-    </message>
-    <message id="aegra.settings.job_retention.3_months">
-        <source>3 months</source>
-        <translation>3 months</translation>
-    </message>
-    <message id="aegra.settings.job_retention.6_months">
-        <source>6 months</source>
-        <translation>6 months</translation>
     </message>
     <message id="aegra.backup.column.backup_type">
         <source>Backup type</source>

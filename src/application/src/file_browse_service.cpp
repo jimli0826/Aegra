@@ -47,9 +47,17 @@ FileBrowseService::mint_token(const ports::FileBrowseCaller& caller, std::string
     const auto now = utc_ms(clock_);
     std::lock_guard lock(mutex_);
     purge_expired_unlocked(now);
-    if (tokens_.size() >= kMaximumActiveTokens) {
-        return base::Result<std::string>::failure(
-            {base::ErrorCode::kConflict, "file_browse.token_limit"});
+    // L22: active tokens are limited per connection session, not process-wide.
+    std::uint32_t session_active = 0;
+    for (const auto& item : tokens_) {
+        if (item.second.session_id != caller.session_id) {
+            continue;
+        }
+        ++session_active;
+        if (session_active >= kMaximumActiveTokens) {
+            return base::Result<std::string>::failure(
+                {base::ErrorCode::kConflict, "file_browse.token_limit"});
+        }
     }
     TokenEntry entry;
     entry.adapter_token = std::move(adapter_token);
@@ -123,6 +131,11 @@ FileBrowseService::browse(const ports::FileBrowseCaller& caller,
             return base::Result<contracts::FileSourceNodePage>::failure(parent.error());
         }
         adapter_parent = parent.value().adapter_token;
+    } else if (!request.page.continuation_token) {
+        // First root page replaces the Desktop tree; drop prior session tokens so
+        // collapse / re-open / locked hydrate cannot accumulate past L22. Continuation
+        // pages keep earlier root tokens from this listing.
+        clear_session(caller.session_id);
     }
     auto page =
         browser_.list_children(caller, adapter_parent, request.page, request.include_unavailable,

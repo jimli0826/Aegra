@@ -155,11 +155,18 @@ void apply_filesystem_capacity_fallback(WindowsVolumeInfo& info) {
     }
 }
 
+struct PhysicalPartitionRange final {
+    std::uint64_t offset_bytes{0};
+    std::uint64_t size_bytes{0};
+};
+
 struct PhysicalDiskInfo final {
     std::uint32_t disk_number{0};
     std::uint64_t capacity_bytes{0};
     std::string partition_style{"Unknown"};
     std::string media_type{"Unknown"};
+    /// Recognized partitions from DRIVE_LAYOUT (used to reject fake/cloud extents).
+    std::vector<PhysicalPartitionRange> partitions;
 };
 
 [[nodiscard]] detail::UniqueHandle open_physical_drive(const std::uint32_t disk_number) {
@@ -221,9 +228,25 @@ struct PhysicalDiskInfo final {
                         layout_buffer.data(), static_cast<DWORD>(layout_buffer.size()),
                         &bytes_returned, nullptr) &&
         bytes_returned >= sizeof(DRIVE_LAYOUT_INFORMATION_EX)) {
-        DRIVE_LAYOUT_INFORMATION_EX layout{};
-        std::memcpy(&layout, layout_buffer.data(), sizeof(layout));
-        info.partition_style = partition_style_name(layout.PartitionStyle);
+        const auto* layout =
+            reinterpret_cast<const DRIVE_LAYOUT_INFORMATION_EX*>(layout_buffer.data());
+        info.partition_style = partition_style_name(layout->PartitionStyle);
+        info.partitions.reserve(layout->PartitionCount);
+        const auto max_parts = (std::min)(layout->PartitionCount, kMaxPartitions);
+        for (DWORD index = 0; index < max_parts; ++index) {
+            const auto& part = layout->PartitionEntry[index];
+            if (part.PartitionLength.QuadPart <= 0 || part.StartingOffset.QuadPart < 0) {
+                continue;
+            }
+            // Skip empty/container slots that layout APIs sometimes emit.
+            if (part.PartitionStyle == PARTITION_STYLE_MBR && part.Mbr.PartitionType == 0) {
+                continue;
+            }
+            info.partitions.push_back(PhysicalPartitionRange{
+                static_cast<std::uint64_t>(part.StartingOffset.QuadPart),
+                static_cast<std::uint64_t>(part.PartitionLength.QuadPart),
+            });
+        }
     }
 
     // Media type (old StorageManager GetDiskInfo): bus type + seek penalty.
@@ -556,6 +579,68 @@ bool supports_vss_snapshot(const WindowsVolumeInfo& volume) noexcept {
            normalized == "FAT32" || normalized == "EXFAT";
 }
 
+/// True when the volume's primary extent lands on a real partition of the physical disk
+/// with a matching size. Cloud / filter volumes (e.g. Google Drive) often report a disk
+/// number via IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS but do not correspond to any partition
+/// in Disk Management — those must not appear under that Disk in the Backup source tree.
+[[nodiscard]] bool volume_extent_matches_disk_partition(
+    const WindowsVolumeInfo& volume, const PhysicalDiskInfo& disk) noexcept {
+    if (volume.extents.empty() || disk.partitions.empty()) {
+        return false;
+    }
+    const auto& extent = volume.extents.front();
+    if (extent.disk_number != disk.disk_number || extent.length_bytes == 0) {
+        return false;
+    }
+    // Prefer authoritative raw volume length when present; filesystem capacity can be smaller.
+    const auto volume_size =
+        volume.volume_size_available && volume.total_size_bytes > 0
+            ? volume.total_size_bytes
+            : extent.length_bytes;
+    constexpr std::uint64_t kOffsetToleranceBytes = 2ULL * 1024ULL * 1024ULL; // 2 MiB
+    for (const auto& part : disk.partitions) {
+        if (part.size_bytes == 0) {
+            continue;
+        }
+        const auto offset_delta = extent.disk_offset_bytes >= part.offset_bytes
+                                      ? extent.disk_offset_bytes - part.offset_bytes
+                                      : part.offset_bytes - extent.disk_offset_bytes;
+        if (offset_delta > kOffsetToleranceBytes) {
+            continue;
+        }
+        // Size must track the partition (not a 1 GiB cloud volume on a 900 GiB partition).
+        const auto size_delta = volume_size >= part.size_bytes ? volume_size - part.size_bytes
+                                                               : part.size_bytes - volume_size;
+        const auto size_tolerance =
+            (std::max)(16ULL * 1024ULL * 1024ULL, part.size_bytes / 100ULL); // 16 MiB or 1%
+        if (size_delta <= size_tolerance) {
+            return true;
+        }
+    }
+    return false;
+}
+
+[[nodiscard]] bool is_local_block_volume(const WindowsVolumeInfo& volume) noexcept {
+    // Prefer a root path for GetDriveType; GUID path also works on modern Windows.
+    std::wstring root;
+    if (!volume.mount_points.empty()) {
+        root = volume.mount_points.front().wstring();
+    } else if (!volume.volume_guid_path.empty()) {
+        root = volume.volume_guid_path.wstring();
+    }
+    if (root.empty()) {
+        // Hidden partitions without a mount still participate in disk backup.
+        return true;
+    }
+    if (root.back() != L'\\') {
+        root.push_back(L'\\');
+    }
+    const auto drive_type = GetDriveTypeW(root.c_str());
+    // Keep fixed + removable (USB data disks). Drop remote/CD/RAM/unknown cloud roots.
+    return drive_type == DRIVE_FIXED || drive_type == DRIVE_REMOVABLE ||
+           drive_type == DRIVE_NO_ROOT_DIR;
+}
+
 [[nodiscard]] ports::SourceInventoryRecord
 make_disk_shell_record(const PhysicalDiskInfo& disk, const bool is_system_disk) {
     return ports::SourceInventoryRecord{
@@ -666,15 +751,19 @@ WindowsSourceInventory::list_sources(const base::CancellationToken cancellation)
         if (!volume.disk_extents_available || volume.extents.empty()) {
             continue;
         }
+        if (!is_local_block_volume(volume)) {
+            continue;
+        }
         const auto disk_number = volume.extents.front().disk_number;
         auto disk_it = disk_by_number.find(disk_number);
-        PhysicalDiskInfo disk_info;
-        if (disk_it != disk_by_number.end()) {
-            disk_info = disk_it->second;
-        } else {
-            // Volume maps to a drive we could not open as PhysicalDriveN — still publish the volume.
-            disk_info.disk_number = disk_number;
-            disk_info.partition_style = "Unknown";
+        // Require an openable PhysicalDrive whose partition table contains this extent.
+        // Prevents cloud/filter volumes (e.g. Google Drive) from nesting under a real Disk.
+        if (disk_it == disk_by_number.end()) {
+            continue;
+        }
+        const auto& disk_info = disk_it->second;
+        if (!volume_extent_matches_disk_partition(volume, disk_info)) {
+            continue;
         }
         auto record = make_volume_record(volume, disk_info, system_root);
         if (!record) {

@@ -20,7 +20,7 @@ namespace aegra::ports {
 // v11: content_kind on jobs/schedules + schedule_file_selections (file_set).
 // v12: restore_preflight_entry_ids for file_set selective restore preflight.
 // v16: service_settings (job retention months) + terminal job purge support.
-inline constexpr std::uint32_t kControlPlaneSchemaVersion = 16;
+inline constexpr std::uint32_t kControlPlaneSchemaVersion = 18;
 
 // ---- Durable records (control-plane only; no plaintext secrets, no RP authority) ----
 

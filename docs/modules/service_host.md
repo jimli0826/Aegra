@@ -165,7 +165,8 @@ per-file Archive Credential 映射与 Local Storage 故障恢复验证仍待补�
 - **API**：Service 控制协议 **V4**（见 [ADR-0017](../adr/0017-service-control-protocol-v4.md) 与
   [SERVICE_CONTROL_PROTOCOL_V4](../protocol/SERVICE_CONTROL_PROTOCOL_V4.md)）。
 - **Browse**：`BrowseFileSources` 经 `FileBrowseService` 组合 Windows `IFileSourceBrowser`；
-  Service 铸造短期 opaque token（TTL、caller SID + pipe session 绑定、断线 `clear_session`）。
+  Service 铸造短期 opaque token（TTL、caller SID + pipe session 绑定；**每 session 最多 4096**；
+  根列表首页清空该 session 旧 token；断线 `clear_session`）。
   根节点仅包含带盘符的卷（如 `新加卷 (D:)` / `System (C:)`）；无盘符的系统隐藏分区
   （EFI/MSR/Recovery 等）不进入树。子节点枚举跳过 `HIDDEN|SYSTEM` 与
   `System Volume Information` / `$RECYCLE.BIN` 等系统保护项。

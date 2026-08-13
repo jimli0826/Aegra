@@ -28,8 +28,8 @@
         <translation>Repository</translation>
     </message>
     <message id="aegra.nav.event_log">
-        <source>Task Log</source>
-        <translation>任务日志</translation>
+        <source>Event Log</source>
+        <translation>事件日志</translation>
     </message>
     <message id="aegra.nav.settings">
         <source>Settings</source>
@@ -103,6 +103,10 @@
         <source>Delete</source>
         <translation>删除</translation>
     </message>
+    <message id="aegra.common.remove">
+        <source>Remove</source>
+        <translation>移除</translation>
+    </message>
     <message id="aegra.common.cancel">
         <source>Cancel</source>
         <translation>取消</translation>
@@ -114,6 +118,14 @@
     <message id="aegra.common.create">
         <source>Create</source>
         <translation>创建</translation>
+    </message>
+    <message id="aegra.common.save">
+        <source>Save</source>
+        <translation>保存</translation>
+    </message>
+    <message id="aegra.common.edit">
+        <source>Edit</source>
+        <translation>编辑</translation>
     </message>
     <message id="aegra.common.not_available">
         <source>N/A</source>
@@ -657,6 +669,14 @@ Server: %1</source>
         <source>Unable to browse local files</source>
         <translation>无法浏览本地文件</translation>
     </message>
+    <message id="aegra.error.file_browse.token_limit">
+        <source>Too many folders were opened. Close the dialog and try again.</source>
+        <translation>打开的文件夹过多。请关闭对话框后重试。</translation>
+    </message>
+    <message id="aegra.error.file_browse.token_invalid">
+        <source>This folder list expired. Refresh and try again.</source>
+        <translation>文件夹列表已过期。请刷新后重试。</translation>
+    </message>
     <message id="aegra.error.file_recover.query_failed">
         <source>Unable to list files in this recovery point</source>
         <translation>无法列出此恢复点中的文件</translation>
@@ -1029,6 +1049,22 @@ Server: %1</source>
         <source>Time of day</source>
         <translation>时间</translation>
     </message>
+    <message id="aegra.backup.add_time">
+        <source>Add time</source>
+        <translation>添加时间</translation>
+    </message>
+    <message id="aegra.backup.time.duplicate">
+        <source>Each time of day must be unique.</source>
+        <translation>不能设置相同的时间。</translation>
+    </message>
+    <message id="aegra.backup.time.min_interval">
+        <source>Times of day must be at least 30 minutes apart.</source>
+        <translation>任意两个时间的间隔不能小于 30 分钟。</translation>
+    </message>
+    <message id="aegra.backup.time.no_slot">
+        <source>No available time slot with at least 30 minutes gap.</source>
+        <translation>没有可用的时间点（需与已有时间间隔至少 30 分钟）。</translation>
+    </message>
     <message id="aegra.backup.weekday.mon">
         <source>Mon</source>
         <translation>一</translation>
@@ -1132,6 +1168,10 @@ Server: %1</source>
     <message id="aegra.backup.action.run_incremental">
         <source>Run incremental</source>
         <translation>运行增量</translation>
+    </message>
+    <message id="aegra.backup.action.run_now">
+        <source>Run now</source>
+        <translation>立即运行</translation>
     </message>
     <message id="aegra.backup.run.started">
         <source>Backup started</source>
@@ -1278,8 +1318,8 @@ Server: %1</source>
         <translation>立即开始首次备份？</translation>
     </message>
     <message id="aegra.backup.schedule.first_backup_message">
-        <source>The schedule will be saved. Do you want to start the first full backup now?</source>
-        <translation>计划将被保存。是否立即开始首次完整备份？</translation>
+        <source>The schedule will be saved. Do you want to start the first backup now?</source>
+        <translation>计划将被保存。是否立即开始首次备份？</translation>
     </message>
     <message id="aegra.backup.schedule.first_backup_now">
         <source>Start now</source>
@@ -1292,6 +1332,26 @@ Server: %1</source>
     <message id="aegra.backup.schedule.save_failed">
         <source>Could not save schedule</source>
         <translation>无法保存计划任务</translation>
+    </message>
+    <message id="aegra.backup.schedule.dest_change_title">
+        <source>Change destination?</source>
+        <translation>更改备份目标？</translation>
+    </message>
+    <message id="aegra.backup.schedule.dest_change_message">
+        <source>The next backup will run as a full backup because the incremental chain will be reset.</source>
+        <translation>下次备份将作为完整备份运行，因为增量链会被重置。</translation>
+    </message>
+    <message id="aegra.backup.opt.password_frozen">
+        <source>Password is set and cannot be changed.</source>
+        <translation>密码已设置，不可更改。</translation>
+    </message>
+    <message id="aegra.backup.file.incremental_default_note">
+        <source>Each run is incremental. The first backup, or a run with no usable parent, becomes a full backup automatically.</source>
+        <translation>每次运行默认为增量。首次备份或没有可用父备份时会自动降为完整备份。</translation>
+    </message>
+    <message id="aegra.backup.schedule.edit_busy">
+        <source>Wait for the backup to finish before editing this schedule</source>
+        <translation>请等待当前备份完成后再编辑此计划</translation>
     </message>
     <message id="aegra.backup.schedule.update_failed">
         <source>Could not update schedule</source>
@@ -1669,26 +1729,6 @@ Server: %1</source>
         <source>Size</source>
         <translation>大小</translation>
     </message>
-    <message id="aegra.mount.disk_name">
-        <source>Disk %1</source>
-        <translation>磁盘 %1</translation>
-    </message>
-    <message id="aegra.mount.state.mounting">
-        <source>Mounting</source>
-        <translation>挂载中</translation>
-    </message>
-    <message id="aegra.mount.state.mounted">
-        <source>Mounted</source>
-        <translation>已挂载</translation>
-    </message>
-    <message id="aegra.mount.state.unmounting">
-        <source>Unmounting</source>
-        <translation>卸载中</translation>
-    </message>
-    <message id="aegra.mount.state.failed">
-        <source>Failed</source>
-        <translation>失败</translation>
-    </message>
     <message id="aegra.mount.drive_letter">
         <source>Drive letter</source>
         <translation>盘符</translation>
@@ -1704,38 +1744,6 @@ Server: %1</source>
     <message id="aegra.mount.unmount">
         <source>Unmount</source>
         <translation>卸载</translation>
-    </message>
-    <message id="aegra.mount.started">
-        <source>Mount started</source>
-        <translation>挂载已开始</translation>
-    </message>
-    <message id="aegra.mount.unmounted">
-        <source>Unmounted</source>
-        <translation>已卸载</translation>
-    </message>
-    <message id="aegra.mount.already_mounted_selection">
-        <source>Selected disk(s) are already mounted</source>
-        <translation>所选磁盘已挂载</translation>
-    </message>
-    <message id="aegra.mount.capability_missing">
-        <source>Service does not support mount</source>
-        <translation>服务不支持挂载</translation>
-    </message>
-    <message id="aegra.mount.busy">
-        <source>A mount command is already in progress</source>
-        <translation>挂载命令正在进行中</translation>
-    </message>
-    <message id="aegra.mount.select_required">
-        <source>Select a checkpoint and at least one source disk</source>
-        <translation>请选择恢复点并至少选择一块源磁盘</translation>
-    </message>
-    <message id="aegra.mount.invalid_drive_letter">
-        <source>Preferred drive letter must be a single letter A–Z</source>
-        <translation>首选盘符必须是单个字母 A–Z</translation>
-    </message>
-    <message id="aegra.mount.select_session">
-        <source>Select a mounted session to unmount</source>
-        <translation>请选择要卸载的已挂载会话</translation>
     </message>
     <message id="aegra.mount.checkpoint_panel_empty">
         <source>Recovery point list will appear when mount Service APIs are connected</source>
@@ -1828,26 +1836,6 @@ Server: %1</source>
     <message id="aegra.settings.service.connection">
         <source>Connection</source>
         <translation>连接</translation>
-    </message>
-    <message id="aegra.settings.job_retention">
-        <source>Job history retention</source>
-        <translation>任务历史保留</translation>
-    </message>
-    <message id="aegra.settings.job_retention_desc">
-        <source>Completed jobs older than this period are permanently deleted from the service.</source>
-        <translation>超过此期限的已完成任务将从服务中永久删除。</translation>
-    </message>
-    <message id="aegra.settings.job_retention.1_month">
-        <source>1 month</source>
-        <translation>1 个月</translation>
-    </message>
-    <message id="aegra.settings.job_retention.3_months">
-        <source>3 months</source>
-        <translation>3 个月</translation>
-    </message>
-    <message id="aegra.settings.job_retention.6_months">
-        <source>6 months</source>
-        <translation>6 个月</translation>
     </message>
     <message id="aegra.backup.column.backup_type">
         <source>Backup type</source>

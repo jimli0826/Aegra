@@ -162,12 +162,23 @@ struct JobListRequest final {
 enum class ScheduleTriggerKind : std::uint8_t {
     kDaily = 1,
     kWeekly = 2,
+    kMonthly = 3,
 };
+
+/// Bit 0 = day 1 … bit 30 = day 31. Unused bit 31 must be 0.
+inline constexpr std::uint32_t kMaximumDayOfMonthMask = 0x7FFFFFFFU;
+/// Distinct local times of day per schedule (HH:MM slots as minutes since midnight).
+inline constexpr std::size_t kMaximumLocalMinutesOfDay = 8;
+/// Minimum gap between any two times on the same day (including wrap past midnight).
+inline constexpr std::uint16_t kMinimumLocalMinutesOfDayGap = 30;
 
 struct ScheduleTrigger final {
     ScheduleTriggerKind kind{ScheduleTriggerKind::kDaily};
-    std::uint16_t local_minute_of_day{0};
+    /// 1..kMaximumLocalMinutesOfDay values in [0, 1439], sorted unique. Empty until set.
+    std::vector<std::uint16_t> local_minutes_of_day;
     std::uint8_t weekday_mask{0};
+    /// Monthly only; 0 for Daily/Weekly.
+    std::uint32_t day_of_month_mask{0};
     std::string timezone_id;
 };
 
@@ -176,6 +187,8 @@ struct FileSelectionSummary final {
     std::string display_label;
     FileEntryKind entry_kind{FileEntryKind::kDirectory};
     FileRecursion recursion{FileRecursion::kRecursive};
+    /// Volume-relative UI names (or [display_label] for a whole-volume selection). Not a path.
+    std::vector<std::string> display_chain;
 };
 
 struct ScheduleSummary final {

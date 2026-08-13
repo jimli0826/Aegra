@@ -103,6 +103,10 @@
         <source>Delete</source>
         <translation>刪除</translation>
     </message>
+    <message id="aegra.common.remove">
+        <source>Remove</source>
+        <translation>移除</translation>
+    </message>
     <message id="aegra.common.cancel">
         <source>Cancel</source>
         <translation>取消</translation>
@@ -114,6 +118,14 @@
     <message id="aegra.common.create">
         <source>Create</source>
         <translation>建立</translation>
+    </message>
+    <message id="aegra.common.save">
+        <source>Save</source>
+        <translation>儲存</translation>
+    </message>
+    <message id="aegra.common.edit">
+        <source>Edit</source>
+        <translation>編輯</translation>
     </message>
     <message id="aegra.common.not_available">
         <source>N/A</source>
@@ -657,6 +669,14 @@ Server: %1</source>
         <source>Unable to browse local files</source>
         <translation>無法瀏覽本機檔案</translation>
     </message>
+    <message id="aegra.error.file_browse.token_limit">
+        <source>Too many folders were opened. Close the dialog and try again.</source>
+        <translation>開啟的資料夾過多。請關閉對話框後重試。</translation>
+    </message>
+    <message id="aegra.error.file_browse.token_invalid">
+        <source>This folder list expired. Refresh and try again.</source>
+        <translation>資料夾列表已過期。請重新整理後重試。</translation>
+    </message>
     <message id="aegra.error.file_recover.query_failed">
         <source>Unable to list files in this recovery point</source>
         <translation>無法列出此還原點中的檔案</translation>
@@ -1029,6 +1049,22 @@ Server: %1</source>
         <source>Time of day</source>
         <translation>時間</translation>
     </message>
+    <message id="aegra.backup.add_time">
+        <source>Add time</source>
+        <translation>新增時間</translation>
+    </message>
+    <message id="aegra.backup.time.duplicate">
+        <source>Each time of day must be unique.</source>
+        <translation>不能設定相同的時間。</translation>
+    </message>
+    <message id="aegra.backup.time.min_interval">
+        <source>Times of day must be at least 30 minutes apart.</source>
+        <translation>任意兩個時間的間隔不能小於 30 分鐘。</translation>
+    </message>
+    <message id="aegra.backup.time.no_slot">
+        <source>No available time slot with at least 30 minutes gap.</source>
+        <translation>沒有可用的時間點（需與既有時間間隔至少 30 分鐘）。</translation>
+    </message>
     <message id="aegra.backup.weekday.mon">
         <source>Mon</source>
         <translation>一</translation>
@@ -1132,6 +1168,10 @@ Server: %1</source>
     <message id="aegra.backup.action.run_incremental">
         <source>Run incremental</source>
         <translation>執行增量</translation>
+    </message>
+    <message id="aegra.backup.action.run_now">
+        <source>Run now</source>
+        <translation>立即執行</translation>
     </message>
     <message id="aegra.backup.run.started">
         <source>Backup started</source>
@@ -1278,8 +1318,8 @@ Server: %1</source>
         <translation>立即開始首次備份？</translation>
     </message>
     <message id="aegra.backup.schedule.first_backup_message">
-        <source>The schedule will be saved. Do you want to start the first full backup now?</source>
-        <translation>排程將會儲存。是否立即開始首次完整備份？</translation>
+        <source>The schedule will be saved. Do you want to start the first backup now?</source>
+        <translation>排程將會儲存。是否立即開始首次備份？</translation>
     </message>
     <message id="aegra.backup.schedule.first_backup_now">
         <source>Start now</source>
@@ -1292,6 +1332,26 @@ Server: %1</source>
     <message id="aegra.backup.schedule.save_failed">
         <source>Could not save schedule</source>
         <translation>無法儲存排程</translation>
+    </message>
+    <message id="aegra.backup.schedule.dest_change_title">
+        <source>Change destination?</source>
+        <translation>變更備份目標？</translation>
+    </message>
+    <message id="aegra.backup.schedule.dest_change_message">
+        <source>The next backup will run as a full backup because the incremental chain will be reset.</source>
+        <translation>下次備份將作為完整備份執行，因為增量鏈會被重設。</translation>
+    </message>
+    <message id="aegra.backup.opt.password_frozen">
+        <source>Password is set and cannot be changed.</source>
+        <translation>密碼已設定，無法變更。</translation>
+    </message>
+    <message id="aegra.backup.file.incremental_default_note">
+        <source>Each run is incremental. The first backup, or a run with no usable parent, becomes a full backup automatically.</source>
+        <translation>每次執行預設為增量。首次備份或沒有可用父備份時會自動降為完整備份。</translation>
+    </message>
+    <message id="aegra.backup.schedule.edit_busy">
+        <source>Wait for the backup to finish before editing this schedule</source>
+        <translation>請等待目前備份完成後再編輯此排程</translation>
     </message>
     <message id="aegra.backup.schedule.update_failed">
         <source>Could not update schedule</source>
@@ -1669,26 +1729,6 @@ Server: %1</source>
         <source>Size</source>
         <translation>大小</translation>
     </message>
-    <message id="aegra.mount.disk_name">
-        <source>Disk %1</source>
-        <translation>磁碟 %1</translation>
-    </message>
-    <message id="aegra.mount.state.mounting">
-        <source>Mounting</source>
-        <translation>掛載中</translation>
-    </message>
-    <message id="aegra.mount.state.mounted">
-        <source>Mounted</source>
-        <translation>已掛載</translation>
-    </message>
-    <message id="aegra.mount.state.unmounting">
-        <source>Unmounting</source>
-        <translation>卸載中</translation>
-    </message>
-    <message id="aegra.mount.state.failed">
-        <source>Failed</source>
-        <translation>失敗</translation>
-    </message>
     <message id="aegra.mount.drive_letter">
         <source>Drive letter</source>
         <translation>磁碟機代號</translation>
@@ -1704,38 +1744,6 @@ Server: %1</source>
     <message id="aegra.mount.unmount">
         <source>Unmount</source>
         <translation>卸載</translation>
-    </message>
-    <message id="aegra.mount.started">
-        <source>Mount started</source>
-        <translation>掛載已開始</translation>
-    </message>
-    <message id="aegra.mount.unmounted">
-        <source>Unmounted</source>
-        <translation>已卸載</translation>
-    </message>
-    <message id="aegra.mount.already_mounted_selection">
-        <source>Selected disk(s) are already mounted</source>
-        <translation>所選磁碟已掛載</translation>
-    </message>
-    <message id="aegra.mount.capability_missing">
-        <source>Service does not support mount</source>
-        <translation>服務不支援掛載</translation>
-    </message>
-    <message id="aegra.mount.busy">
-        <source>A mount command is already in progress</source>
-        <translation>掛載命令正在進行中</translation>
-    </message>
-    <message id="aegra.mount.select_required">
-        <source>Select a checkpoint and at least one source disk</source>
-        <translation>請選擇還原點並至少選擇一塊來源磁碟</translation>
-    </message>
-    <message id="aegra.mount.invalid_drive_letter">
-        <source>Preferred drive letter must be a single letter A–Z</source>
-        <translation>偏好磁碟機代號必須是單一字母 A–Z</translation>
-    </message>
-    <message id="aegra.mount.select_session">
-        <source>Select a mounted session to unmount</source>
-        <translation>請選擇要卸載的已掛載工作階段</translation>
     </message>
     <message id="aegra.mount.checkpoint_panel_empty">
         <source>Recovery point list will appear when mount Service APIs are connected</source>

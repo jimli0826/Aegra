@@ -31,7 +31,7 @@ constexpr int kJobPollIntervalMilliseconds = 500;
 ServiceClient::ServiceClient(QObject* parent)
     : QObject(parent), recovery_points_(this), jobs_(this), task_log_(this), sources_(this),
       file_browse_sources_(this), file_restore_targets_(this), file_recover_entries_(this),
-      connections_(this),
+      connections_(this), schedule_list_(this),
       transport_(std::make_unique<IpcFrameTransport>(QLatin1String(kServicePipeName))),
       coordinator_(std::make_unique<ServiceRequestCoordinator>(*transport_)),
       job_poll_timer_(new QTimer(this)), toast_timer_(new QTimer(this)),
@@ -328,7 +328,7 @@ bool ServiceClient::globalLoading() const noexcept {
     return repository_loading_ || recovery_point_layout_loading_ || jobs_loading_ ||
            inventory_loading_ || connections_loading_ || schedules_loading_ ||
            repository_command_busy_ || backup_command_busy_ || cancel_command_busy_ ||
-           schedule_command_busy_ || mount_command_busy_;
+           (schedule_command_busy_ && !schedule_enable_patch_active_) || mount_command_busy_;
 }
 
 bool ServiceClient::hasCapability(const QString& capability) const {

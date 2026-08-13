@@ -1,5 +1,8 @@
 #include "service_protocol_json.h"
 
+#include "aegra/contracts/service_control.h"
+
+#include <algorithm>
 #include <array>
 #include <stdexcept>
 #include <utility>
@@ -547,34 +550,63 @@ parse_recovery_point_source_volume(const Json& payload) {
 
 [[nodiscard]] Json encode_schedule_trigger(const contracts::ScheduleTrigger& trigger) {
     return Json{{"kind", static_cast<std::uint8_t>(trigger.kind)},
-                {"local_minute_of_day", trigger.local_minute_of_day},
+                {"local_minutes_of_day", trigger.local_minutes_of_day},
                 {"weekday_mask", trigger.weekday_mask},
+                {"day_of_month_mask", trigger.day_of_month_mask},
                 {"timezone_id", trigger.timezone_id}};
 }
 
 [[nodiscard]] contracts::ScheduleTrigger parse_schedule_trigger(const Json& payload) {
-    constexpr std::array<std::string_view, 4> keys{"kind", "local_minute_of_day", "weekday_mask",
-                                                   "timezone_id"};
+    constexpr std::array<std::string_view, 5> keys{"kind", "local_minutes_of_day", "weekday_mask",
+                                                   "day_of_month_mask", "timezone_id"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("schedule trigger fields are invalid");
     }
-    return {
-        static_cast<contracts::ScheduleTriggerKind>(unsigned_value<std::uint8_t>(payload, "kind")),
-        unsigned_value<std::uint16_t>(payload, "local_minute_of_day"),
-        unsigned_value<std::uint8_t>(payload, "weekday_mask"),
-        payload.at("timezone_id").get<std::string>()};
+    contracts::ScheduleTrigger trigger;
+    trigger.kind =
+        static_cast<contracts::ScheduleTriggerKind>(unsigned_value<std::uint8_t>(payload, "kind"));
+    const auto& minutes = payload.at("local_minutes_of_day");
+    if (!minutes.is_array() || minutes.empty() ||
+        minutes.size() > contracts::kMaximumLocalMinutesOfDay) {
+        throw std::invalid_argument("schedule trigger times are invalid");
+    }
+    // Default-constructed trigger must not keep a seed minute (would become extra 00:00).
+    trigger.local_minutes_of_day.clear();
+    trigger.local_minutes_of_day.reserve(minutes.size());
+    for (const auto& item : minutes) {
+        if (!item.is_number_unsigned() && !item.is_number_integer()) {
+            throw std::invalid_argument("schedule trigger times are invalid");
+        }
+        const auto value = item.get<std::uint64_t>();
+        if (value >= 24ULL * 60ULL) {
+            throw std::invalid_argument("schedule trigger times are invalid");
+        }
+        trigger.local_minutes_of_day.push_back(static_cast<std::uint16_t>(value));
+    }
+    std::sort(trigger.local_minutes_of_day.begin(), trigger.local_minutes_of_day.end());
+    trigger.local_minutes_of_day.erase(
+        std::unique(trigger.local_minutes_of_day.begin(), trigger.local_minutes_of_day.end()),
+        trigger.local_minutes_of_day.end());
+    if (trigger.local_minutes_of_day.empty()) {
+        throw std::invalid_argument("schedule trigger times are invalid");
+    }
+    trigger.weekday_mask = unsigned_value<std::uint8_t>(payload, "weekday_mask");
+    trigger.day_of_month_mask = unsigned_value<std::uint32_t>(payload, "day_of_month_mask");
+    trigger.timezone_id = payload.at("timezone_id").get<std::string>();
+    return trigger;
 }
 
 [[nodiscard]] Json encode_selection_summary(const contracts::FileSelectionSummary& summary) {
     return Json{{"selection_id", summary.selection_id},
                 {"display_label", summary.display_label},
                 {"entry_kind", static_cast<std::uint8_t>(summary.entry_kind)},
-                {"recursion", static_cast<std::uint8_t>(summary.recursion)}};
+                {"recursion", static_cast<std::uint8_t>(summary.recursion)},
+                {"display_chain", summary.display_chain}};
 }
 
 [[nodiscard]] contracts::FileSelectionSummary parse_selection_summary(const Json& payload) {
-    constexpr std::array<std::string_view, 4> keys{"selection_id", "display_label", "entry_kind",
-                                                   "recursion"};
+    constexpr std::array<std::string_view, 5> keys{
+        "selection_id", "display_label", "entry_kind", "recursion", "display_chain"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("file selection summary fields are invalid");
     }
@@ -585,6 +617,7 @@ parse_recovery_point_source_volume(const Json& payload) {
         static_cast<contracts::FileEntryKind>(unsigned_value<std::uint8_t>(payload, "entry_kind"));
     summary.recursion =
         static_cast<contracts::FileRecursion>(unsigned_value<std::uint8_t>(payload, "recursion"));
+    summary.display_chain = payload.at("display_chain").get<std::vector<std::string>>();
     return summary;
 }
 

@@ -227,15 +227,22 @@ QByteArray encode_upsert_schedule_request(const QString& request_id, const QStri
                                           const bool enabled, const QVariantList& source_ids,
                                           const QString& repository_connection_id,
                                           const int backup_type, const int trigger_kind,
-                                          const int local_minute_of_day, const int weekday_mask,
-                                          const QString& timezone_id,
+                                          const QList<int>& local_minutes_of_day,
+                                          const int weekday_mask, const QString& timezone_id,
                                           const bool exclude_page_and_hibernation_files,
                                           const bool deduplication_enabled,
                                           const bool encryption_enabled,
-                                          const QString& archive_password) {
+                                          const QString& archive_password,
+                                          const quint32 day_of_month_mask) {
+    QJsonArray minutes_json;
+    for (const auto minute : local_minutes_of_day) {
+        minutes_json.push_back(minute);
+    }
     const QJsonObject trigger{{QStringLiteral("kind"), trigger_kind},
-                              {QStringLiteral("local_minute_of_day"), local_minute_of_day},
+                              {QStringLiteral("local_minutes_of_day"), minutes_json},
                               {QStringLiteral("weekday_mask"), weekday_mask},
+                              {QStringLiteral("day_of_month_mask"),
+                               static_cast<qint64>(day_of_month_mask)},
                               {QStringLiteral("timezone_id"), timezone_id}};
     const QJsonObject protection{
         {QStringLiteral("content_kind"), 1},
@@ -531,8 +538,8 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
             return false;
         }
         const auto summary_object = summary_value.toObject();
-        if (!has_exact_keys(summary_object,
-                            {"selection_id", "display_label", "entry_kind", "recursion"})) {
+        if (!has_exact_keys(summary_object, {"selection_id", "display_label", "entry_kind",
+                                             "recursion", "display_chain"})) {
             return false;
         }
         const auto selection_id = summary_object.value(QStringLiteral("selection_id")).toString();
@@ -545,30 +552,73 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
                                 display_label) ||
             !integer_in_range(summary_object.value(QStringLiteral("entry_kind")), 1, 4,
                               entry_kind) ||
-            !integer_in_range(summary_object.value(QStringLiteral("recursion")), 1, 2, recursion)) {
+            !integer_in_range(summary_object.value(QStringLiteral("recursion")), 1, 2, recursion) ||
+            !summary_object.value(QStringLiteral("display_chain")).isArray()) {
             return false;
+        }
+        QStringList display_chain;
+        const auto chain_array = summary_object.value(QStringLiteral("display_chain")).toArray();
+        if (chain_array.isEmpty() || chain_array.size() > 64) {
+            return false;
+        }
+        for (const auto& part_value : chain_array) {
+            QString part;
+            if (!parse_display_name(part_value, part)) {
+                return false;
+            }
+            display_chain.push_back(std::move(part));
         }
         seen_selection_ids.insert(selection_id);
         selection_summaries.push_back(QVariantMap{
             {QStringLiteral("selectionId"), selection_id},
             {QStringLiteral("displayLabel"), display_label},
             {QStringLiteral("entryKind"), entry_kind},
-            {QStringLiteral("recursion"), recursion}});
+            {QStringLiteral("recursion"), recursion},
+            {QStringLiteral("displayChain"), display_chain}});
     }
     const auto trigger = object.value(QStringLiteral("trigger")).toObject();
-    if (!has_exact_keys(trigger,
-                        {"kind", "local_minute_of_day", "weekday_mask", "timezone_id"})) {
+    if (!has_exact_keys(trigger, {"kind", "local_minutes_of_day", "weekday_mask",
+                                  "day_of_month_mask", "timezone_id"})) {
         return false;
     }
     qint64 trigger_kind = 0;
-    qint64 local_minute = 0;
     qint64 weekday_mask = 0;
-    if (!integer_in_range(trigger.value(QStringLiteral("kind")), 1, 2, trigger_kind) ||
-        !integer_in_range(trigger.value(QStringLiteral("local_minute_of_day")), 0, 24 * 60 - 1,
-                          local_minute) ||
+    qint64 day_of_month_mask = 0;
+    if (!integer_in_range(trigger.value(QStringLiteral("kind")), 1, 3, trigger_kind) ||
+        !trigger.value(QStringLiteral("local_minutes_of_day")).isArray() ||
         !integer_in_range(trigger.value(QStringLiteral("weekday_mask")), 0, 127, weekday_mask) ||
+        !integer_in_range(trigger.value(QStringLiteral("day_of_month_mask")), 0, 2147483647,
+                          day_of_month_mask) ||
         !trigger.value(QStringLiteral("timezone_id")).isString()) {
         return false;
+    }
+    const auto minutes_array = trigger.value(QStringLiteral("local_minutes_of_day")).toArray();
+    if (minutes_array.isEmpty() || minutes_array.size() > 8) {
+        return false;
+    }
+    QStringList time_labels;
+    QVariantList times_of_day;
+    QSet<int> seen_minutes;
+    for (const auto& minute_value : minutes_array) {
+        qint64 minute = 0;
+        if (!integer_in_range(minute_value, 0, 24 * 60 - 1, minute) ||
+            seen_minutes.contains(static_cast<int>(minute))) {
+            return false;
+        }
+        seen_minutes.insert(static_cast<int>(minute));
+        const auto hour = static_cast<int>(minute / 60);
+        const auto min = static_cast<int>(minute % 60);
+        const auto label = QStringLiteral("%1:%2")
+                               .arg(hour, 2, 10, QLatin1Char('0'))
+                               .arg(min, 2, 10, QLatin1Char('0'));
+        time_labels.push_back(label);
+        times_of_day.push_back(label);
+    }
+    // Sort labels and keep timesOfDay in the same minute order.
+    std::sort(time_labels.begin(), time_labels.end());
+    times_of_day.clear();
+    for (const auto& label : time_labels) {
+        times_of_day.push_back(label);
     }
     qint64 next_run = 0;
     const auto next_value = object.value(QStringLiteral("next_run_utc_ms"));
@@ -576,14 +626,12 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
     if (has_next && !integer_in_range(next_value, 0, (std::numeric_limits<qint64>::max)(), next_run)) {
         return false;
     }
-    const auto hour = static_cast<int>(local_minute / 60);
-    const auto minute = static_cast<int>(local_minute % 60);
-    const QString time_of_day =
-        QStringLiteral("%1:%2")
-            .arg(hour, 2, 10, QLatin1Char('0'))
-            .arg(minute, 2, 10, QLatin1Char('0'));
-    const QString frequency =
-        trigger_kind == kScheduleTriggerWeekly ? QStringLiteral("weekly") : QStringLiteral("daily");
+    QString frequency = QStringLiteral("daily");
+    if (trigger_kind == kScheduleTriggerWeekly) {
+        frequency = QStringLiteral("weekly");
+    } else if (trigger_kind == kScheduleTriggerMonthly) {
+        frequency = QStringLiteral("monthly");
+    }
     result = {{QStringLiteral("scheduleId"), schedule_id},
               {QStringLiteral("id"), schedule_id},
               {QStringLiteral("displayName"), display_name},
@@ -596,8 +644,10 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
                object.value(QStringLiteral("repository_connection_id")).toString()},
               {QStringLiteral("backupType"), backup_type},
               {QStringLiteral("frequency"), frequency},
-              {QStringLiteral("timeOfDay"), time_of_day},
+              {QStringLiteral("timeOfDay"), time_labels.join(QStringLiteral(", "))},
+              {QStringLiteral("timesOfDay"), times_of_day},
               {QStringLiteral("weekdayMask"), weekday_mask},
+              {QStringLiteral("dayOfMonthMask"), day_of_month_mask},
               {QStringLiteral("timezoneId"), trigger.value(QStringLiteral("timezone_id")).toString()},
               {QStringLiteral("nextRunUtcMs"), has_next ? next_run : QVariant{}},
               {QStringLiteral("excludePageAndHibernation"),

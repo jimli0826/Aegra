@@ -57,8 +57,12 @@ false。只有 Volume 枚举本身无法启动或异常终止时，整个调用�
 
 `list_sources()` 对齐旧项目 `GetDisksWithVolumes`：
 
-1. 先枚举 `PhysicalDrive0..31`（容量、`MBR`/`GPT`/`RAW` 分区样式）；
-2. 再枚举 Volume，且 **仅在 extent 能解析出 disk number 时** 发布卷记录（不再把未知 extent 默认到 Disk 0）；
+1. 先枚举 `PhysicalDrive0..31`（容量、`MBR`/`GPT`/`RAW` 分区样式、分区 offset/length 表）；
+2. 再枚举 Volume，且 **仅在**同时满足时发布卷记录：
+   - extent 能解析出 disk number，且对应 PhysicalDrive 可打开；
+   - 主 extent 的 offset/size 与该盘 `DRIVE_LAYOUT` 中某一分区一致（容差：offset ≤2 MiB，
+     size ≤ max(16 MiB, 1%)）；用于剔除 Google Drive 等云/过滤卷误报到真实 Disk 下；
+   - `GetDriveType` 为 Fixed / Removable / NoRootDir（隐藏分区无挂载点仍保留）；
 3. **每个**物理盘发布不可选的 `disk.N` 壳记录（`capacity_bytes=0`、`is_read_only`，`disk_capacity_bytes`
    为整盘容量）：空盘供 Desktop `disksTree` 显示 Unallocated；有卷的盘供 Restore 以 `disk.N` 作为
    `PrepareRestore.target_source_id`。`is_system` 由同盘上是否存在系统卷推导。

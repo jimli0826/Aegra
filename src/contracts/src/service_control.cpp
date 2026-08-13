@@ -304,16 +304,51 @@ base::Result<void> validate_job_summary(const JobSummary& summary) {
 }
 
 base::Result<void> validate_schedule_trigger(const ScheduleTrigger& trigger) {
-    const auto known_kind =
-        trigger.kind == ScheduleTriggerKind::kDaily || trigger.kind == ScheduleTriggerKind::kWeekly;
-    if (!known_kind || trigger.local_minute_of_day >= 24U * 60U ||
-        !valid_text(trigger.timezone_id, kMaximumTimezoneBytes)) {
+    const auto known_kind = trigger.kind == ScheduleTriggerKind::kDaily ||
+                            trigger.kind == ScheduleTriggerKind::kWeekly ||
+                            trigger.kind == ScheduleTriggerKind::kMonthly;
+    if (!known_kind || trigger.local_minutes_of_day.empty() ||
+        trigger.local_minutes_of_day.size() > kMaximumLocalMinutesOfDay ||
+        !valid_text(trigger.timezone_id, kMaximumTimezoneBytes) ||
+        (trigger.day_of_month_mask & ~kMaximumDayOfMonthMask) != 0) {
         return invalid("schedule trigger is invalid");
     }
-    if ((trigger.kind == ScheduleTriggerKind::kDaily && trigger.weekday_mask != 0) ||
-        (trigger.kind == ScheduleTriggerKind::kWeekly &&
-         (trigger.weekday_mask == 0 || (trigger.weekday_mask & 0x80U) != 0))) {
+    for (std::size_t index = 0; index < trigger.local_minutes_of_day.size(); ++index) {
+        const auto minute = trigger.local_minutes_of_day[index];
+        if (minute >= 24U * 60U) {
+            return invalid("schedule trigger is invalid");
+        }
+        if (index > 0) {
+            const auto previous = trigger.local_minutes_of_day[index - 1];
+            if (previous >= minute) {
+                return invalid("schedule trigger times must be sorted unique");
+            }
+            if (static_cast<std::uint16_t>(minute - previous) < kMinimumLocalMinutesOfDayGap) {
+                return invalid("schedule trigger times are too close");
+            }
+        }
+    }
+    if (trigger.local_minutes_of_day.size() >= 2) {
+        const auto first = trigger.local_minutes_of_day.front();
+        const auto last = trigger.local_minutes_of_day.back();
+        const auto wrap_gap =
+            static_cast<std::uint16_t>((first + 24U * 60U) - last);
+        if (wrap_gap < kMinimumLocalMinutesOfDayGap) {
+            return invalid("schedule trigger times are too close");
+        }
+    }
+    if (trigger.kind == ScheduleTriggerKind::kDaily &&
+        (trigger.weekday_mask != 0 || trigger.day_of_month_mask != 0)) {
         return invalid("schedule weekday selection is invalid");
+    }
+    if (trigger.kind == ScheduleTriggerKind::kWeekly &&
+        (trigger.weekday_mask == 0 || (trigger.weekday_mask & 0x80U) != 0 ||
+         trigger.day_of_month_mask != 0)) {
+        return invalid("schedule weekday selection is invalid");
+    }
+    if (trigger.kind == ScheduleTriggerKind::kMonthly &&
+        (trigger.weekday_mask != 0 || trigger.day_of_month_mask == 0)) {
+        return invalid("schedule month-day selection is invalid");
     }
     return base::Result<void>::success();
 }
@@ -338,7 +373,8 @@ base::Result<void> validate_schedule_summary(const ScheduleSummary& summary) {
         }
         if (!summary.source_ids.empty() || summary.selection_summaries.empty() ||
             summary.selection_summaries.size() > kMaximumFileSelections ||
-            summary.backup_type != BackupType::kFull) {
+            (summary.backup_type != BackupType::kFull &&
+             summary.backup_type != BackupType::kIncremental)) {
             return invalid("file schedule summary selections are invalid");
         }
         std::set<std::string_view> seen;
@@ -346,8 +382,15 @@ base::Result<void> validate_schedule_summary(const ScheduleSummary& summary) {
             if (!base::is_canonical_uuid(item.selection_id) ||
                 !valid_text(item.display_label, kMaximumDisplayLabelBytes) ||
                 !is_known_file_entry_kind(item.entry_kind) ||
-                !is_known_file_recursion(item.recursion) || !seen.insert(item.selection_id).second) {
+                !is_known_file_recursion(item.recursion) || !seen.insert(item.selection_id).second ||
+                item.display_chain.empty() ||
+                item.display_chain.size() > kMaximumRelativePathComponents) {
                 return invalid("file schedule selection summary is invalid");
+            }
+            for (const auto& part : item.display_chain) {
+                if (!valid_text(part, kMaximumDisplayLabelBytes)) {
+                    return invalid("file schedule selection summary is invalid");
+                }
             }
         }
     }

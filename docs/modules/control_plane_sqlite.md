@@ -56,10 +56,12 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
 
 ## Schema 与不变量
 
-- `schema_meta.version` 当前为 `16`（`ports::kControlPlaneSchemaVersion`）。产品未发布：
-  - 新库 `CREATE IF NOT EXISTS` 即为当前完整表结构，再写入 version=16；
+- `schema_meta.version` 当前为 `18`（`ports::kControlPlaneSchemaVersion`）。产品未发布：
+  - 新库 `CREATE IF NOT EXISTS` 即为当前完整表结构，再写入 version=18；
   - **不提供** 历史 schema 的 `ALTER` 迁移或兼容读取；旧开发库必须删除后重建；
   - 非 0 且非当前版本 → `kUnsupportedVersion`。
+- schema 18：`schedules.local_minutes_of_day`（TEXT，逗号分隔分钟，如 `120,900`）替换单值
+  `local_minute_of_day`；一条 Schedule 可配置多个当日时刻。
 - `service_settings`（schema 16）：单行 `id=1`；`job_retention_months` ∈ {1,3,6} 默认 3；
   `updated_utc_ms`。Service 启动与 `UpdateServiceSettings` 时按 30 天/月对终端 Job 做
   `purge_terminal_completed_before` 硬删除。
@@ -89,11 +91,13 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
   （DPAPI `CRYPTPROTECT_LOCAL_MACHINE`，`pOptionalEntropy` = UTF-8 `schedule_id`）；未加密必须为空串。
   **不**返回给 Desktop `ScheduleSummary`。
 - **Schedule 更新不变量**（`UpsertSchedule` 在已有 `schedule_id` 上强制）：
-  - **创建后不可变**：`content_kind`、有序 volume `source_ids[]` 或 file selections、`backup_type`、
+  - **创建后不可变**：`content_kind`、有序 volume `source_ids[]` 或 file selections、
     `exclude_page_and_hibernation_files`、`deduplication_enabled`、`encryption_enabled`；加密时 `archive_password_protected`
     创建后不可改、不可清空、不可关闭加密。file_set 更新不得携带新 `file_selections`。
   - **可修改**：`display_name`、`enabled`、`repository_connection_id`（可换其它 Repository connection）、
     `trigger`（频率/时间/星期等 Schedule settings）。
+  - **`backup_type`**：创建与更新都写入 Incremental。不是用户策略；Run now / 定时请求增量，首次或 tip 空则降 Full。
+    用户 Run full 只影响那一次 `StartBackup`。
   - **Backup options**：除未来的 “完成后关机”（shutdown）外，其它选项均为创建时固定；当前持久化选项为
     `exclude_page_and_hibernation_files`、`deduplication_enabled` 与 `encryption_enabled`，更新时不得变更。
   - 更新请求不得携带 `archive_password`；加密口令只在创建时 DPAPI 保护后写入 SQLite。

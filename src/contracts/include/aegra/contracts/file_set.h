@@ -225,6 +225,13 @@ is_zero_selection_fingerprint(const FileSelectionFingerprint& fingerprint) noexc
 validate_file_selection_fingerprint(const FileSelectionFingerprint& fingerprint);
 [[nodiscard]] base::Result<void> validate_file_source_ref(const FileSourceRef& ref);
 [[nodiscard]] base::Result<void> validate_file_source_refs(const std::vector<FileSourceRef>& refs);
+/// UI-only label for one relative component (UTF-16LE → UTF-8, C0 stripped). Not a path.
+[[nodiscard]] std::string file_component_display_label(const EncodedName& name);
+/// Fixed English browse-root labels (Desktop, Downloads, Documents, Pictures, Music, Videos).
+[[nodiscard]] bool is_file_special_folder_display_label(std::string_view label) noexcept;
+/// Browse-tree display names for edit rehydrate. Special-folder product roots use their short
+/// label; other selections use volume-relative component labels. Whole-volume uses display_label.
+[[nodiscard]] std::vector<std::string> file_selection_display_chain(const FileSourceRef& ref);
 [[nodiscard]] base::Result<void> validate_file_stream_desc(const FileStreamDesc& stream);
 [[nodiscard]] base::Result<void> validate_file_entry_desc(const FileEntryDesc& entry);
 [[nodiscard]] base::Result<void> validate_file_restore_target(const FileRestoreTarget& target);

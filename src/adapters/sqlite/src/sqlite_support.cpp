@@ -328,6 +328,54 @@ base::Result<std::vector<std::string>> decode_string_list(const std::string_view
     return base::Result<std::vector<std::string>>::success(std::move(values));
 }
 
+std::string encode_local_minutes_of_day(const std::vector<std::uint16_t>& minutes) {
+    std::string encoded;
+    for (std::size_t index = 0; index < minutes.size(); ++index) {
+        if (index != 0) {
+            encoded.push_back(',');
+        }
+        encoded.append(std::to_string(minutes[index]));
+    }
+    return encoded;
+}
+
+base::Result<std::vector<std::uint16_t>>
+decode_local_minutes_of_day(const std::string_view encoded) {
+    std::vector<std::uint16_t> minutes;
+    if (encoded.empty()) {
+        return base::Result<std::vector<std::uint16_t>>::failure(
+            {base::ErrorCode::kInvalidArgument, "local minutes of day are empty"});
+    }
+    std::size_t begin = 0;
+    while (begin <= encoded.size()) {
+        const auto end = encoded.find(',', begin);
+        const auto part = encoded.substr(
+            begin, end == std::string_view::npos ? std::string_view::npos : end - begin);
+        if (part.empty()) {
+            return base::Result<std::vector<std::uint16_t>>::failure(
+                {base::ErrorCode::kInvalidArgument, "local minutes of day are invalid"});
+        }
+        std::uint32_t value = 0;
+        for (const char character : part) {
+            if (character < '0' || character > '9') {
+                return base::Result<std::vector<std::uint16_t>>::failure(
+                    {base::ErrorCode::kInvalidArgument, "local minutes of day are invalid"});
+            }
+            value = value * 10U + static_cast<std::uint32_t>(character - '0');
+            if (value >= 24U * 60U) {
+                return base::Result<std::vector<std::uint16_t>>::failure(
+                    {base::ErrorCode::kInvalidArgument, "local minutes of day are invalid"});
+            }
+        }
+        minutes.push_back(static_cast<std::uint16_t>(value));
+        if (end == std::string_view::npos) {
+            break;
+        }
+        begin = end + 1;
+    }
+    return base::Result<std::vector<std::uint16_t>>::success(std::move(minutes));
+}
+
 std::string encode_message_arguments(const contracts::MessageArguments& arguments) {
     std::string encoded;
     for (std::size_t index = 0; index < arguments.size(); ++index) {
@@ -762,18 +810,23 @@ base::Result<ports::ScheduleRecord> read_schedule(sqlite3_stmt* const stmt) {
     record.repository_connection_id = column_text_required(stmt, 6);
     record.backup_type = static_cast<contracts::BackupType>(sqlite3_column_int(stmt, 7));
     record.trigger.kind = static_cast<contracts::ScheduleTriggerKind>(sqlite3_column_int(stmt, 8));
-    record.trigger.local_minute_of_day = static_cast<std::uint16_t>(sqlite3_column_int(stmt, 9));
+    auto local_minutes = decode_local_minutes_of_day(column_text_required(stmt, 9));
+    if (!local_minutes) {
+        return base::Result<ports::ScheduleRecord>::failure(local_minutes.error());
+    }
+    record.trigger.local_minutes_of_day = std::move(local_minutes).value();
     record.trigger.weekday_mask = static_cast<std::uint8_t>(sqlite3_column_int(stmt, 10));
-    record.trigger.timezone_id = column_text_required(stmt, 11);
-    record.next_run_utc_ms = column_uint64_optional(stmt, 12);
-    record.exclude_page_and_hibernation_files = sqlite3_column_int(stmt, 13) != 0;
-    record.deduplication_enabled = sqlite3_column_int(stmt, 14) != 0;
-    record.encryption_enabled = sqlite3_column_int(stmt, 15) != 0;
-    record.archive_password_protected = column_text_required(stmt, 16);
-    record.backup_set_uuid = column_text_required(stmt, 17);
-    record.last_recovery_point_id = column_text_optional(stmt, 18);
-    record.created_utc_ms = column_uint64(stmt, 19);
-    record.updated_utc_ms = column_uint64(stmt, 20);
+    record.trigger.day_of_month_mask = static_cast<std::uint32_t>(sqlite3_column_int64(stmt, 11));
+    record.trigger.timezone_id = column_text_required(stmt, 12);
+    record.next_run_utc_ms = column_uint64_optional(stmt, 13);
+    record.exclude_page_and_hibernation_files = sqlite3_column_int(stmt, 14) != 0;
+    record.deduplication_enabled = sqlite3_column_int(stmt, 15) != 0;
+    record.encryption_enabled = sqlite3_column_int(stmt, 16) != 0;
+    record.archive_password_protected = column_text_required(stmt, 17);
+    record.backup_set_uuid = column_text_required(stmt, 18);
+    record.last_recovery_point_id = column_text_optional(stmt, 19);
+    record.created_utc_ms = column_uint64(stmt, 20);
+    record.updated_utc_ms = column_uint64(stmt, 21);
     // file_selections loaded by schedule store after read when content_kind is file_set.
     auto valid = validate_schedule_record(record);
     if (!valid && record.content_kind == contracts::ContentKind::kFileSet &&
@@ -911,6 +964,10 @@ contracts::ScheduleSummary to_schedule_summary(const ports::ScheduleRecord& reco
             item.display_label = selection.display_label;
             item.entry_kind = selection.entry_kind;
             item.recursion = selection.recursion;
+            item.display_chain = contracts::file_selection_display_chain(selection);
+            if (item.display_chain.empty() && !item.display_label.empty()) {
+                item.display_chain.push_back(item.display_label);
+            }
             summary.selection_summaries.push_back(std::move(item));
         }
     }

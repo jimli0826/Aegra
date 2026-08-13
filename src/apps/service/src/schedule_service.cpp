@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -59,11 +60,23 @@ make_canonical_uuid(ports::IRandomSource& random, const base::CancellationToken&
     return base::Result<void>::success();
 }
 
-[[nodiscard]] std::uint64_t compute_next_run_utc_ms(const contracts::ScheduleTrigger& trigger,
-                                                    const std::uint64_t now_ms) {
+[[nodiscard]] unsigned utc_day_of_month(const std::uint64_t utc_ms) {
+    using namespace std::chrono;
+    const sys_seconds time_point{seconds{static_cast<std::int64_t>(utc_ms / 1000ULL)}};
+    const year_month_day date{floor<days>(time_point)};
+    return static_cast<unsigned>(date.day());
+}
+
+[[nodiscard]] bool month_day_is_selected(const std::uint32_t mask, const unsigned day) noexcept {
+    return day >= 1 && day <= 31 && (mask & (1U << (day - 1U))) != 0;
+}
+
+[[nodiscard]] std::uint64_t
+compute_next_run_for_minute(const contracts::ScheduleTrigger& trigger, const std::uint64_t now_ms,
+                            const std::uint16_t local_minute) {
     constexpr std::uint64_t kDayMs = 24ULL * 60ULL * 60ULL * 1000ULL;
     constexpr std::uint64_t kMinuteMs = 60ULL * 1000ULL;
-    const auto minute = static_cast<std::uint64_t>(trigger.local_minute_of_day);
+    const auto minute = static_cast<std::uint64_t>(local_minute);
     const auto day_start = (now_ms / kDayMs) * kDayMs;
     auto candidate = day_start + minute * kMinuteMs;
     if (candidate <= now_ms) {
@@ -79,7 +92,30 @@ make_canonical_uuid(ports::IRandomSource& random, const base::CancellationToken&
             candidate += kDayMs;
         }
     }
+    if (trigger.kind == contracts::ScheduleTriggerKind::kMonthly &&
+        trigger.day_of_month_mask != 0) {
+        for (int step = 0; step < 40; ++step) {
+            if (month_day_is_selected(trigger.day_of_month_mask, utc_day_of_month(candidate))) {
+                break;
+            }
+            candidate += kDayMs;
+        }
+    }
     return candidate;
+}
+
+[[nodiscard]] std::uint64_t compute_next_run_utc_ms(const contracts::ScheduleTrigger& trigger,
+                                                    const std::uint64_t now_ms) {
+    std::uint64_t best = 0;
+    bool have_best = false;
+    for (const auto minute : trigger.local_minutes_of_day) {
+        const auto candidate = compute_next_run_for_minute(trigger, now_ms, minute);
+        if (!have_best || candidate < best) {
+            best = candidate;
+            have_best = true;
+        }
+    }
+    return have_best ? best : now_ms;
 }
 
 [[nodiscard]] contracts::CommandAcknowledgement accepted(std::string command_id,
@@ -161,9 +197,16 @@ make_canonical_uuid(ports::IRandomSource& random, const base::CancellationToken&
     fingerprint += "|";
     fingerprint += std::to_string(static_cast<int>(command.trigger.kind));
     fingerprint += "|";
-    fingerprint += std::to_string(command.trigger.local_minute_of_day);
+    for (std::size_t index = 0; index < command.trigger.local_minutes_of_day.size(); ++index) {
+        if (index != 0) {
+            fingerprint.push_back(',');
+        }
+        fingerprint += std::to_string(command.trigger.local_minutes_of_day[index]);
+    }
     fingerprint += "|";
     fingerprint += std::to_string(command.trigger.weekday_mask);
+    fingerprint += "|";
+    fingerprint += std::to_string(command.trigger.day_of_month_mask);
     fingerprint += "|";
     fingerprint += command.trigger.timezone_id;
     fingerprint += "|";
@@ -281,10 +324,6 @@ enforce_schedule_update_invariants(const contracts::UpsertScheduleCommand& comma
     } else if (!command.protection.file_selections.empty()) {
         return base::Result<void>::failure(
             {base::ErrorCode::kConflict, "schedule.source_frozen"});
-    }
-    if (command.backup_type != existing.backup_type) {
-        return base::Result<void>::failure(
-            {base::ErrorCode::kInvalidArgument, "schedule backup type cannot be changed after create"});
     }
     if (command.exclude_page_and_hibernation_files != existing.exclude_page_and_hibernation_files) {
         return base::Result<void>::failure(
@@ -452,7 +491,8 @@ ScheduleService::upsert_schedule(const contracts::UpsertScheduleCommand& command
     record.file_selections = std::move(file_selections);
     record.owner_sid = std::move(owner_sid);
     record.repository_connection_id = command.repository_connection_id;
-    record.backup_type = command.backup_type;
+    // Scheduled runs always request Incremental; first backup / missing parent demote to Full.
+    record.backup_type = contracts::BackupType::kIncremental;
     record.trigger = command.trigger;
     record.exclude_page_and_hibernation_files = command.exclude_page_and_hibernation_files;
     if (content_kind == contracts::ContentKind::kFileSet) {

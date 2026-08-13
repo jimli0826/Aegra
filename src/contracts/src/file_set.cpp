@@ -441,4 +441,89 @@ encode_file_selection_fingerprint_preimage(const std::vector<FileSourceRef>& ref
     return base::Result<std::vector<std::byte>>::success(std::move(preimage));
 }
 
+namespace {
+
+void append_utf8_code_point(std::string& utf8, const std::uint32_t code) {
+    if (code < 0x80U) {
+        utf8.push_back(static_cast<char>(code));
+        return;
+    }
+    if (code < 0x800U) {
+        utf8.push_back(static_cast<char>(0xC0U | (code >> 6U)));
+        utf8.push_back(static_cast<char>(0x80U | (code & 0x3FU)));
+        return;
+    }
+    if (code < 0x10000U) {
+        utf8.push_back(static_cast<char>(0xE0U | (code >> 12U)));
+        utf8.push_back(static_cast<char>(0x80U | ((code >> 6U) & 0x3FU)));
+        utf8.push_back(static_cast<char>(0x80U | (code & 0x3FU)));
+        return;
+    }
+    utf8.push_back(static_cast<char>(0xF0U | (code >> 18U)));
+    utf8.push_back(static_cast<char>(0x80U | ((code >> 12U) & 0x3FU)));
+    utf8.push_back(static_cast<char>(0x80U | ((code >> 6U) & 0x3FU)));
+    utf8.push_back(static_cast<char>(0x80U | (code & 0x3FU)));
+}
+
+} // namespace
+
+std::string file_component_display_label(const EncodedName& name) {
+    if (name.bytes.size() < 2 || (name.bytes.size() % 2U) != 0U) {
+        return ".";
+    }
+    std::string utf8;
+    utf8.reserve(name.bytes.size());
+    for (std::size_t index = 0; index + 1 < name.bytes.size();) {
+        const auto unit = static_cast<std::uint32_t>(
+            static_cast<std::uint16_t>(name.bytes[index]) |
+            (static_cast<std::uint16_t>(name.bytes[index + 1]) << 8U));
+        index += 2;
+        std::uint32_t code = unit;
+        if (unit >= 0xD800U && unit <= 0xDBFFU && index + 1 < name.bytes.size()) {
+            const auto trail = static_cast<std::uint32_t>(
+                static_cast<std::uint16_t>(name.bytes[index]) |
+                (static_cast<std::uint16_t>(name.bytes[index + 1]) << 8U));
+            if (trail >= 0xDC00U && trail <= 0xDFFFU) {
+                index += 2;
+                code = 0x10000U + (((unit - 0xD800U) << 10U) | (trail - 0xDC00U));
+            }
+        }
+        if (code < 0x20U || code == 0x7FU) {
+            continue;
+        }
+        append_utf8_code_point(utf8, code);
+    }
+    if (utf8.empty() || utf8.size() > kMaximumDisplayLabelBytes) {
+        return ".";
+    }
+    return utf8;
+}
+
+bool is_file_special_folder_display_label(const std::string_view label) noexcept {
+    // Keep in sync with WindowsFileSourceBrowser special-folder roots (fixed English labels).
+    return label == "Desktop" || label == "Downloads" || label == "Documents" ||
+           label == "Pictures" || label == "Music" || label == "Videos";
+}
+
+std::vector<std::string> file_selection_display_chain(const FileSourceRef& ref) {
+    // Special-folder browse roots are selected with product labels (Downloads, …) while
+    // relative_components store the volume path used for backup. Edit rehydrate must match
+    // the special root row, not dig Users/… under the volume tree.
+    if (is_file_special_folder_display_label(ref.display_label)) {
+        return {ref.display_label};
+    }
+    std::vector<std::string> chain;
+    if (ref.relative_components.empty()) {
+        if (!ref.display_label.empty()) {
+            chain.push_back(ref.display_label);
+        }
+        return chain;
+    }
+    chain.reserve(ref.relative_components.size());
+    for (const auto& component : ref.relative_components) {
+        chain.push_back(file_component_display_label(component));
+    }
+    return chain;
+}
+
 } // namespace aegra::contracts

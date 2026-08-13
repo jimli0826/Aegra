@@ -367,6 +367,7 @@ Item {
 
         Rectangle {
             anchors.fill: parent
+            radius: Theme.radiusWindow
             color: Theme.colorScrim
             opacity: root.recoveryPointDrawerOpen ? 1 : 0
             visible: opacity > 0.01
@@ -386,6 +387,8 @@ Item {
             x: parent.width - width + slideProgress * width
             visible: slideProgress < 0.999 || root.recoveryPointDrawerOpen
             color: Theme.colorBg
+            radius: Theme.radiusWindow
+            clip: true
             border.width: 1
             border.color: Theme.colorBorder
 

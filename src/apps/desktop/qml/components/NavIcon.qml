@@ -127,6 +127,38 @@ Item {
                 ctx.fill()
                 break
 
+            case "folder": // lucide folder
+                ctx.beginPath()
+                ctx.moveTo(3.5, 8)
+                ctx.lineTo(3.5, 18.5)
+                ctx.quadraticCurveTo(3.5, 20, 5, 20)
+                ctx.lineTo(19, 20)
+                ctx.quadraticCurveTo(20.5, 20, 20.5, 18.5)
+                ctx.lineTo(20.5, 9.5)
+                ctx.quadraticCurveTo(20.5, 8, 19, 8)
+                ctx.lineTo(11.5, 8)
+                ctx.lineTo(9.5, 5.5)
+                ctx.quadraticCurveTo(9, 5, 8.2, 5)
+                ctx.lineTo(5, 5)
+                ctx.quadraticCurveTo(3.5, 5, 3.5, 6.5)
+                ctx.closePath()
+                ctx.stroke()
+                break
+
+            case "hard_drive": // lucide hard-drive (volume_set type mark)
+                rrect(2.5, 8, 19, 10, 2)
+                ctx.beginPath()
+                ctx.moveTo(2.5, 13)
+                ctx.lineTo(21.5, 13)
+                ctx.stroke()
+                ctx.beginPath()
+                ctx.arc(7, 16.2, 1.1, 0, Math.PI * 2)
+                ctx.fill()
+                ctx.beginPath()
+                ctx.arc(11, 16.2, 1.1, 0, Math.PI * 2)
+                ctx.fill()
+                break
+
             case "repository": // archive
                 rrect(3, 3.5, 18, 4.5, 1.2)
                 ctx.beginPath()

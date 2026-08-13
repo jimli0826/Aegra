@@ -77,9 +77,11 @@ CREATE TABLE IF NOT EXISTS schedules (
     owner_sid TEXT NOT NULL DEFAULT '',
     repository_connection_id TEXT NOT NULL,
     backup_type INTEGER NOT NULL CHECK (backup_type BETWEEN 1 AND 3),
-    trigger_kind INTEGER NOT NULL CHECK (trigger_kind IN (1, 2)),
-    local_minute_of_day INTEGER NOT NULL CHECK (local_minute_of_day >= 0 AND local_minute_of_day < 1440),
+    trigger_kind INTEGER NOT NULL CHECK (trigger_kind IN (1, 2, 3)),
+    local_minutes_of_day TEXT NOT NULL,
     weekday_mask INTEGER NOT NULL CHECK (weekday_mask >= 0 AND weekday_mask <= 127),
+    day_of_month_mask INTEGER NOT NULL DEFAULT 0
+        CHECK (day_of_month_mask >= 0 AND day_of_month_mask <= 2147483647),
     timezone_id TEXT NOT NULL,
     next_run_utc_ms INTEGER CHECK (next_run_utc_ms IS NULL OR next_run_utc_ms >= 0),
     exclude_page_and_hibernation_files INTEGER NOT NULL DEFAULT 1

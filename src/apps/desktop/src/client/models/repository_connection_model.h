@@ -50,6 +50,7 @@ class RepositoryConnectionModel final : public QAbstractListModel {
     /// QML helpers for wizard destination selection by list index.
     Q_INVOKABLE [[nodiscard]] QString connectionIdAt(int row) const;
     Q_INVOKABLE [[nodiscard]] bool isAvailableAt(int row) const;
+    Q_INVOKABLE [[nodiscard]] int indexOfConnectionId(const QString& connection_id) const;
 
     [[nodiscard]] int rowCount(const QModelIndex& parent = QModelIndex()) const override;
     [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;

@@ -1,5 +1,6 @@
 #include "client/models/file_browse_model.h"
 
+#include <QStringList>
 #include <QVariantMap>
 
 #include <utility>
@@ -72,6 +73,7 @@ void FileBrowseModel::clear() {
     token_index_.clear();
     endResetModel();
     loading_ = false;
+    locked_hydrate_in_progress_ = false;
     error_text_.clear();
     refresh_selection_cache();
     emit countChanged();
@@ -79,6 +81,7 @@ void FileBrowseModel::clear() {
 }
 
 void FileBrowseModel::set_roots(QVector<FileBrowseNode> roots) {
+    locked_hydrate_in_progress_ = false;
     auto filtered = filter_nodes_for_mode(std::move(roots), single_directory_mode_);
     beginResetModel();
     rows_ = std::move(filtered);
@@ -94,6 +97,7 @@ void FileBrowseModel::set_roots(QVector<FileBrowseNode> roots) {
     refresh_selection_cache();
     emit countChanged();
     emit loadingChanged();
+    apply_locked_selection();
 }
 
 void FileBrowseModel::set_children(const QString& parent_token, QVector<FileBrowseNode> children) {
@@ -118,7 +122,8 @@ void FileBrowseModel::set_children(const QString& parent_token, QVector<FileBrow
     auto filtered = filter_nodes_for_mode(std::move(children), single_directory_mode_);
     parent.children_loaded = true;
     parent.loading = false;
-    parent.expanded = true;
+    // Locked hydrate keeps the parent collapsed; QML hides non-visible rows.
+    parent.expanded = !locked_hydrate_in_progress_;
     token_index_.clear();
     for (int index = 0; index < rows_.size(); ++index) {
         token_index_.insert(rows_[index].node_token, index);
@@ -144,6 +149,8 @@ void FileBrowseModel::set_children(const QString& parent_token, QVector<FileBrow
     emit_row(parent_index);
     refresh_selection_cache();
     emit countChanged();
+    notify_row_visibility();
+    apply_locked_selection();
 }
 
 void FileBrowseModel::set_node_loading(const QString& node_token, const bool loading) {
@@ -162,7 +169,6 @@ void FileBrowseModel::set_node_expanded(const QString& node_token, const bool ex
     }
     rows_[index].expanded = expanded;
     if (!expanded) {
-        // Hide descendants by collapsing only the flag; keep children for re-expand.
         for (int cursor = index + 1; cursor < rows_.size() && rows_[cursor].depth > rows_[index].depth;
              ++cursor) {
             if (rows_[cursor].depth == rows_[index].depth + 1) {
@@ -171,8 +177,7 @@ void FileBrowseModel::set_node_expanded(const QString& node_token, const bool ex
         }
     }
     emit_row(index);
-    // Visibility is handled via expanded ancestor chain in data() — use filter in QML via depth.
-    // For list models without filtering, collapse removes children from view:
+    // User collapse removes loaded children so the next expand re-fetches.
     if (!expanded && rows_[index].children_loaded) {
         int remove_start = index + 1;
         int remove_end = remove_start;
@@ -180,7 +185,6 @@ void FileBrowseModel::set_node_expanded(const QString& node_token, const bool ex
             ++remove_end;
         }
         if (remove_end > remove_start) {
-            // Keep children_loaded false so re-expand re-fetches fresh page.
             beginRemoveRows(QModelIndex(), remove_start, remove_end - 1);
             rows_.remove(remove_start, remove_end - remove_start);
             endRemoveRows();
@@ -193,6 +197,7 @@ void FileBrowseModel::set_node_expanded(const QString& node_token, const bool ex
         }
     }
     emit_row(index);
+    notify_row_visibility();
 }
 
 bool FileBrowseModel::loading() const noexcept { return loading_; }
@@ -311,7 +316,60 @@ void FileBrowseModel::toggleExpanded(const QString& node_token) {
     emit expandRequested(node_token);
 }
 
+void FileBrowseModel::setSelectionLocked(const bool locked) {
+    if (selection_locked_ == locked) {
+        return;
+    }
+    selection_locked_ = locked;
+    emit selectionLockedChanged();
+    if (locked) {
+        apply_locked_selection();
+    }
+}
+
+bool FileBrowseModel::selectionLocked() const noexcept { return selection_locked_; }
+
+void FileBrowseModel::setLockedDisplayChains(const QVariantList& chains) {
+    locked_chains_.clear();
+    locked_chains_.reserve(static_cast<int>(chains.size()));
+    for (const auto& item : chains) {
+        QStringList names;
+        if (item.canConvert<QStringList>()) {
+            names = item.toStringList();
+        } else if (item.canConvert<QVariantList>()) {
+            for (const auto& part : item.toList()) {
+                const auto name = part.toString();
+                if (!name.isEmpty()) {
+                    names.push_back(name);
+                }
+            }
+        }
+        if (!names.isEmpty()) {
+            locked_chains_.push_back(std::move(names));
+        }
+    }
+    apply_locked_selection();
+}
+
+void FileBrowseModel::clearChecks() {
+    bool changed = false;
+    for (int index = 0; index < rows_.size(); ++index) {
+        if (rows_[index].check_state == 0) {
+            continue;
+        }
+        rows_[index].check_state = 0;
+        emit_row(index);
+        changed = true;
+    }
+    if (changed) {
+        refresh_selection_cache();
+    }
+}
+
 void FileBrowseModel::toggleChecked(const QString& node_token) {
+    if (selection_locked_) {
+        return;
+    }
     const int index = find_index(node_token);
     if (index < 0 || !is_selectable_node(rows_[index])) {
         return;
@@ -373,6 +431,8 @@ QVariant FileBrowseModel::data(const QModelIndex& index, const int role) const {
         return row.check_state;
     case IsSelectableRole:
         return is_selectable_node(row) && (!single_directory_mode_ || row.is_directory);
+    case RowVisibleRole:
+        return is_row_visible(index.row());
     case DisabledReasonRole:
         if (row.selectability == 3) {
             //% "Unsupported"
@@ -405,7 +465,8 @@ QHash<int, QByteArray> FileBrowseModel::roleNames() const {
             {LoadingRole, "nodeLoading"},
             {CheckStateRole, "checkState"},
             {IsSelectableRole, "isSelectable"},
-            {DisabledReasonRole, "disabledReason"}};
+            {DisabledReasonRole, "disabledReason"},
+            {RowVisibleRole, "rowVisible"}};
 }
 
 int FileBrowseModel::find_index(const QString& node_token) const {
@@ -513,6 +574,262 @@ void FileBrowseModel::refresh_selection_cache() {
                 .arg(selected_count_ - labels.size());
     }
     emit selectionChanged();
+}
+
+QStringList FileBrowseModel::display_path(const int index) const {
+    QStringList names;
+    if (index < 0 || index >= rows_.size()) {
+        return names;
+    }
+    QString token = rows_[index].node_token;
+    while (!token.isEmpty()) {
+        const int cursor = find_index(token);
+        if (cursor < 0) {
+            break;
+        }
+        names.prepend(rows_[cursor].display_name);
+        token = rows_[cursor].parent_token;
+    }
+    return names;
+}
+
+namespace {
+
+[[nodiscard]] bool names_equal(const QStringList& left, const int left_offset,
+                               const QStringList& right) noexcept {
+    if (left_offset < 0 || left.size() - left_offset != right.size()) {
+        return false;
+    }
+    for (int index = 0; index < right.size(); ++index) {
+        if (left.at(left_offset + index) != right.at(index)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] bool names_are_prefix(const QStringList& left, const int left_offset,
+                                    const QStringList& right) noexcept {
+    if (left_offset < 0 || left.size() - left_offset >= right.size()) {
+        return false;
+    }
+    for (int index = 0; index < left.size() - left_offset; ++index) {
+        if (left.at(left_offset + index) != right.at(index)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] bool is_special_folder_root_name(const QString& name) noexcept {
+    return name == QLatin1String("Desktop") || name == QLatin1String("Downloads") ||
+           name == QLatin1String("Documents") || name == QLatin1String("Pictures") ||
+           name == QLatin1String("Music") || name == QLatin1String("Videos");
+}
+
+[[nodiscard]] bool is_complete_locked_match(const QStringList& names,
+                                            const QStringList& chain) noexcept {
+    return names_equal(names, 0, chain) || names_equal(names, 1, chain);
+}
+
+[[nodiscard]] bool is_locked_prefix(const QStringList& names, const QStringList& chain) noexcept {
+    return names_are_prefix(names, 0, chain) || names_are_prefix(names, 1, chain);
+}
+
+} // namespace
+
+bool FileBrowseModel::is_row_visible(const int index) const {
+    if (index < 0 || index >= rows_.size()) {
+        return false;
+    }
+    QString parent = rows_[index].parent_token;
+    while (!parent.isEmpty()) {
+        const int parent_index = find_index(parent);
+        if (parent_index < 0) {
+            return false;
+        }
+        if (!rows_[parent_index].expanded) {
+            return false;
+        }
+        parent = rows_[parent_index].parent_token;
+    }
+    return true;
+}
+
+void FileBrowseModel::notify_row_visibility() {
+    if (rows_.isEmpty()) {
+        return;
+    }
+    emit dataChanged(this->index(0), this->index(rows_.size() - 1),
+                     {static_cast<int>(ExpandedRole), static_cast<int>(RowVisibleRole)});
+}
+
+void FileBrowseModel::remove_descendants(const int parent_index) {
+    if (parent_index < 0 || parent_index >= rows_.size()) {
+        return;
+    }
+    int remove_start = parent_index + 1;
+    int remove_end = remove_start;
+    while (remove_end < rows_.size() && rows_[remove_end].depth > rows_[parent_index].depth) {
+        ++remove_end;
+    }
+    if (remove_end <= remove_start) {
+        return;
+    }
+    beginRemoveRows(QModelIndex(), remove_start, remove_end - 1);
+    rows_.remove(remove_start, remove_end - remove_start);
+    endRemoveRows();
+    token_index_.clear();
+    for (int index = 0; index < rows_.size(); ++index) {
+        token_index_.insert(rows_[index].node_token, index);
+    }
+    emit countChanged();
+}
+
+void FileBrowseModel::prune_locked_hydrate_dead_ends(const QVector<bool>& chain_resolved) {
+    if (!locked_hydrate_in_progress_ || chain_resolved.size() != locked_chains_.size()) {
+        return;
+    }
+    for (int index = rows_.size() - 1; index >= 0; --index) {
+        if (rows_[index].depth != 0 || !rows_[index].children_loaded) {
+            continue;
+        }
+        bool useful = false;
+        for (int child = index + 1;
+             child < rows_.size() && rows_[child].depth > 0 && !useful; ++child) {
+            const auto names = display_path(child);
+            for (int chain_index = 0; chain_index < locked_chains_.size(); ++chain_index) {
+                if (chain_resolved[chain_index]) {
+                    continue;
+                }
+                if (is_complete_locked_match(names, locked_chains_[chain_index]) ||
+                    is_locked_prefix(names, locked_chains_[chain_index])) {
+                    useful = true;
+                    break;
+                }
+            }
+        }
+        if (useful) {
+            continue;
+        }
+        // Keep children_loaded so this root is not re-expanded this hydrate pass.
+        rows_[index].expanded = false;
+        remove_descendants(index);
+    }
+}
+
+void FileBrowseModel::collapse_locked_view() {
+    // Drop hydrated children from the model so ListView does not keep empty gaps.
+    // Preserve root check_state (full / partial). User expand will re-fetch children.
+    // Service tokens for dropped nodes are released on the next root browse.
+    QVector<FileBrowseNode> roots;
+    roots.reserve(rows_.size());
+    bool removed_deep = false;
+    for (auto& row : rows_) {
+        if (row.depth != 0) {
+            removed_deep = true;
+            continue;
+        }
+        row.expanded = false;
+        row.loading = false;
+        row.children_loaded = false;
+        roots.push_back(std::move(row));
+    }
+    if (!removed_deep) {
+        for (int index = 0; index < rows_.size(); ++index) {
+            if (!rows_[index].expanded && !rows_[index].children_loaded) {
+                continue;
+            }
+            rows_[index].expanded = false;
+            rows_[index].children_loaded = false;
+            rows_[index].loading = false;
+            emit_row(index);
+        }
+        notify_row_visibility();
+        return;
+    }
+    beginResetModel();
+    rows_ = std::move(roots);
+    token_index_.clear();
+    for (int index = 0; index < rows_.size(); ++index) {
+        token_index_.insert(rows_[index].node_token, index);
+    }
+    endResetModel();
+    emit countChanged();
+    refresh_selection_cache();
+    notify_row_visibility();
+}
+
+void FileBrowseModel::apply_locked_selection() {
+    if (!selection_locked_ || rows_.isEmpty()) {
+        return;
+    }
+    for (int index = 0; index < rows_.size(); ++index) {
+        if (rows_[index].check_state == 0) {
+            continue;
+        }
+        rows_[index].check_state = 0;
+        emit_row(index);
+    }
+    if (locked_chains_.isEmpty()) {
+        refresh_selection_cache();
+        return;
+    }
+    QVector<bool> chain_resolved(locked_chains_.size(), false);
+    for (int index = 0; index < rows_.size(); ++index) {
+        auto& row = rows_[index];
+        const auto names = display_path(index);
+        for (int chain_index = 0; chain_index < locked_chains_.size(); ++chain_index) {
+            if (!is_complete_locked_match(names, locked_chains_[chain_index])) {
+                continue;
+            }
+            chain_resolved[chain_index] = true;
+            if (is_selectable_node(row) && row.check_state != 2) {
+                row.check_state = 2;
+                apply_check_to_descendants(index, 2);
+                emit_row(index);
+                recompute_ancestors(index);
+            }
+        }
+    }
+    prune_locked_hydrate_dead_ends(chain_resolved);
+    QString expand_token;
+    for (int index = 0; index < rows_.size() && expand_token.isEmpty(); ++index) {
+        const auto& row = rows_[index];
+        if (!row.is_directory || !row.has_children || row.children_loaded || row.loading) {
+            continue;
+        }
+        const auto names = display_path(index);
+        for (int chain_index = 0; chain_index < locked_chains_.size(); ++chain_index) {
+            if (chain_resolved[chain_index]) {
+                continue;
+            }
+            // Special-folder roots (Downloads, …) are never dug for volume-relative chains —
+            // expanding them lists the folder contents and confuses the locked edit tree.
+            // They only match as complete roots via short product labels.
+            if (row.depth == 0 && is_special_folder_root_name(row.display_name)) {
+                continue;
+            }
+            // Volume-relative chains do not include the volume root label, so dig under volumes.
+            if (row.depth == 0 || is_locked_prefix(names, locked_chains_[chain_index])) {
+                expand_token = row.node_token;
+                break;
+            }
+        }
+    }
+    refresh_selection_cache();
+    if (!expand_token.isEmpty()) {
+        locked_hydrate_in_progress_ = true;
+        emit expandRequested(expand_token);
+        return;
+    }
+    const bool finishing_hydrate = locked_hydrate_in_progress_;
+    locked_hydrate_in_progress_ = false;
+    if (finishing_hydrate) {
+        collapse_locked_view();
+    } else {
+        notify_row_visibility();
+    }
 }
 
 } // namespace aegra::desktop

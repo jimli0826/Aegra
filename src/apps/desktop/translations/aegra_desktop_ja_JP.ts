@@ -103,6 +103,10 @@
         <source>Delete</source>
         <translation>削除</translation>
     </message>
+    <message id="aegra.common.remove">
+        <source>Remove</source>
+        <translation>削除</translation>
+    </message>
     <message id="aegra.common.cancel">
         <source>Cancel</source>
         <translation>キャンセル</translation>
@@ -114,6 +118,14 @@
     <message id="aegra.common.create">
         <source>Create</source>
         <translation>作成</translation>
+    </message>
+    <message id="aegra.common.save">
+        <source>Save</source>
+        <translation>保存</translation>
+    </message>
+    <message id="aegra.common.edit">
+        <source>Edit</source>
+        <translation>編集</translation>
     </message>
     <message id="aegra.common.not_available">
         <source>N/A</source>
@@ -657,6 +669,14 @@ Server: %1</source>
         <source>Unable to browse local files</source>
         <translation>ローカルファイルを参照できません</translation>
     </message>
+    <message id="aegra.error.file_browse.token_limit">
+        <source>Too many folders were opened. Close the dialog and try again.</source>
+        <translation>開いたフォルダーが多すぎます。ダイアログを閉じて再試行してください。</translation>
+    </message>
+    <message id="aegra.error.file_browse.token_invalid">
+        <source>This folder list expired. Refresh and try again.</source>
+        <translation>フォルダー一覧の有効期限が切れました。更新して再試行してください。</translation>
+    </message>
     <message id="aegra.error.file_recover.query_failed">
         <source>Unable to list files in this recovery point</source>
         <translation>この復旧ポイントのファイルを一覧表示できません</translation>
@@ -1029,6 +1049,22 @@ Server: %1</source>
         <source>Time of day</source>
         <translation>時刻</translation>
     </message>
+    <message id="aegra.backup.add_time">
+        <source>Add time</source>
+        <translation>時刻を追加</translation>
+    </message>
+    <message id="aegra.backup.time.duplicate">
+        <source>Each time of day must be unique.</source>
+        <translation>同じ時刻を重複して指定できません。</translation>
+    </message>
+    <message id="aegra.backup.time.min_interval">
+        <source>Times of day must be at least 30 minutes apart.</source>
+        <translation>時刻の間隔は 30 分以上にしてください。</translation>
+    </message>
+    <message id="aegra.backup.time.no_slot">
+        <source>No available time slot with at least 30 minutes gap.</source>
+        <translation>30 分以上の間隔を確保できる空き時刻がありません。</translation>
+    </message>
     <message id="aegra.backup.weekday.mon">
         <source>Mon</source>
         <translation>月</translation>
@@ -1132,6 +1168,10 @@ Server: %1</source>
     <message id="aegra.backup.action.run_incremental">
         <source>Run incremental</source>
         <translation>増分実行</translation>
+    </message>
+    <message id="aegra.backup.action.run_now">
+        <source>Run now</source>
+        <translation>今すぐ実行</translation>
     </message>
     <message id="aegra.backup.run.started">
         <source>Backup started</source>
@@ -1278,8 +1318,8 @@ Server: %1</source>
         <translation>初回バックアップを開始しますか？</translation>
     </message>
     <message id="aegra.backup.schedule.first_backup_message">
-        <source>The schedule will be saved. Do you want to start the first full backup now?</source>
-        <translation>スケジュールは保存されます。初回のフルバックアップを今すぐ開始しますか？</translation>
+        <source>The schedule will be saved. Do you want to start the first backup now?</source>
+        <translation>スケジュールは保存されます。初回バックアップを今すぐ開始しますか？</translation>
     </message>
     <message id="aegra.backup.schedule.first_backup_now">
         <source>Start now</source>
@@ -1292,6 +1332,26 @@ Server: %1</source>
     <message id="aegra.backup.schedule.save_failed">
         <source>Could not save schedule</source>
         <translation>スケジュールを保存できませんでした</translation>
+    </message>
+    <message id="aegra.backup.schedule.dest_change_title">
+        <source>Change destination?</source>
+        <translation>保存先を変更しますか？</translation>
+    </message>
+    <message id="aegra.backup.schedule.dest_change_message">
+        <source>The next backup will run as a full backup because the incremental chain will be reset.</source>
+        <translation>増分チェーンがリセットされるため、次回のバックアップはフルになります。</translation>
+    </message>
+    <message id="aegra.backup.opt.password_frozen">
+        <source>Password is set and cannot be changed.</source>
+        <translation>パスワードは設定済みで変更できません。</translation>
+    </message>
+    <message id="aegra.backup.file.incremental_default_note">
+        <source>Each run is incremental. The first backup, or a run with no usable parent, becomes a full backup automatically.</source>
+        <translation>実行は増分です。初回、または利用可能な親がない場合は自動的にフルになります。</translation>
+    </message>
+    <message id="aegra.backup.schedule.edit_busy">
+        <source>Wait for the backup to finish before editing this schedule</source>
+        <translation>このスケジュールを編集する前にバックアップの完了を待ってください</translation>
     </message>
     <message id="aegra.backup.schedule.update_failed">
         <source>Could not update schedule</source>
@@ -1669,26 +1729,6 @@ Server: %1</source>
         <source>Size</source>
         <translation>サイズ</translation>
     </message>
-    <message id="aegra.mount.disk_name">
-        <source>Disk %1</source>
-        <translation>ディスク %1</translation>
-    </message>
-    <message id="aegra.mount.state.mounting">
-        <source>Mounting</source>
-        <translation>マウント中</translation>
-    </message>
-    <message id="aegra.mount.state.mounted">
-        <source>Mounted</source>
-        <translation>マウント済み</translation>
-    </message>
-    <message id="aegra.mount.state.unmounting">
-        <source>Unmounting</source>
-        <translation>アンマウント中</translation>
-    </message>
-    <message id="aegra.mount.state.failed">
-        <source>Failed</source>
-        <translation>失敗</translation>
-    </message>
     <message id="aegra.mount.drive_letter">
         <source>Drive letter</source>
         <translation>ドライブレター</translation>
@@ -1704,38 +1744,6 @@ Server: %1</source>
     <message id="aegra.mount.unmount">
         <source>Unmount</source>
         <translation>アンマウント</translation>
-    </message>
-    <message id="aegra.mount.started">
-        <source>Mount started</source>
-        <translation>マウントを開始しました</translation>
-    </message>
-    <message id="aegra.mount.unmounted">
-        <source>Unmounted</source>
-        <translation>アンマウントしました</translation>
-    </message>
-    <message id="aegra.mount.already_mounted_selection">
-        <source>Selected disk(s) are already mounted</source>
-        <translation>選択したディスクは既にマウントされています</translation>
-    </message>
-    <message id="aegra.mount.capability_missing">
-        <source>Service does not support mount</source>
-        <translation>サービスはマウントをサポートしていません</translation>
-    </message>
-    <message id="aegra.mount.busy">
-        <source>A mount command is already in progress</source>
-        <translation>マウントコマンドが既に実行中です</translation>
-    </message>
-    <message id="aegra.mount.select_required">
-        <source>Select a checkpoint and at least one source disk</source>
-        <translation>チェックポイントと少なくとも1台のソースディスクを選択してください</translation>
-    </message>
-    <message id="aegra.mount.invalid_drive_letter">
-        <source>Preferred drive letter must be a single letter A–Z</source>
-        <translation>優先ドライブレターは A–Z の1文字である必要があります</translation>
-    </message>
-    <message id="aegra.mount.select_session">
-        <source>Select a mounted session to unmount</source>
-        <translation>アンマウントするマウント済みセッションを選択してください</translation>
     </message>
     <message id="aegra.mount.checkpoint_panel_empty">
         <source>Recovery point list will appear when mount Service APIs are connected</source>
@@ -1828,26 +1836,6 @@ Server: %1</source>
     <message id="aegra.settings.service.connection">
         <source>Connection</source>
         <translation>接続</translation>
-    </message>
-    <message id="aegra.settings.job_retention">
-        <source>Job history retention</source>
-        <translation>ジョブ履歴の保持期間</translation>
-    </message>
-    <message id="aegra.settings.job_retention_desc">
-        <source>Completed jobs older than this period are permanently deleted from the service.</source>
-        <translation>この期間より古い完了済みジョブはサービスから完全に削除されます。</translation>
-    </message>
-    <message id="aegra.settings.job_retention.1_month">
-        <source>1 month</source>
-        <translation>1 か月</translation>
-    </message>
-    <message id="aegra.settings.job_retention.3_months">
-        <source>3 months</source>
-        <translation>3 か月</translation>
-    </message>
-    <message id="aegra.settings.job_retention.6_months">
-        <source>6 months</source>
-        <translation>6 か月</translation>
     </message>
     <message id="aegra.backup.column.backup_type">
         <source>Backup type</source>

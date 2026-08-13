@@ -146,7 +146,7 @@ Item {
         property real slideProgress: root.open ? 0 : 1
         x: parent.width - width + slideProgress * width
         color: Theme.colorBg
-        radius: 16
+        radius: Theme.radiusWindow
         clip: true
         border.width: 1
         border.color: Theme.colorBorder

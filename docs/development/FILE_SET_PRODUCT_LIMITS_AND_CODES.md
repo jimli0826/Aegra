@@ -38,7 +38,7 @@
 | L19 | Index spool 磁盘预算 / Job | 8 GiB | `file_backup.index_spool_budget_exceeded` |
 | L20 | Browse 页大小 | 1–100 | `service.page_limit` |
 | L21 | node token TTL | 15 min | `file_browse.token_invalid` |
-| L22 | active node tokens / connection | 4096 | `file_browse.token_limit` |
+| L22 | active node tokens / connection | 4096（按 pipe session 计数；根列表首页清零该 session） | `file_browse.token_limit` |
 | L23 | preflight token TTL | 30 min | `file_restore.preflight_expired` |
 | L24 | CBOR metadata plaintext | 64 MiB | `format.metadata_size_limit` |
 | L25 | Service frame | 1 MiB | framing reject |

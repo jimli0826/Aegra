@@ -1909,6 +1909,206 @@ Server: %1</translation>
         <source>Recovery points deleted</source>
         <translation>Wiederherstellungspunkte gelöscht</translation>
     </message>
+    <message id="aegra.repository.type.local">
+        <source>Local</source>
+        <translation>Lokal</translation>
+    </message>
+    <message id="aegra.repository.type.network">
+        <source>Network</source>
+        <translation>Netzwerk</translation>
+    </message>
+    <message id="aegra.repository.field.name">
+        <source>Name</source>
+        <translation>Name</translation>
+    </message>
+    <message id="aegra.repository.field.type">
+        <source>Type</source>
+        <translation>Typ</translation>
+    </message>
+    <message id="aegra.repository.field.network_path">
+        <source>Network path</source>
+        <translation>Netzwerkpfad</translation>
+    </message>
+    <message id="aegra.repository.field.authentication">
+        <source>Authentication</source>
+        <translation>Authentifizierung</translation>
+    </message>
+    <message id="aegra.repository.field.username">
+        <source>Username</source>
+        <translation>Benutzername</translation>
+    </message>
+    <message id="aegra.repository.field.password">
+        <source>Password</source>
+        <translation>Kennwort</translation>
+    </message>
+    <message id="aegra.repository.field.domain">
+        <source>Domain</source>
+        <translation>Domäne</translation>
+    </message>
+    <message id="aegra.repository.field.root_path">
+        <source>Repository root path</source>
+        <translation>Repository-Stammverzeichnis</translation>
+    </message>
+    <message id="aegra.repository.field.optional_password">
+        <source>Optional repository password</source>
+        <translation>Optionales Repository-Kennwort</translation>
+    </message>
+    <message id="aegra.repository.field.password_optional">
+        <source>Password(optional)</source>
+        <translation>Kennwort (optional)</translation>
+    </message>
+    <message id="aegra.repository.field.optional_legend">
+        <source>optional</source>
+        <translation>optional</translation>
+    </message>
+    <message id="aegra.repository.field.encryption">
+        <source>Encryption (password required)</source>
+        <translation>Verschlüsselung (Kennwort erforderlich)</translation>
+    </message>
+    <message id="aegra.repository.field.confirm_password">
+        <source>Confirm password</source>
+        <translation>Kennwort bestätigen</translation>
+    </message>
+    <message id="aegra.repository.please_enter_password">
+        <source>Please enter a password</source>
+        <translation>Bitte ein Kennwort eingeben</translation>
+    </message>
+    <message id="aegra.repository.password_mismatch">
+        <source>Passwords do not match</source>
+        <translation>Kennwörter stimmen nicht überein</translation>
+    </message>
+    <message id="aegra.error.repository.locator_exists">
+        <source>A repository already exists at this location</source>
+        <translation>An diesem Speicherort ist bereits ein Repository vorhanden</translation>
+    </message>
+    <message id="aegra.error.repository.import_available">
+        <source>A repository already exists at this location but is not registered. Import it?</source>
+        <translation>An diesem Speicherort liegt ein nicht registriertes Repository. Importieren?</translation>
+    </message>
+    <message id="aegra.error.repository.location_occupied">
+        <source>This location is not empty and cannot be used as a new repository</source>
+        <translation>Dieser Speicherort ist nicht leer und kann kein neues Repository aufnehmen</translation>
+    </message>
+    <message id="aegra.repository.remove_title">
+        <source>Remove repository connection?</source>
+        <translation>Repository-Verbindung entfernen?</translation>
+    </message>
+    <message id="aegra.repository.remove_description">
+        <source>Only the saved connection is removed. Backup data is not deleted.</source>
+        <translation>Nur die gespeicherte Verbindung wird entfernt. Sicherungsdaten werden nicht gelöscht.</translation>
+    </message>
+    <message id="aegra.repository.import_offer.title">
+        <source>Import repository</source>
+        <translation>Repository importieren</translation>
+    </message>
+    <message id="aegra.repository.import_offer.message">
+        <source>A repository already exists at this location but is not registered. Import it?</source>
+        <translation>An diesem Speicherort liegt ein nicht registriertes Repository. Importieren?</translation>
+    </message>
+    <message id="aegra.repository.stat.count">
+        <source>Repositories</source>
+        <translation>Repositories</translation>
+    </message>
+    <message id="aegra.repository.stat.count_value">
+        <source>%1 repositories</source>
+        <translation>%1 Repositories</translation>
+    </message>
+    <message id="aegra.repository.stat.used">
+        <source>Used space</source>
+        <translation>Belegter Speicher</translation>
+    </message>
+    <message id="aegra.repository.stat.free">
+        <source>Free space</source>
+        <translation>Freier Speicher</translation>
+    </message>
+    <message id="aegra.repository.recovery_points_label">
+        <source>Recovery points</source>
+        <translation>Wiederherstellungspunkte</translation>
+    </message>
+    <message id="aegra.repository.column.name">
+        <source>NAME</source>
+        <translation>NAME</translation>
+    </message>
+    <message id="aegra.repository.column.status">
+        <source>STATUS</source>
+        <translation>STATUS</translation>
+    </message>
+    <message id="aegra.repository.column.default">
+        <source>DEFAULT</source>
+        <translation>STANDARD</translation>
+    </message>
+    <message id="aegra.repository.column.recovery_points">
+        <source>RECOVERY POINTS</source>
+        <translation>WIEDERHERSTELLUNGSPUNKTE</translation>
+    </message>
+    <message id="aegra.repository.column.free_space">
+        <source>FREE SPACE</source>
+        <translation>FREIER SPEICHER</translation>
+    </message>
+    <message id="aegra.repository.name_placeholder">
+        <source>e.g. My Backup Location</source>
+        <translation>z. B. Mein Sicherungsort</translation>
+    </message>
+    <message id="aegra.repository.browse">
+        <source>Browse</source>
+        <translation>Durchsuchen</translation>
+    </message>
+    <message id="aegra.repository.please_select_drive">
+        <source>Please select a drive</source>
+        <translation>Bitte Laufwerk auswählen</translation>
+    </message>
+    <message id="aegra.repository.please_select_path">
+        <source>Please select a drive or folder</source>
+        <translation>Bitte Laufwerk oder Ordner auswählen</translation>
+    </message>
+    <message id="aegra.repository.please_enter_name">
+        <source>Please enter a name</source>
+        <translation>Bitte einen Namen eingeben</translation>
+    </message>
+    <message id="aegra.repository.please_enter_path">
+        <source>Please enter a network path</source>
+        <translation>Bitte Netzwerkpfad eingeben</translation>
+    </message>
+    <message id="aegra.repository.please_connect_first">
+        <source>Connect first</source>
+        <translation>Zuerst verbinden</translation>
+    </message>
+    <message id="aegra.repository.no_folders">
+        <source>No folders</source>
+        <translation>Keine Ordner</translation>
+    </message>
+    <message id="aegra.repository.selected_path">
+        <source>Selected: %1</source>
+        <translation>Ausgewählt: %1</translation>
+    </message>
+    <message id="aegra.repository.set_as_default">
+        <source>Set as default</source>
+        <translation>Als Standard festlegen</translation>
+    </message>
+    <message id="aegra.repository.connect">
+        <source>Connect</source>
+        <translation>Verbinden</translation>
+    </message>
+    <message id="aegra.repository.connecting">
+        <source>Connecting...</source>
+        <translation>Verbindung wird hergestellt...</translation>
+    </message>
+    <message id="aegra.repository.connected_btn">
+        <source>Connected</source>
+        <translation>Verbunden</translation>
+    </message>
+    <message id="aegra.repository.service_not_connected">
+        <source>Service is not connected</source>
+        <translation>Service ist nicht verbunden</translation>
+    </message>
+    <message id="aegra.repository.display_name">
+        <source>Display name</source>
+        <translation>Anzeigename</translation>
+    </message>
+    <message id="aegra.repository.location">
+        <source>Repository location</source>
+        <translation>Repository-Speicherort</translation>
+    </message>
     <message id="aegra.error.file_recover.parent_missing">
         <source>A required parent recovery point is missing. Restore is not possible for this chain.</source>
         <translation>Erforderlicher Eltern-Wiederherstellungspunkt fehlt. Wiederherstellung nicht möglich.</translation>

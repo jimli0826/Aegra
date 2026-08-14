@@ -913,8 +913,8 @@ base::Result<ports::RestorePreflightRecord> read_restore_preflight(sqlite3_stmt*
 
 contracts::RepositoryConnectionSummary
 to_connection_summary(const ports::RepositoryConnectionRecord& record) {
-    return {record.connection_id, record.display_name, record.state, record.is_default,
-            record.capabilities};
+    return {record.connection_id, record.display_name, record.locator, record.state,
+            record.is_default, record.capabilities};
 }
 
 contracts::JobSummary to_job_summary(const ports::JobRecord& record) {

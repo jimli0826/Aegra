@@ -4,8 +4,11 @@
 #include "locale/locale_format.h"
 #include "locale/message_code_map.h"
 
+#include <QDir>
 #include <QHash>
 #include <QJsonObject>
+#include <QSet>
+#include <QStorageInfo>
 #include <QUuid>
 
 #include <algorithm>
@@ -500,6 +503,10 @@ QString ServiceClient::repositoryCommandErrorText() const {
                : localize_message_code(repository_command_error_code_);
 }
 
+QString ServiceClient::repositoryCommandErrorCode() const {
+    return repository_command_error_code_;
+}
+
 void ServiceClient::selectRepositoryConnection(const QString& connection_id) {
     if (connection_id.isEmpty() || !connections_.find(connection_id)) {
         return;
@@ -784,6 +791,155 @@ void ServiceClient::finish_execute_delete_failure(const QString& message_code) {
     delete_plan_error_code_ = message_code;
     emit deletePlanChanged();
     emit deletePlanFailed(localize_message_code(message_code));
+}
+
+QVariantList ServiceClient::listLocalRepositoryDrives() const {
+    QVariantList drives;
+    const auto volumes = QStorageInfo::mountedVolumes();
+    for (const auto& volume : volumes) {
+        if (!volume.isValid() || !volume.isReady()) {
+            continue;
+        }
+        const auto root = QDir::toNativeSeparators(volume.rootPath());
+        if (root.isEmpty()) {
+            continue;
+        }
+        // Skip optical / empty removable shells without a usable path.
+        if (!QDir(root).exists()) {
+            continue;
+        }
+        drives.push_back(root);
+    }
+    std::sort(drives.begin(), drives.end(), [](const QVariant& left, const QVariant& right) {
+        return left.toString().compare(right.toString(), Qt::CaseInsensitive) < 0;
+    });
+    return drives;
+}
+
+QVariantList ServiceClient::listLocalRepositoryFolders(const QString& path) const {
+    QVariantList folders;
+    const auto trimmed = path.trimmed();
+    if (trimmed.isEmpty()) {
+        return folders;
+    }
+    QDir dir(trimmed);
+    if (!dir.exists()) {
+        return folders;
+    }
+    const auto entries = dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name | QDir::IgnoreCase);
+    folders.reserve(entries.size());
+    for (const auto& name : entries) {
+        folders.push_back(name);
+    }
+    return folders;
+}
+
+QString ServiceClient::formatBytes(const qint64 bytes) const {
+    return format_.format_bytes(bytes);
+}
+
+namespace {
+
+/// Resolve the host volume for a repository locator (no directory walk).
+[[nodiscard]] QStorageInfo volume_for_locator(const QString& locator) {
+    const auto trimmed = locator.trimmed();
+    if (trimmed.isEmpty()) {
+        return {};
+    }
+    QStorageInfo volume(trimmed);
+    if (!volume.isValid() || !volume.isReady()) {
+        // Drive form "D:\AegraRepo" — fall back to the volume root letter.
+        if (trimmed.size() >= 2 && trimmed.at(1) == QLatin1Char(':')) {
+            volume.setPath(trimmed.left(3));
+        }
+    }
+    if (!volume.isValid() || !volume.isReady()) {
+        return {};
+    }
+    return volume;
+}
+
+[[nodiscard]] QString volume_root_key(const QStorageInfo& volume) {
+    return QDir::toNativeSeparators(volume.rootPath()).toUpper();
+}
+
+/// Volume used space = total − free (OS query; never recurse repository files).
+[[nodiscard]] qint64 volume_used_bytes(const QStorageInfo& volume) {
+    const auto total = volume.bytesTotal();
+    if (total <= 0) {
+        return 0;
+    }
+    const auto free = volume.bytesFree();
+    if (free >= 0 && free <= total) {
+        return total - free;
+    }
+    const auto available = volume.bytesAvailable();
+    if (available >= 0 && available <= total) {
+        return total - available;
+    }
+    return 0;
+}
+
+} // namespace
+
+qint64 ServiceClient::repositoryHostFreeBytes() const {
+    // Free space on unique volumes that host registered repository locators.
+    qint64 free_bytes = 0;
+    QSet<QString> seen_roots;
+    const int rows = connections_.rowCount();
+    for (int row = 0; row < rows; ++row) {
+        const auto locator =
+            connections_
+                .data(connections_.index(row, 0), RepositoryConnectionModel::LocatorRole)
+                .toString();
+        const auto volume = volume_for_locator(locator);
+        if (!volume.isValid()) {
+            continue;
+        }
+        const auto key = volume_root_key(volume);
+        if (key.isEmpty() || seen_roots.contains(key)) {
+            continue;
+        }
+        seen_roots.insert(key);
+        free_bytes += volume.bytesAvailable();
+    }
+    return free_bytes;
+}
+
+qint64 ServiceClient::repositoryHostUsedBytes() const {
+    // Used space = used size of each unique host volume (not AegraRepo folder size).
+    qint64 used_bytes = 0;
+    QSet<QString> seen_roots;
+    const int rows = connections_.rowCount();
+    for (int row = 0; row < rows; ++row) {
+        const auto locator =
+            connections_
+                .data(connections_.index(row, 0), RepositoryConnectionModel::LocatorRole)
+                .toString();
+        const auto volume = volume_for_locator(locator);
+        if (!volume.isValid()) {
+            continue;
+        }
+        const auto key = volume_root_key(volume);
+        if (key.isEmpty() || seen_roots.contains(key)) {
+            continue;
+        }
+        seen_roots.insert(key);
+        used_bytes += volume_used_bytes(volume);
+    }
+    return used_bytes;
+}
+
+qint64 ServiceClient::freeBytesForLocator(const QString& locator) const {
+    const auto volume = volume_for_locator(locator);
+    if (!volume.isValid()) {
+        return 0;
+    }
+    return volume.bytesAvailable();
+}
+
+QString ServiceClient::freeSpaceTextForLocator(const QString& locator) const {
+    return format_.format_bytes(freeBytesForLocator(locator));
 }
 
 } // namespace aegra::desktop

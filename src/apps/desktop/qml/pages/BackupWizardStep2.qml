@@ -401,7 +401,7 @@ Item {
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 20
+            spacing: 12
 
             // Left: Schedule settings
             Card {
@@ -829,7 +829,8 @@ Item {
                 Flickable {
                     anchors.fill: parent
                     anchors.topMargin: 56
-                    anchors.margins: 16
+                    // Match Schedule settings card inner padding (20) so card gutters match.
+                    anchors.margins: 20
                     contentWidth: width
                     contentHeight: optCol.implicitHeight
                     clip: true

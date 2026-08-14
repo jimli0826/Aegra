@@ -14,6 +14,7 @@ namespace aegra::desktop {
 struct RepositoryConnectionRow final {
     QString connection_id;
     QString display_name;
+    QString locator;
     std::int64_t state{2};
     bool is_default{false};
     QStringList capabilities;
@@ -29,6 +30,7 @@ class RepositoryConnectionModel final : public QAbstractListModel {
     enum Role : int {
         ConnectionIdRole = Qt::UserRole + 1,
         DisplayNameRole,
+        LocatorRole,
         StateValueRole,
         StateTextRole,
         IsDefaultRole,

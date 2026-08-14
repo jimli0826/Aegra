@@ -191,6 +191,7 @@ base::Result<void>
 validate_repository_connection_summary(const RepositoryConnectionSummary& summary) {
     if (!valid_stable_value(summary.connection_id, kMaximumIdentifierBytes) ||
         !valid_text(summary.display_name, kMaximumDisplayNameBytes) ||
+        !valid_text(summary.locator, kMaximumLocatorBytes) ||
         !known_repository_state(summary.state) ||
         summary.capabilities.size() > kMaximumCapabilities) {
         return invalid("repository connection summary is invalid");

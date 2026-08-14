@@ -364,8 +364,16 @@ command_response(const contracts::ServiceRequest& request, const ServiceRuntimeI
         // Prefer domain-specific message codes so Desktop can show actionable text.
         std::string message_code = "service.request_failed";
         const auto& detail = result.error().message;
-        if (detail.rfind("mount.", 0) == 0) {
+        if (detail.rfind("mount.", 0) == 0 || detail.rfind("repository.", 0) == 0) {
+            // Domain codes from Application (e.g. repository.import_available,
+            // repository.locator_exists, repository.location_occupied).
             message_code = detail;
+        } else if (detail.find("repository locator already registered") != std::string::npos) {
+            message_code = "repository.locator_exists";
+        } else if (detail.find("repository root is not empty") != std::string::npos ||
+                   detail.find("repository root is not an empty directory") != std::string::npos) {
+            // Fallback when a lower layer still returns a raw non-empty root error.
+            message_code = "repository.location_occupied";
         } else if (detail.find("repository is unavailable") != std::string::npos) {
             message_code = "backup.repository_unavailable";
         } else if (detail.find("source is not selectable") != std::string::npos) {

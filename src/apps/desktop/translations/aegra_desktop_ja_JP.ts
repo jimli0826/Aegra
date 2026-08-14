@@ -1909,6 +1909,206 @@ Server: %1</source>
         <source>Recovery points deleted</source>
         <translation>リカバリ ポイントを削除しました</translation>
     </message>
+    <message id="aegra.repository.type.local">
+        <source>Local</source>
+        <translation>ローカル</translation>
+    </message>
+    <message id="aegra.repository.type.network">
+        <source>Network</source>
+        <translation>ネットワーク</translation>
+    </message>
+    <message id="aegra.repository.field.name">
+        <source>Name</source>
+        <translation>名前</translation>
+    </message>
+    <message id="aegra.repository.field.type">
+        <source>Type</source>
+        <translation>種類</translation>
+    </message>
+    <message id="aegra.repository.field.network_path">
+        <source>Network path</source>
+        <translation>ネットワーク パス</translation>
+    </message>
+    <message id="aegra.repository.field.authentication">
+        <source>Authentication</source>
+        <translation>認証</translation>
+    </message>
+    <message id="aegra.repository.field.username">
+        <source>Username</source>
+        <translation>ユーザー名</translation>
+    </message>
+    <message id="aegra.repository.field.password">
+        <source>Password</source>
+        <translation>パスワード</translation>
+    </message>
+    <message id="aegra.repository.field.domain">
+        <source>Domain</source>
+        <translation>ドメイン</translation>
+    </message>
+    <message id="aegra.repository.field.root_path">
+        <source>Repository root path</source>
+        <translation>リポジトリ ルート パス</translation>
+    </message>
+    <message id="aegra.repository.field.optional_password">
+        <source>Optional repository password</source>
+        <translation>任意のリポジトリ パスワード</translation>
+    </message>
+    <message id="aegra.repository.field.password_optional">
+        <source>Password(optional)</source>
+        <translation>パスワード（任意）</translation>
+    </message>
+    <message id="aegra.repository.field.optional_legend">
+        <source>optional</source>
+        <translation>は任意</translation>
+    </message>
+    <message id="aegra.repository.field.encryption">
+        <source>Encryption (password required)</source>
+        <translation>暗号化（パスワード必須）</translation>
+    </message>
+    <message id="aegra.repository.field.confirm_password">
+        <source>Confirm password</source>
+        <translation>パスワードの確認</translation>
+    </message>
+    <message id="aegra.repository.please_enter_password">
+        <source>Please enter a password</source>
+        <translation>パスワードを入力してください</translation>
+    </message>
+    <message id="aegra.repository.password_mismatch">
+        <source>Passwords do not match</source>
+        <translation>パスワードが一致しません</translation>
+    </message>
+    <message id="aegra.error.repository.locator_exists">
+        <source>A repository already exists at this location</source>
+        <translation>この場所には既にリポジトリがあります</translation>
+    </message>
+    <message id="aegra.error.repository.import_available">
+        <source>A repository already exists at this location but is not registered. Import it?</source>
+        <translation>この場所に未登録のリポジトリがあります。インポートしますか？</translation>
+    </message>
+    <message id="aegra.error.repository.location_occupied">
+        <source>This location is not empty and cannot be used as a new repository</source>
+        <translation>この場所は空ではないため、新しいリポジトリに使用できません</translation>
+    </message>
+    <message id="aegra.repository.remove_title">
+        <source>Remove repository connection?</source>
+        <translation>リポジトリ接続を削除しますか？</translation>
+    </message>
+    <message id="aegra.repository.remove_description">
+        <source>Only the saved connection is removed. Backup data is not deleted.</source>
+        <translation>保存された接続のみ削除します。バックアップ データは削除されません。</translation>
+    </message>
+    <message id="aegra.repository.import_offer.title">
+        <source>Import repository</source>
+        <translation>リポジトリをインポート</translation>
+    </message>
+    <message id="aegra.repository.import_offer.message">
+        <source>A repository already exists at this location but is not registered. Import it?</source>
+        <translation>この場所に未登録のリポジトリがあります。インポートしますか？</translation>
+    </message>
+    <message id="aegra.repository.stat.count">
+        <source>Repositories</source>
+        <translation>リポジトリ数</translation>
+    </message>
+    <message id="aegra.repository.stat.count_value">
+        <source>%1 repositories</source>
+        <translation>%1 件</translation>
+    </message>
+    <message id="aegra.repository.stat.used">
+        <source>Used space</source>
+        <translation>使用済み容量</translation>
+    </message>
+    <message id="aegra.repository.stat.free">
+        <source>Free space</source>
+        <translation>空き容量</translation>
+    </message>
+    <message id="aegra.repository.recovery_points_label">
+        <source>Recovery points</source>
+        <translation>リカバリ ポイント</translation>
+    </message>
+    <message id="aegra.repository.column.name">
+        <source>NAME</source>
+        <translation>名前</translation>
+    </message>
+    <message id="aegra.repository.column.status">
+        <source>STATUS</source>
+        <translation>状態</translation>
+    </message>
+    <message id="aegra.repository.column.default">
+        <source>DEFAULT</source>
+        <translation>既定</translation>
+    </message>
+    <message id="aegra.repository.column.recovery_points">
+        <source>RECOVERY POINTS</source>
+        <translation>リカバリ ポイント</translation>
+    </message>
+    <message id="aegra.repository.column.free_space">
+        <source>FREE SPACE</source>
+        <translation>空き容量</translation>
+    </message>
+    <message id="aegra.repository.name_placeholder">
+        <source>e.g. My Backup Location</source>
+        <translation>例: マイ バックアップ場所</translation>
+    </message>
+    <message id="aegra.repository.browse">
+        <source>Browse</source>
+        <translation>参照</translation>
+    </message>
+    <message id="aegra.repository.please_select_drive">
+        <source>Please select a drive</source>
+        <translation>ドライブを選択してください</translation>
+    </message>
+    <message id="aegra.repository.please_select_path">
+        <source>Please select a drive or folder</source>
+        <translation>ドライブまたはフォルダーを選択してください</translation>
+    </message>
+    <message id="aegra.repository.please_enter_name">
+        <source>Please enter a name</source>
+        <translation>名前を入力してください</translation>
+    </message>
+    <message id="aegra.repository.please_enter_path">
+        <source>Please enter a network path</source>
+        <translation>ネットワーク パスを入力してください</translation>
+    </message>
+    <message id="aegra.repository.please_connect_first">
+        <source>Connect first</source>
+        <translation>先に接続してください</translation>
+    </message>
+    <message id="aegra.repository.no_folders">
+        <source>No folders</source>
+        <translation>フォルダーがありません</translation>
+    </message>
+    <message id="aegra.repository.selected_path">
+        <source>Selected: %1</source>
+        <translation>選択済み: %1</translation>
+    </message>
+    <message id="aegra.repository.set_as_default">
+        <source>Set as default</source>
+        <translation>既定に設定</translation>
+    </message>
+    <message id="aegra.repository.connect">
+        <source>Connect</source>
+        <translation>接続</translation>
+    </message>
+    <message id="aegra.repository.connecting">
+        <source>Connecting...</source>
+        <translation>接続中...</translation>
+    </message>
+    <message id="aegra.repository.connected_btn">
+        <source>Connected</source>
+        <translation>接続済み</translation>
+    </message>
+    <message id="aegra.repository.service_not_connected">
+        <source>Service is not connected</source>
+        <translation>Service に接続されていません</translation>
+    </message>
+    <message id="aegra.repository.display_name">
+        <source>Display name</source>
+        <translation>表示名</translation>
+    </message>
+    <message id="aegra.repository.location">
+        <source>Repository location</source>
+        <translation>リポジトリの場所</translation>
+    </message>
     <message id="aegra.error.file_recover.parent_missing">
         <source>A required parent recovery point is missing. Restore is not possible for this chain.</source>
         <translation>必要な親リカバリ ポイントがないため、このチェーンは復元できません。</translation>

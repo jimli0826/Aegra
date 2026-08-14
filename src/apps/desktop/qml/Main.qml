@@ -14,25 +14,30 @@ Window {
     width: 600
     height: 440
     visible: true
-    //% "Aegra"
-    title: qsTrId("aegra.app.title")
-    // Transparent + alpha buffer (main.cpp) so the rounded shell shows real corners.
-    // Frameless: no Windows caption bar; chrome buttons are self-drawn in QML.
-    color: "transparent"
+    // Keep the native caption empty. Branding is drawn by SidebarMenu and the
+    // application name still identifies the process in the taskbar.
+    title: ""
+    // Acrylic and the QML rounded fallback need a transparent clear color. Without
+    // Acrylic, Windows 11 clears opaquely and lets DWM clip the native corners.
+    color: surfaceColor
     flags: Qt.Window | Qt.FramelessWindowHint
-           | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint
     minimumWidth: appReady ? 900 : 400
     minimumHeight: appReady ? 600 : 300
 
     readonly property int mainWidth: 1080
     readonly property int mainHeight: 720
     readonly property int resizeBorder: 6
+    readonly property bool hasNativeWindowCorners: nativeWindowCorners
+    readonly property color surfaceColor: Theme.hasAcrylicBlur
+                                          ? "transparent"
+                                          : (hasNativeWindowCorners
+                                             ? Theme.colorBg : "transparent")
     readonly property bool canResize: appReady
                                       && visibility !== Window.Maximized
                                       && visibility !== Window.FullScreen
     readonly property real chromeRadius: (visibility === Window.Maximized
                                           || visibility === Window.FullScreen
-                                          || Theme.hasAcrylicBlur)
+                                          || hasNativeWindowCorners)
                                          ? 0 : Theme.radiusWindow
     /// Settings opens as right drawer (old Main.qml pattern)
     property bool settingsPanelOpen: false
@@ -68,14 +73,12 @@ Window {
         var h = splash.preferredHeight || 440
         window.width = w
         window.height = h
-        window.color = "transparent"
         centerOnScreen()
     }
 
     function applyMainSize() {
         window.width = window.mainWidth
         window.height = window.mainHeight
-        window.color = "transparent"
         centerOnScreen()
     }
 
@@ -85,14 +88,6 @@ Window {
         window.appReady = true
         splash.windowAppReady = true
         applyMainSize()
-    }
-
-    // Frameless shell stays transparent; Theme paints the rounded chrome.
-    Connections {
-        target: Theme
-        function onThemeIdChanged() {
-            window.color = "transparent"
-        }
     }
 
     Connections {
@@ -115,8 +110,8 @@ Window {
         }
     }
 
-    // Shell container: on Win11 DWM clips window corners natively (chromeRadius=0).
-    // On Win10/Server2022 without DWM clipping, QML renders smooth rounded corners (chromeRadius=14).
+    // Use one rounded-corner renderer only: DWM on Windows 11, QML elsewhere.
+    // A fully opaque square shell avoids stale alpha pixels after restore.
     Rectangle {
         id: shell
         anchors.fill: parent
@@ -126,8 +121,7 @@ Window {
             GradientStop { position: 0.0; color: Theme.colorBg }
             GradientStop { position: 1.0; color: Theme.colorBgEnd }
         }
-        border.width: window.chromeRadius > 0 ? 1 : 0
-        border.color: Theme.colorBorder
+        border.width: 0
         clip: true
 
         // Full-height body (no system/title brand strip — brand lives in sidebar only).

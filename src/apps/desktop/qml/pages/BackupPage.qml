@@ -1474,7 +1474,8 @@ Item {
                             horizontalAlignment: Text.AlignHCenter
                         }
                         Text {
-                            Layout.preferredWidth: 110
+                            // Wide enough for "yyyy-MM-dd HH:mm" without elide.
+                            Layout.preferredWidth: 148
                             //% "Next run"
                             text: qsTrId("aegra.backup.column.next_run").toUpperCase()
                             color: Theme.colorTextDim
@@ -1552,10 +1553,11 @@ Item {
 
                         delegate: Item {
                             id: scheduleRow
-                            // ScheduleListModel: modelData map + enabled role for row-level updates.
+                            // ScheduleListModel: modelData + row roles for enable/nextRun without reset.
                             required property var modelData
                             required property int index
                             required property bool enabled
+                            required property string nextRun
                             width: scheduleTable.width
                             height: 52
 
@@ -1852,10 +1854,10 @@ Item {
                                     }
                                 }
 
-                                // Next run — emphasized like PTS
+                                // Next run — emphasized like PTS (bound to NextRunRole for toggle).
                                 Text {
-                                    Layout.preferredWidth: 110
-                                    text: root.timeOrNa(modelData.nextRun)
+                                    Layout.preferredWidth: 148
+                                    text: root.timeOrNa(scheduleRow.nextRun)
                                     color: Theme.colorTextWhite
                                     font.pixelSize: 14
                                     font.bold: true
@@ -2137,8 +2139,8 @@ Item {
             ColumnLayout {
                 anchors.fill: parent
                 anchors.margins: 20
-                // Leave room for the absolute close control on the right.
-                anchors.rightMargin: 52
+                // Match left/right content inset; close button is top-right and does not need a
+                // full-height right gutter (that made Options look wider-padded on the right).
                 spacing: 16
 
                 // Header: back + step progress bar
@@ -2789,10 +2791,10 @@ Item {
 
                                                 Rectangle {
                                                     width: diskDelegate.width
-                                                    height: 45
+                                                    height: 40
                                                     radius: 4
                                                     color: diskHover.containsMouse && hasVolumes
-                                                           ? Theme.colorHover : Theme.colorListItem
+                                                           ? Theme.colorHover : "transparent"
                                                     opacity: isSelectable ? 1.0 : 0.55
 
                                                     RowLayout {
@@ -2863,27 +2865,18 @@ Item {
                                                                      ? "system" : "hdd"
                                                         }
 
-                                                        ColumnLayout {
+                                                        Text {
                                                             Layout.fillWidth: true
-                                                            spacing: 2
-                                                            Text {
-                                                                text: (modelData.name || "")
-                                                                      + (modelData.size
-                                                                         ? (" (" + modelData.size
-                                                                            + ")") : "")
-                                                                color: Theme.colorTextWhite
-                                                                font.pixelSize: 13
-                                                                font.bold: true
-                                                                font.family: Theme.fontFamily
-                                                            }
-                                                            Text {
-                                                                text: modelData.type || "GPT"
-                                                                color: Theme.colorTextGrey
-                                                                font.pixelSize: 11
-                                                                font.family: Theme.fontFamily
-                                                            }
+                                                            text: (modelData.name || "")
+                                                                  + (modelData.size
+                                                                     ? (" (" + modelData.size
+                                                                        + ")") : "")
+                                                            color: Theme.colorTextWhite
+                                                            font.pixelSize: 13
+                                                            font.bold: true
+                                                            font.family: Theme.fontFamily
+                                                            elide: Text.ElideRight
                                                         }
-                                                        Item { Layout.fillWidth: true }
                                                     }
                                                     MouseArea {
                                                         id: diskHover
@@ -2903,7 +2896,7 @@ Item {
                                                     spacing: 2
                                                     clip: true
                                                     height: isExpanded
-                                                            ? (volumes.length * 57) : 0
+                                                            ? (volumes.length * 40) : 0
                                                     opacity: isExpanded ? 1 : 0
                                                     Behavior on height {
                                                         NumberAnimation { duration: 150 }
@@ -2916,11 +2909,11 @@ Item {
                                                             required property int index
                                                             required property var modelData
                                                             width: diskDelegate.width
-                                                            height: 55
+                                                            height: 38
                                                             radius: 4
                                                             color: volHover.containsMouse
                                                                    ? Theme.colorHover
-                                                                   : Theme.colorListItemAlt
+                                                                   : "transparent"
                                                             readonly property int volumeIndex: index
                                                             readonly property bool isSelectable:
                                                                 modelData.selectable === true
@@ -2966,52 +2959,35 @@ Item {
                                                                                 volumeDelegate.volumeIndex)
                                                                     }
                                                                 }
-                                                                ColumnLayout {
+                                                                RowLayout {
                                                                     Layout.fillWidth: true
-                                                                    spacing: 2
-                                                                    RowLayout {
-                                                                        spacing: 8
-                                                                        Text {
-                                                                            text: volumeDelegate.modelData.name
-                                                                                  || ""
-                                                                            color:
-                                                                                Theme.colorTextWhite
-                                                                            font.pixelSize: 12
-                                                                            font.bold: true
-                                                                            font.family:
-                                                                                Theme.fontFamily
-                                                                        }
-                                                                        Text {
-                                                                            text: volumeDelegate.modelData.letter
-                                                                                  || ""
-                                                                            color:
-                                                                                Theme.colorAccentBlue
-                                                                            font.pixelSize: 12
-                                                                            font.family:
-                                                                                Theme.fontFamily
-                                                                            visible:
-                                                                                (volumeDelegate.modelData.letter
-                                                                                 || "").length > 0
-                                                                        }
-                                                                        Text {
-                                                                            text: volumeDelegate.modelData.size
-                                                                                  || ""
-                                                                            color:
-                                                                                Theme.colorTextGrey
-                                                                            font.pixelSize: 11
-                                                                            font.family:
-                                                                                Theme.fontFamily
-                                                                        }
-                                                                    }
+                                                                    spacing: 8
                                                                     Text {
-                                                                        text: volumeDelegate.modelData.status
-                                                                              || ""
-                                                                        color: Theme.colorTextGrey
-                                                                        font.pixelSize: 10
-                                                                        font.family:
-                                                                            Theme.fontFamily
+                                                                        readonly property string letter:
+                                                                            (volumeDelegate.modelData.letter
+                                                                             || "").trim()
+                                                                        text: {
+                                                                            var name =
+                                                                                volumeDelegate.modelData.name
+                                                                                || ""
+                                                                            if (letter.length > 0)
+                                                                                return name + " ("
+                                                                                       + letter + ")"
+                                                                            return name
+                                                                        }
+                                                                        color: Theme.colorTextWhite
+                                                                        font.pixelSize: 12
+                                                                        font.bold: true
+                                                                        font.family: Theme.fontFamily
                                                                         elide: Text.ElideRight
                                                                         Layout.fillWidth: true
+                                                                    }
+                                                                    Text {
+                                                                        text: volumeDelegate.modelData.size
+                                                                              || ""
+                                                                        color: Theme.colorTextGrey
+                                                                        font.pixelSize: 11
+                                                                        font.family: Theme.fontFamily
                                                                     }
                                                                 }
                                                             }

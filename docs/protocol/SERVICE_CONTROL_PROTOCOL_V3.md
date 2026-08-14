@@ -518,9 +518,9 @@
 
 **成功 payload：** `{ "items": [RepositoryConnectionSummary…], "continuation_token": … }`
 
-**`RepositoryConnectionSummary`（5 字段）：**
+**`RepositoryConnectionSummary`（6 字段）：**
 
-`connection_id`, `display_name`, `state`, `is_default`, `capabilities`
+`connection_id`, `display_name`, `locator`, `state`, `is_default`, `capabilities`
 
 **示例请求：**
 

@@ -49,7 +49,8 @@ Rectangle {
         anchors.leftMargin: 22
         anchors.rightMargin: 16
         anchors.topMargin: 16
-        height: 32
+        // Taller when custom header actions (e.g. Repository Refresh/Add/Import).
+        height: card.headerRightComponent !== null ? 36 : 32
 
         Text {
             visible: card.title.length > 0

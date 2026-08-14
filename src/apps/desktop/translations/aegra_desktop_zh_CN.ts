@@ -1909,6 +1909,206 @@ Server: %1</source>
         <source>Recovery points deleted</source>
         <translation>恢复点已删除</translation>
     </message>
+    <message id="aegra.repository.type.local">
+        <source>Local</source>
+        <translation>本地</translation>
+    </message>
+    <message id="aegra.repository.type.network">
+        <source>Network</source>
+        <translation>网络</translation>
+    </message>
+    <message id="aegra.repository.field.name">
+        <source>Name</source>
+        <translation>名称</translation>
+    </message>
+    <message id="aegra.repository.field.type">
+        <source>Type</source>
+        <translation>类型</translation>
+    </message>
+    <message id="aegra.repository.field.network_path">
+        <source>Network path</source>
+        <translation>网络路径</translation>
+    </message>
+    <message id="aegra.repository.field.authentication">
+        <source>Authentication</source>
+        <translation>身份验证</translation>
+    </message>
+    <message id="aegra.repository.field.username">
+        <source>Username</source>
+        <translation>用户名</translation>
+    </message>
+    <message id="aegra.repository.field.password">
+        <source>Password</source>
+        <translation>密码</translation>
+    </message>
+    <message id="aegra.repository.field.domain">
+        <source>Domain</source>
+        <translation>域</translation>
+    </message>
+    <message id="aegra.repository.field.root_path">
+        <source>Repository root path</source>
+        <translation>Repository 根路径</translation>
+    </message>
+    <message id="aegra.repository.field.optional_password">
+        <source>Optional repository password</source>
+        <translation>可选 Repository 密码</translation>
+    </message>
+    <message id="aegra.repository.field.password_optional">
+        <source>Password(optional)</source>
+        <translation>密码（可选）</translation>
+    </message>
+    <message id="aegra.repository.field.optional_legend">
+        <source>optional</source>
+        <translation>为可选</translation>
+    </message>
+    <message id="aegra.repository.field.encryption">
+        <source>Encryption (password required)</source>
+        <translation>加密（需要密码）</translation>
+    </message>
+    <message id="aegra.repository.field.confirm_password">
+        <source>Confirm password</source>
+        <translation>确认密码</translation>
+    </message>
+    <message id="aegra.repository.please_enter_password">
+        <source>Please enter a password</source>
+        <translation>请输入密码</translation>
+    </message>
+    <message id="aegra.repository.password_mismatch">
+        <source>Passwords do not match</source>
+        <translation>两次密码不一致</translation>
+    </message>
+    <message id="aegra.error.repository.locator_exists">
+        <source>A repository already exists at this location</source>
+        <translation>该位置已存在 Repository</translation>
+    </message>
+    <message id="aegra.error.repository.import_available">
+        <source>A repository already exists at this location but is not registered. Import it?</source>
+        <translation>该位置已有 Repository，但尚未登记。是否导入？</translation>
+    </message>
+    <message id="aegra.error.repository.location_occupied">
+        <source>This location is not empty and cannot be used as a new repository</source>
+        <translation>该位置非空，无法创建新 Repository</translation>
+    </message>
+    <message id="aegra.repository.remove_title">
+        <source>Remove repository connection?</source>
+        <translation>移除 Repository 连接？</translation>
+    </message>
+    <message id="aegra.repository.remove_description">
+        <source>Only the saved connection is removed. Backup data is not deleted.</source>
+        <translation>仅移除已保存的连接，不会删除备份数据。</translation>
+    </message>
+    <message id="aegra.repository.import_offer.title">
+        <source>Import repository</source>
+        <translation>导入 Repository</translation>
+    </message>
+    <message id="aegra.repository.import_offer.message">
+        <source>A repository already exists at this location but is not registered. Import it?</source>
+        <translation>该位置已有 Repository，但尚未登记。是否导入？</translation>
+    </message>
+    <message id="aegra.repository.stat.count">
+        <source>Repositories</source>
+        <translation>Repository 数量</translation>
+    </message>
+    <message id="aegra.repository.stat.count_value">
+        <source>%1 repositories</source>
+        <translation>%1 个</translation>
+    </message>
+    <message id="aegra.repository.stat.used">
+        <source>Used space</source>
+        <translation>已用空间</translation>
+    </message>
+    <message id="aegra.repository.stat.free">
+        <source>Free space</source>
+        <translation>剩余空间</translation>
+    </message>
+    <message id="aegra.repository.recovery_points_label">
+        <source>Recovery points</source>
+        <translation>恢复点</translation>
+    </message>
+    <message id="aegra.repository.column.name">
+        <source>NAME</source>
+        <translation>名称</translation>
+    </message>
+    <message id="aegra.repository.column.status">
+        <source>STATUS</source>
+        <translation>状态</translation>
+    </message>
+    <message id="aegra.repository.column.default">
+        <source>DEFAULT</source>
+        <translation>默认</translation>
+    </message>
+    <message id="aegra.repository.column.recovery_points">
+        <source>RECOVERY POINTS</source>
+        <translation>恢复点</translation>
+    </message>
+    <message id="aegra.repository.column.free_space">
+        <source>FREE SPACE</source>
+        <translation>剩余空间</translation>
+    </message>
+    <message id="aegra.repository.name_placeholder">
+        <source>e.g. My Backup Location</source>
+        <translation>例如：我的备份位置</translation>
+    </message>
+    <message id="aegra.repository.browse">
+        <source>Browse</source>
+        <translation>浏览</translation>
+    </message>
+    <message id="aegra.repository.please_select_drive">
+        <source>Please select a drive</source>
+        <translation>请选择驱动器</translation>
+    </message>
+    <message id="aegra.repository.please_select_path">
+        <source>Please select a drive or folder</source>
+        <translation>请选择驱动器或文件夹</translation>
+    </message>
+    <message id="aegra.repository.please_enter_name">
+        <source>Please enter a name</source>
+        <translation>请输入名称</translation>
+    </message>
+    <message id="aegra.repository.please_enter_path">
+        <source>Please enter a network path</source>
+        <translation>请输入网络路径</translation>
+    </message>
+    <message id="aegra.repository.please_connect_first">
+        <source>Connect first</source>
+        <translation>请先连接</translation>
+    </message>
+    <message id="aegra.repository.no_folders">
+        <source>No folders</source>
+        <translation>没有文件夹</translation>
+    </message>
+    <message id="aegra.repository.selected_path">
+        <source>Selected: %1</source>
+        <translation>已选择：%1</translation>
+    </message>
+    <message id="aegra.repository.set_as_default">
+        <source>Set as default</source>
+        <translation>设为默认</translation>
+    </message>
+    <message id="aegra.repository.connect">
+        <source>Connect</source>
+        <translation>连接</translation>
+    </message>
+    <message id="aegra.repository.connecting">
+        <source>Connecting...</source>
+        <translation>连接中...</translation>
+    </message>
+    <message id="aegra.repository.connected_btn">
+        <source>Connected</source>
+        <translation>已连接</translation>
+    </message>
+    <message id="aegra.repository.service_not_connected">
+        <source>Service is not connected</source>
+        <translation>Service 未连接</translation>
+    </message>
+    <message id="aegra.repository.display_name">
+        <source>Display name</source>
+        <translation>显示名称</translation>
+    </message>
+    <message id="aegra.repository.location">
+        <source>Repository location</source>
+        <translation>Repository 位置</translation>
+    </message>
     <message id="aegra.error.file_recover.parent_missing">
         <source>A required parent recovery point is missing. Restore is not possible for this chain.</source>
         <translation>缺少必需的父恢复点，无法恢复此链。</translation>

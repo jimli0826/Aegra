@@ -139,6 +139,7 @@ parse_service_recovery_point_page(const Json& payload) {
 encode_repository_connection(const contracts::RepositoryConnectionSummary& summary) {
     return Json{{"connection_id", summary.connection_id},
                 {"display_name", summary.display_name},
+                {"locator", summary.locator},
                 {"state", static_cast<std::uint8_t>(summary.state)},
                 {"is_default", summary.is_default},
                 {"capabilities", summary.capabilities}};
@@ -146,14 +147,15 @@ encode_repository_connection(const contracts::RepositoryConnectionSummary& summa
 
 [[nodiscard]] contracts::RepositoryConnectionSummary
 parse_repository_connection(const Json& payload) {
-    constexpr std::array<std::string_view, 5> keys{"connection_id", "display_name", "state",
-                                                   "is_default", "capabilities"};
+    constexpr std::array<std::string_view, 6> keys{"connection_id", "display_name", "locator",
+                                                   "state", "is_default", "capabilities"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("repository connection summary fields are invalid");
     }
     contracts::RepositoryConnectionSummary summary;
     summary.connection_id = payload.at("connection_id").get<std::string>();
     summary.display_name = payload.at("display_name").get<std::string>();
+    summary.locator = payload.at("locator").get<std::string>();
     summary.state = static_cast<contracts::RepositoryConnectionState>(
         unsigned_value<std::uint8_t>(payload, "state"));
     summary.is_default = payload.at("is_default").get<bool>();

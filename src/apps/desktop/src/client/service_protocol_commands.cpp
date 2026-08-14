@@ -120,14 +120,31 @@ using protocol_detail::stable_code;
         return false;
     }
     const auto object = value.toObject();
-    if (!has_exact_keys(object,
-                        {"connection_id", "display_name", "state", "is_default", "capabilities"})) {
+    // Prefer 6-field summary (with locator). Accept 5-field only if locator is absent so a
+    // briefly mismatched Service process does not hard-fail the whole Repository page.
+    const bool has_locator_key = object.contains(QStringLiteral("locator"));
+    if (has_locator_key) {
+        if (!has_exact_keys(object, {"connection_id", "display_name", "locator", "state",
+                                     "is_default", "capabilities"})) {
+            return false;
+        }
+    } else if (!has_exact_keys(
+                   object, {"connection_id", "display_name", "state", "is_default", "capabilities"})) {
         return false;
     }
     const auto connection_id = object.value(QStringLiteral("connection_id")).toString();
     QString display_name;
     qint64 state = 0;
     QStringList capabilities;
+    QString locator;
+    if (has_locator_key) {
+        const auto locator_value = object.value(QStringLiteral("locator"));
+        if (!locator_value.isString() || locator_value.toString().isEmpty() ||
+            locator_value.toString().size() > 2048) {
+            return false;
+        }
+        locator = locator_value.toString();
+    }
     if (!object.value(QStringLiteral("connection_id")).isString() ||
         !stable_code(connection_id, 128) ||
         !parse_display_name(object.value(QStringLiteral("display_name")), display_name) ||
@@ -138,6 +155,7 @@ using protocol_detail::stable_code;
     }
     result = {{QStringLiteral("connectionId"), connection_id},
               {QStringLiteral("displayName"), display_name},
+              {QStringLiteral("locator"), locator},
               {QStringLiteral("state"), state},
               {QStringLiteral("isDefault"), object.value(QStringLiteral("is_default")).toBool()},
               {QStringLiteral("capabilities"), capabilities}};

@@ -84,6 +84,8 @@ class ServiceClient final : public QObject {
         bool repositoryCommandBusy READ repositoryCommandBusy NOTIFY repositoryCommandChanged)
     Q_PROPERTY(QString repositoryCommandErrorText READ repositoryCommandErrorText NOTIFY
                    repositoryCommandChanged)
+    Q_PROPERTY(QString repositoryCommandErrorCode READ repositoryCommandErrorCode NOTIFY
+                   repositoryCommandChanged)
     Q_PROPERTY(bool backupStartAvailable READ backupStartAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool restoreStartAvailable READ restoreStartAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool restoreCommandBusy READ restoreCommandBusy NOTIFY restoreCommandChanged)
@@ -193,6 +195,7 @@ class ServiceClient final : public QObject {
     [[nodiscard]] QString selectedRepositoryConnectionId() const;
     [[nodiscard]] bool repositoryCommandBusy() const noexcept;
     [[nodiscard]] QString repositoryCommandErrorText() const;
+    [[nodiscard]] QString repositoryCommandErrorCode() const;
     [[nodiscard]] bool backupStartAvailable() const noexcept;
     [[nodiscard]] bool jobCancelAvailable() const noexcept;
     [[nodiscard]] bool backupCommandBusy() const noexcept;
@@ -325,6 +328,20 @@ class ServiceClient final : public QObject {
     Q_INVOKABLE void refreshMountSessions();
     /// Free drive letters for Mount Options (Auto + unused C:–Z:), matching old MountBackend.
     Q_INVOKABLE QVariantList availableDriveLetters() const;
+    /// Local drive roots for Add Repository browse (Desktop Qt only; not Service IPC).
+    Q_INVOKABLE QVariantList listLocalRepositoryDrives() const;
+    /// Immediate subdirectories under path for Add Repository browse (Desktop Qt only).
+    Q_INVOKABLE QVariantList listLocalRepositoryFolders(const QString& path) const;
+    /// Locale-aware byte size for QML stat cards.
+    Q_INVOKABLE QString formatBytes(qint64 bytes) const;
+    /// Free space on unique volumes hosting registered repository locators (OS volume query).
+    Q_INVOKABLE qint64 repositoryHostFreeBytes() const;
+    /// Used space of unique volumes hosting registered repository locators
+    /// (volume total − free; never recursively scans repository files).
+    Q_INVOKABLE qint64 repositoryHostUsedBytes() const;
+    /// Free space on the volume that contains the repository locator (OS volume query).
+    Q_INVOKABLE qint64 freeBytesForLocator(const QString& locator) const;
+    Q_INVOKABLE QString freeSpaceTextForLocator(const QString& locator) const;
     Q_INVOKABLE void cancelActiveBackup();
     Q_INVOKABLE void dismissToast();
     /// Show a top toast. Pass isError=true for validation/command failures (red banner).

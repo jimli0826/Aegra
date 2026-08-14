@@ -121,6 +121,8 @@ QVariant RepositoryConnectionModel::data(const QModelIndex& index, const int rol
         return row.connection_id;
     case DisplayNameRole:
         return row.display_name;
+    case LocatorRole:
+        return row.locator;
     case StateValueRole:
         return static_cast<qint64>(row.state);
     case StateTextRole:
@@ -139,6 +141,7 @@ QVariant RepositoryConnectionModel::data(const QModelIndex& index, const int rol
 QHash<int, QByteArray> RepositoryConnectionModel::roleNames() const {
     return {{ConnectionIdRole, "connectionId"},
             {DisplayNameRole, "displayName"},
+            {LocatorRole, "locator"},
             {StateValueRole, "stateValue"},
             {StateTextRole, "stateText"},
             {IsDefaultRole, "isDefault"},
@@ -171,6 +174,7 @@ QVector<RepositoryConnectionRow> connections_from_variant_list(const QVariantLis
         RepositoryConnectionRow row;
         row.connection_id = map.value(QStringLiteral("connectionId")).toString();
         row.display_name = map.value(QStringLiteral("displayName")).toString();
+        row.locator = map.value(QStringLiteral("locator")).toString();
         row.state = map.value(QStringLiteral("state")).toLongLong();
         row.is_default = map.value(QStringLiteral("isDefault")).toBool();
         row.capabilities = map.value(QStringLiteral("capabilities")).toStringList();

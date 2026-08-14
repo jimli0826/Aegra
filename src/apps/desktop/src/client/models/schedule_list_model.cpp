@@ -40,16 +40,33 @@ int ScheduleListModel::find_row(const QString& schedule_id) const {
 }
 
 bool ScheduleListModel::set_enabled(const QString& schedule_id, const bool enabled) {
+    return patch_row(schedule_id, {{QStringLiteral("enabled"), enabled}});
+}
+
+bool ScheduleListModel::patch_row(const QString& schedule_id, const QVariantMap& fields) {
     const int row = find_row(schedule_id);
-    if (row < 0) {
+    if (row < 0 || fields.isEmpty()) {
         return false;
     }
-    if (rows_[row].value(QStringLiteral("enabled")).toBool() == enabled) {
+    bool changed = false;
+    QList<int> roles{ModelDataRole};
+    for (auto it = fields.constBegin(); it != fields.constEnd(); ++it) {
+        if (rows_[row].value(it.key()) == it.value()) {
+            continue;
+        }
+        rows_[row].insert(it.key(), it.value());
+        changed = true;
+        if (it.key() == QLatin1String("enabled")) {
+            roles.push_back(EnabledRole);
+        } else if (it.key() == QLatin1String("nextRun")) {
+            roles.push_back(NextRunRole);
+        }
+    }
+    if (!changed) {
         return true;
     }
-    rows_[row].insert(QStringLiteral("enabled"), enabled);
     const auto model_index = index(row, 0);
-    emit dataChanged(model_index, model_index, {ModelDataRole, EnabledRole});
+    emit dataChanged(model_index, model_index, roles);
     return true;
 }
 
@@ -94,6 +111,8 @@ QVariant ScheduleListModel::data(const QModelIndex& index, const int role) const
         return row.value(QStringLiteral("scheduleId"));
     case EnabledRole:
         return row.value(QStringLiteral("enabled"));
+    case NextRunRole:
+        return row.value(QStringLiteral("nextRun"));
     default:
         return {};
     }
@@ -102,7 +121,8 @@ QVariant ScheduleListModel::data(const QModelIndex& index, const int role) const
 QHash<int, QByteArray> ScheduleListModel::roleNames() const {
     return {{ModelDataRole, "modelData"},
             {ScheduleIdRole, "scheduleId"},
-            {EnabledRole, "enabled"}};
+            {EnabledRole, "enabled"},
+            {NextRunRole, "nextRun"}};
 }
 
 } // namespace aegra::desktop

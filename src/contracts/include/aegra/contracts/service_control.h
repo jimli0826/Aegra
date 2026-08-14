@@ -53,6 +53,8 @@ enum class RepositoryConnectionState : std::uint8_t {
 struct RepositoryConnectionSummary final {
     std::string connection_id;
     std::string display_name;
+    /// Stable repository root locator (local path / future network locator).
+    std::string locator;
     RepositoryConnectionState state{RepositoryConnectionState::kUnavailable};
     bool is_default{false};
     std::vector<std::string> capabilities;

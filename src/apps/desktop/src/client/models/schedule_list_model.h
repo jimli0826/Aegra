@@ -19,6 +19,7 @@ class ScheduleListModel final : public QAbstractListModel {
         ModelDataRole = Qt::UserRole + 1,
         ScheduleIdRole,
         EnabledRole,
+        NextRunRole,
     };
 
     explicit ScheduleListModel(QObject* parent = nullptr);
@@ -28,6 +29,8 @@ class ScheduleListModel final : public QAbstractListModel {
 
     /// Update enabled for one schedule; emits dataChanged only (no model reset).
     [[nodiscard]] bool set_enabled(const QString& schedule_id, bool enabled);
+    /// Merge fields into one row (enabled / nextRun / nextRunUtcMs); dataChanged only.
+    [[nodiscard]] bool patch_row(const QString& schedule_id, const QVariantMap& fields);
 
     [[nodiscard]] bool enabled_for(const QString& schedule_id) const;
     [[nodiscard]] QVariantMap item_for(const QString& schedule_id) const;

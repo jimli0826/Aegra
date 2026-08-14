@@ -73,6 +73,82 @@ constexpr int kMaximumSchedules = 500;
     return dt.toString(QStringLiteral("yyyy-MM-dd HH:mm"));
 }
 
+[[nodiscard]] unsigned utc_day_of_month_ms(const quint64 utc_ms) {
+    const auto dt = QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(utc_ms), QTimeZone::UTC);
+    return static_cast<unsigned>(dt.date().day());
+}
+
+/// Mirror Service schedule_service next-run projection for optimistic enable toggle UI.
+[[nodiscard]] QVariant compute_next_run_utc_ms_for_row(const QVariantMap& row) {
+    if (!row.value(QStringLiteral("enabled")).toBool()) {
+        return {};
+    }
+    QList<int> minutes = parse_times_of_day_minutes(row.value(QStringLiteral("timeOfDay")).toString());
+    const auto times_list = row.value(QStringLiteral("timesOfDay")).toList();
+    if (!times_list.isEmpty()) {
+        minutes.clear();
+        for (const auto& item : times_list) {
+            const auto parsed = parse_times_of_day_minutes(item.toString());
+            for (const auto value : parsed) {
+                if (!minutes.contains(value)) {
+                    minutes.push_back(value);
+                }
+            }
+        }
+        if (minutes.isEmpty()) {
+            minutes.push_back(2 * 60);
+        }
+        std::sort(minutes.begin(), minutes.end());
+    }
+    const auto frequency = row.value(QStringLiteral("frequency")).toString().toLower();
+    const auto weekday_mask = static_cast<std::uint8_t>(
+        qBound(0, row.value(QStringLiteral("weekdayMask")).toInt(), 127));
+    const auto day_of_month_mask =
+        static_cast<std::uint32_t>(row.value(QStringLiteral("dayOfMonthMask")).toUInt());
+    const auto now_ms =
+        static_cast<quint64>(QDateTime::currentDateTimeUtc().toMSecsSinceEpoch());
+    constexpr quint64 kDayMs = 24ULL * 60ULL * 60ULL * 1000ULL;
+    constexpr quint64 kMinuteMs = 60ULL * 1000ULL;
+    quint64 best = 0;
+    bool have_best = false;
+    for (const auto local_minute : minutes) {
+        const auto minute = static_cast<quint64>(qBound(0, local_minute, 24 * 60 - 1));
+        const auto day_start = (now_ms / kDayMs) * kDayMs;
+        auto candidate = day_start + minute * kMinuteMs;
+        if (candidate <= now_ms) {
+            candidate += kDayMs;
+        }
+        if (frequency == QLatin1String("weekly") && weekday_mask != 0) {
+            for (int step = 0; step < 8; ++step) {
+                const auto days_since_epoch = candidate / kDayMs;
+                const auto weekday = static_cast<std::uint8_t>((days_since_epoch + 4U) % 7U);
+                if ((weekday_mask & static_cast<std::uint8_t>(1U << weekday)) != 0) {
+                    break;
+                }
+                candidate += kDayMs;
+            }
+        }
+        if (frequency == QLatin1String("monthly") && day_of_month_mask != 0) {
+            for (int step = 0; step < 40; ++step) {
+                const auto day = utc_day_of_month_ms(candidate);
+                if (day >= 1 && day <= 31 &&
+                    (day_of_month_mask & (1U << (day - 1U))) != 0) {
+                    break;
+                }
+                candidate += kDayMs;
+            }
+        }
+        if (!have_best || candidate < best) {
+            best = candidate;
+            have_best = true;
+        }
+    }
+    if (!have_best) {
+        return {};
+    }
+    return QVariant::fromValue(static_cast<qint64>(best));
+}
+
 } // namespace
 
 QVariantList ServiceClient::schedules() const { return schedules_; }
@@ -200,6 +276,7 @@ bool ServiceClient::patch_schedule_enabled(const QString& schedule_id, const boo
     if (schedule_id.isEmpty()) {
         return false;
     }
+    QVariantMap fields{{QStringLiteral("enabled"), enabled}};
     // Keep QVariantList cache in sync for C++ helpers; model uses row-level dataChanged only.
     for (auto& item : schedules_) {
         auto map = item.toMap();
@@ -208,10 +285,23 @@ bool ServiceClient::patch_schedule_enabled(const QString& schedule_id, const boo
             continue;
         }
         map.insert(QStringLiteral("enabled"), enabled);
+        // Service clears next_run when disabled and recomputes when enabled.
+        if (enabled) {
+            const auto next_utc = compute_next_run_utc_ms_for_row(map);
+            map.insert(QStringLiteral("nextRunUtcMs"), next_utc);
+            map.insert(QStringLiteral("nextRun"), format_next_run(next_utc));
+            fields.insert(QStringLiteral("nextRunUtcMs"), next_utc);
+            fields.insert(QStringLiteral("nextRun"), format_next_run(next_utc));
+        } else {
+            map.insert(QStringLiteral("nextRunUtcMs"), QVariant{});
+            map.insert(QStringLiteral("nextRun"), QString{});
+            fields.insert(QStringLiteral("nextRunUtcMs"), QVariant{});
+            fields.insert(QStringLiteral("nextRun"), QString{});
+        }
         item = map;
         break;
     }
-    return schedule_list_.set_enabled(schedule_id, enabled);
+    return schedule_list_.patch_row(schedule_id, fields);
 }
 
 void ServiceClient::start_schedule_query() {

@@ -191,6 +191,34 @@ publish_repository_descriptor(ports::IRepositoryStorageAccess& storage,
     return base::Result<void>::success();
 }
 
+[[nodiscard]] bool is_non_empty_repository_root(const base::Error& error) noexcept {
+    if (error.code != base::ErrorCode::kConflict) {
+        return false;
+    }
+    return error.message.find("not empty") != std::string::npos ||
+           error.message.find("not an empty directory") != std::string::npos;
+}
+
+/// When Add hits a non-empty root: if a valid Repository descriptor is present,
+/// signal Desktop to offer Import (location not in control plane yet).
+[[nodiscard]] base::Result<void>
+classify_non_empty_add_target(ports::IRepositoryStorageFactory& storage_factory,
+                              const std::string_view locator,
+                              const base::CancellationToken cancellation) {
+    auto storage = storage_factory.open(locator, cancellation);
+    if (!storage) {
+        return base::Result<void>::failure(
+            make_error(base::ErrorCode::kConflict, "repository.location_occupied"));
+    }
+    auto probed = probe_repository_descriptor(*storage.value(), cancellation);
+    if (probed) {
+        return base::Result<void>::failure(
+            make_error(base::ErrorCode::kConflict, "repository.import_available"));
+    }
+    return base::Result<void>::failure(
+        make_error(base::ErrorCode::kConflict, "repository.location_occupied"));
+}
+
 [[nodiscard]] base::Result<void>
 initialize_repository(ports::IRepositoryStorageFactory& storage_factory, ports::IClock& clock,
                       ports::IRandomSource& random, const std::string_view locator,
@@ -471,30 +499,34 @@ RepositoryConnectionService::add_connection(const contracts::RepositoryConnectio
         return base::Result<contracts::CommandAcknowledgement>::failure(existing.error());
     }
     if (existing.value()) {
-        if (existing.value()->display_name == input.display_name &&
+        // Unavailable + same identity: allow one re-initialize of an empty root.
+        // Any other existing registration (including same name) is a conflict so the UI
+        // can show "already exists" instead of silently accepting a duplicate Add.
+        if (existing.value()->state == contracts::RepositoryConnectionState::kUnavailable &&
+            existing.value()->display_name == input.display_name &&
             existing.value()->credential_ref == input.credential_ref) {
-            if (existing.value()->state == contracts::RepositoryConnectionState::kUnavailable) {
-                auto initialized = initialize_repository(storage_factory_, clock_, random_,
-                                                         input.locator, cancellation);
-                if (!initialized) {
-                    return base::Result<contracts::CommandAcknowledgement>::failure(
-                        initialized.error());
-                }
-                return persist_connection_test({control_plane_, clock_, random_},
-                                               std::move(*existing.value()), true,
-                                               {idempotency_key, fingerprint, cancellation});
+            auto initialized = initialize_repository(storage_factory_, clock_, random_,
+                                                     input.locator, cancellation);
+            if (!initialized) {
+                return base::Result<contracts::CommandAcknowledgement>::failure(
+                    initialized.error());
             }
-            return persist_existing_connection(control_plane_, clock_, random_,
-                                               existing.value()->connection_id, idempotency_key,
-                                               fingerprint, cancellation);
+            return persist_connection_test({control_plane_, clock_, random_},
+                                           std::move(*existing.value()), true,
+                                           {idempotency_key, fingerprint, cancellation});
         }
         return base::Result<contracts::CommandAcknowledgement>::failure(
-            make_error(base::ErrorCode::kConflict, "repository locator already registered"));
+            make_error(base::ErrorCode::kConflict, "repository.locator_exists"));
     }
 
     auto initialized =
         initialize_repository(storage_factory_, clock_, random_, input.locator, cancellation);
     if (!initialized) {
+        if (is_non_empty_repository_root(initialized.error())) {
+            auto classified =
+                classify_non_empty_add_target(storage_factory_, input.locator, cancellation);
+            return base::Result<contracts::CommandAcknowledgement>::failure(classified.error());
+        }
         return base::Result<contracts::CommandAcknowledgement>::failure(initialized.error());
     }
     return create_connection(control_plane_, clock_, random_, input, idempotency_key, fingerprint,

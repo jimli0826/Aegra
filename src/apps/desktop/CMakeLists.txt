@@ -31,6 +31,8 @@ set(AEGRA_DESKTOP_SOURCES
     src/client/service_client_repository.cpp
     src/client/service_client_restore.cpp
     src/client/service_client_schedule.cpp
+    src/client/network_share_access.cpp
+    src/client/network_share_access.h
     src/client/service_protocol_file.cpp
     src/client/models/job_model.cpp
     src/client/models/job_model.h
@@ -109,7 +111,7 @@ target_link_libraries(
 )
 
 if(WIN32)
-    target_link_libraries(aegra_desktop PRIVATE dwmapi)
+    target_link_libraries(aegra_desktop PRIVATE dwmapi uxtheme mpr)
 endif()
 
 aegra_configure_target(aegra_desktop)

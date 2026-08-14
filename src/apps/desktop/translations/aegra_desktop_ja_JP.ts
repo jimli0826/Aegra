@@ -1989,6 +1989,22 @@ Server: %1</source>
         <source>This location is not empty and cannot be used as a new repository</source>
         <translation>この場所は空ではないため、新しいリポジトリに使用できません</translation>
     </message>
+    <message id="aegra.repository.please_connect_first">
+        <source>Connect to the network share first</source>
+        <translation>先にネットワーク共有に接続してください</translation>
+    </message>
+    <message id="aegra.repository.network_connect_failed">
+        <source>Failed to connect to the network share</source>
+        <translation>ネットワーク共有に接続できません</translation>
+    </message>
+    <message id="aegra.repository.network_path_invalid">
+        <source>Invalid network path (expected \\server\share)</source>
+        <translation>ネットワーク パスが無効です（\\server\share 形式）</translation>
+    </message>
+    <message id="aegra.repository.storage_root_invalid">
+        <source>The repository location is not a valid storage path</source>
+        <translation>リポジトリの場所が有効なストレージ パスではありません</translation>
+    </message>
     <message id="aegra.repository.remove_title">
         <source>Remove repository connection?</source>
         <translation>リポジトリ接続を削除しますか？</translation>
@@ -2068,10 +2084,6 @@ Server: %1</source>
     <message id="aegra.repository.please_enter_path">
         <source>Please enter a network path</source>
         <translation>ネットワーク パスを入力してください</translation>
-    </message>
-    <message id="aegra.repository.please_connect_first">
-        <source>Connect first</source>
-        <translation>先に接続してください</translation>
     </message>
     <message id="aegra.repository.no_folders">
         <source>No folders</source>

@@ -186,16 +186,28 @@ parse_recovery_point_request(const Json& payload) {
 }
 
 [[nodiscard]] Json encode_repository_input(const contracts::RepositoryConnectionInput& input) {
+    // Never encode network_password into traces; request log path redacts password keys.
     return Json{{"display_name", input.display_name},
                 {"locator", input.locator},
                 {"credential_ref",
-                 input.credential_ref ? Json(input.credential_ref->value) : Json(nullptr)}};
+                 input.credential_ref ? Json(input.credential_ref->value) : Json(nullptr)},
+                {"network_username", input.network_username},
+                {"network_password", input.network_password},
+                {"network_domain", input.network_domain}};
 }
 
 [[nodiscard]] contracts::RepositoryConnectionInput parse_repository_input(const Json& payload) {
-    constexpr std::array<std::string_view, 3> keys{"display_name", "locator", "credential_ref"};
-    if (!exact_keys(payload, keys)) {
+    if (!payload.is_object() || !payload.contains("display_name") || !payload.contains("locator") ||
+        !payload.contains("credential_ref")) {
         throw std::invalid_argument("repository connection input fields are invalid");
+    }
+    // Required keys only; network_* optional for local repositories.
+    for (const auto& item : payload.items()) {
+        const auto& key = item.key();
+        if (key != "display_name" && key != "locator" && key != "credential_ref" &&
+            key != "network_username" && key != "network_password" && key != "network_domain") {
+            throw std::invalid_argument("repository connection input fields are invalid");
+        }
     }
     contracts::RepositoryConnectionInput input;
     input.display_name = payload.at("display_name").get<std::string>();
@@ -203,6 +215,15 @@ parse_recovery_point_request(const Json& payload) {
     const auto credential = optional_string(payload.at("credential_ref"));
     if (credential) {
         input.credential_ref = contracts::SecretRef{*credential};
+    }
+    if (payload.contains("network_username") && payload.at("network_username").is_string()) {
+        input.network_username = payload.at("network_username").get<std::string>();
+    }
+    if (payload.contains("network_password") && payload.at("network_password").is_string()) {
+        input.network_password = payload.at("network_password").get<std::string>();
+    }
+    if (payload.contains("network_domain") && payload.at("network_domain").is_string()) {
+        input.network_domain = payload.at("network_domain").get<std::string>();
     }
     return input;
 }

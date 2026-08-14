@@ -73,14 +73,45 @@ Item {
             root.isDriveListLoading = false
             return
         }
-        // Network: optional share listing after connect (select only, no drill-down).
+        // Network: list share folders after WNet connect (matches backup AddRepositoryPanel).
         var pathVal = networkPathInput.text.trim()
         if (pathVal === "" || !root.isConnected) {
             root.isDriveListLoading = false
             return
         }
-        root.driveList = serviceClient.listLocalRepositoryFolders(pathVal) || []
+        root.driveList = serviceClient.listNetworkShareFolders(pathVal) || []
         root.isDriveListLoading = false
+    }
+
+    function connectNetworkShare() {
+        var pathVal = networkPathInput.text.trim()
+        if (pathVal === "") {
+            //% "Please enter a network path"
+            root.showError(qsTrId("aegra.repository.please_enter_path"))
+            return
+        }
+        if (typeof serviceClient === "undefined" || !serviceClient)
+            return
+        root.isConnecting = true
+        root.isConnected = false
+        root.selectedPath = pathVal
+        root.driveList = []
+        var result = serviceClient.connectNetworkShare(
+                    pathVal,
+                    networkUserInput.text.trim(),
+                    networkPasswordInput.text,
+                    networkDomainInput.text.trim())
+        root.isConnecting = false
+        if (!result || !result.ok) {
+            var msg = (result && result.errorText) ? result.errorText : ""
+            if (msg.length === 0)
+                //% "Failed to connect to the network share"
+                msg = qsTrId("aegra.repository.network_connect_failed")
+            root.showError(msg)
+            return
+        }
+        root.isConnected = true
+        root.refreshBrowse()
     }
 
     function selectDrive(name) {
@@ -162,6 +193,11 @@ Item {
             }
         }
         var pathVal = root.repositoryLocatorFromRoot(rootPath)
+        if (currentType().value === "network" && !root.isConnected) {
+            //% "Connect to the network share first"
+            root.showError(qsTrId("aegra.repository.please_connect_first"))
+            return
+        }
         if (typeof serviceClient === "undefined" || !serviceClient || !serviceClient.connected) {
             //% "Service is not connected"
             root.showError(qsTrId("aegra.repository.service_not_connected"))
@@ -176,7 +212,15 @@ Item {
         root.pendingLocator = pathVal
         root.isSubmitting = true
         root.pendingSetDefault = root.isDefault
-        serviceClient.addRepositoryConnection(nameVal, pathVal)
+        if (currentType().value === "network") {
+            serviceClient.addRepositoryConnection(
+                        nameVal, pathVal,
+                        networkUserInput.text.trim(),
+                        networkPasswordInput.text,
+                        networkDomainInput.text.trim())
+        } else {
+            serviceClient.addRepositoryConnection(nameVal, pathVal)
+        }
     }
 
     function confirmImportExisting() {
@@ -187,7 +231,15 @@ Item {
         if (serviceClient.repositoryCommandBusy)
             return
         root.isSubmitting = true
-        serviceClient.importRepositoryConnection(root.pendingName, root.pendingLocator)
+        if (currentType().value === "network") {
+            serviceClient.importRepositoryConnection(
+                        root.pendingName, root.pendingLocator,
+                        networkUserInput.text.trim(),
+                        networkPasswordInput.text,
+                        networkDomainInput.text.trim())
+        } else {
+            serviceClient.importRepositoryConnection(root.pendingName, root.pendingLocator)
+        }
     }
 
     function declineImportExisting() {
@@ -503,9 +555,12 @@ Item {
                                         selectByMouse: true
                                         verticalAlignment: TextInput.AlignVCenter
                                         onTextChanged: {
-                                            if (root.currentType().value === "network"
-                                                    && root.selectedPath === "")
-                                                root.selectedPath = text.trim()
+                                            if (root.currentType().value === "network") {
+                                                root.isConnected = false
+                                                root.driveList = []
+                                                if (root.selectedPath === "")
+                                                    root.selectedPath = text.trim()
+                                            }
                                         }
                                         LinePlaceholder {
                                             anchors.fill: parent
@@ -683,21 +738,7 @@ Item {
                                             hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
                                             enabled: !root.isConnecting
-                                            onClicked: {
-                                                var pathVal = networkPathInput.text.trim()
-                                                if (pathVal === "") {
-                                                    //% "Please enter a network path"
-                                                    root.showError(
-                                                            qsTrId("aegra.repository.please_enter_path"))
-                                                    return
-                                                }
-                                                root.selectedPath = pathVal
-                                                root.isConnecting = true
-                                                root.isConnected = false
-                                                root.refreshBrowse()
-                                                root.isConnecting = false
-                                                root.isConnected = true
-                                            }
+                                            onClicked: root.connectNetworkShare()
                                         }
                                     }
                                     Item { Layout.fillWidth: true }

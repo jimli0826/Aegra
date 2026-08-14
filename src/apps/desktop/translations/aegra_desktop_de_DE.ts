@@ -1989,6 +1989,22 @@ Server: %1</translation>
         <source>This location is not empty and cannot be used as a new repository</source>
         <translation>Dieser Speicherort ist nicht leer und kann kein neues Repository aufnehmen</translation>
     </message>
+    <message id="aegra.repository.please_connect_first">
+        <source>Connect to the network share first</source>
+        <translation>Stellen Sie zuerst eine Verbindung zur Netzwerkfreigabe her</translation>
+    </message>
+    <message id="aegra.repository.network_connect_failed">
+        <source>Failed to connect to the network share</source>
+        <translation>Verbindung zur Netzwerkfreigabe fehlgeschlagen</translation>
+    </message>
+    <message id="aegra.repository.network_path_invalid">
+        <source>Invalid network path (expected \\server\share)</source>
+        <translation>Ungültiger Netzwerkpfad (erwartet: \\server\share)</translation>
+    </message>
+    <message id="aegra.repository.storage_root_invalid">
+        <source>The repository location is not a valid storage path</source>
+        <translation>Der Repository-Speicherort ist kein gültiger Speicherpfad</translation>
+    </message>
     <message id="aegra.repository.remove_title">
         <source>Remove repository connection?</source>
         <translation>Repository-Verbindung entfernen?</translation>
@@ -2068,10 +2084,6 @@ Server: %1</translation>
     <message id="aegra.repository.please_enter_path">
         <source>Please enter a network path</source>
         <translation>Bitte Netzwerkpfad eingeben</translation>
-    </message>
-    <message id="aegra.repository.please_connect_first">
-        <source>Connect first</source>
-        <translation>Zuerst verbinden</translation>
     </message>
     <message id="aegra.repository.no_folders">
         <source>No folders</source>

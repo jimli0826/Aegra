@@ -201,11 +201,10 @@ encode_schedule_list_request(const QString& request_id,
 [[nodiscard]] QByteArray encode_cancel_job_request(const QString& request_id,
                                                    const QString& idempotency_key,
                                                    const QString& job_id);
-[[nodiscard]] QByteArray encode_repository_connection_input_request(const QString& request_id,
-                                                                    const QString& idempotency_key,
-                                                                    int request_kind,
-                                                                    const QString& display_name,
-                                                                    const QString& locator);
+[[nodiscard]] QByteArray encode_repository_connection_input_request(
+    const QString& request_id, const QString& idempotency_key, int request_kind,
+    const QString& display_name, const QString& locator, const QString& network_username = {},
+    const QString& network_password = {}, const QString& network_domain = {});
 [[nodiscard]] QByteArray
 encode_repository_connection_resource_request(const QString& request_id,
                                               const QString& idempotency_key, int request_kind,

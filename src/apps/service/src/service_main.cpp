@@ -21,6 +21,8 @@
 #include "aegra/apps/service/windows_service_scm_host.h"
 #include "aegra/apps/service/worker_job_service.h"
 #include "aegra/apps/service/worker_supervisor.h"
+#include "aegra/ports/repository_storage.h"
+#include "network_aware_storage_factory.h"
 #include "service_log_formatter.h"
 
 #include <spdlog/sinks/rotating_file_sink.h>
@@ -182,7 +184,8 @@ struct RuntimeComponents final {
     std::unique_ptr<windows_system::WindowsSystemClock> clock;
     std::unique_ptr<windows_system::WindowsCryptographicRandom> random;
     std::unique_ptr<windows_disk::WindowsSourceInventory> source_inventory;
-    std::unique_ptr<storage_local::LocalRepositoryStorageFactory> storage_factory;
+    std::unique_ptr<storage_local::LocalRepositoryStorageFactory> local_storage_factory;
+    std::unique_ptr<aegra::ports::IRepositoryStorageFactory> storage_factory;
     std::unique_ptr<windows_process::WindowsProcessLauncher> process_launcher;
     std::unique_ptr<storage_local::LocalObjectStorage> storage;
     std::unique_ptr<aegra::application::PersonalRepositoryQuery> repository_query;
@@ -572,7 +575,8 @@ create_runtime(const ServiceArguments& arguments) {
     components.clock = std::make_unique<windows_system::WindowsSystemClock>();
     components.random = std::make_unique<windows_system::WindowsCryptographicRandom>();
     components.source_inventory = std::make_unique<windows_disk::WindowsSourceInventory>();
-    components.storage_factory = std::make_unique<storage_local::LocalRepositoryStorageFactory>();
+    components.local_storage_factory =
+        std::make_unique<storage_local::LocalRepositoryStorageFactory>();
     components.process_launcher = std::make_unique<windows_process::WindowsProcessLauncher>();
 
     auto data_dir = resolve_data_dir(arguments);
@@ -610,6 +614,8 @@ create_runtime(const ServiceArguments& arguments) {
             !control_plane ? control_plane.error() : repository.error());
     }
 
+    components.storage_factory = std::make_unique<service::NetworkAwareRepositoryStorageFactory>(
+        *components.local_storage_factory, *components.control_plane);
     components.source_query =
         std::make_unique<aegra::application::SourceInventoryQuery>(*components.source_inventory);
     components.connection_service =

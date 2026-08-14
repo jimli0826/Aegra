@@ -18,9 +18,10 @@ namespace {
 
 constexpr std::string_view kDpapiLocalMachinePrefix = "dpapi-lm:";
 constexpr std::size_t kMaximumSecretBytes = 32;
+constexpr std::size_t kMaximumSecretBlobBytes = 1'024;
 constexpr std::size_t kMaximumEntropyIdBytes = 128;
-// DPAPI envelope + base64 expansion for at most 32 password bytes stays well under this.
-constexpr std::size_t kMaximumProtectedBase64Bytes = 4'096;
+// DPAPI envelope + base64 expansion for at most 1024 material bytes stays well under this.
+constexpr std::size_t kMaximumProtectedBase64Bytes = 8'192;
 constexpr DWORD kDpapiFlags = CRYPTPROTECT_LOCAL_MACHINE | CRYPTPROTECT_UI_FORBIDDEN;
 
 struct ParsedDpapiSecretRef final {
@@ -356,10 +357,12 @@ WindowsCredentialResolver::resolve(const contracts::SecretRef& secret_ref,
     return locked;
 }
 
-base::Result<contracts::SecretRef>
-protect_local_machine_secret(const std::string_view secret_material,
-                             const std::string_view entropy_id) {
-    if (secret_material.empty() || secret_material.size() > kMaximumSecretBytes ||
+namespace {
+
+[[nodiscard]] base::Result<contracts::SecretRef>
+protect_secret_with_limit(const std::string_view secret_material, const std::string_view entropy_id,
+                          const std::size_t maximum_bytes) {
+    if (secret_material.empty() || secret_material.size() > maximum_bytes ||
         !valid_entropy_id(entropy_id)) {
         return base::Result<contracts::SecretRef>::failure(
             base::Error{base::ErrorCode::kInvalidArgument, "secret material is invalid"});
@@ -381,6 +384,20 @@ protect_local_machine_secret(const std::string_view secret_material,
     reference.value.push_back(':');
     reference.value.append(encoded.value());
     return base::Result<contracts::SecretRef>::success(std::move(reference));
+}
+
+} // namespace
+
+base::Result<contracts::SecretRef>
+protect_local_machine_secret(const std::string_view secret_material,
+                             const std::string_view entropy_id) {
+    return protect_secret_with_limit(secret_material, entropy_id, kMaximumSecretBytes);
+}
+
+base::Result<contracts::SecretRef>
+protect_local_machine_secret_blob(const std::string_view secret_material,
+                                  const std::string_view entropy_id) {
+    return protect_secret_with_limit(secret_material, entropy_id, kMaximumSecretBlobBytes);
 }
 
 } // namespace aegra::adapters::windows_system

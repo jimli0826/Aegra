@@ -453,9 +453,13 @@ base::Result<void> validate_mount_session_summary(const MountSessionSummary& sum
 }
 
 base::Result<void> validate_repository_connection_input(const RepositoryConnectionInput& input) {
+    constexpr std::size_t kMaximumNetworkFieldBytes = 256;
     if (!valid_text(input.display_name, kMaximumDisplayNameBytes) ||
         !valid_text(input.locator, kMaximumLocatorBytes) ||
-        (input.credential_ref && !valid_text(input.credential_ref->value, kMaximumLocatorBytes))) {
+        (input.credential_ref && !valid_text(input.credential_ref->value, kMaximumLocatorBytes)) ||
+        input.network_username.size() > kMaximumNetworkFieldBytes ||
+        input.network_password.size() > kMaximumNetworkFieldBytes ||
+        input.network_domain.size() > kMaximumNetworkFieldBytes) {
         return invalid("repository connection input is invalid");
     }
     return base::Result<void>::success();

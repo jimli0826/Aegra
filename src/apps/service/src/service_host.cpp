@@ -12,10 +12,14 @@
 #include "aegra/apps/service/service_response_fit.h"
 #include "aegra/apps/service/worker_job_service.h"
 #include "aegra/apps/service/worker_supervisor.h"
+#include "aegra/adapters/windows_system/windows_system.h"
+#include "aegra/ports/control_plane.h"
 #include "file_recovery_point_query.h"
+#include "network_share_access.h"
 #include "recovery_point_layout_service.h"
 #include "service_log_formatter.h"
-#include "aegra/ports/control_plane.h"
+
+#include <Windows.h>
 
 #include <algorithm>
 #include <chrono>
@@ -257,6 +261,56 @@ query_response(const contracts::ServiceRequest& request, const ServiceRuntimeInf
     return capability_unavailable(request);
 }
 
+[[nodiscard]] std::string network_entropy_id_for_locator(const std::string_view locator) {
+    std::string entropy = "net.";
+    for (const unsigned char character : locator) {
+        if ((character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') ||
+            character == '.' || character == '_' || character == '-') {
+            entropy.push_back(static_cast<char>(character));
+        } else if (character >= 'A' && character <= 'Z') {
+            entropy.push_back(static_cast<char>(character - 'A' + 'a'));
+        } else {
+            entropy.push_back('_');
+        }
+        if (entropy.size() >= 96U) {
+            break;
+        }
+    }
+    return entropy;
+}
+
+/// Connect UNC share when needed and DPAPI-protect network auth into credential_ref.
+[[nodiscard]] base::Result<contracts::RepositoryConnectionInput>
+prepare_repository_connection_input(contracts::RepositoryConnectionInput input) {
+    const bool has_network_auth = !input.network_username.empty() ||
+                                  !input.network_password.empty() ||
+                                  !input.network_domain.empty();
+    if (is_unc_locator(input.locator)) {
+        auto connected = connect_network_share(input.locator, input.network_username,
+                                               input.network_password, input.network_domain);
+        if (!connected) {
+            return base::Result<contracts::RepositoryConnectionInput>::failure(connected.error());
+        }
+        if (has_network_auth) {
+            const auto packed = pack_network_auth_material(
+                input.network_username, input.network_domain, input.network_password);
+            const auto entropy = network_entropy_id_for_locator(input.locator);
+            auto protected_secret =
+                adapters::windows_system::protect_local_machine_secret_blob(packed, entropy);
+            if (!input.network_password.empty()) {
+                SecureZeroMemory(input.network_password.data(), input.network_password.size());
+            }
+            if (!protected_secret) {
+                return base::Result<contracts::RepositoryConnectionInput>::failure(
+                    protected_secret.error());
+            }
+            input.credential_ref = std::move(protected_secret).value();
+        }
+    }
+    input.network_password.clear();
+    return base::Result<contracts::RepositoryConnectionInput>::success(std::move(input));
+}
+
 [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
 run_repository_command(const contracts::ServiceRequest& request, const ServiceRuntimeInfo& runtime,
                        const base::CancellationToken cancellation) {
@@ -266,12 +320,23 @@ run_repository_command(const contracts::ServiceRequest& request, const ServiceRu
     }
     const auto key = *request.idempotency_key;
     switch (request.kind) {
-    case contracts::ServiceRequestKind::kAddRepositoryConnection:
-        return runtime.repository_connections->add_connection(
-            std::get<contracts::RepositoryConnectionInput>(request.payload), key, cancellation);
-    case contracts::ServiceRequestKind::kImportRepositoryConnection:
-        return runtime.repository_connections->import_connection(
-            std::get<contracts::RepositoryConnectionInput>(request.payload), key, cancellation);
+    case contracts::ServiceRequestKind::kAddRepositoryConnection: {
+        auto prepared = prepare_repository_connection_input(
+            std::get<contracts::RepositoryConnectionInput>(request.payload));
+        if (!prepared) {
+            return base::Result<contracts::CommandAcknowledgement>::failure(prepared.error());
+        }
+        return runtime.repository_connections->add_connection(prepared.value(), key, cancellation);
+    }
+    case contracts::ServiceRequestKind::kImportRepositoryConnection: {
+        auto prepared = prepare_repository_connection_input(
+            std::get<contracts::RepositoryConnectionInput>(request.payload));
+        if (!prepared) {
+            return base::Result<contracts::CommandAcknowledgement>::failure(prepared.error());
+        }
+        return runtime.repository_connections->import_connection(prepared.value(), key,
+                                                                 cancellation);
+    }
     case contracts::ServiceRequestKind::kTestRepositoryConnection:
         return runtime.repository_connections->test_connection(
             std::get<contracts::ResourceRef>(request.payload), key, cancellation);
@@ -374,6 +439,8 @@ command_response(const contracts::ServiceRequest& request, const ServiceRuntimeI
                    detail.find("repository root is not an empty directory") != std::string::npos) {
             // Fallback when a lower layer still returns a raw non-empty root error.
             message_code = "repository.location_occupied";
+        } else if (detail.find("local storage root is invalid") != std::string::npos) {
+            message_code = "repository.storage_root_invalid";
         } else if (detail.find("repository is unavailable") != std::string::npos) {
             message_code = "backup.repository_unavailable";
         } else if (detail.find("source is not selectable") != std::string::npos) {

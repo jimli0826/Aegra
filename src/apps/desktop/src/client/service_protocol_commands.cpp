@@ -441,14 +441,18 @@ QByteArray encode_unmount_session_request(const QString& request_id, const QStri
         .toJson(QJsonDocument::Compact);
 }
 
-QByteArray encode_repository_connection_input_request(const QString& request_id,
-                                                      const QString& idempotency_key,
-                                                      const int request_kind,
-                                                      const QString& display_name,
-                                                      const QString& locator) {
-    const QJsonObject payload{{QStringLiteral("display_name"), display_name},
-                              {QStringLiteral("locator"), locator},
-                              {QStringLiteral("credential_ref"), QJsonValue(QJsonValue::Null)}};
+QByteArray encode_repository_connection_input_request(
+    const QString& request_id, const QString& idempotency_key, const int request_kind,
+    const QString& display_name, const QString& locator, const QString& network_username,
+    const QString& network_password, const QString& network_domain) {
+    QJsonObject payload{{QStringLiteral("display_name"), display_name},
+                        {QStringLiteral("locator"), locator},
+                        {QStringLiteral("credential_ref"), QJsonValue(QJsonValue::Null)}};
+    if (!network_username.isEmpty() || !network_password.isEmpty() || !network_domain.isEmpty()) {
+        payload.insert(QStringLiteral("network_username"), network_username);
+        payload.insert(QStringLiteral("network_password"), network_password);
+        payload.insert(QStringLiteral("network_domain"), network_domain);
+    }
     return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
                                       static_cast<qint64>(kServiceSchemaVersion)},
                                      {QStringLiteral("message_type"), 1},

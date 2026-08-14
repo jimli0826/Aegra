@@ -294,9 +294,14 @@ class ServiceClient final : public QObject {
     Q_INVOKABLE QVariantList displayChainsForSchedule(const QString& schedule_id) const;
     Q_INVOKABLE void logScheduleEdit(const QString& message);
     Q_INVOKABLE void selectRepositoryConnection(const QString& connection_id);
-    Q_INVOKABLE void addRepositoryConnection(const QString& display_name, const QString& locator);
-    Q_INVOKABLE void importRepositoryConnection(const QString& display_name,
-                                                const QString& locator);
+    Q_INVOKABLE void addRepositoryConnection(const QString& display_name, const QString& locator,
+                                             const QString& network_username = {},
+                                             const QString& network_password = {},
+                                             const QString& network_domain = {});
+    Q_INVOKABLE void importRepositoryConnection(const QString& display_name, const QString& locator,
+                                                const QString& network_username = {},
+                                                const QString& network_password = {},
+                                                const QString& network_domain = {});
     Q_INVOKABLE void testRepositoryConnection(const QString& connection_id);
     Q_INVOKABLE void setDefaultRepositoryConnection(const QString& connection_id);
     Q_INVOKABLE void removeRepositoryConnection(const QString& connection_id);
@@ -332,6 +337,12 @@ class ServiceClient final : public QObject {
     Q_INVOKABLE QVariantList listLocalRepositoryDrives() const;
     /// Immediate subdirectories under path for Add Repository browse (Desktop Qt only).
     Q_INVOKABLE QVariantList listLocalRepositoryFolders(const QString& path) const;
+    /// Connect to UNC share via WNet (Desktop process). Returns {ok, errorText}.
+    Q_INVOKABLE QVariantMap connectNetworkShare(const QString& unc_path, const QString& username,
+                                                const QString& password,
+                                                const QString& domain = {}) const;
+    /// List subdirectories under a connected UNC path (Desktop Qt only).
+    Q_INVOKABLE QVariantList listNetworkShareFolders(const QString& unc_path) const;
     /// Locale-aware byte size for QML stat cards.
     Q_INVOKABLE QString formatBytes(qint64 bytes) const;
     /// Free space on unique volumes hosting registered repository locators (OS volume query).
@@ -525,7 +536,9 @@ class ServiceClient final : public QObject {
     void reset_schedules();
     void reset_repository_command();
     void start_repository_input_command(int request_kind, const QString& display_name,
-                                        const QString& locator);
+                                        const QString& locator, const QString& network_username = {},
+                                        const QString& network_password = {},
+                                        const QString& network_domain = {});
     void start_repository_resource_command(int request_kind, const QString& connection_id);
     void reset_backup_command();
     void set_state(State state, QString error_code = {});

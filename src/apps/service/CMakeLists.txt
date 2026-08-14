@@ -5,6 +5,8 @@ add_library(aegra_app_service STATIC
     src/file_recovery_chain.cpp
     src/file_recovery_point_query.cpp
     src/mount_supervisor.cpp
+    src/network_aware_storage_factory.cpp
+    src/network_share_access.cpp
     src/recovery_point_layout_service.cpp
     src/schedule_service.cpp
     src/service_host.cpp
@@ -48,6 +50,7 @@ target_link_libraries(
         Aegra::AdapterWindowsSystem
         nlohmann_json::nlohmann_json
         Advapi32
+        Mpr
 )
 aegra_configure_target(aegra_app_service)
 

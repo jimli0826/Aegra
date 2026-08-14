@@ -192,7 +192,9 @@ make_volume_root_entry_name(const contracts::FileSourceRef& selection) {
     }
 }
 
-/// FI0: strict fail on reparse / hard-linked file / sparse / named ADS.
+/// FI0: strict fail on reparse / hard-linked file / sparse.
+/// Named ADS are not archived (main unnamed $DATA only) — do not fail the whole job for common
+/// Mark-of-the-Web Zone.Identifier streams on downloaded files.
 /// Also captures FILE_ID_128 for FI1 stable identity.
 /// Paths must not appear in the stable message code.
 [[nodiscard]] base::Result<std::array<std::byte, contracts::kStableFileIdBytes>>
@@ -237,18 +239,8 @@ reject_unsupported_and_read_file_id(const std::wstring& absolute_path, const DWO
         static_assert(sizeof(id_info.FileId.Identifier) >= contracts::kStableFileIdBytes);
         std::memcpy(file_id.data(), id_info.FileId.Identifier, contracts::kStableFileIdBytes);
     }
-
-    if (capabilities.supports_named_data_streams) {
-        auto named_data_stream = has_named_data_stream(handle.value().get());
-        if (!named_data_stream) {
-            return base::Result<std::array<std::byte, contracts::kStableFileIdBytes>>::failure(
-                named_data_stream.error());
-        }
-        if (named_data_stream.value()) {
-            return base::Result<std::array<std::byte, contracts::kStableFileIdBytes>>::failure(
-                {base::ErrorCode::kInvalidArgument, "file_source.unsupported_ads"});
-        }
-    }
+    // Named ADS are not archived (entry builder only adds unnamed main $DATA). Presence of
+    // Zone.Identifier / other named streams must not fail the whole Job.
     return base::Result<std::array<std::byte, contracts::kStableFileIdBytes>>::success(file_id);
 }
 

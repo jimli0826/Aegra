@@ -134,6 +134,14 @@ contracts::TaskResult completed_result(const contracts::JobRequest& job,
     result.stored_bytes = summary.stats.bytes_restored;
     result.entry_count = summary.stats.entries_restored;
     result.message_code = partial ? "file_restore.partial" : "file_restore.completed";
+    if (partial) {
+        // validate_task_result(SucceededWithWarning) requires non-empty warning_codes.
+        result.warning_codes = summary.stats.stable_error_codes;
+        if (result.warning_codes.empty()) {
+            result.warning_codes.push_back("file_restore.partial");
+        }
+        result.partial_restore = summary.stats;
+    }
     return result;
 }
 

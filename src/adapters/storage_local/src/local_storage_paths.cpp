@@ -32,12 +32,65 @@ template <typename Character>
     return value.size() == internal.size() || value[internal.size()] == '/';
 }
 
+[[nodiscard]] bool is_extended_path(const std::wstring_view native) noexcept {
+    return native.starts_with(L"\\\\?\\");
+}
+
+[[nodiscard]] bool is_unc_native(const std::wstring_view native) noexcept {
+    // \\?\UNC\server\share\... or \\server\share\...
+    if (native.starts_with(L"\\\\?\\UNC\\")) {
+        return true;
+    }
+    if (is_extended_path(native)) {
+        return false; // \\?\C:\... is local extended, not UNC
+    }
+    return native.size() >= 2 && native[0] == L'\\' && native[1] == L'\\';
+}
+
+/// Strip \\?\ / \\?\UNC\ prefixes to a conventional \\server\... or drive path.
+[[nodiscard]] std::wstring conventional_native(std::wstring_view native) {
+    if (native.starts_with(L"\\\\?\\UNC\\")) {
+        std::wstring out = L"\\\\";
+        out.append(native.substr(8));
+        return out;
+    }
+    if (native.starts_with(L"\\\\?\\")) {
+        return std::wstring(native.substr(4));
+    }
+    return std::wstring(native);
+}
+
 [[nodiscard]] std::filesystem::path extended_path(const std::filesystem::path& path) {
     const auto native = path.native();
-    if (native.starts_with(L"\\\\?\\")) {
+    if (is_extended_path(native)) {
         return path;
     }
+    // UNC \\server\share\... must use \\?\UNC\server\share\... (not \\?\ + \\server\...).
+    if (is_unc_native(native)) {
+        return std::filesystem::path(std::wstring(L"\\\\?\\UNC\\") + native.substr(2));
+    }
     return std::filesystem::path(std::wstring(L"\\\\?\\") + native);
+}
+
+/// First inspectable UNC unit is \\server\share (MSVC root_path is only \\server\ — invalid).
+[[nodiscard]] std::filesystem::path unc_share_root(const std::filesystem::path& path) {
+    auto native = conventional_native(path.native());
+    if (!is_unc_native(native)) {
+        return {};
+    }
+    // \\server\share[\rest]
+    const auto server_end = native.find(L'\\', 2);
+    if (server_end == std::wstring::npos || server_end <= 2) {
+        return {};
+    }
+    const auto share_end = native.find(L'\\', server_end + 1);
+    if (share_end == std::wstring::npos) {
+        return std::filesystem::path(native);
+    }
+    if (share_end == server_end + 1) {
+        return {}; // empty share name
+    }
+    return std::filesystem::path(native.substr(0, share_end));
 }
 
 [[nodiscard]] base::Result<std::wstring> utf8_to_wide(const std::string_view encoded) {
@@ -113,8 +166,69 @@ template <typename Character>
     return base::Result<void>::success();
 }
 
+[[nodiscard]] base::Result<void>
+check_unc_root_directory_chain(const std::filesystem::path& root, const bool create_missing) {
+    // MSVC decomposes \\server\share\a as root_path=\\server\ which is not a valid Win32 path
+    // (ERROR_BAD_PATHNAME 161). Walk from \\server\share, then remaining components.
+    auto current = unc_share_root(root);
+    if (current.empty()) {
+        return base::Result<void>::failure(
+            local_error(base::ErrorCode::kInvalidArgument, "local storage root is invalid"));
+    }
+    auto inspected = inspect_directory(extended_path(current), false);
+    if (!inspected) {
+        return inspected;
+    }
+    const auto full = conventional_native(root.lexically_normal().native());
+    auto share = conventional_native(current.native());
+    // Case-insensitive prefix match for share root.
+    if (full.size() < share.size()) {
+        return base::Result<void>::failure(
+            local_error(base::ErrorCode::kInvalidArgument, "local storage root is invalid"));
+    }
+    for (std::size_t i = 0; i < share.size(); ++i) {
+        const auto a = full[i] >= L'A' && full[i] <= L'Z' ? static_cast<wchar_t>(full[i] + 32) : full[i];
+        const auto b =
+            share[i] >= L'A' && share[i] <= L'Z' ? static_cast<wchar_t>(share[i] + 32) : share[i];
+        if (a != b) {
+            return base::Result<void>::failure(
+                local_error(base::ErrorCode::kInvalidArgument, "local storage root is invalid"));
+        }
+    }
+    std::wstring rest;
+    if (full.size() > share.size()) {
+        rest = full.substr(share.size());
+        while (!rest.empty() && rest.front() == L'\\') {
+            rest.erase(rest.begin());
+        }
+    }
+    std::size_t pos = 0;
+    while (pos < rest.size()) {
+        const auto slash = rest.find(L'\\', pos);
+        const auto component =
+            rest.substr(pos, slash == std::wstring::npos ? std::wstring::npos : slash - pos);
+        pos = slash == std::wstring::npos ? rest.size() : slash + 1;
+        if (component.empty() || component == L".") {
+            continue;
+        }
+        if (component == L"..") {
+            return base::Result<void>::failure(
+                local_error(base::ErrorCode::kInvalidArgument, "local storage root is invalid"));
+        }
+        current /= component;
+        inspected = inspect_directory(extended_path(current), create_missing);
+        if (!inspected) {
+            return inspected;
+        }
+    }
+    return base::Result<void>::success();
+}
+
 [[nodiscard]] base::Result<void> check_root_directory_chain(const std::filesystem::path& root,
                                                             const bool create_missing) {
+    if (is_unc_native(root.native())) {
+        return check_unc_root_directory_chain(root, create_missing);
+    }
     auto current = root.root_path();
     if (current.empty()) {
         return base::Result<void>::failure(
@@ -183,15 +297,30 @@ template <typename Character>
 }
 
 [[nodiscard]] bool is_unc_path(const std::filesystem::path& path) noexcept {
-    const auto& native = path.native();
-    return native.size() >= 2 && native[0] == L'\\' && native[1] == L'\\';
+    return is_unc_native(path.native());
 }
 
 [[nodiscard]] base::Result<std::filesystem::path>
 prepare_local_root(const LocalObjectStorageOpenRequest& request) {
     std::error_code filesystem_error;
-    auto absolute = std::filesystem::absolute(request.root, filesystem_error).lexically_normal();
-    if (filesystem_error || is_unc_path(absolute)) {
+    std::filesystem::path absolute = request.root;
+    // Drive-letter roots: resolve absolute. UNC roots stay as-is (already absolute).
+    // Network share access is established by Service WNet before open/create.
+    if (!is_unc_path(absolute)) {
+        absolute = std::filesystem::absolute(request.root, filesystem_error).lexically_normal();
+        if (filesystem_error) {
+            return base::Result<std::filesystem::path>::failure(
+                local_error(base::ErrorCode::kInvalidArgument, "local storage root is invalid"));
+        }
+    } else {
+        // Prefer conventional \\server\share form before walking the chain.
+        absolute = std::filesystem::path(conventional_native(absolute.native())).lexically_normal();
+        if (unc_share_root(absolute).empty()) {
+            return base::Result<std::filesystem::path>::failure(
+                local_error(base::ErrorCode::kInvalidArgument, "local storage root is invalid"));
+        }
+    }
+    if (absolute.empty() || (!absolute.has_root_path() && !is_unc_path(absolute))) {
         return base::Result<std::filesystem::path>::failure(
             local_error(base::ErrorCode::kInvalidArgument, "local storage root is invalid"));
     }
@@ -199,6 +328,10 @@ prepare_local_root(const LocalObjectStorageOpenRequest& request) {
     auto safe = check_root_directory_chain(absolute, create_missing);
     if (!safe) {
         return base::Result<std::filesystem::path>::failure(safe.error());
+    }
+    if (is_unc_path(absolute)) {
+        // weakly_canonical on UNC is unreliable; keep the walk-validated path.
+        return base::Result<std::filesystem::path>::success(extended_path(absolute));
     }
     auto canonical = std::filesystem::weakly_canonical(absolute, filesystem_error);
     if (filesystem_error) {

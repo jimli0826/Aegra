@@ -1989,6 +1989,22 @@ Server: %1</translation>
         <source>This location is not empty and cannot be used as a new repository</source>
         <translation>This location is not empty and cannot be used as a new repository</translation>
     </message>
+    <message id="aegra.repository.please_connect_first">
+        <source>Connect to the network share first</source>
+        <translation>Connect to the network share first</translation>
+    </message>
+    <message id="aegra.repository.network_connect_failed">
+        <source>Failed to connect to the network share</source>
+        <translation>Failed to connect to the network share</translation>
+    </message>
+    <message id="aegra.repository.network_path_invalid">
+        <source>Invalid network path (expected \\server\share)</source>
+        <translation>Invalid network path (expected \\server\share)</translation>
+    </message>
+    <message id="aegra.repository.storage_root_invalid">
+        <source>The repository location is not a valid storage path</source>
+        <translation>The repository location is not a valid storage path</translation>
+    </message>
     <message id="aegra.repository.remove_title">
         <source>Remove repository connection?</source>
         <translation>Remove repository connection?</translation>
@@ -2068,10 +2084,6 @@ Server: %1</translation>
     <message id="aegra.repository.please_enter_path">
         <source>Please enter a network path</source>
         <translation>Please enter a network path</translation>
-    </message>
-    <message id="aegra.repository.please_connect_first">
-        <source>Connect first</source>
-        <translation>Connect first</translation>
     </message>
     <message id="aegra.repository.no_folders">
         <source>No folders</source>

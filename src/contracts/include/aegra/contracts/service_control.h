@@ -279,7 +279,13 @@ using MountSessionPage = ServicePage<MountSessionSummary>;
 struct RepositoryConnectionInput final {
     std::string display_name;
     std::string locator;
+    /// Optional pre-protected SecretRef (rarely set by Desktop). Prefer network_* on create.
     std::optional<SecretRef> credential_ref;
+    /// Create/import only for UNC network shares. Never log. Empty for local paths.
+    /// Service packs these into credential_ref (DPAPI) before durable store.
+    std::string network_username;
+    std::string network_password;
+    std::string network_domain;
 };
 
 struct ResourceRef final {

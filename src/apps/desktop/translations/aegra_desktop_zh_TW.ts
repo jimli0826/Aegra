@@ -1989,6 +1989,22 @@ Server: %1</source>
         <source>This location is not empty and cannot be used as a new repository</source>
         <translation>此位置非空，無法建立新 Repository</translation>
     </message>
+    <message id="aegra.repository.please_connect_first">
+        <source>Connect to the network share first</source>
+        <translation>請先連線網路共用</translation>
+    </message>
+    <message id="aegra.repository.network_connect_failed">
+        <source>Failed to connect to the network share</source>
+        <translation>無法連線網路共用</translation>
+    </message>
+    <message id="aegra.repository.network_path_invalid">
+        <source>Invalid network path (expected \\server\share)</source>
+        <translation>無效的網路路徑（應為 \\伺服器\共用）</translation>
+    </message>
+    <message id="aegra.repository.storage_root_invalid">
+        <source>The repository location is not a valid storage path</source>
+        <translation>Repository 位置不是有效的儲存路徑</translation>
+    </message>
     <message id="aegra.repository.remove_title">
         <source>Remove repository connection?</source>
         <translation>移除 Repository 連線？</translation>
@@ -2068,10 +2084,6 @@ Server: %1</source>
     <message id="aegra.repository.please_enter_path">
         <source>Please enter a network path</source>
         <translation>請輸入網路路徑</translation>
-    </message>
-    <message id="aegra.repository.please_connect_first">
-        <source>Connect first</source>
-        <translation>請先連線</translation>
     </message>
     <message id="aegra.repository.no_folders">
         <source>No folders</source>

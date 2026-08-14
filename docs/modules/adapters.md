@@ -128,8 +128,9 @@ Target：`aegra_adapter_windows_filesystem` / `Aegra::AdapterWindowsFilesystem`�
     `file_restore.rename_exhausted`。
   - **能力声明（FI0）**：`capabilities()` 声明 `supports_security_descriptor`、`free_bytes` 与
     `maximum_file_size_bytes`。不支持 reparse / hard link / sparse / ADS，Port 上无对应方法或 capability 位。
-  - **Source 严格检测（FI0/FI2）**：完整枚举期间检测 reparse、`NumberOfLinks>1` 的文件、sparse 属性、
-    命名 ADS，分别返回 `file_source.unsupported_reparse|hard_link|sparse|ads`，整 Job fail 且无 RP。
+  - **Source 严格检测（FI0/FI2）**：完整枚举期间检测 reparse、`NumberOfLinks>1` 的文件、sparse 属性，
+    分别返回 `file_source.unsupported_reparse|hard_link|sparse`，整 Job fail 且无 RP。命名 ADS 不写入
+    Archive（仅 unnamed main `$DATA`）；存在 ADS 时不因此 fail Job（常见如下载文件的 `Zone.Identifier`）。
   - **Incremental 变化判断（ADR-0020）**：Windows source 必须为每个 entry 提供 snapshot-consistent
     `write_time` 与 `logical_size`。Pipeline 用 parent path index 比较 metadata signature；Windows Adapter
     不为 file_set Incremental 创建、查询或读取 USN Journal；历史 USN reader 及其 CMake source 已删除。

@@ -29,6 +29,9 @@
 #  ifndef DWMWCP_ROUND
 #    define DWMWCP_ROUND 2
 #  endif
+#  ifndef DWMWCP_DONOTROUND
+#    define DWMWCP_DONOTROUND 1
+#  endif
 #  ifndef DWMWA_BORDER_COLOR
 #    define DWMWA_BORDER_COLOR 34
 #  endif
@@ -99,12 +102,14 @@ void apply_frameless_platform_chrome(QWindow* window) {
     }
 
     if (is_windows_11_or_greater()) {
-        const int preference = DWMWCP_ROUND;
+        const Qt::WindowState state = window->windowState();
+        const bool fills_screen =
+            state == Qt::WindowMaximized || state == Qt::WindowFullScreen;
+        const int preference = fills_screen ? DWMWCP_DONOTROUND : DWMWCP_ROUND;
         DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &preference,
                               sizeof(preference));
         const COLORREF no_border = static_cast<COLORREF>(DWMWA_COLOR_NONE);
         DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &no_border, sizeof(no_border));
-
     }
 #endif
 }
@@ -244,7 +249,14 @@ int main(int argument_count, char* arguments[]) {
         return EXIT_FAILURE;
     }
     for (QObject* object : engine.rootObjects()) {
-        apply_frameless_platform_chrome(qobject_cast<QWindow*>(object));
+        auto* window = qobject_cast<QWindow*>(object);
+        apply_frameless_platform_chrome(window);
+        if (window != nullptr) {
+            QObject::connect(window, &QWindow::windowStateChanged, window,
+                             [window](Qt::WindowState) {
+                                 apply_frameless_platform_chrome(window);
+                             });
+        }
     }
 
     QObject::connect(&ipc_server, &QLocalServer::newConnection, &application, [&]() {

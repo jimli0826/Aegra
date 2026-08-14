@@ -343,7 +343,7 @@ Windows snapshot enumerator 对每个当前 entry 执行：
 - attributes/tag 检测 reparse；不打开 target，不递归；返回 `file_source.unsupported_reparse`；
 - handle info 检测 `NumberOfLinks > 1`；返回 `file_source.unsupported_hard_link`；
 - attributes/allocated semantics 检测 sparse；返回 `file_source.unsupported_sparse`；
-- stream enumeration 确认只有 unnamed main `$DATA`；发现其它 `$DATA` stream 返回 `file_source.unsupported_ads`。
+- 命名 ADS **不**写入 Archive（entry 仅含 unnamed main `$DATA`）；存在 ADS 时**不** fail Job。
 
 检测覆盖 Full 与 Incremental 的完整枚举，即使 metadata signature 判断该 entry 未变化也不能跳过。发生错误后
 Abort Archive staging，不发布 Catalog。
@@ -358,8 +358,8 @@ Current-format Parser exact-schema 拒绝相关旧字段/枚举。Restore prefli
 - 不把 reparse target 当普通目录继续遍历；
 - 不把 hard link 的每个名称备份为独立普通文件；
 - 不读取 sparse logical zeros 并写成 dense file；
-- 不只备份 unnamed stream 而忽略 ADS；
-- 不用 warning、计数或 UI 提示把数据缺失包装为成功。
+- 不把命名 ADS 内容写入 Archive（主 stream only；非 strict fail）；
+- 不用 warning、计数或 UI 提示把 reparse/hard-link/sparse 数据缺失包装为成功。
 
 ## 12. 安全、资源与可观测性
 

@@ -1,5 +1,6 @@
 #include "client/service_client.h"
 
+#include "client/network_share_access.h"
 #include "client/service_protocol.h"
 #include "locale/locale_format.h"
 #include "locale/message_code_map.h"
@@ -519,13 +520,20 @@ void ServiceClient::selectRepositoryConnection(const QString& connection_id) {
     refreshRepository();
 }
 
-void ServiceClient::addRepositoryConnection(const QString& display_name, const QString& locator) {
-    start_repository_input_command(kAddRepositoryConnectionRequestKind, display_name, locator);
+void ServiceClient::addRepositoryConnection(const QString& display_name, const QString& locator,
+                                            const QString& network_username,
+                                            const QString& network_password,
+                                            const QString& network_domain) {
+    start_repository_input_command(kAddRepositoryConnectionRequestKind, display_name, locator,
+                                   network_username, network_password, network_domain);
 }
 
-void ServiceClient::importRepositoryConnection(const QString& display_name,
-                                               const QString& locator) {
-    start_repository_input_command(kImportRepositoryConnectionRequestKind, display_name, locator);
+void ServiceClient::importRepositoryConnection(const QString& display_name, const QString& locator,
+                                               const QString& network_username,
+                                               const QString& network_password,
+                                               const QString& network_domain) {
+    start_repository_input_command(kImportRepositoryConnectionRequestKind, display_name, locator,
+                                   network_username, network_password, network_domain);
 }
 
 void ServiceClient::testRepositoryConnection(const QString& connection_id) {
@@ -540,9 +548,10 @@ void ServiceClient::removeRepositoryConnection(const QString& connection_id) {
     start_repository_resource_command(kRemoveRepositoryConnectionRequestKind, connection_id);
 }
 
-void ServiceClient::start_repository_input_command(const int request_kind,
-                                                   const QString& display_name,
-                                                   const QString& locator) {
+void ServiceClient::start_repository_input_command(
+    const int request_kind, const QString& display_name, const QString& locator,
+    const QString& network_username, const QString& network_password,
+    const QString& network_domain) {
     if (!connected() || repository_command_busy_ || display_name.trimmed().isEmpty() ||
         locator.trimmed().isEmpty()) {
         return;
@@ -555,7 +564,8 @@ void ServiceClient::start_repository_input_command(const int request_kind,
     emit repositoryCommandChanged();
     const auto body = encode_repository_connection_input_request(
         repository_command_request_id_, repository_command_idempotency_key_, request_kind,
-        display_name.trimmed(), locator.trimmed());
+        display_name.trimmed(), locator.trimmed(), network_username, network_password,
+        network_domain);
     const auto started = coordinator_->begin_request(
         repository_command_request_id_, body, [this](const QByteArray& frame_body) {
             return handle_repository_command_frame(frame_body);
@@ -829,6 +839,22 @@ QVariantList ServiceClient::listLocalRepositoryFolders(const QString& path) cons
     const auto entries = dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name | QDir::IgnoreCase);
     folders.reserve(entries.size());
     for (const auto& name : entries) {
+        folders.push_back(name);
+    }
+    return folders;
+}
+
+QVariantMap ServiceClient::connectNetworkShare(const QString& unc_path, const QString& username,
+                                               const QString& password,
+                                               const QString& domain) const {
+    return connect_network_share(unc_path, username, password, domain);
+}
+
+QVariantList ServiceClient::listNetworkShareFolders(const QString& unc_path) const {
+    QVariantList folders;
+    const auto names = list_network_share_folders(unc_path);
+    folders.reserve(names.size());
+    for (const auto& name : names) {
         folders.push_back(name);
     }
     return folders;

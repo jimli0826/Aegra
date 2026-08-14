@@ -1048,13 +1048,15 @@ Item {
                                     radius: 4
                                     color: Theme.colorInput
                                     border.width: 1
-                                    border.color: Theme.colorBorder
+                                    border.color: splitInput.activeFocus ? Theme.colorAccentBlue : Theme.colorBorder
                                     TextInput {
+                                        id: splitInput
                                         anchors.fill: parent
                                         anchors.margins: 6
                                         color: Theme.colorTextWhite
                                         font.pixelSize: 13
                                         font.family: Theme.fontFamily
+                                        activeFocusOnTab: true
                                         validator: IntValidator { bottom: 1; top: 1024 }
                                         text: "" + root.splitSize
                                         onTextChanged: {
@@ -1173,7 +1175,7 @@ Item {
                                 color: Theme.colorInput
                                 radius: 4
                                 border.width: 1
-                                border.color: Theme.colorBorder
+                                border.color: passwordInput.activeFocus ? Theme.colorAccentBlue : Theme.colorBorder
                                 TextInput {
                                     id: passwordInput
                                     anchors.fill: parent
@@ -1187,6 +1189,7 @@ Item {
                                     maximumLength: root.passwordMaxLength
                                     clip: true
                                     selectByMouse: true
+                                    activeFocusOnTab: true
                                     text: root.password
                                     onTextChanged: root.password = text
                                     Text {
@@ -1209,7 +1212,8 @@ Item {
                                 border.width: 1
                                 border.color: (root.passwordConfirm.length > 0
                                               && root.passwordConfirm !== root.password)
-                                             ? Theme.colorAccentRed : Theme.colorBorder
+                                             ? Theme.colorAccentRed
+                                             : (passwordConfirmInput.activeFocus ? Theme.colorAccentBlue : Theme.colorBorder)
                                 TextInput {
                                     id: passwordConfirmInput
                                     anchors.fill: parent
@@ -1223,6 +1227,7 @@ Item {
                                     maximumLength: root.passwordMaxLength
                                     clip: true
                                     selectByMouse: true
+                                    activeFocusOnTab: true
                                     text: root.passwordConfirm
                                     onTextChanged: root.passwordConfirm = text
                                     Text {

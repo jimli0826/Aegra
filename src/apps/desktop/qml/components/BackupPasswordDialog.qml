@@ -71,7 +71,7 @@ Popup {
             color: Theme.colorInput
             radius: 4
             border.width: 1
-            border.color: Theme.colorBorder
+            border.color: passwordField.activeFocus ? Theme.colorAccentBlue : Theme.colorBorder
             TextInput {
                 id: passwordField
                 anchors.fill: parent
@@ -82,6 +82,7 @@ Popup {
                 echoMode: TextInput.Password
                 maximumLength: root.passwordMaxLength
                 selectByMouse: true
+                activeFocusOnTab: true
                 Keys.onReturnPressed: root.submit()
                 Keys.onEnterPressed: root.submit()
             }

@@ -33,10 +33,12 @@ Button {
 
     background: Rectangle {
         radius: Theme.radiusButton
-        border.width: (root.primary || root.danger || !root.borderVisible) ? 0 : 1
+        border.width: (root.visualFocus || root.activeFocus) ? 2 : ((root.primary || root.danger || !root.borderVisible) ? 0 : 1)
         border.color: {
             if (!root.enabled)
                 return Theme.colorBorder
+            if (root.visualFocus || root.activeFocus)
+                return Theme.colorAccentBlue
             if (root.danger)
                 return root.hovered ? "#aa2222" : "#882222"
             return Theme.colorBorder
@@ -47,8 +49,8 @@ Button {
             if (root.danger)
                 return root.hovered ? "#e03333" : "#cc3333"
             if (root.primary)
-                return root.hovered ? Theme.colorLinkHover : Theme.colorAccentBlue
-            return root.hovered ? Theme.colorButtonHover : Theme.colorButton
+                return (root.hovered || root.visualFocus || root.activeFocus) ? Theme.colorLinkHover : Theme.colorAccentBlue
+            return (root.hovered || root.visualFocus || root.activeFocus) ? Theme.colorButtonHover : Theme.colorButton
         }
         opacity: root.enabled ? 1.0 : 0.55
 

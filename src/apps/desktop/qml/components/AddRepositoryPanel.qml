@@ -493,6 +493,7 @@ Item {
                                         font.family: Theme.fontFamily
                                         clip: true
                                         selectByMouse: true
+                                        activeFocusOnTab: true
                                         verticalAlignment: TextInput.AlignVCenter
                                         LinePlaceholder {
                                             anchors.fill: parent
@@ -526,17 +527,32 @@ Item {
                                     Repeater {
                                         model: root.locationTypes
                                         delegate: Rectangle {
+                                            id: typeBtn
                                             required property int index
                                             required property var modelData
                                             width: Math.max(88, typeLabel.implicitWidth + 28)
                                             height: root.fieldControlHeight
                                             radius: Theme.radiusControl
+                                            activeFocusOnTab: true
                                             color: root.selectedTypeIndex === index
                                                    ? Theme.colorAccentBlue
                                                    : (typeBtnArea.containsMouse
                                                       ? Theme.colorButtonHover : Theme.colorButton)
-                                            border.width: root.selectedTypeIndex === index ? 0 : 1
-                                            border.color: Theme.colorBorder
+                                            border.width: (root.selectedTypeIndex === index && !typeBtn.activeFocus) ? 0 : 1
+                                            border.color: typeBtn.activeFocus
+                                                          ? (root.selectedTypeIndex === index ? "white" : Theme.colorAccentBlue)
+                                                          : Theme.colorBorder
+
+                                            function selectType() {
+                                                root.selectedTypeIndex = index
+                                                root.isConnected = false
+                                                root.isConnecting = false
+                                                root.selectedPath = ""
+                                                root.driveList = []
+                                                if (root.locationTypes[index].value === "local")
+                                                    root.refreshBrowse()
+                                            }
+
                                             Text {
                                                 id: typeLabel
                                                 anchors.centerIn: parent
@@ -553,15 +569,13 @@ Item {
                                                 hoverEnabled: true
                                                 cursorShape: Qt.PointingHandCursor
                                                 onClicked: {
-                                                    root.selectedTypeIndex = index
-                                                    root.isConnected = false
-                                                    root.isConnecting = false
-                                                    root.selectedPath = ""
-                                                    root.driveList = []
-                                                    if (root.locationTypes[index].value === "local")
-                                                        root.refreshBrowse()
+                                                    typeBtn.forceActiveFocus()
+                                                    typeBtn.selectType()
                                                 }
                                             }
+                                            Keys.onReturnPressed: typeBtn.selectType()
+                                            Keys.onEnterPressed: typeBtn.selectType()
+                                            Keys.onSpacePressed: typeBtn.selectType()
                                         }
                                     }
                                 }
@@ -605,6 +619,7 @@ Item {
                                         font.family: Theme.fontFamily
                                         clip: true
                                         selectByMouse: true
+                                        activeFocusOnTab: true
                                         verticalAlignment: TextInput.AlignVCenter
                                         onTextChanged: {
                                             if (root.currentType().value === "network") {
@@ -629,7 +644,6 @@ Item {
                                 Layout.fillWidth: true
                                 spacing: 12
                                 visible: root.locationTypes[root.selectedTypeIndex].hasAuth
-
                                 RowLayout {
                                     Layout.fillWidth: true
                                     spacing: root.fieldRowSpacing
@@ -652,7 +666,8 @@ Item {
                                         radius: Theme.radiusControl
                                         color: Theme.colorInput
                                         border.width: 1
-                                        border.color: Theme.colorBorder
+                                        border.color: networkUserInput.activeFocus
+                                                      ? Theme.colorAccentBlue : Theme.colorBorder
                                         clip: true
                                         TextInput {
                                             id: networkUserInput
@@ -664,6 +679,7 @@ Item {
                                             font.family: Theme.fontFamily
                                             clip: true
                                             selectByMouse: true
+                                            activeFocusOnTab: true
                                             verticalAlignment: TextInput.AlignVCenter
                                             onTextChanged: {
                                                 root.isConnected = false
@@ -695,7 +711,8 @@ Item {
                                         radius: Theme.radiusControl
                                         color: Theme.colorInput
                                         border.width: 1
-                                        border.color: Theme.colorBorder
+                                        border.color: networkPasswordInput.activeFocus
+                                                      ? Theme.colorAccentBlue : Theme.colorBorder
                                         clip: true
                                         TextInput {
                                             id: networkPasswordInput
@@ -708,11 +725,14 @@ Item {
                                             echoMode: TextInput.Password
                                             clip: true
                                             selectByMouse: true
+                                            activeFocusOnTab: true
                                             verticalAlignment: TextInput.AlignVCenter
                                             onTextChanged: {
                                                 root.isConnected = false
                                                 root.driveList = []
                                             }
+                                            Keys.onReturnPressed: if (!root.isConnecting) root.connectNetworkShare()
+                                            Keys.onEnterPressed: if (!root.isConnecting) root.connectNetworkShare()
                                         }
                                     }
                                 }
@@ -739,7 +759,8 @@ Item {
                                         radius: Theme.radiusControl
                                         color: Theme.colorInput
                                         border.width: 1
-                                        border.color: Theme.colorBorder
+                                        border.color: networkDomainInput.activeFocus
+                                                      ? Theme.colorAccentBlue : Theme.colorBorder
                                         clip: true
                                         TextInput {
                                             id: networkDomainInput
@@ -751,11 +772,14 @@ Item {
                                             font.family: Theme.fontFamily
                                             clip: true
                                             selectByMouse: true
+                                            activeFocusOnTab: true
                                             verticalAlignment: TextInput.AlignVCenter
                                             onTextChanged: {
                                                 root.isConnected = false
                                                 root.driveList = []
                                             }
+                                            Keys.onReturnPressed: if (!root.isConnecting) root.connectNetworkShare()
+                                            Keys.onEnterPressed: if (!root.isConnecting) root.connectNetworkShare()
                                         }
                                     }
                                 }
@@ -765,19 +789,23 @@ Item {
                                     spacing: root.fieldRowSpacing
                                     Item { Layout.preferredWidth: root.fieldLabelWidth }
                                     Rectangle {
+                                        id: connectBtn
                                         Layout.preferredWidth: 110
                                         Layout.preferredHeight: root.fieldControlHeight
                                         radius: Theme.radiusControl
                                         visible: root.locationTypes[root.selectedTypeIndex]
                                                  .needsConnect
+                                        activeFocusOnTab: true
                                         color: {
                                             if (root.isConnecting)
                                                 return Theme.colorButtonDisabled
                                             if (root.isConnected)
                                                 return Theme.colorGreen
-                                            return connectBtnArea.containsMouse
+                                            return (connectBtnArea.containsMouse || connectBtn.activeFocus)
                                                    ? Theme.colorButtonHover : Theme.colorButton
                                         }
+                                        border.width: connectBtn.activeFocus ? 2 : 0
+                                        border.color: Theme.colorAccentBlue
                                         Text {
                                             anchors.centerIn: parent
                                             text: {
@@ -802,8 +830,14 @@ Item {
                                             hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
                                             enabled: !root.isConnecting
-                                            onClicked: root.connectNetworkShare()
+                                            onClicked: {
+                                                connectBtn.forceActiveFocus()
+                                                root.connectNetworkShare()
+                                            }
                                         }
+                                        Keys.onReturnPressed: if (!root.isConnecting) root.connectNetworkShare()
+                                        Keys.onEnterPressed: if (!root.isConnecting) root.connectNetworkShare()
+                                        Keys.onSpacePressed: if (!root.isConnecting) root.connectNetworkShare()
                                     }
                                     Item { Layout.fillWidth: true }
                                 }
@@ -1017,12 +1051,16 @@ Item {
                 RowLayout {
                     spacing: 4
                     Rectangle {
+                        id: defaultCheckRect
                         width: 16
                         height: 16
                         radius: 3
+                        activeFocusOnTab: true
                         color: root.isDefault ? Theme.colorAccentBlue : "transparent"
-                        border.width: 1
-                        border.color: root.isDefault ? Theme.colorAccentBlue : Theme.colorTextGrey
+                        border.width: defaultCheckRect.activeFocus ? 2 : 1
+                        border.color: defaultCheckRect.activeFocus
+                                      ? Theme.colorAccentBlue
+                                      : (root.isDefault ? Theme.colorAccentBlue : Theme.colorTextGrey)
                         Text {
                             anchors.centerIn: parent
                             text: "\u2713"
@@ -1034,8 +1072,14 @@ Item {
                         MouseArea {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: root.isDefault = !root.isDefault
+                            onClicked: {
+                                defaultCheckRect.forceActiveFocus()
+                                root.isDefault = !root.isDefault
+                            }
                         }
+                        Keys.onSpacePressed: root.isDefault = !root.isDefault
+                        Keys.onReturnPressed: root.isDefault = !root.isDefault
+                        Keys.onEnterPressed: root.isDefault = !root.isDefault
                     }
                     Text {
                         //% "Set as default"
@@ -1046,7 +1090,10 @@ Item {
                         MouseArea {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: root.isDefault = !root.isDefault
+                            onClicked: {
+                                defaultCheckRect.forceActiveFocus()
+                                root.isDefault = !root.isDefault
+                            }
                         }
                     }
                 }

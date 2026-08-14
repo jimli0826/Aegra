@@ -63,7 +63,8 @@ class ServiceClient final : public QObject {
     Q_PROPERTY(bool fileRestoreAvailable READ fileRestoreAvailable NOTIFY stateChanged)
     Q_PROPERTY(aegra::desktop::FileBrowseModel* fileBrowseSources READ fileBrowseSources CONSTANT)
     Q_PROPERTY(aegra::desktop::FileBrowseModel* fileRestoreTargets READ fileRestoreTargets CONSTANT)
-    Q_PROPERTY(aegra::desktop::FileRecoverModel* fileRecoverEntries READ fileRecoverEntries CONSTANT)
+    Q_PROPERTY(
+        aegra::desktop::FileRecoverModel* fileRecoverEntries READ fileRecoverEntries CONSTANT)
     Q_PROPERTY(QVariantList schedules READ schedules NOTIFY schedulesChanged)
     /// Stable ListView model; enable toggle uses dataChanged (no full table reset).
     Q_PROPERTY(aegra::desktop::ScheduleListModel* scheduleList READ scheduleList CONSTANT)
@@ -71,13 +72,14 @@ class ServiceClient final : public QObject {
     Q_PROPERTY(bool scheduleCommandBusy READ scheduleCommandBusy NOTIFY scheduleCommandChanged)
     /// True when a schedule command should show the full-window loading overlay.
     /// Enable/disable toggle is busy but must not block/flash the main window.
-    Q_PROPERTY(bool scheduleCommandBlocksUi READ scheduleCommandBlocksUi NOTIFY scheduleCommandChanged)
+    Q_PROPERTY(
+        bool scheduleCommandBlocksUi READ scheduleCommandBlocksUi NOTIFY scheduleCommandChanged)
     Q_PROPERTY(bool schedulesAvailable READ schedulesAvailable NOTIFY stateChanged)
     Q_PROPERTY(QString schedulesErrorText READ schedulesErrorText NOTIFY schedulesChanged)
     Q_PROPERTY(aegra::desktop::RepositoryConnectionModel* connections READ connections CONSTANT)
     Q_PROPERTY(bool connectionsLoading READ connectionsLoading NOTIFY connectionsChanged)
-    Q_PROPERTY(bool repositoryRefreshRunning READ repositoryRefreshRunning NOTIFY
-                   connectionsChanged)
+    Q_PROPERTY(
+        bool repositoryRefreshRunning READ repositoryRefreshRunning NOTIFY connectionsChanged)
     Q_PROPERTY(bool connectionsAvailable READ connectionsAvailable NOTIFY stateChanged)
     Q_PROPERTY(QString connectionsErrorText READ connectionsErrorText NOTIFY connectionsChanged)
     Q_PROPERTY(QString selectedRepositoryConnectionId READ selectedRepositoryConnectionId NOTIFY
@@ -88,6 +90,12 @@ class ServiceClient final : public QObject {
                    repositoryCommandChanged)
     Q_PROPERTY(QString repositoryCommandErrorCode READ repositoryCommandErrorCode NOTIFY
                    repositoryCommandChanged)
+    Q_PROPERTY(bool repositoryDirectoriesLoading READ repositoryDirectoriesLoading NOTIFY
+                   repositoryDirectoriesChanged)
+    Q_PROPERTY(QVariantList repositoryDirectories READ repositoryDirectories NOTIFY
+                   repositoryDirectoriesChanged)
+    Q_PROPERTY(QString repositoryDirectoriesErrorText READ repositoryDirectoriesErrorText NOTIFY
+                   repositoryDirectoriesChanged)
     Q_PROPERTY(bool backupStartAvailable READ backupStartAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool restoreStartAvailable READ restoreStartAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool restoreCommandBusy READ restoreCommandBusy NOTIFY restoreCommandChanged)
@@ -96,7 +104,8 @@ class ServiceClient final : public QObject {
     Q_PROPERTY(bool mountCommandBusy READ mountCommandBusy NOTIFY mountCommandChanged)
     Q_PROPERTY(bool mountSessionsLoading READ mountSessionsLoading NOTIFY mountSessionsChanged)
     Q_PROPERTY(QVariantList mountSessions READ mountSessions NOTIFY mountSessionsChanged)
-    Q_PROPERTY(QString mountSessionsErrorText READ mountSessionsErrorText NOTIFY mountSessionsChanged)
+    Q_PROPERTY(
+        QString mountSessionsErrorText READ mountSessionsErrorText NOTIFY mountSessionsChanged)
     Q_PROPERTY(QString mountCommandErrorText READ mountCommandErrorText NOTIFY mountCommandChanged)
     Q_PROPERTY(bool jobCancelAvailable READ jobCancelAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool backupCommandBusy READ backupCommandBusy NOTIFY backupCommandChanged)
@@ -128,7 +137,8 @@ class ServiceClient final : public QObject {
     Q_PROPERTY(QString deletePlanErrorText READ deletePlanErrorText NOTIFY deletePlanChanged)
     /// Service-owned job history retention (1/3/6 months). Hard-deletes expired terminal jobs.
     Q_PROPERTY(bool serviceSettingsAvailable READ serviceSettingsAvailable NOTIFY stateChanged)
-    Q_PROPERTY(bool serviceSettingsLoading READ serviceSettingsLoading NOTIFY serviceSettingsChanged)
+    Q_PROPERTY(
+        bool serviceSettingsLoading READ serviceSettingsLoading NOTIFY serviceSettingsChanged)
     Q_PROPERTY(bool serviceSettingsBusy READ serviceSettingsBusy NOTIFY serviceSettingsChanged)
     Q_PROPERTY(int jobRetentionMonths READ jobRetentionMonths NOTIFY serviceSettingsChanged)
     Q_PROPERTY(QString serviceSettingsErrorText READ serviceSettingsErrorText NOTIFY
@@ -162,7 +172,8 @@ class ServiceClient final : public QObject {
     [[nodiscard]] QString taskLogErrorText() const;
     [[nodiscard]] bool taskLogHasMore() const noexcept;
     /// Reload Task Log: time_index 0=all,1=24h,2=7d,3=30d; type 0=all,1=backup,2=restore,3=verify;
-    /// status 0=all,1=succeeded,2=failed,3=cancelled(+interrupted grouped as cancelled filter uses cancelled only).
+    /// status 0=all,1=succeeded,2=failed,3=cancelled(+interrupted grouped as cancelled filter uses
+    /// cancelled only).
     Q_INVOKABLE void refreshTaskLog(int time_index, int type_index, int status_index);
     Q_INVOKABLE void loadMoreTaskLog();
     [[nodiscard]] bool serviceSettingsAvailable() const noexcept;
@@ -199,6 +210,9 @@ class ServiceClient final : public QObject {
     [[nodiscard]] bool repositoryCommandBusy() const noexcept;
     [[nodiscard]] QString repositoryCommandErrorText() const;
     [[nodiscard]] QString repositoryCommandErrorCode() const;
+    [[nodiscard]] bool repositoryDirectoriesLoading() const noexcept;
+    [[nodiscard]] QVariantList repositoryDirectories() const;
+    [[nodiscard]] QString repositoryDirectoriesErrorText() const;
     [[nodiscard]] bool backupStartAvailable() const noexcept;
     [[nodiscard]] bool jobCancelAvailable() const noexcept;
     [[nodiscard]] bool backupCommandBusy() const noexcept;
@@ -255,15 +269,14 @@ class ServiceClient final : public QObject {
                    recoveryPointLayoutChanged)
     /// Create or update a schedule (empty scheduleId creates). Returns false if not sent.
     Q_INVOKABLE bool upsertSchedule(const QString& schedule_id, const QString& display_name,
-                                     bool enabled, const QVariantList& source_ids,
-                                     const QString& connection_id, const QString& frequency,
-                                     const QString& time_of_day,
-                                     bool exclude_page_and_hibernation_files = true,
-                                     bool deduplication_enabled = true,
-                                     bool encryption_enabled = false,
-                                     const QString& archive_password = {},
-                                     int backup_type = 2, int weekday_mask = 0,
-                                     unsigned int day_of_month_mask = 0);
+                                    bool enabled, const QVariantList& source_ids,
+                                    const QString& connection_id, const QString& frequency,
+                                    const QString& time_of_day,
+                                    bool exclude_page_and_hibernation_files = true,
+                                    bool deduplication_enabled = true,
+                                    bool encryption_enabled = false,
+                                    const QString& archive_password = {}, int backup_type = 2,
+                                    int weekday_mask = 0, unsigned int day_of_month_mask = 0);
     /// Creates one schedule containing all selected volumes.
     /// After-create StartBackup requests Incremental; Service demotes the first run to Full.
     Q_INVOKABLE bool createSchedule(const QVariantList& sources, const QString& connection_id,
@@ -276,14 +289,11 @@ class ServiceClient final : public QObject {
                                     int weekday_mask = 0, unsigned int day_of_month_mask = 0);
     /// Creates a file_set schedule from the current fileBrowseSources selection (opaque tokens).
     /// deduplication_enabled is always forced false for file_set.
-    Q_INVOKABLE bool createFileSetSchedule(const QString& connection_id, const QString& frequency,
-                                           const QString& time_of_day,
-                                           bool exclude_page_and_hibernation_files = true,
-                                           bool encryption_enabled = false,
-                                           const QString& archive_password = {},
-                                           bool start_full_backup_after_create = false,
-                                           int weekday_mask = 0,
-                                           unsigned int day_of_month_mask = 0);
+    Q_INVOKABLE bool createFileSetSchedule(
+        const QString& connection_id, const QString& frequency, const QString& time_of_day,
+        bool exclude_page_and_hibernation_files = true, bool encryption_enabled = false,
+        const QString& archive_password = {}, bool start_full_backup_after_create = false,
+        int weekday_mask = 0, unsigned int day_of_month_mask = 0);
     /// Updates a file_set schedule (source frozen; file_selections omitted).
     Q_INVOKABLE bool updateFileSetSchedule(const QString& schedule_id, const QString& display_name,
                                            bool enabled, const QString& connection_id,
@@ -307,6 +317,11 @@ class ServiceClient final : public QObject {
                                                 const QString& network_username = {},
                                                 const QString& network_password = {},
                                                 const QString& network_domain = {});
+    /// Validates and connects a network locator through Service without persisting it.
+    Q_INVOKABLE void connectRepositoryLocation(const QString& locator,
+                                               const QString& network_username = {},
+                                               const QString& network_password = {},
+                                               const QString& network_domain = {});
     Q_INVOKABLE void testRepositoryConnection(const QString& connection_id);
     Q_INVOKABLE void setDefaultRepositoryConnection(const QString& connection_id);
     Q_INVOKABLE void removeRepositoryConnection(const QString& connection_id);
@@ -405,6 +420,7 @@ class ServiceClient final : public QObject {
     void scheduleCommandFailed(const QString& message);
     void connectionsChanged();
     void repositoryCommandChanged();
+    void repositoryDirectoriesChanged();
     void backupCommandChanged();
     void backupObserveChanged();
     void splashChanged();
@@ -457,11 +473,11 @@ class ServiceClient final : public QObject {
         kTerminalSeed = 2,
         kTaskLog = 3,
     };
-    [[nodiscard]] JobListQuery make_active_job_query(
-        const std::optional<QString>& continuation_token) const;
+    [[nodiscard]] JobListQuery
+    make_active_job_query(const std::optional<QString>& continuation_token) const;
     [[nodiscard]] JobListQuery make_terminal_seed_query() const;
-    [[nodiscard]] JobListQuery make_task_log_query(
-        const std::optional<QString>& continuation_token) const;
+    [[nodiscard]] JobListQuery
+    make_task_log_query(const std::optional<QString>& continuation_token) const;
     void start_connection_query();
     void begin_next_repository_refresh();
     void request_connection_snapshot_after_probe();
@@ -485,7 +501,8 @@ class ServiceClient final : public QObject {
     [[nodiscard]] RequestDisposition handle_unmount_command_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_browse_file_sources_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_file_target_browse_frame(const QByteArray& body);
-    [[nodiscard]] RequestDisposition handle_list_recovery_point_entries_frame(const QByteArray& body);
+    [[nodiscard]] RequestDisposition
+    handle_list_recovery_point_entries_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_prepare_file_restore_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_start_file_restore_frame(const QByteArray& body);
     void on_file_browse_expand_requested(const QString& node_token);
@@ -536,8 +553,12 @@ class ServiceClient final : public QObject {
     void reset_connections();
     void reset_schedules();
     void reset_repository_command();
+    void refresh_repository_directories(const QString& location_token);
+    [[nodiscard]] RequestDisposition handle_repository_directories_frame(const QByteArray& body);
+    void finish_repository_directories_failure(const QString& message_code);
     void start_repository_input_command(int request_kind, const QString& display_name,
-                                        const QString& locator, const QString& network_username = {},
+                                        const QString& locator,
+                                        const QString& network_username = {},
                                         const QString& network_password = {},
                                         const QString& network_domain = {});
     void start_repository_resource_command(int request_kind, const QString& connection_id);
@@ -579,6 +600,9 @@ class ServiceClient final : public QObject {
     QString schedules_error_code_;
     QString connections_error_code_;
     QString repository_command_error_code_;
+    QString repository_directories_error_code_;
+    QString repository_location_token_;
+    QString repository_directories_request_id_;
     QString selected_repository_connection_id_;
     QString backup_command_error_code_;
     QString repository_request_id_;
@@ -615,6 +639,7 @@ class ServiceClient final : public QObject {
     QVariantList schedules_;
     ScheduleListModel schedule_list_;
     QVariantList pending_connections_;
+    QVariantList repository_directories_;
     QSet<QString> toasted_job_keys_;
     std::optional<QString> requested_token_;
     std::optional<QString> job_requested_token_;
@@ -681,6 +706,7 @@ class ServiceClient final : public QObject {
     QStringList repository_refresh_queue_;
     QString repository_refresh_current_id_;
     bool repository_command_busy_{false};
+    bool repository_directories_loading_{false};
     int repository_command_kind_{0};
     bool delete_plan_busy_{false};
     QString delete_plan_request_id_;

@@ -245,3 +245,6 @@ Repository 容量卡片只使用 Service 异步返回的本机 volume inventory 
 socket、重连 timer、frame 收发与组装均归属专用 `QThread`；GUI 线程只提交 queued 请求并处理 queued 响应。
 本机卷、盘符、容量和 Repository locator 等业务系统数据必须来自 Service 快照或命令，Desktop 不得直接调用
 `QStorageInfo`、目录枚举、WNet 或 Win32 volume API。刷新失败与短暂断线保留最后一次完整模型快照。
+新增网络 Repository 时，Connect 按钮通过异步 Service kind 50 探测 UNC 根路径；Desktop 不直接调用
+WNet，路径或凭据变化后必须重新 Connect，成功后才允许 Add。Connect acknowledgement 返回 session
+绑定的 location token；Desktop 随后异步调用 kind 17 获取共享根目录的直接子目录并更新 Browse 列表。

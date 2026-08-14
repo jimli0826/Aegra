@@ -86,6 +86,8 @@ void redact(Json& value) {
         return "Prepare file restore";
     case contracts::ServiceRequestKind::kGetServiceSettings:
         return "Get service settings";
+    case contracts::ServiceRequestKind::kListRepositoryDirectories:
+        return "List repository directories";
     default:
         return "Unknown query";
     }
@@ -97,6 +99,8 @@ void redact(Json& value) {
         return "Add repository connection";
     case contracts::ServiceRequestKind::kImportRepositoryConnection:
         return "Import repository connection";
+    case contracts::ServiceRequestKind::kConnectRepositoryLocation:
+        return "Connect repository location";
     case contracts::ServiceRequestKind::kTestRepositoryConnection:
         return "Test repository connection";
     case contracts::ServiceRequestKind::kSetDefaultRepository:
@@ -138,33 +142,36 @@ void redact(Json& value) {
 
 std::string_view request_kind_name(const contracts::ServiceRequestKind kind) noexcept {
     const auto value = static_cast<std::uint8_t>(kind);
-    return value < static_cast<std::uint8_t>(contracts::ServiceRequestKind::kAddRepositoryConnection)
+    return value < static_cast<std::uint8_t>(
+                       contracts::ServiceRequestKind::kAddRepositoryConnection)
                ? query_kind_name(kind)
                : command_kind_name(kind);
 }
 
 std::string readable_code(const std::string_view code) {
     std::string result(code);
-    std::ranges::replace_if(result, [](const char value) { return value == '.' || value == '_'; },
-                            ' ');
+    std::ranges::replace_if(
+        result, [](const char value) { return value == '.' || value == '_'; }, ' ');
     if (!result.empty()) {
-        result.front() = static_cast<char>(std::toupper(static_cast<unsigned char>(result.front())));
+        result.front() =
+            static_cast<char>(std::toupper(static_cast<unsigned char>(result.front())));
     }
     return result;
 }
 
 std::string request_log_detail(const contracts::ServiceRequest& request) {
     std::ostringstream stream;
-    stream << "operation=" << request_kind_name(request.kind) << "; request_id="
-           << request.request_id << "; mode="
-           << (contracts::is_service_command_kind(request.kind) ? "command" : "query");
+    stream << "operation=" << request_kind_name(request.kind)
+           << "; request_id=" << request.request_id
+           << "; mode=" << (contracts::is_service_command_kind(request.kind) ? "command" : "query");
     return stream.str();
 }
 
 std::string response_log_detail(const contracts::ServiceResponse& response) {
     std::ostringstream stream;
-    stream << "operation=" << request_kind_name(response.request_kind) << "; request_id="
-           << response.request_id << "; response=" << response_kind_name(response.kind)
+    stream << "operation=" << request_kind_name(response.request_kind)
+           << "; request_id=" << response.request_id
+           << "; response=" << response_kind_name(response.kind)
            << "; error=" << readable_code(base::error_code_name(response.boundary_error_code));
     if (!response.message_code.empty()) {
         stream << "; message=" << readable_code(response.message_code) << " ["

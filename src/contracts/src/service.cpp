@@ -100,6 +100,9 @@ template <typename Payload, typename Validator>
                                                            validate_prepare_file_restore_request);
     case ServiceRequestKind::kGetServiceSettings:
         return validate_payload<ServiceSettingsQuery>(request, validate_service_settings_query);
+    case ServiceRequestKind::kListRepositoryDirectories:
+        return validate_payload<RepositoryDirectoryListRequest>(
+            request, validate_repository_directory_list_request);
     default:
         return invalid("service query kind is invalid");
     }
@@ -109,6 +112,7 @@ template <typename Payload, typename Validator>
     switch (request.kind) {
     case ServiceRequestKind::kAddRepositoryConnection:
     case ServiceRequestKind::kImportRepositoryConnection:
+    case ServiceRequestKind::kConnectRepositoryLocation:
         return validate_payload<RepositoryConnectionInput>(request,
                                                            validate_repository_connection_input);
     case ServiceRequestKind::kTestRepositoryConnection:
@@ -197,6 +201,9 @@ template <typename Payload, typename Validator>
                                                                validate_file_restore_preflight);
     case ServiceRequestKind::kGetServiceSettings:
         return validate_response_payload<ServiceSettings>(response, validate_service_settings);
+    case ServiceRequestKind::kListRepositoryDirectories:
+        return validate_response_payload<FileSourceNodePage>(response,
+                                                             validate_file_source_node_page);
     default:
         return invalid("service query response kind is invalid");
     }
@@ -227,14 +234,15 @@ template <typename Payload, typename Validator>
 
 bool is_service_query_kind(const ServiceRequestKind kind) noexcept {
     return kind >= ServiceRequestKind::kGetServiceInfo &&
-           kind <= ServiceRequestKind::kGetServiceSettings;
+           kind <= ServiceRequestKind::kListRepositoryDirectories;
 }
 
 bool is_service_command_kind(const ServiceRequestKind kind) noexcept {
     return (kind >= ServiceRequestKind::kAddRepositoryConnection &&
             kind <= ServiceRequestKind::kExecuteDeletePlan) ||
            kind == ServiceRequestKind::kStartFileRestore ||
-           kind == ServiceRequestKind::kUpdateServiceSettings;
+           kind == ServiceRequestKind::kUpdateServiceSettings ||
+           kind == ServiceRequestKind::kConnectRepositoryLocation;
 }
 
 base::Result<void> validate_service_request(const ServiceRequest& request) {

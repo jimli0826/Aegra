@@ -65,6 +65,8 @@ Archive、Catalog 和 IPC 只表达 selection fingerprint、`FileChangeDetection
 新增 query kind 13–15（浏览文件源、列出 RP 条目、PrepareFileRestore）与 command kind 48
 （StartFileRestore）。`UpsertScheduleCommand` 使用 tagged `ProtectionSpecInput`（`volume_source_ids` 与
 file selections 互斥）。`ScheduleSummary` / `JobSummary` / `RecoveryPointSummary` 携带 `content_kind`。
+Repository 新增 query kind 17 `ListRepositoryDirectories`，仅接受 Connect 返回的 session-bound location
+token 与分页参数，响应复用不含绝对路径的 `FileSourceNodePage`。
 完整 wire 见 [ADR-0017](../adr/0017-service-control-protocol-v4.md) 与
 [SERVICE_CONTROL_PROTOCOL_V4](../protocol/SERVICE_CONTROL_PROTOCOL_V4.md)。产品未发布，不实现 V3 解析。
 

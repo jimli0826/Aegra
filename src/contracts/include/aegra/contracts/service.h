@@ -42,6 +42,7 @@ enum class ServiceRequestKind : std::uint8_t {
     kPrepareFileRestore = 15,
     /// Control-plane preferences (job retention, etc.).
     kGetServiceSettings = 16,
+    kListRepositoryDirectories = 17,
     kAddRepositoryConnection = 32,
     kImportRepositoryConnection = 33,
     kTestRepositoryConnection = 34,
@@ -61,6 +62,8 @@ enum class ServiceRequestKind : std::uint8_t {
     kStartFileRestore = 48,
     /// Persist control-plane preferences and apply retention purge.
     kUpdateServiceSettings = 49,
+    /// Validate and connect a repository locator without persisting a connection record.
+    kConnectRepositoryLocation = 50,
 };
 
 enum class ServiceResponseKind : std::uint8_t {
@@ -83,16 +86,15 @@ struct ServiceInfo final {
     std::vector<std::string> capabilities;
 };
 
-using ServiceRequestPayload =
-    std::variant<ServiceVersionRange, ServiceRecoveryPointListRequest,
-                 RepositoryConnectionListRequest, SourceInventoryListRequest, JobListRequest,
-                 ScheduleListRequest, AuditEventListRequest, MountSessionListRequest,
-                 RestorePreflightRequest, RecoveryPointRef, RepositoryConnectionInput, ResourceRef,
-                 StartBackupCommand, StartVerifyCommand, StartRestoreCommand,
-                 MountRecoveryPointCommand, UpsertScheduleCommand, EventSubscriptionRequest,
-                 EventAcknowledgement, ExecuteDeletePlanCommand, BrowseFileSourcesRequest,
-                 ListRecoveryPointEntriesRequest, PrepareFileRestoreRequest,
-                 StartFileRestoreCommand, ServiceSettingsQuery, UpdateServiceSettingsCommand>;
+using ServiceRequestPayload = std::variant<
+    ServiceVersionRange, ServiceRecoveryPointListRequest, RepositoryConnectionListRequest,
+    SourceInventoryListRequest, JobListRequest, ScheduleListRequest, AuditEventListRequest,
+    MountSessionListRequest, RestorePreflightRequest, RecoveryPointRef, RepositoryConnectionInput,
+    ResourceRef, StartBackupCommand, StartVerifyCommand, StartRestoreCommand,
+    MountRecoveryPointCommand, UpsertScheduleCommand, EventSubscriptionRequest,
+    EventAcknowledgement, ExecuteDeletePlanCommand, BrowseFileSourcesRequest,
+    RepositoryDirectoryListRequest, ListRecoveryPointEntriesRequest, PrepareFileRestoreRequest,
+    StartFileRestoreCommand, ServiceSettingsQuery, UpdateServiceSettingsCommand>;
 
 struct ServiceRequest final {
     std::uint32_t schema_version{kServiceRequestSchemaVersion};
@@ -106,9 +108,9 @@ struct ServiceRequest final {
 using ServiceResponsePayload =
     std::variant<std::monostate, ServiceInfo, ServiceRecoveryPointPage, RepositoryConnectionPage,
                  SourceInventoryPage, JobPage, SchedulePage, AuditEventPage, MountSessionPage,
-                 RestorePreflight, RecoveryPointChainResult, DeletePlanSummary,
-                 RecoveryPointLayout, CommandAcknowledgement, FileSourceNodePage,
-                 RecoveryPointEntryPage, FileRestorePreflight, ServiceSettings>;
+                 RestorePreflight, RecoveryPointChainResult, DeletePlanSummary, RecoveryPointLayout,
+                 CommandAcknowledgement, FileSourceNodePage, RecoveryPointEntryPage,
+                 FileRestorePreflight, ServiceSettings>;
 
 struct ServiceResponse final {
     std::uint32_t schema_version{kServiceResponseSchemaVersion};

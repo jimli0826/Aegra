@@ -68,8 +68,8 @@ constexpr qsizetype kMaximumRecoveryPoints = 10'000;
             break;
         }
     }
-    const auto name = (partition.value(QStringLiteral("volumeLabel")).toString() + QLatin1Char(' ') +
-                       partition.value(QStringLiteral("gptName")).toString())
+    const auto name = (partition.value(QStringLiteral("volumeLabel")).toString() +
+                       QLatin1Char(' ') + partition.value(QStringLiteral("gptName")).toString())
                           .toLower();
     static const char* k_name_keys[] = {
         "microsoft reserved", "msr", "efi system", "efi ", "recovery", "winre", "oem", "diag",
@@ -97,10 +97,10 @@ constexpr qsizetype kMaximumRecoveryPoints = 10'000;
 
 /// Old volumesForSourceDisk: partitions (order) + volumes via extents for letter/label/fs/size.
 [[nodiscard]] QVariantList volumes_for_source_disk(const int disk_number,
-                                                  const QVariantList& partitions,
-                                                  const QVariantList& all_volumes,
-                                                  const qint64 disk_total,
-                                                  const LocaleFormat& format) {
+                                                   const QVariantList& partitions,
+                                                   const QVariantList& all_volumes,
+                                                   const qint64 disk_total,
+                                                   const LocaleFormat& format) {
     QHash<int, QString> letter_by_part;
     QHash<int, QString> label_by_part;
     QHash<int, QString> fs_by_part;
@@ -181,7 +181,7 @@ constexpr qsizetype kMaximumRecoveryPoints = 10'000;
 
 /// Flat Manifest volumes for volume→volume restore (source_volume_index mapping).
 [[nodiscard]] QVariantList source_volumes_from_layout(const QVariantList& volumes,
-                                                     const LocaleFormat& format) {
+                                                      const LocaleFormat& format) {
     QVariantList sorted = volumes;
     std::sort(sorted.begin(), sorted.end(), [](const QVariant& left, const QVariant& right) {
         return left.toMap().value(QStringLiteral("volumeIndex")).toInt() <
@@ -225,8 +225,8 @@ constexpr qsizetype kMaximumRecoveryPoints = 10'000;
 
 /// Hierarchical layout (disks + volumes) → Restore Source DiskRows (old project shape).
 [[nodiscard]] QVariantList source_disks_from_layout(const QVariantList& disks,
-                                                   const QVariantList& volumes,
-                                                   const LocaleFormat& format) {
+                                                    const QVariantList& volumes,
+                                                    const LocaleFormat& format) {
     QVariantList sorted = disks;
     std::sort(sorted.begin(), sorted.end(), [](const QVariant& left, const QVariant& right) {
         return left.toMap().value(QStringLiteral("diskNumber")).toInt() <
@@ -272,11 +272,10 @@ void ServiceClient::start_repository_query() {
             ? std::nullopt
             : std::optional{selected_repository_connection_id_};
     const auto body = encode_recovery_point_request(request_id, std::nullopt, connection_id);
-    const auto started =
-        coordinator_->begin_request(
-            request_id, body,
-            [this](const QByteArray& frame_body) { return handle_recovery_point_frame(frame_body); },
-            kRepositoryQueryDeadlineMilliseconds);
+    const auto started = coordinator_->begin_request(
+        request_id, body,
+        [this](const QByteArray& frame_body) { return handle_recovery_point_frame(frame_body); },
+        kRepositoryQueryDeadlineMilliseconds);
     if (!started) {
         finish_repository_failure(QStringLiteral("repository.query_failed"));
     }
@@ -481,10 +480,10 @@ void ServiceClient::finish_recovery_point_layout_failure(const QString& message_
 }
 
 void ServiceClient::reset_recovery_point_layout() {
-    const bool had_state = recovery_point_layout_loading_ || !recovery_point_source_disks_.isEmpty() ||
-                           !recovery_point_source_volumes_.isEmpty() ||
-                           !recovery_point_layout_error_code_.isEmpty() ||
-                           !recovery_point_layout_recovery_point_id_.isEmpty();
+    const bool had_state =
+        recovery_point_layout_loading_ || !recovery_point_source_disks_.isEmpty() ||
+        !recovery_point_source_volumes_.isEmpty() || !recovery_point_layout_error_code_.isEmpty() ||
+        !recovery_point_layout_recovery_point_id_.isEmpty();
     recovery_point_source_disks_.clear();
     recovery_point_source_volumes_.clear();
     recovery_point_layout_loading_ = false;
@@ -509,8 +508,18 @@ QString ServiceClient::repositoryCommandErrorText() const {
                : localize_message_code(repository_command_error_code_);
 }
 
-QString ServiceClient::repositoryCommandErrorCode() const {
-    return repository_command_error_code_;
+QString ServiceClient::repositoryCommandErrorCode() const { return repository_command_error_code_; }
+
+bool ServiceClient::repositoryDirectoriesLoading() const noexcept {
+    return repository_directories_loading_;
+}
+
+QVariantList ServiceClient::repositoryDirectories() const { return repository_directories_; }
+
+QString ServiceClient::repositoryDirectoriesErrorText() const {
+    return repository_directories_error_code_.isEmpty()
+               ? QString{}
+               : localize_message_code(repository_directories_error_code_);
 }
 
 void ServiceClient::selectRepositoryConnection(const QString& connection_id) {
@@ -539,6 +548,15 @@ void ServiceClient::importRepositoryConnection(const QString& display_name, cons
                                                const QString& network_domain) {
     start_repository_input_command(kImportRepositoryConnectionRequestKind, display_name, locator,
                                    network_username, network_password, network_domain);
+}
+
+void ServiceClient::connectRepositoryLocation(const QString& locator,
+                                              const QString& network_username,
+                                              const QString& network_password,
+                                              const QString& network_domain) {
+    start_repository_input_command(kConnectRepositoryLocationRequestKind,
+                                   QStringLiteral("network-probe"), locator, network_username,
+                                   network_password, network_domain);
 }
 
 void ServiceClient::testRepositoryConnection(const QString& connection_id) {
@@ -575,8 +593,7 @@ void ServiceClient::request_connection_snapshot_after_probe() {
 }
 
 void ServiceClient::stop_repository_refresh() {
-    const bool changed = repository_refresh_running_ ||
-                         repository_refresh_waiting_for_snapshot_ ||
+    const bool changed = repository_refresh_running_ || repository_refresh_waiting_for_snapshot_ ||
                          !repository_refresh_current_id_.isEmpty() ||
                          !repository_refresh_queue_.isEmpty();
     repository_refresh_running_ = false;
@@ -597,10 +614,12 @@ void ServiceClient::removeRepositoryConnection(const QString& connection_id) {
     start_repository_resource_command(kRemoveRepositoryConnectionRequestKind, connection_id);
 }
 
-void ServiceClient::start_repository_input_command(
-    const int request_kind, const QString& display_name, const QString& locator,
-    const QString& network_username, const QString& network_password,
-    const QString& network_domain) {
+void ServiceClient::start_repository_input_command(const int request_kind,
+                                                   const QString& display_name,
+                                                   const QString& locator,
+                                                   const QString& network_username,
+                                                   const QString& network_password,
+                                                   const QString& network_domain) {
     if (!connected() || repository_command_busy_ || display_name.trimmed().isEmpty() ||
         locator.trimmed().isEmpty()) {
         return;
@@ -615,10 +634,15 @@ void ServiceClient::start_repository_input_command(
         repository_command_request_id_, repository_command_idempotency_key_, request_kind,
         display_name.trimmed(), locator.trimmed(), network_username, network_password,
         network_domain);
+    const auto deadline = request_kind == kConnectRepositoryLocationRequestKind
+                              ? kRepositoryProbeDeadlineMilliseconds
+                              : ServiceRequestCoordinator::kDefaultDeadlineMilliseconds;
     const auto started = coordinator_->begin_request(
-        repository_command_request_id_, body, [this](const QByteArray& frame_body) {
+        repository_command_request_id_, body,
+        [this](const QByteArray& frame_body) {
             return handle_repository_command_frame(frame_body);
-        });
+        },
+        deadline);
     if (!started) {
         finish_repository_command_failure(QStringLiteral("service.send_failed"));
     }
@@ -642,9 +666,11 @@ void ServiceClient::start_repository_resource_command(const int request_kind,
                               ? kRepositoryProbeDeadlineMilliseconds
                               : ServiceRequestCoordinator::kDefaultDeadlineMilliseconds;
     const auto started = coordinator_->begin_request(
-        repository_command_request_id_, body, [this](const QByteArray& frame_body) {
+        repository_command_request_id_, body,
+        [this](const QByteArray& frame_body) {
             return handle_repository_command_frame(frame_body);
-        }, deadline);
+        },
+        deadline);
     if (!started) {
         finish_repository_command_failure(QStringLiteral("service.send_failed"));
     }
@@ -656,13 +682,14 @@ RequestDisposition ServiceClient::handle_repository_command_frame(const QByteArr
         return RequestDisposition::kProtocolError;
     }
     if (is_command_failure_response(root, repository_command_kind_)) {
+        const bool location_probe =
+            repository_command_kind_ == kConnectRepositoryLocationRequestKind;
         const bool refresh_probe = repository_refresh_running_ &&
-                                   repository_command_kind_ ==
-                                       kTestRepositoryConnectionRequestKind;
+                                   repository_command_kind_ == kTestRepositoryConnectionRequestKind;
         const auto message_code = root.value(QStringLiteral("message_code")).toString();
         finish_repository_command_failure(
             message_code.isEmpty() ? QStringLiteral("service.request_failed") : message_code);
-        if (!refresh_probe) {
+        if (!refresh_probe && !location_probe) {
             refreshConnections();
         }
         return RequestDisposition::kFinished;
@@ -672,29 +699,96 @@ RequestDisposition ServiceClient::handle_repository_command_frame(const QByteArr
         return RequestDisposition::kProtocolError;
     }
     const auto completed_kind = repository_command_kind_;
-    const bool refresh_probe = repository_refresh_running_ &&
-                               completed_kind == kTestRepositoryConnectionRequestKind;
+    const bool location_probe = completed_kind == kConnectRepositoryLocationRequestKind;
+    const bool refresh_probe =
+        repository_refresh_running_ && completed_kind == kTestRepositoryConnectionRequestKind;
     if (completed_kind == kRemoveRepositoryConnectionRequestKind &&
         acknowledgement.resource_id == selected_repository_connection_id_) {
         selected_repository_connection_id_.clear();
         reset_repository();
-    } else if (acknowledgement.has_resource_id && !refresh_probe) {
+    } else if (acknowledgement.has_resource_id && !refresh_probe && !location_probe) {
         selected_repository_connection_id_ = acknowledgement.resource_id;
+    }
+    if (location_probe && acknowledgement.has_resource_id) {
+        repository_location_token_ = acknowledgement.resource_id;
     }
     reset_repository_command();
     if (refresh_probe) {
         request_connection_snapshot_after_probe();
-    } else {
+    } else if (!location_probe) {
         refreshConnections();
     }
-    emit repositoryChanged();
+    if (!location_probe) {
+        emit repositoryChanged();
+    } else if (!repository_location_token_.isEmpty()) {
+        refresh_repository_directories(repository_location_token_);
+    }
     return RequestDisposition::kFinished;
+}
+
+void ServiceClient::refresh_repository_directories(const QString& location_token) {
+    if (!connected() || location_token.isEmpty() || repository_directories_loading_) {
+        return;
+    }
+    repository_directories_loading_ = true;
+    repository_directories_.clear();
+    repository_directories_error_code_.clear();
+    repository_directories_request_id_ = new_request_id();
+    emit repositoryDirectoriesChanged();
+    const auto body = encode_repository_directory_list_request(repository_directories_request_id_,
+                                                               location_token);
+    const auto started = coordinator_->begin_request(
+        repository_directories_request_id_, body,
+        [this](const QByteArray& frame_body) {
+            return handle_repository_directories_frame(frame_body);
+        },
+        kRepositoryProbeDeadlineMilliseconds);
+    if (!started) {
+        finish_repository_directories_failure(QStringLiteral("service.send_failed"));
+    }
+}
+
+RequestDisposition ServiceClient::handle_repository_directories_frame(const QByteArray& body) {
+    QJsonObject root;
+    if (!parse_response_root(body, repository_directories_request_id_, root)) {
+        return RequestDisposition::kProtocolError;
+    }
+    if (is_command_failure_response(root, kListRepositoryDirectoriesRequestKind)) {
+        const auto message_code = root.value(QStringLiteral("message_code")).toString();
+        finish_repository_directories_failure(
+            message_code.isEmpty() ? QStringLiteral("service.request_failed") : message_code);
+        return RequestDisposition::kFinished;
+    }
+    FileBrowsePage page;
+    if (!parse_repository_directory_list_response(root, page)) {
+        return RequestDisposition::kProtocolError;
+    }
+    QVariantList directories;
+    directories.reserve(page.items.size());
+    for (const auto& value : page.items) {
+        const auto item = value.toMap();
+        if (item.value(QStringLiteral("isDirectory")).toBool()) {
+            directories.push_back(item.value(QStringLiteral("displayName")).toString());
+        }
+    }
+    repository_directories_ = std::move(directories);
+    repository_directories_loading_ = false;
+    repository_directories_request_id_.clear();
+    repository_directories_error_code_.clear();
+    emit repositoryDirectoriesChanged();
+    return RequestDisposition::kFinished;
+}
+
+void ServiceClient::finish_repository_directories_failure(const QString& message_code) {
+    repository_directories_loading_ = false;
+    repository_directories_request_id_.clear();
+    repository_directories_error_code_ = message_code;
+    emit repositoryDirectoriesChanged();
 }
 
 void ServiceClient::finish_repository_command_failure(const QString& message_code) {
     const bool refresh_probe = repository_refresh_running_ &&
-                               repository_command_kind_ ==
-                                   kTestRepositoryConnectionRequestKind;
+                               repository_command_kind_ == kTestRepositoryConnectionRequestKind;
     repository_command_busy_ = false;
     repository_command_request_id_.clear();
     repository_command_idempotency_key_.clear();
@@ -774,11 +868,10 @@ bool ServiceClient::executeDeletePlan() {
     emit deletePlanChanged();
     const auto body = encode_execute_delete_plan_request(
         execute_delete_request_id_, execute_delete_idempotency_key_, plan_token, true);
-    const auto started =
-        coordinator_->begin_request(execute_delete_request_id_, body,
-                                    [this](const QByteArray& frame_body) {
-                                        return handle_execute_delete_plan_frame(frame_body);
-                                    });
+    const auto started = coordinator_->begin_request(
+        execute_delete_request_id_, body, [this](const QByteArray& frame_body) {
+            return handle_execute_delete_plan_frame(frame_body);
+        });
     if (!started) {
         finish_execute_delete_failure(QStringLiteral("service.request_failed"));
         return false;
@@ -881,10 +974,8 @@ QVariantList ServiceClient::listLocalRepositoryDrives() const {
         for (const auto& volume_value : volumes) {
             auto letter = volume_value.toMap().value(QStringLiteral("letter")).toString().trimmed();
             if (letter.isEmpty()) {
-                letter = volume_value.toMap()
-                             .value(QStringLiteral("mountLetter"))
-                             .toString()
-                             .trimmed();
+                letter =
+                    volume_value.toMap().value(QStringLiteral("mountLetter")).toString().trimmed();
             }
             if (letter.isEmpty()) {
                 continue;
@@ -903,9 +994,7 @@ QVariantList ServiceClient::listLocalRepositoryDrives() const {
     return drives;
 }
 
-QString ServiceClient::formatBytes(const qint64 bytes) const {
-    return format_.format_bytes(bytes);
-}
+QString ServiceClient::formatBytes(const qint64 bytes) const { return format_.format_bytes(bytes); }
 
 namespace {
 
@@ -941,8 +1030,7 @@ qint64 ServiceClient::repositoryHostFreeBytes() const {
     const int rows = connections_.rowCount();
     for (int row = 0; row < rows; ++row) {
         const auto locator =
-            connections_
-                .data(connections_.index(row, 0), RepositoryConnectionModel::LocatorRole)
+            connections_.data(connections_.index(row, 0), RepositoryConnectionModel::LocatorRole)
                 .toString();
         const auto key = locator.left(1).toUpper();
         const auto volume = inventory_volume(sources_, locator);
@@ -962,8 +1050,7 @@ qint64 ServiceClient::repositoryHostUsedBytes() const {
     const int rows = connections_.rowCount();
     for (int row = 0; row < rows; ++row) {
         const auto locator =
-            connections_
-                .data(connections_.index(row, 0), RepositoryConnectionModel::LocatorRole)
+            connections_.data(connections_.index(row, 0), RepositoryConnectionModel::LocatorRole)
                 .toString();
         const auto key = locator.left(1).toUpper();
         const auto volume = inventory_volume(sources_, locator);

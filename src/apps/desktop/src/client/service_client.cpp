@@ -195,10 +195,9 @@ void ServiceClient::refreshServiceSettings() {
     const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     service_settings_request_id_ = request_id;
     const auto body = encode_get_service_settings_request(request_id);
-    if (!coordinator_->begin_request(
-            request_id, body, [this](const QByteArray& frame_body) {
-                return handle_get_service_settings_frame(frame_body);
-            })) {
+    if (!coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
+            return handle_get_service_settings_frame(frame_body);
+        })) {
         service_settings_loading_ = false;
         service_settings_error_code_ = QStringLiteral("service.send_failed");
         emit serviceSettingsChanged();
@@ -226,10 +225,9 @@ bool ServiceClient::setJobRetentionMonths(const int months) {
     service_settings_update_request_id_ = request_id;
     const auto body = encode_update_service_settings_request(
         request_id, service_settings_update_idempotency_key_, months);
-    if (!coordinator_->begin_request(
-            request_id, body, [this](const QByteArray& frame_body) {
-                return handle_update_service_settings_frame(frame_body);
-            })) {
+    if (!coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
+            return handle_update_service_settings_frame(frame_body);
+        })) {
         service_settings_busy_ = false;
         service_settings_error_code_ = QStringLiteral("service.send_failed");
         emit serviceSettingsChanged();
@@ -330,9 +328,9 @@ bool ServiceClient::globalLoading() const noexcept {
     }
     return recovery_point_layout_loading_ || jobs_loading_ || inventory_loading_ ||
            (connections_loading_ && !repository_refresh_running_) || schedules_loading_ ||
-           (repository_command_busy_ && !repository_refresh_running_) ||
-           backup_command_busy_ || cancel_command_busy_ ||
-           (schedule_command_busy_ && !schedule_enable_patch_active_) || mount_command_busy_;
+           (repository_command_busy_ && !repository_refresh_running_) || backup_command_busy_ ||
+           cancel_command_busy_ || (schedule_command_busy_ && !schedule_enable_patch_active_) ||
+           mount_command_busy_;
 }
 
 bool ServiceClient::hasCapability(const QString& capability) const {
@@ -460,7 +458,8 @@ void ServiceClient::on_request_failed(const QString& message_code) {
                 finish_repository_failure(QStringLiteral("repository.query_failed"));
             }
             if (recovery_point_layout_loading_) {
-                finish_recovery_point_layout_failure(QStringLiteral("recovery_point.layout_failed"));
+                finish_recovery_point_layout_failure(
+                    QStringLiteral("recovery_point.layout_failed"));
             }
             if (jobs_loading_) {
                 finish_job_failure(QStringLiteral("job.query_failed"));
@@ -536,6 +535,9 @@ void ServiceClient::on_request_failed(const QString& message_code) {
     if (repository_command_busy_) {
         finish_repository_command_failure(QStringLiteral("service.request_failed"));
     }
+    if (repository_directories_loading_) {
+        finish_repository_directories_failure(QStringLiteral("service.request_failed"));
+    }
     if (backup_command_busy_) {
         finish_backup_command_failure(QStringLiteral("backup.command_failed"));
     }
@@ -594,8 +596,8 @@ void ServiceClient::send_service_info_request() {
     }
 }
 
-JobListQuery ServiceClient::make_active_job_query(
-    const std::optional<QString>& continuation_token) const {
+JobListQuery
+ServiceClient::make_active_job_query(const std::optional<QString>& continuation_token) const {
     JobListQuery query;
     query.scope = kJobListScopeActive;
     query.continuation_token = continuation_token;
@@ -610,8 +612,8 @@ JobListQuery ServiceClient::make_terminal_seed_query() const {
     return query;
 }
 
-JobListQuery ServiceClient::make_task_log_query(
-    const std::optional<QString>& continuation_token) const {
+JobListQuery
+ServiceClient::make_task_log_query(const std::optional<QString>& continuation_token) const {
     auto query = task_log_query_;
     query.continuation_token = continuation_token;
     return query;
@@ -677,9 +679,8 @@ void ServiceClient::start_task_log_query(const bool append) {
     if (!job_list_available_ || jobs_loading_) {
         return;
     }
-    if (task_log_loading_ ||
-        (!task_log_request_id_.isEmpty() &&
-         coordinator_->has_pending_request(task_log_request_id_))) {
+    if (task_log_loading_ || (!task_log_request_id_.isEmpty() &&
+                              coordinator_->has_pending_request(task_log_request_id_))) {
         return;
     }
     if (!append) {
@@ -829,10 +830,9 @@ RequestDisposition ServiceClient::handle_job_list_frame(const QByteArray& body) 
         return RequestDisposition::kProtocolError;
     }
 
-    auto& pending =
-        purpose == JobQueryPurpose::kTaskLog ? pending_task_log_ : pending_jobs_;
-    auto& requested_token = purpose == JobQueryPurpose::kTaskLog ? task_log_requested_token_
-                                                                   : job_requested_token_;
+    auto& pending = purpose == JobQueryPurpose::kTaskLog ? pending_task_log_ : pending_jobs_;
+    auto& requested_token =
+        purpose == JobQueryPurpose::kTaskLog ? task_log_requested_token_ : job_requested_token_;
 
     if ((page.continuation_token && page.continuation_token == requested_token) ||
         pending.size() + page.items.size() > kMaximumJobs) {
@@ -1072,7 +1072,6 @@ void ServiceClient::reset_file_models() {
     file_restore_target_token_.clear();
     file_restore_conflict_policy_ = kFileConflictPolicyFail;
     file_restore_security_ = true;
-
 }
 
 void ServiceClient::set_state(const State state, QString error_code) {

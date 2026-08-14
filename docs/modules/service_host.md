@@ -15,6 +15,10 @@ UNC Repository 在进入同步 WNet 或文件系统调用前，对 IP-literal Se
 会话被 Windows 网络重试无界占用；hostname locator 仍由 Windows 网络 Provider 负责解析与连接。
 WNet 失败按路径无效、主机不可达、共享不存在、凭据被拒、访问拒绝和已有连接凭据冲突映射为稳定
 `repository.network_*` message code；Service 不返回 Win32 文本，也不为解决凭据冲突强制断开现有映射。
+`ConnectRepositoryLocation`（kind 50）在请求执行线程中执行有 deadline 的 UNC 探测与连接，只返回
+correlated acknowledgement，不持久化 Repository connection 或凭据。成功后以 acknowledgement
+`resource_id` 注册 pipe-session 绑定的临时 location token；kind 17 使用该 token 枚举共享根目录，session
+断开时清理。Desktop 不接收绝对路径。
 
 ## 依赖与 Target
 

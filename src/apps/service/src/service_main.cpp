@@ -23,6 +23,7 @@
 #include "aegra/base/error.h"
 #include "aegra/ports/repository_storage.h"
 #include "network_aware_storage_factory.h"
+#include "network_share_access.h"
 #include "service_log_formatter.h"
 
 #include <spdlog/sinks/rotating_file_sink.h>
@@ -196,6 +197,7 @@ struct RuntimeComponents final {
     std::shared_ptr<service::BackupCatalogRegistrar> backup_catalog_registrar;
     std::unique_ptr<windows_filesystem::WindowsFileSourceBrowser> file_browser;
     std::unique_ptr<aegra::application::FileBrowseService> file_browse;
+    std::unique_ptr<service::RepositoryLocationBrowseRegistry> repository_location_browse;
     std::unique_ptr<service::WorkerSupervisor> supervisor;
     std::unique_ptr<service::WorkerJobService> worker_jobs;
     std::unique_ptr<service::ScheduleService> schedules;
@@ -717,6 +719,8 @@ create_runtime(const ServiceArguments& arguments) {
         *components.source_query, *components.control_plane, *components.storage_factory,
         *components.supervisor, *components.clock, *components.random,
         components.file_browse.get());
+    components.repository_location_browse =
+        std::make_unique<service::RepositoryLocationBrowseRegistry>();
     components.schedules = std::make_unique<service::ScheduleService>(
         *components.control_plane, *components.clock, *components.random,
         components.file_browse.get());
@@ -736,6 +740,7 @@ create_runtime(const ServiceArguments& arguments) {
         .source_inventory = components.source_query.get(),
         .recovery_point_operations = components.recovery_point_operations.get(),
         .file_browse = components.file_browse.get(),
+        .repository_location_browse = components.repository_location_browse.get(),
         .worker_jobs = components.worker_jobs.get(),
         .schedules = components.schedules.get(),
         .worker_supervisor = components.supervisor.get(),

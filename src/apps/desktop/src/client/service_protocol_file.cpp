@@ -20,10 +20,10 @@ using protocol_detail::stable_code;
 
 [[nodiscard]] QJsonObject make_page(const quint32 maximum_results,
                                     const std::optional<QString>& continuation_token) {
-    return QJsonObject{
-        {QStringLiteral("maximum_results"), static_cast<qint64>(maximum_results)},
-        {QStringLiteral("continuation_token"),
-         continuation_token ? QJsonValue(*continuation_token) : QJsonValue(QJsonValue::Null)}};
+    return QJsonObject{{QStringLiteral("maximum_results"), static_cast<qint64>(maximum_results)},
+                       {QStringLiteral("continuation_token"), continuation_token
+                                                                  ? QJsonValue(*continuation_token)
+                                                                  : QJsonValue(QJsonValue::Null)}};
 }
 
 [[nodiscard]] bool parse_optional_string(const QJsonValue& value, std::optional<QString>& result,
@@ -74,14 +74,15 @@ using protocol_detail::stable_code;
         }
         message_code = message_value.toString();
     }
-    result = {{QStringLiteral("nodeToken"), token},
-              {QStringLiteral("displayName"), display_name},
-              {QStringLiteral("entryKind"), entry_kind},
-              {QStringLiteral("selectability"), selectability},
-              {QStringLiteral("hasChildren"), object.value(QStringLiteral("has_children")).toBool()},
-              {QStringLiteral("isDirectory"), object.value(QStringLiteral("is_directory")).toBool()},
-              {QStringLiteral("availability"), availability},
-              {QStringLiteral("messageCode"), message_code}};
+    result = {
+        {QStringLiteral("nodeToken"), token},
+        {QStringLiteral("displayName"), display_name},
+        {QStringLiteral("entryKind"), entry_kind},
+        {QStringLiteral("selectability"), selectability},
+        {QStringLiteral("hasChildren"), object.value(QStringLiteral("has_children")).toBool()},
+        {QStringLiteral("isDirectory"), object.value(QStringLiteral("is_directory")).toBool()},
+        {QStringLiteral("availability"), availability},
+        {QStringLiteral("messageCode"), message_code}};
     return true;
 }
 
@@ -119,12 +120,13 @@ using protocol_detail::stable_code;
         }
         message_code = message_value.toString();
     }
-    result = {{QStringLiteral("entryId"), entry_id},
-              {QStringLiteral("displayName"), display_name},
-              {QStringLiteral("entryKind"), entry_kind},
-              {QStringLiteral("logicalSizeBytes"), logical_size},
-              {QStringLiteral("hasChildren"), object.value(QStringLiteral("has_children")).toBool()},
-              {QStringLiteral("messageCode"), message_code}};
+    result = {
+        {QStringLiteral("entryId"), entry_id},
+        {QStringLiteral("displayName"), display_name},
+        {QStringLiteral("entryKind"), entry_kind},
+        {QStringLiteral("logicalSizeBytes"), logical_size},
+        {QStringLiteral("hasChildren"), object.value(QStringLiteral("has_children")).toBool()},
+        {QStringLiteral("messageCode"), message_code}};
     return true;
 }
 
@@ -150,20 +152,37 @@ QByteArray encode_browse_file_sources_request(const QString& request_id,
         .toJson(QJsonDocument::Compact);
 }
 
+QByteArray
+encode_repository_directory_list_request(const QString& request_id, const QString& location_token,
+                                         const std::optional<QString>& continuation_token) {
+    const QJsonObject payload{
+        {QStringLiteral("location_token"), location_token},
+        {QStringLiteral("page"), make_page(kFileBrowsePageSize, continuation_token)}};
+    return QJsonDocument(
+               QJsonObject{
+                   {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
+                   {QStringLiteral("message_type"), 1},
+                   {QStringLiteral("request_id"), request_id},
+                   {QStringLiteral("kind"), kListRepositoryDirectoriesRequestKind},
+                   {QStringLiteral("idempotency_key"), QJsonValue(QJsonValue::Null)},
+                   {QStringLiteral("payload"), payload}})
+        .toJson(QJsonDocument::Compact);
+}
+
 QByteArray encode_list_recovery_point_entries_request(
     const QString& request_id, const QString& repository_connection_id,
     const QString& recovery_point_id, const QString& parent_entry_id,
     const std::optional<QString>& continuation_token, const QString& archive_secret_ref) {
     const QJsonObject payload{
-        {QStringLiteral("repository_connection_id"),
-         repository_connection_id.isEmpty() ? QJsonValue(QJsonValue::Null)
-                                            : QJsonValue(repository_connection_id)},
+        {QStringLiteral("repository_connection_id"), repository_connection_id.isEmpty()
+                                                         ? QJsonValue(QJsonValue::Null)
+                                                         : QJsonValue(repository_connection_id)},
         {QStringLiteral("recovery_point_id"), recovery_point_id},
         {QStringLiteral("parent_entry_id"), parent_entry_id},
         {QStringLiteral("page"), make_page(kFileBrowsePageSize, continuation_token)},
-        {QStringLiteral("archive_secret_ref"),
-         archive_secret_ref.isEmpty() ? QJsonValue(QJsonValue::Null)
-                                      : QJsonValue(archive_secret_ref)}};
+        {QStringLiteral("archive_secret_ref"), archive_secret_ref.isEmpty()
+                                                   ? QJsonValue(QJsonValue::Null)
+                                                   : QJsonValue(archive_secret_ref)}};
     return QJsonDocument(
                QJsonObject{
                    {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
@@ -175,29 +194,26 @@ QByteArray encode_list_recovery_point_entries_request(
         .toJson(QJsonDocument::Compact);
 }
 
-QByteArray encode_prepare_file_restore_request(const QString& request_id,
-                                               const QString& repository_connection_id,
-                                               const QString& recovery_point_id,
-                                               const QStringList& entry_ids,
-                                               const QString& target_node_token,
-                                               const int conflict_policy,
-                                               const QString& archive_secret_ref,
-                                               const bool restore_security) {
+QByteArray encode_prepare_file_restore_request(
+    const QString& request_id, const QString& repository_connection_id,
+    const QString& recovery_point_id, const QStringList& entry_ids,
+    const QString& target_node_token, const int conflict_policy, const QString& archive_secret_ref,
+    const bool restore_security) {
     QJsonArray entries;
     for (const auto& entry_id : entry_ids) {
         entries.push_back(entry_id);
     }
     const QJsonObject payload{
-        {QStringLiteral("repository_connection_id"),
-         repository_connection_id.isEmpty() ? QJsonValue(QJsonValue::Null)
-                                            : QJsonValue(repository_connection_id)},
+        {QStringLiteral("repository_connection_id"), repository_connection_id.isEmpty()
+                                                         ? QJsonValue(QJsonValue::Null)
+                                                         : QJsonValue(repository_connection_id)},
         {QStringLiteral("recovery_point_id"), recovery_point_id},
         {QStringLiteral("entry_ids"), entries},
         {QStringLiteral("target_node_token"), target_node_token},
         {QStringLiteral("conflict_policy"), conflict_policy},
-        {QStringLiteral("archive_secret_ref"),
-         archive_secret_ref.isEmpty() ? QJsonValue(QJsonValue::Null)
-                                      : QJsonValue(archive_secret_ref)},
+        {QStringLiteral("archive_secret_ref"), archive_secret_ref.isEmpty()
+                                                   ? QJsonValue(QJsonValue::Null)
+                                                   : QJsonValue(archive_secret_ref)},
         {QStringLiteral("restore_security"), restore_security}};
     return QJsonDocument(
                QJsonObject{
@@ -217,17 +233,15 @@ QByteArray encode_start_file_restore_request(const QString& request_id,
     const QJsonObject payload{{QStringLiteral("preflight_token"), preflight_token},
                               {QStringLiteral("confirmed"), true},
                               {QStringLiteral("archive_secret_ref"),
-                               archive_secret_ref.isEmpty()
-                                   ? QJsonValue(QJsonValue::Null)
-                                   : QJsonValue(archive_secret_ref)}};
-    return QJsonDocument(
-               QJsonObject{
-                   {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
-                   {QStringLiteral("message_type"), 1},
-                   {QStringLiteral("request_id"), request_id},
-                   {QStringLiteral("kind"), kStartFileRestoreRequestKind},
-                   {QStringLiteral("idempotency_key"), idempotency_key},
-                   {QStringLiteral("payload"), payload}})
+                               archive_secret_ref.isEmpty() ? QJsonValue(QJsonValue::Null)
+                                                            : QJsonValue(archive_secret_ref)}};
+    return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
+                                      static_cast<qint64>(kServiceSchemaVersion)},
+                                     {QStringLiteral("message_type"), 1},
+                                     {QStringLiteral("request_id"), request_id},
+                                     {QStringLiteral("kind"), kStartFileRestoreRequestKind},
+                                     {QStringLiteral("idempotency_key"), idempotency_key},
+                                     {QStringLiteral("payload"), payload}})
         .toJson(QJsonDocument::Compact);
 }
 
@@ -245,7 +259,8 @@ QByteArray encode_upsert_file_set_schedule_request(
         selections.push_back(QJsonObject{
             {QStringLiteral("node_token"), map.value(QStringLiteral("nodeToken")).toString()},
             {QStringLiteral("recursion"), map.value(QStringLiteral("recursion")).toInt()},
-            {QStringLiteral("display_label"), map.value(QStringLiteral("displayLabel")).toString()}});
+            {QStringLiteral("display_label"),
+             map.value(QStringLiteral("displayLabel")).toString()}});
     }
     const QJsonObject file_set{
         {QStringLiteral("selections"), selections},
@@ -257,12 +272,12 @@ QByteArray encode_upsert_file_set_schedule_request(
     for (const auto minute : local_minutes_of_day) {
         minutes_json.push_back(minute);
     }
-    const QJsonObject trigger{{QStringLiteral("kind"), trigger_kind},
-                              {QStringLiteral("local_minutes_of_day"), minutes_json},
-                              {QStringLiteral("weekday_mask"), weekday_mask},
-                              {QStringLiteral("day_of_month_mask"),
-                               static_cast<qint64>(day_of_month_mask)},
-                              {QStringLiteral("timezone_id"), timezone_id}};
+    const QJsonObject trigger{
+        {QStringLiteral("kind"), trigger_kind},
+        {QStringLiteral("local_minutes_of_day"), minutes_json},
+        {QStringLiteral("weekday_mask"), weekday_mask},
+        {QStringLiteral("day_of_month_mask"), static_cast<qint64>(day_of_month_mask)},
+        {QStringLiteral("timezone_id"), timezone_id}};
     const QJsonObject payload{
         {QStringLiteral("schedule_id"),
          schedule_id.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(schedule_id)},
@@ -277,14 +292,13 @@ QByteArray encode_upsert_file_set_schedule_request(
         {QStringLiteral("deduplication_enabled"), false},
         {QStringLiteral("encryption_enabled"), encryption_enabled},
         {QStringLiteral("archive_password"), archive_password}};
-    return QJsonDocument(
-               QJsonObject{
-                   {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
-                   {QStringLiteral("message_type"), 1},
-                   {QStringLiteral("request_id"), request_id},
-                   {QStringLiteral("kind"), kUpsertScheduleRequestKind},
-                   {QStringLiteral("idempotency_key"), idempotency_key},
-                   {QStringLiteral("payload"), payload}})
+    return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
+                                      static_cast<qint64>(kServiceSchemaVersion)},
+                                     {QStringLiteral("message_type"), 1},
+                                     {QStringLiteral("request_id"), request_id},
+                                     {QStringLiteral("kind"), kUpsertScheduleRequestKind},
+                                     {QStringLiteral("idempotency_key"), idempotency_key},
+                                     {QStringLiteral("payload"), payload}})
         .toJson(QJsonDocument::Compact);
 }
 
@@ -295,6 +309,40 @@ bool parse_browse_file_sources_response(const QJsonObject& root, FileBrowsePage&
     if (!integer_in_range(root.value(QStringLiteral("kind")), 1, 1, kind) ||
         !integer_in_range(root.value(QStringLiteral("request_kind")), kBrowseFileSourcesRequestKind,
                           kBrowseFileSourcesRequestKind, request_kind) ||
+        !integer_in_range(root.value(QStringLiteral("boundary_error_code")), 0, 0, error) ||
+        !root.value(QStringLiteral("payload")).isObject()) {
+        return false;
+    }
+    const auto payload = root.value(QStringLiteral("payload")).toObject();
+    if (!has_exact_keys(payload, {"items", "continuation_token"}) ||
+        !payload.value(QStringLiteral("items")).isArray()) {
+        return false;
+    }
+    const auto items = payload.value(QStringLiteral("items")).toArray();
+    if (items.size() > static_cast<qsizetype>(kFileBrowsePageSize)) {
+        return false;
+    }
+    QVariantList parsed_items;
+    for (const auto& item : items) {
+        QVariantMap map;
+        if (!parse_file_source_node(item, map)) {
+            return false;
+        }
+        parsed_items.push_back(std::move(map));
+    }
+    result.items = std::move(parsed_items);
+    return parse_token(payload.value(QStringLiteral("continuation_token")),
+                       result.continuation_token);
+}
+
+bool parse_repository_directory_list_response(const QJsonObject& root, FileBrowsePage& result) {
+    qint64 kind = 0;
+    qint64 request_kind = 0;
+    qint64 error = 0;
+    if (!integer_in_range(root.value(QStringLiteral("kind")), 1, 1, kind) ||
+        !integer_in_range(root.value(QStringLiteral("request_kind")),
+                          kListRepositoryDirectoriesRequestKind,
+                          kListRepositoryDirectoriesRequestKind, request_kind) ||
         !integer_in_range(root.value(QStringLiteral("boundary_error_code")), 0, 0, error) ||
         !root.value(QStringLiteral("payload")).isObject()) {
         return false;
@@ -335,8 +383,9 @@ bool parse_list_recovery_point_entries_response(const QJsonObject& root,
         return false;
     }
     const auto payload = root.value(QStringLiteral("payload")).toObject();
-    if (!has_exact_keys(payload, {"repository_connection_id", "recovery_point_id", "parent_entry_id",
-                                  "index_generation", "items", "continuation_token"}) ||
+    if (!has_exact_keys(payload,
+                        {"repository_connection_id", "recovery_point_id", "parent_entry_id",
+                         "index_generation", "items", "continuation_token"}) ||
         !payload.value(QStringLiteral("items")).isArray()) {
         return false;
     }
@@ -369,22 +418,24 @@ bool parse_list_recovery_point_entries_response(const QJsonObject& root,
                        result.continuation_token);
 }
 
-bool parse_prepare_file_restore_response(const QJsonObject& root, FileRestorePreflightPage& result) {
+bool parse_prepare_file_restore_response(const QJsonObject& root,
+                                         FileRestorePreflightPage& result) {
     qint64 kind = 0;
     qint64 request_kind = 0;
     qint64 error = 0;
     if (!integer_in_range(root.value(QStringLiteral("kind")), 1, 1, kind) ||
-        !integer_in_range(root.value(QStringLiteral("request_kind")), kPrepareFileRestoreRequestKind,
-                          kPrepareFileRestoreRequestKind, request_kind) ||
+        !integer_in_range(root.value(QStringLiteral("request_kind")),
+                          kPrepareFileRestoreRequestKind, kPrepareFileRestoreRequestKind,
+                          request_kind) ||
         !integer_in_range(root.value(QStringLiteral("boundary_error_code")), 0, 0, error) ||
         !root.value(QStringLiteral("payload")).isObject()) {
         return false;
     }
     const auto payload = root.value(QStringLiteral("payload")).toObject();
-    if (!has_exact_keys(payload, {"preflight_token", "repository_connection_id", "recovery_point_id",
-                                  "entry_count", "logical_size_bytes", "target_free_bytes",
-                                  "conflict_policy", "expires_utc_ms", "restore_eligible",
-                                  "message_code"})) {
+    if (!has_exact_keys(payload, {"preflight_token", "repository_connection_id",
+                                  "recovery_point_id", "entry_count", "logical_size_bytes",
+                                  "target_free_bytes", "conflict_policy", "expires_utc_ms",
+                                  "restore_eligible", "message_code"})) {
         return false;
     }
     qint64 entry_count = 0;
@@ -404,7 +455,8 @@ bool parse_prepare_file_restore_response(const QJsonObject& root, FileRestorePre
                           (std::numeric_limits<qint64>::max)(), logical_size) ||
         !integer_in_range(payload.value(QStringLiteral("target_free_bytes")), 0,
                           (std::numeric_limits<qint64>::max)(), target_free) ||
-        !integer_in_range(payload.value(QStringLiteral("conflict_policy")), 1, 3, conflict_policy) ||
+        !integer_in_range(payload.value(QStringLiteral("conflict_policy")), 1, 3,
+                          conflict_policy) ||
         !integer_in_range(payload.value(QStringLiteral("expires_utc_ms")), 0,
                           (std::numeric_limits<qint64>::max)(), expires) ||
         !payload.value(QStringLiteral("restore_eligible")).isBool() ||
@@ -429,8 +481,9 @@ bool is_browse_file_sources_failure_response(const QJsonObject& root) {
     qint64 request_kind = 0;
     return integer_in_range(root.value(QStringLiteral("kind")), kRequestFailedResponseKind,
                             kRequestFailedResponseKind, kind) &&
-           integer_in_range(root.value(QStringLiteral("request_kind")), kBrowseFileSourcesRequestKind,
-                            kBrowseFileSourcesRequestKind, request_kind);
+           integer_in_range(root.value(QStringLiteral("request_kind")),
+                            kBrowseFileSourcesRequestKind, kBrowseFileSourcesRequestKind,
+                            request_kind);
 }
 
 bool is_list_recovery_point_entries_failure_response(const QJsonObject& root) {

@@ -88,9 +88,11 @@ struct RequestState final {
     case Kind::kPrepareFileRestore:
         return 1;
     case Kind::kBrowseFileSources:
+    case Kind::kListRepositoryDirectories:
         return 2;
     case Kind::kAddRepositoryConnection:
     case Kind::kImportRepositoryConnection:
+    case Kind::kConnectRepositoryLocation:
     case Kind::kTestRepositoryConnection:
     case Kind::kSetDefaultRepository:
     case Kind::kRemoveRepositoryConnection:
@@ -245,9 +247,8 @@ class SessionExecutor final {
             }
             for (const auto& state : expired) {
                 persist_probe_timeout(*state);
-                enqueue_claimed_response(
-                    failure_response(state->request, base::ErrorCode::kCancelled,
-                                     "service.request_timeout"));
+                enqueue_claimed_response(failure_response(
+                    state->request, base::ErrorCode::kCancelled, "service.request_timeout"));
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }

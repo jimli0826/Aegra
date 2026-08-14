@@ -91,8 +91,8 @@
 
 | 类别 | kind 范围 | `idempotency_key` | 成功 response.kind |
 | --- | --- | --- | --- |
-| Query | 1–15 | null | 1 |
-| Command | 32–48 | 非空 | 2 |
+| Query | 1–17 | null | 1 |
+| Command | 32–50 | 非空 | 2 |
 
 ### 3.2 幂等
 
@@ -136,6 +136,7 @@ Job list 的 `progress`：仅合并 Worker 监督器缓存中的真实 progress�
 | 14 | ListRecoveryPointEntries | Query |
 | 15 | PrepareFileRestore | Query |
 | 16 | GetServiceSettings | Query |
+| 17 | ListRepositoryDirectories | Query |
 | 32 | AddRepositoryConnection | Command |
 | 33 | ImportRepositoryConnection | Command |
 | 34 | TestRepositoryConnection | Command |
@@ -154,6 +155,7 @@ Job list 的 `progress`：仅合并 Worker 监督器缓存中的真实 progress�
 | 47 | ExecuteDeletePlan | Command |
 | 48 | StartFileRestore | Command |
 | 49 | UpdateServiceSettings | Command |
+| 50 | ConnectRepositoryLocation | Command |
 
 ---
 
@@ -613,11 +615,18 @@ payload 保持 repository/schedule/job 引用形状；若 Schedule 为 file_set�
 }
 ```
 
-### 7.4 其它命令 32–47
+### 7.4 其它命令 32–47、50
 
 字段级形状与 V3 相同（版本号 4），除非 Contracts 在 F1 明确收紧。`StartRestore`（40）仅 volume。
 
 Repository 网络命令失败使用以下稳定 `message_code`，不得返回 Win32 原始错误文本：
+
+`ConnectRepositoryLocation`（kind 50）复用 `RepositoryConnectionInput`；`display_name` 仅为必填的请求字段，
+Service 忽略它。该命令只验证并连接 UNC 路径，不写 Repository connection、凭据或其它控制面状态。
+Desktop 必须异步调用并等待独立 correlation response，且应为请求设置 deadline。
+成功 acknowledgement 的 `resource_id` 是当前 pipe session 绑定的临时 location token。Desktop 随后用
+kind 17 `ListRepositoryDirectories` 查询共享根目录的直接子目录；payload 为 `location_token` + `page`，
+响应复用 `FileSourceNodePage`，断开 session 后 token 立即失效。Service 不持久化凭据或目录 token。
 
 - `repository.network_path_invalid`
 - `repository.network_unreachable`

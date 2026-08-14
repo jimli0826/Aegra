@@ -53,6 +53,10 @@ Request / Response / Event envelope 字段名与语义同 V3，仅版本号为 4
 | 15 | Query | `PrepareFileRestore` |
 | 48 | Command | `StartFileRestore` |
 
+Repository 添加界面沿用 current V4，并增加：kind 17 `ListRepositoryDirectories` query 与 kind 50
+`ConnectRepositoryLocation` command。Connect 返回 pipe-session 绑定的临时 location token；kind 17 只用
+该 token 分页列出共享根目录的直接子目录，不返回绝对路径，session 断开即清理。
+
 `UpsertSchedule`（43）payload 改为携带 `ProtectionSpecInput` 互斥 tagged union；创建 file_set 时使用
 node token，更新不得改变已解析 selection。
 

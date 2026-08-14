@@ -332,8 +332,7 @@ base::Result<void> validate_schedule_trigger(const ScheduleTrigger& trigger) {
     if (trigger.local_minutes_of_day.size() >= 2) {
         const auto first = trigger.local_minutes_of_day.front();
         const auto last = trigger.local_minutes_of_day.back();
-        const auto wrap_gap =
-            static_cast<std::uint16_t>((first + 24U * 60U) - last);
+        const auto wrap_gap = static_cast<std::uint16_t>((first + 24U * 60U) - last);
         if (wrap_gap < kMinimumLocalMinutesOfDayGap) {
             return invalid("schedule trigger times are too close");
         }
@@ -383,8 +382,8 @@ base::Result<void> validate_schedule_summary(const ScheduleSummary& summary) {
             if (!base::is_canonical_uuid(item.selection_id) ||
                 !valid_text(item.display_label, kMaximumDisplayLabelBytes) ||
                 !is_known_file_entry_kind(item.entry_kind) ||
-                !is_known_file_recursion(item.recursion) || !seen.insert(item.selection_id).second ||
-                item.display_chain.empty() ||
+                !is_known_file_recursion(item.recursion) ||
+                !seen.insert(item.selection_id).second || item.display_chain.empty() ||
                 item.display_chain.size() > kMaximumRelativePathComponents) {
                 return invalid("file schedule selection summary is invalid");
             }
@@ -439,8 +438,7 @@ base::Result<void> validate_mount_session_summary(const MountSessionSummary& sum
     // mount_point may be empty while mounting or when no drive letter was assigned yet.
     if (!valid_stable_value(summary.session_id, kMaximumIdentifierBytes) ||
         !valid_stable_value(summary.recovery_point_id, kMaximumIdentifierBytes) ||
-        !known_mount_state(summary.state) ||
-        summary.mount_point.size() > kMaximumMountPointBytes ||
+        !known_mount_state(summary.state) || summary.mount_point.size() > kMaximumMountPointBytes ||
         (!summary.mount_point.empty() &&
          !valid_text(summary.mount_point, kMaximumMountPointBytes)) ||
         !valid_wire_integer(summary.source_disk_number) ||
@@ -683,8 +681,7 @@ base::Result<void> validate_recovery_point_layout(const RecoveryPointLayout& lay
     for (const auto& volume : layout.volumes) {
         if (!seen_index.insert(volume.volume_index).second || volume.total_size_bytes == 0 ||
             volume.letter.size() > 16 || volume.label.size() > 256 ||
-            volume.filesystem.size() > 64 || volume.extents.empty() ||
-            volume.extents.size() > 32) {
+            volume.filesystem.size() > 64 || volume.extents.empty() || volume.extents.size() > 32) {
             return invalid("recovery point source volume is invalid");
         }
         for (const auto& extent : volume.extents) {
@@ -826,10 +823,17 @@ base::Result<void> validate_protection_spec_input(const ProtectionSpecInput& pro
 }
 
 base::Result<void> validate_browse_file_sources_request(const BrowseFileSourcesRequest& request) {
-    if (request.parent_node_token &&
-        (request.parent_node_token->empty() ||
-         request.parent_node_token->size() > kMaximumNodeTokenBytes)) {
+    if (request.parent_node_token && (request.parent_node_token->empty() ||
+                                      request.parent_node_token->size() > kMaximumNodeTokenBytes)) {
         return invalid("browse parent_node_token is invalid");
+    }
+    return validate_service_page_request(request.page);
+}
+
+base::Result<void>
+validate_repository_directory_list_request(const RepositoryDirectoryListRequest& request) {
+    if (!valid_stable_value(request.location_token, kMaximumIdentifierBytes)) {
+        return invalid("repository directory location token is invalid");
     }
     return validate_service_page_request(request.page);
 }
@@ -843,8 +847,7 @@ base::Result<void> validate_file_source_node(const FileSourceNode& node) {
          node.selectability != FileNodeSelectability::kUnsupported) ||
         (node.availability != SourceAvailability::kAvailable &&
          node.availability != SourceAvailability::kUnavailable) ||
-        (node.message_code &&
-         !valid_stable_value(*node.message_code, kMaximumMessageCodeBytes))) {
+        (node.message_code && !valid_stable_value(*node.message_code, kMaximumMessageCodeBytes))) {
         return invalid("file source node is invalid");
     }
     return base::Result<void>::success();
@@ -866,8 +869,7 @@ validate_list_recovery_point_entries_request(const ListRecoveryPointEntriesReque
     return validate_service_page_request(request.page);
 }
 
-base::Result<void>
-validate_recovery_point_entry_summary(const RecoveryPointEntrySummary& summary) {
+base::Result<void> validate_recovery_point_entry_summary(const RecoveryPointEntrySummary& summary) {
     if (summary.entry_id.empty() || summary.entry_id.size() > 20 ||
         !valid_text(summary.display_name, kMaximumDisplayNameBytes) ||
         !is_known_file_entry_kind(summary.entry_kind) ||

@@ -316,6 +316,22 @@ prepare_repository_connection_input(contracts::RepositoryConnectionInput input,
     return base::Result<contracts::RepositoryConnectionInput>::success(std::move(input));
 }
 
+/// Validate and connect a UNC share without protecting credentials or writing control-plane state.
+[[nodiscard]] base::Result<void>
+connect_repository_location(const contracts::RepositoryConnectionInput& input,
+                            const base::CancellationToken cancellation) {
+    if (!is_unc_locator(input.locator)) {
+        return base::Result<void>::failure(
+            {base::ErrorCode::kInvalidArgument, "repository.network_path_invalid"});
+    }
+    auto reachable = probe_network_share_server(input.locator, cancellation);
+    if (!reachable) {
+        return reachable;
+    }
+    return connect_network_share(input.locator, input.network_username, input.network_password,
+                                 input.network_domain);
+}
+
 [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
 run_repository_command(const contracts::ServiceRequest& request, const ServiceRuntimeInfo& runtime,
                        const base::CancellationToken cancellation) {
@@ -393,8 +409,32 @@ command_response(const contracts::ServiceRequest& request, const ServiceRuntimeI
         base::Result<contracts::CommandAcknowledgement>::failure(
             {base::ErrorCode::kConflict, "command unavailable"});
     bool handled = false;
-    if (request.kind >= contracts::ServiceRequestKind::kAddRepositoryConnection &&
-        request.kind <= contracts::ServiceRequestKind::kRemoveRepositoryConnection) {
+    if (request.kind == contracts::ServiceRequestKind::kConnectRepositoryLocation &&
+        request.idempotency_key && runtime.repository_location_browse != nullptr) {
+        auto connected = connect_repository_location(
+            std::get<contracts::RepositoryConnectionInput>(request.payload), cancellation);
+        if (!connected) {
+            handled = true;
+            result = base::Result<contracts::CommandAcknowledgement>::failure(connected.error());
+        } else {
+            auto registered = runtime.repository_location_browse->register_location(
+                session.browser_session.session_id, *request.idempotency_key,
+                std::get<contracts::RepositoryConnectionInput>(request.payload).locator);
+            handled = true;
+            if (!registered) {
+                result =
+                    base::Result<contracts::CommandAcknowledgement>::failure(registered.error());
+            } else {
+                contracts::CommandAcknowledgement acknowledgement;
+                acknowledgement.command_id = *request.idempotency_key;
+                acknowledgement.disposition = contracts::CommandDisposition::kAccepted;
+                acknowledgement.resource_id = *request.idempotency_key;
+                result = base::Result<contracts::CommandAcknowledgement>::success(
+                    std::move(acknowledgement));
+            }
+        }
+    } else if (request.kind >= contracts::ServiceRequestKind::kAddRepositoryConnection &&
+               request.kind <= contracts::ServiceRequestKind::kRemoveRepositoryConnection) {
         handled = runtime.repository_connections != nullptr;
         result = run_repository_command(request, runtime, cancellation);
     } else if (runtime.worker_jobs && request.idempotency_key &&
@@ -463,8 +503,9 @@ command_response(const contracts::ServiceRequest& request, const ServiceRuntimeI
         // Prefer domain-specific message codes so Desktop can show actionable text.
         std::string message_code = "service.request_failed";
         const auto& detail = result.error().message;
-        if (request.kind >= contracts::ServiceRequestKind::kAddRepositoryConnection &&
-            request.kind <= contracts::ServiceRequestKind::kRemoveRepositoryConnection) {
+        if ((request.kind >= contracts::ServiceRequestKind::kAddRepositoryConnection &&
+             request.kind <= contracts::ServiceRequestKind::kRemoveRepositoryConnection) ||
+            request.kind == contracts::ServiceRequestKind::kConnectRepositoryLocation) {
             message_code = repository_failure_message_code(result.error());
         } else if (detail.rfind("mount.", 0) == 0) {
             message_code = detail;
@@ -666,6 +707,31 @@ mount_list_response(const contracts::ServiceRequest& request, const ServiceRunti
             fitted.error().message.empty() ? "file_browse.failed" : fitted.error().message));
     }
     response.payload = std::move(fitted).value();
+    return base::Result<contracts::ServiceResponse>::success(std::move(response));
+}
+
+[[nodiscard]] base::Result<contracts::ServiceResponse> list_repository_directories_response(
+    const contracts::ServiceRequest& request, const ServiceRuntimeInfo& runtime,
+    const ServiceSessionContext& session, const base::CancellationToken cancellation) {
+    if (runtime.repository_location_browse == nullptr ||
+        session.browser_session.session_id.empty()) {
+        return capability_unavailable(request);
+    }
+    const auto& query = std::get<contracts::RepositoryDirectoryListRequest>(request.payload);
+    contracts::ServiceResponse response;
+    response.request_id = request.request_id;
+    response.kind = contracts::ServiceResponseKind::kQueryResult;
+    response.request_kind = request.kind;
+    response.boundary_error_code = base::ErrorCode::kNone;
+    response.message_code = "repository.directories_ready";
+    auto page = runtime.repository_location_browse->list_directories(
+        session.browser_session.session_id, query, cancellation);
+    if (!page) {
+        return base::Result<contracts::ServiceResponse>::success(
+            failure(page.error().code, request.request_id, request.kind,
+                    repository_failure_message_code(page.error())));
+    }
+    response.payload = std::move(page).value();
     return base::Result<contracts::ServiceResponse>::success(std::move(response));
 }
 
@@ -953,11 +1019,15 @@ dispatch_service_request(const contracts::ServiceRequest& request,
         response = base::Result<contracts::ServiceResponse>::success(std::move(ok));
         break;
     }
+    case contracts::ServiceRequestKind::kListRepositoryDirectories:
+        response = list_repository_directories_response(request, runtime, session, cancellation);
+        break;
     case contracts::ServiceRequestKind::kAddRepositoryConnection:
     case contracts::ServiceRequestKind::kImportRepositoryConnection:
     case contracts::ServiceRequestKind::kTestRepositoryConnection:
     case contracts::ServiceRequestKind::kSetDefaultRepository:
     case contracts::ServiceRequestKind::kRemoveRepositoryConnection:
+    case contracts::ServiceRequestKind::kConnectRepositoryLocation:
     case contracts::ServiceRequestKind::kStartBackup:
     case contracts::ServiceRequestKind::kStartVerify:
     case contracts::ServiceRequestKind::kStartRestore:
@@ -1056,6 +1126,10 @@ base::Result<void> run_service_session(ports::IMessageChannel& channel,
                                                          maximum_requests);
     if (runtime.file_browse != nullptr && !session.browser_session.session_id.empty()) {
         runtime.file_browse->clear_session(session.browser_session.session_id);
+    }
+    if (runtime.repository_location_browse != nullptr &&
+        !session.browser_session.session_id.empty()) {
+        runtime.repository_location_browse->clear_session(session.browser_session.session_id);
     }
     return result;
 }

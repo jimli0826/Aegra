@@ -103,8 +103,8 @@ encode_source_list_request(const contracts::SourceInventoryListRequest& request)
 }
 
 [[nodiscard]] contracts::JobListRequest parse_job_list_request(const Json& payload) {
-    constexpr std::array<std::string_view, 6> keys{"page",         "operation",   "state",
-                                                   "scope",        "from_utc_ms", "to_utc_ms"};
+    constexpr std::array<std::string_view, 6> keys{"page",  "operation",   "state",
+                                                   "scope", "from_utc_ms", "to_utc_ms"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("job list request fields are invalid");
     }
@@ -312,9 +312,9 @@ encode_restore_preflight_request(const contracts::RestorePreflightRequest& reque
 
 [[nodiscard]] contracts::RestorePreflightRequest
 parse_restore_preflight_request(const Json& payload) {
-    constexpr std::array<std::string_view, 6> keys{
-        "repository_connection_id", "recovery_point_id", "target_source_id", "source_disk_number",
-        "source_volume_index", "archive_password"};
+    constexpr std::array<std::string_view, 6> keys{"repository_connection_id", "recovery_point_id",
+                                                   "target_source_id",         "source_disk_number",
+                                                   "source_volume_index",      "archive_password"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("restore preflight request fields are invalid");
     }
@@ -322,10 +322,8 @@ parse_restore_preflight_request(const Json& payload) {
     request.repository_connection_id = payload.at("repository_connection_id").get<std::string>();
     request.recovery_point_id = payload.at("recovery_point_id").get<std::string>();
     request.target_source_id = payload.at("target_source_id").get<std::string>();
-    request.source_disk_number =
-        unsigned_value<std::uint32_t>(payload, "source_disk_number");
-    request.source_volume_index =
-        unsigned_value<std::uint32_t>(payload, "source_volume_index");
+    request.source_disk_number = unsigned_value<std::uint32_t>(payload, "source_disk_number");
+    request.source_volume_index = unsigned_value<std::uint32_t>(payload, "source_volume_index");
     request.archive_password = payload.at("archive_password").get<std::string>();
     return request;
 }
@@ -339,9 +337,9 @@ parse_restore_preflight_request(const Json& payload) {
 }
 
 [[nodiscard]] contracts::StartRestoreCommand parse_start_restore(const Json& payload) {
-    constexpr std::array<std::string_view, 5> keys{
-        "preflight_token", "confirmed", "archive_password", "preserve_disk_signature",
-        "auto_expand_last_partition"};
+    constexpr std::array<std::string_view, 5> keys{"preflight_token", "confirmed",
+                                                   "archive_password", "preserve_disk_signature",
+                                                   "auto_expand_last_partition"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("start restore fields are invalid");
     }
@@ -361,9 +359,9 @@ encode_mount_recovery_point(const contracts::MountRecoveryPointCommand& command)
 }
 
 [[nodiscard]] contracts::MountRecoveryPointCommand parse_mount_recovery_point(const Json& payload) {
-    constexpr std::array<std::string_view, 5> keys{
-        "repository_connection_id", "recovery_point_id", "source_disk_number",
-        "preferred_drive_letter",   "archive_password"};
+    constexpr std::array<std::string_view, 5> keys{"repository_connection_id", "recovery_point_id",
+                                                   "source_disk_number", "preferred_drive_letter",
+                                                   "archive_password"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("mount recovery point fields are invalid");
     }
@@ -432,16 +430,14 @@ encode_mount_recovery_point(const contracts::MountRecoveryPointCommand& command)
     } else {
         Json selections = Json::array();
         for (const auto& item : protection.file_selections) {
-            selections.push_back(
-                Json{{"node_token", item.node_token},
-                     {"recursion", static_cast<std::uint8_t>(item.recursion)},
-                     {"display_label", item.display_label}});
+            selections.push_back(Json{{"node_token", item.node_token},
+                                      {"recursion", static_cast<std::uint8_t>(item.recursion)},
+                                      {"display_label", item.display_label}});
         }
         file = Json{{"selections", std::move(selections)},
                     {"options",
                      Json{{"unreadable_policy",
-                           static_cast<std::uint8_t>(
-                               protection.file_options.unreadable_policy)}}}};
+                           static_cast<std::uint8_t>(protection.file_options.unreadable_policy)}}}};
     }
     return Json{{"content_kind", static_cast<std::uint8_t>(protection.content_kind)},
                 {"volume_set", std::move(volume)},
@@ -513,18 +509,17 @@ encode_mount_recovery_point(const contracts::MountRecoveryPointCommand& command)
 }
 
 [[nodiscard]] contracts::UpsertScheduleCommand parse_upsert_schedule(const Json& payload) {
-    constexpr std::array<std::string_view, 11> keys{
-        "schedule_id",
-        "display_name",
-        "enabled",
-        "protection",
-        "repository_connection_id",
-        "backup_type",
-        "trigger",
-        "exclude_page_and_hibernation_files",
-        "deduplication_enabled",
-        "encryption_enabled",
-        "archive_password"};
+    constexpr std::array<std::string_view, 11> keys{"schedule_id",
+                                                    "display_name",
+                                                    "enabled",
+                                                    "protection",
+                                                    "repository_connection_id",
+                                                    "backup_type",
+                                                    "trigger",
+                                                    "exclude_page_and_hibernation_files",
+                                                    "deduplication_enabled",
+                                                    "encryption_enabled",
+                                                    "archive_password"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("upsert schedule fields are invalid");
     }
@@ -667,6 +662,7 @@ Json encode_request_payload(const contracts::ServiceRequest& request) {
         return encode_recovery_point_ref(std::get<contracts::RecoveryPointRef>(request.payload));
     case contracts::ServiceRequestKind::kAddRepositoryConnection:
     case contracts::ServiceRequestKind::kImportRepositoryConnection:
+    case contracts::ServiceRequestKind::kConnectRepositoryLocation:
         return encode_repository_input(
             std::get<contracts::RepositoryConnectionInput>(request.payload));
     case contracts::ServiceRequestKind::kTestRepositoryConnection:
@@ -704,21 +700,23 @@ Json encode_request_payload(const contracts::ServiceRequest& request) {
     }
     case contracts::ServiceRequestKind::kListRecoveryPointEntries: {
         const auto& body = std::get<contracts::ListRecoveryPointEntriesRequest>(request.payload);
-        return Json{{"repository_connection_id", optional_string_json(body.repository_connection_id)},
-                    {"recovery_point_id", body.recovery_point_id},
-                    {"parent_entry_id", body.parent_entry_id},
-                    {"page", encode_page_request(body.page)},
-                    {"archive_secret_ref", optional_string_json(body.archive_secret_ref)}};
+        return Json{
+            {"repository_connection_id", optional_string_json(body.repository_connection_id)},
+            {"recovery_point_id", body.recovery_point_id},
+            {"parent_entry_id", body.parent_entry_id},
+            {"page", encode_page_request(body.page)},
+            {"archive_secret_ref", optional_string_json(body.archive_secret_ref)}};
     }
     case contracts::ServiceRequestKind::kPrepareFileRestore: {
         const auto& body = std::get<contracts::PrepareFileRestoreRequest>(request.payload);
-        return Json{{"repository_connection_id", optional_string_json(body.repository_connection_id)},
-                    {"recovery_point_id", body.recovery_point_id},
-                    {"entry_ids", body.entry_ids},
-                    {"target_node_token", body.target_node_token},
-                    {"conflict_policy", static_cast<std::uint8_t>(body.conflict_policy)},
-                    {"archive_secret_ref", optional_string_json(body.archive_secret_ref)},
-                    {"restore_security", body.restore_security}};
+        return Json{
+            {"repository_connection_id", optional_string_json(body.repository_connection_id)},
+            {"recovery_point_id", body.recovery_point_id},
+            {"entry_ids", body.entry_ids},
+            {"target_node_token", body.target_node_token},
+            {"conflict_policy", static_cast<std::uint8_t>(body.conflict_policy)},
+            {"archive_secret_ref", optional_string_json(body.archive_secret_ref)},
+            {"restore_security", body.restore_security}};
     }
     case contracts::ServiceRequestKind::kStartFileRestore: {
         const auto& body = std::get<contracts::StartFileRestoreCommand>(request.payload);
@@ -729,6 +727,11 @@ Json encode_request_payload(const contracts::ServiceRequest& request) {
     case contracts::ServiceRequestKind::kGetServiceSettings:
         (void)std::get<contracts::ServiceSettingsQuery>(request.payload);
         return Json::object();
+    case contracts::ServiceRequestKind::kListRepositoryDirectories: {
+        const auto& body = std::get<contracts::RepositoryDirectoryListRequest>(request.payload);
+        return Json{{"location_token", body.location_token},
+                    {"page", encode_page_request(body.page)}};
+    }
     case contracts::ServiceRequestKind::kUpdateServiceSettings: {
         const auto& body = std::get<contracts::UpdateServiceSettingsCommand>(request.payload);
         return Json{{"job_retention_months", body.job_retention_months}};
@@ -772,6 +775,7 @@ contracts::ServiceRequestPayload parse_request_payload(const contracts::ServiceR
         return parse_recovery_point_ref(payload);
     case contracts::ServiceRequestKind::kAddRepositoryConnection:
     case contracts::ServiceRequestKind::kImportRepositoryConnection:
+    case contracts::ServiceRequestKind::kConnectRepositoryLocation:
         return parse_repository_input(payload);
     case contracts::ServiceRequestKind::kTestRepositoryConnection:
     case contracts::ServiceRequestKind::kSetDefaultRepository:
@@ -809,9 +813,9 @@ contracts::ServiceRequestPayload parse_request_payload(const contracts::ServiceR
         return request;
     }
     case contracts::ServiceRequestKind::kListRecoveryPointEntries: {
-        constexpr std::array<std::string_view, 5> keys{
-            "repository_connection_id", "recovery_point_id", "parent_entry_id", "page",
-            "archive_secret_ref"};
+        constexpr std::array<std::string_view, 5> keys{"repository_connection_id",
+                                                       "recovery_point_id", "parent_entry_id",
+                                                       "page", "archive_secret_ref"};
         if (!exact_keys(payload, keys)) {
             throw std::invalid_argument("list recovery point entries fields are invalid");
         }
@@ -825,8 +829,9 @@ contracts::ServiceRequestPayload parse_request_payload(const contracts::ServiceR
     }
     case contracts::ServiceRequestKind::kPrepareFileRestore: {
         constexpr std::array<std::string_view, 7> keys{
-            "repository_connection_id", "recovery_point_id", "entry_ids", "target_node_token",
-            "conflict_policy", "archive_secret_ref", "restore_security"};
+            "repository_connection_id", "recovery_point_id", "entry_ids",
+            "target_node_token",        "conflict_policy",   "archive_secret_ref",
+            "restore_security"};
         if (!exact_keys(payload, keys)) {
             throw std::invalid_argument("prepare file restore fields are invalid");
         }
@@ -860,13 +865,23 @@ contracts::ServiceRequestPayload parse_request_payload(const contracts::ServiceR
         }
         return contracts::ServiceSettingsQuery{};
     }
+    case contracts::ServiceRequestKind::kListRepositoryDirectories: {
+        constexpr std::array<std::string_view, 2> keys{"location_token", "page"};
+        if (!exact_keys(payload, keys)) {
+            throw std::invalid_argument("repository directory list fields are invalid");
+        }
+        return contracts::RepositoryDirectoryListRequest{
+            payload.at("location_token").get<std::string>(),
+            parse_page_request(payload.at("page"))};
+    }
     case contracts::ServiceRequestKind::kUpdateServiceSettings: {
         constexpr std::array<std::string_view, 1> keys{"job_retention_months"};
         if (!exact_keys(payload, keys)) {
             throw std::invalid_argument("update service settings fields are invalid");
         }
         contracts::UpdateServiceSettingsCommand command;
-        command.job_retention_months = unsigned_value<std::uint8_t>(payload, "job_retention_months");
+        command.job_retention_months =
+            unsigned_value<std::uint8_t>(payload, "job_retention_months");
         return command;
     }
     }

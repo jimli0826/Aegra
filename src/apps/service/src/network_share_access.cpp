@@ -3,14 +3,16 @@
 #include "aegra/adapters/windows_system/windows_system.h"
 
 #include <WinSock2.h>
-#include <Ws2tcpip.h>
 #include <Windows.h>
+#include <Ws2tcpip.h>
 #include <winnetwk.h>
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cstring>
 #include <string>
+#include <utility>
 
 namespace aegra::apps::service {
 namespace {
@@ -48,8 +50,7 @@ constexpr u_short kSmbPort = 445;
     case ERROR_UNEXP_NET_ERR:
         return make_error(base::ErrorCode::kIoFailure, "repository.network_unreachable");
     case ERROR_SESSION_CREDENTIAL_CONFLICT:
-        return make_error(base::ErrorCode::kConflict,
-                          "repository.network_credential_conflict");
+        return make_error(base::ErrorCode::kConflict, "repository.network_credential_conflict");
     default:
         return make_error(base::ErrorCode::kIoFailure, "repository.network_connect_failed");
     }
@@ -65,9 +66,112 @@ constexpr u_short kSmbPort = 445;
         return {};
     }
     std::wstring wide(static_cast<std::size_t>(needed), L'\0');
-    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(),
-                        static_cast<int>(value.size()), wide.data(), needed);
+    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()),
+                        wide.data(), needed);
     return wide;
+}
+
+[[nodiscard]] std::string wide_to_utf8(const std::wstring_view value) {
+    if (value.empty()) {
+        return {};
+    }
+    const int needed = WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()),
+                                           nullptr, 0, nullptr, nullptr);
+    if (needed <= 0) {
+        return {};
+    }
+    std::string utf8(static_cast<std::size_t>(needed), '\0');
+    if (WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), utf8.data(),
+                            needed, nullptr, nullptr) != needed) {
+        return {};
+    }
+    return utf8;
+}
+
+class FindHandle final {
+  public:
+    explicit FindHandle(const HANDLE value) noexcept : value_(value) {}
+    ~FindHandle() {
+        if (value_ != INVALID_HANDLE_VALUE) {
+            FindClose(value_);
+        }
+    }
+    FindHandle(const FindHandle&) = delete;
+    FindHandle& operator=(const FindHandle&) = delete;
+    [[nodiscard]] HANDLE get() const noexcept { return value_; }
+    [[nodiscard]] bool valid() const noexcept { return value_ != INVALID_HANDLE_VALUE; }
+
+  private:
+    HANDLE value_{INVALID_HANDLE_VALUE};
+};
+
+[[nodiscard]] bool is_directory_entry(const WIN32_FIND_DATAW& data) noexcept {
+    const std::wstring_view name(data.cFileName);
+    return name != L"." && name != L".." &&
+           (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 &&
+           (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0;
+}
+
+[[nodiscard]] base::Result<contracts::FileSourceNodePage>
+enumerate_directories(const std::string_view locator, const contracts::ServicePageRequest& page,
+                      const base::CancellationToken cancellation) {
+    auto root = utf8_to_wide(locator);
+    if (root.empty()) {
+        return base::Result<contracts::FileSourceNodePage>::failure(
+            make_error(base::ErrorCode::kInvalidArgument, "repository.network_path_invalid"));
+    }
+    while (!root.empty() && (root.back() == L'\\' || root.back() == L'/')) {
+        root.pop_back();
+    }
+    const auto pattern = root + L"\\*";
+    WIN32_FIND_DATAW data{};
+    FindHandle find(FindFirstFileExW(pattern.c_str(), FindExInfoBasic, &data, FindExSearchNameMatch,
+                                     nullptr, 0));
+    if (!find.valid()) {
+        return base::Result<contracts::FileSourceNodePage>::failure(
+            network_connection_error(GetLastError()));
+    }
+    std::uint64_t offset = 0;
+    if (page.continuation_token) {
+        const auto& value = *page.continuation_token;
+        const auto parsed = std::from_chars(value.data(), value.data() + value.size(), offset);
+        if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size()) {
+            return base::Result<contracts::FileSourceNodePage>::failure(
+                make_error(base::ErrorCode::kInvalidArgument, "repository.directory_page_invalid"));
+        }
+    }
+    contracts::FileSourceNodePage result;
+    std::uint64_t directory_index = 0;
+    do {
+        if (cancellation.stop_requested()) {
+            return base::Result<contracts::FileSourceNodePage>::failure(
+                make_error(base::ErrorCode::kCancelled, "repository.directory_list_cancelled"));
+        }
+        if (!is_directory_entry(data)) {
+            continue;
+        }
+        if (directory_index++ < offset) {
+            continue;
+        }
+        if (result.items.size() >= page.maximum_results) {
+            result.continuation_token = std::to_string(directory_index - 1U);
+            break;
+        }
+        auto display_name = wide_to_utf8(data.cFileName);
+        if (display_name.empty()) {
+            continue;
+        }
+        contracts::FileSourceNode node;
+        node.node_token = "repository-directory-" + std::to_string(directory_index);
+        node.display_name = std::move(display_name);
+        node.entry_kind = contracts::FileEntryKind::kDirectory;
+        node.selectability = contracts::FileNodeSelectability::kSelectable;
+        node.has_children = true;
+        node.is_directory = true;
+        node.availability = contracts::SourceAvailability::kAvailable;
+        result.items.push_back(std::move(node));
+    } while (FindNextFileW(find.get(), &data) != FALSE);
+    return base::Result<contracts::FileSourceNodePage>::success(std::move(result));
 }
 
 class WinsockSession final {
@@ -135,9 +239,9 @@ class SocketHandle final {
     return false;
 }
 
-[[nodiscard]] base::Result<void>
-wait_for_connection(const SOCKET socket, const std::chrono::milliseconds timeout,
-                    const base::CancellationToken cancellation) {
+[[nodiscard]] base::Result<void> wait_for_connection(const SOCKET socket,
+                                                     const std::chrono::milliseconds timeout,
+                                                     const base::CancellationToken cancellation) {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     while (std::chrono::steady_clock::now() < deadline) {
         if (cancellation.stop_requested()) {
@@ -159,7 +263,8 @@ wait_for_connection(const SOCKET socket, const std::chrono::milliseconds timeout
             int socket_error = 0;
             int size = sizeof(socket_error);
             if (getsockopt(socket, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&socket_error),
-                           &size) == 0 && socket_error == 0) {
+                           &size) == 0 &&
+                socket_error == 0) {
                 return base::Result<void>::success();
             }
             break;
@@ -311,11 +416,9 @@ bool unpack_network_auth_material(const std::string_view material, std::string& 
     return true;
 }
 
-base::Result<void>
-connect_network_share_from_secret(const std::string_view locator,
-                                  const contracts::SecretRef& secret_ref) {
-    auto resolved =
-        adapters::windows_system::WindowsCredentialResolver{}.resolve(secret_ref, {});
+base::Result<void> connect_network_share_from_secret(const std::string_view locator,
+                                                     const contracts::SecretRef& secret_ref) {
+    auto resolved = adapters::windows_system::WindowsCredentialResolver{}.resolve(secret_ref, {});
     if (!resolved) {
         return base::Result<void>::failure(resolved.error());
     }
@@ -332,6 +435,52 @@ connect_network_share_from_secret(const std::string_view locator,
         SecureZeroMemory(password.data(), password.size());
     }
     return connected;
+}
+
+base::Result<void> RepositoryLocationBrowseRegistry::register_location(
+    const std::string_view session_id, std::string location_token, std::string locator) {
+    if (session_id.empty() || location_token.empty() || !is_unc_locator(locator)) {
+        return base::Result<void>::failure(
+            make_error(base::ErrorCode::kInvalidArgument, "repository.network_path_invalid"));
+    }
+    std::lock_guard lock(mutex_);
+    for (auto iterator = locations_.begin(); iterator != locations_.end();) {
+        if (iterator->second.session_id == session_id) {
+            iterator = locations_.erase(iterator);
+        } else {
+            ++iterator;
+        }
+    }
+    locations_.insert_or_assign(location_token,
+                                Location{std::string(session_id), std::move(locator)});
+    return base::Result<void>::success();
+}
+
+base::Result<contracts::FileSourceNodePage> RepositoryLocationBrowseRegistry::list_directories(
+    const std::string_view session_id, const contracts::RepositoryDirectoryListRequest& request,
+    const base::CancellationToken cancellation) {
+    std::string locator;
+    {
+        std::lock_guard lock(mutex_);
+        const auto found = locations_.find(request.location_token);
+        if (found == locations_.end() || found->second.session_id != session_id) {
+            return base::Result<contracts::FileSourceNodePage>::failure(
+                make_error(base::ErrorCode::kNotFound, "repository.directory_token_invalid"));
+        }
+        locator = found->second.locator;
+    }
+    return enumerate_directories(locator, request.page, cancellation);
+}
+
+void RepositoryLocationBrowseRegistry::clear_session(const std::string_view session_id) noexcept {
+    std::lock_guard lock(mutex_);
+    for (auto iterator = locations_.begin(); iterator != locations_.end();) {
+        if (iterator->second.session_id == session_id) {
+            iterator = locations_.erase(iterator);
+        } else {
+            ++iterator;
+        }
+    }
 }
 
 } // namespace aegra::apps::service

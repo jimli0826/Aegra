@@ -32,7 +32,7 @@ Item {
             pathHint: "e.g. \\\\192.168.1.1\\share",
             hasAuth: true,
             needsPath: true,
-            needsConnect: false
+            needsConnect: true
         }
     ]
 
@@ -84,10 +84,22 @@ Item {
             root.showError(qsTrId("aegra.repository.please_enter_path"))
             return
         }
-        if (typeof serviceClient === "undefined" || !serviceClient)
+        if (!root.isValidNetworkRoot(pathVal)) {
+            root.showError(qsTrId("aegra.repository.network_path_invalid"))
+            return
+        }
+        if (typeof serviceClient === "undefined" || !serviceClient || !serviceClient.connected) {
+            root.showError(qsTrId("aegra.repository.service_not_connected"))
+            return
+        }
+        if (serviceClient.repositoryCommandBusy)
             return
         root.selectedPath = pathVal
-        root.isConnected = true
+        root.isConnected = false
+        root.isConnecting = true
+        serviceClient.connectRepositoryLocation(
+                    pathVal, networkUserInput.text.trim(), networkPasswordInput.text,
+                    networkDomainInput.text.trim())
     }
 
     function selectDrive(name) {
@@ -167,6 +179,10 @@ Item {
                 return
             }
         } else {
+            if (!root.isConnected) {
+                root.showError(qsTrId("aegra.repository.please_connect_first"))
+                return
+            }
             rootPath = root.selectedPath.trim()
             if (rootPath === "")
                 rootPath = networkPathInput.text.trim()
@@ -236,6 +252,19 @@ Item {
         enabled: typeof serviceClient !== "undefined" && serviceClient !== null
 
         function onRepositoryCommandChanged() {
+            if (root.isConnecting) {
+                if (serviceClient.repositoryCommandBusy)
+                    return
+                root.isConnecting = false
+                var connectError = serviceClient.repositoryCommandErrorText || ""
+                if (connectError.length > 0) {
+                    root.isConnected = false
+                    root.showError(connectError)
+                    return
+                }
+                root.isConnected = true
+                return
+            }
             if (!root.isSubmitting)
                 return
             if (serviceClient.repositoryCommandBusy)
@@ -264,6 +293,16 @@ Item {
             root.pendingName = ""
             root.pendingLocator = ""
             root.finished()
+        }
+
+        function onRepositoryDirectoriesChanged() {
+            root.isDriveListLoading = serviceClient.repositoryDirectoriesLoading
+            if (root.isDriveListLoading)
+                return
+            root.driveList = serviceClient.repositoryDirectories || []
+            var browseError = serviceClient.repositoryDirectoriesErrorText || ""
+            if (browseError.length > 0)
+                root.showError(browseError)
         }
     }
 
@@ -596,6 +635,10 @@ Item {
                                             clip: true
                                             selectByMouse: true
                                             verticalAlignment: TextInput.AlignVCenter
+                                            onTextChanged: {
+                                                root.isConnected = false
+                                                root.driveList = []
+                                            }
                                         }
                                     }
                                 }
@@ -636,6 +679,10 @@ Item {
                                             clip: true
                                             selectByMouse: true
                                             verticalAlignment: TextInput.AlignVCenter
+                                            onTextChanged: {
+                                                root.isConnected = false
+                                                root.driveList = []
+                                            }
                                         }
                                     }
                                 }
@@ -675,6 +722,10 @@ Item {
                                             clip: true
                                             selectByMouse: true
                                             verticalAlignment: TextInput.AlignVCenter
+                                            onTextChanged: {
+                                                root.isConnected = false
+                                                root.driveList = []
+                                            }
                                         }
                                     }
                                 }
@@ -984,6 +1035,7 @@ Item {
                     primary: true
                     enabled: !root.isSubmitting && !serviceClient.repositoryCommandBusy
                              && serviceClient.connected
+                             && (root.currentType().value !== "network" || root.isConnected)
                     onClicked: root.submit()
                 }
             }

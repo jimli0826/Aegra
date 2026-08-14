@@ -2,11 +2,13 @@
 
 #include "aegra/base/cancellation.h"
 #include "aegra/base/result.h"
-#include "aegra/contracts/job.h"
+#include "aegra/contracts/service_control.h"
 
 #include <chrono>
+#include <mutex>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 
 namespace aegra::apps::service {
 
@@ -41,5 +43,27 @@ probe_network_share_server(std::string_view locator, base::CancellationToken can
 /// Connect using resolved SecretRef material when it is a network auth pack.
 [[nodiscard]] base::Result<void>
 connect_network_share_from_secret(std::string_view locator, const contracts::SecretRef& secret_ref);
+
+/// Session-scoped registry for browsing a connected Repository share. It stores locators only;
+/// credentials are never retained. All methods are thread-safe.
+class RepositoryLocationBrowseRegistry final {
+  public:
+    [[nodiscard]] base::Result<void>
+    register_location(std::string_view session_id, std::string location_token, std::string locator);
+    [[nodiscard]] base::Result<contracts::FileSourceNodePage>
+    list_directories(std::string_view session_id,
+                     const contracts::RepositoryDirectoryListRequest& request,
+                     base::CancellationToken cancellation);
+    void clear_session(std::string_view session_id) noexcept;
+
+  private:
+    struct Location final {
+        std::string session_id;
+        std::string locator;
+    };
+
+    std::mutex mutex_;
+    std::unordered_map<std::string, Location> locations_;
+};
 
 } // namespace aegra::apps::service

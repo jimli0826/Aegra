@@ -145,8 +145,8 @@ struct JobSummary final {
 /// Which job states ListJobs returns when `state` is null.
 enum class JobListScope : std::uint8_t {
     kAll = 1,
-    kActive = 2,    // queued, running, cancelling — operational hot path
-    kTerminal = 3,  // succeeded, failed, cancelled, interrupted — Task Log
+    kActive = 2,   // queued, running, cancelling — operational hot path
+    kTerminal = 3, // succeeded, failed, cancelled, interrupted — Task Log
 };
 
 struct JobListRequest final {
@@ -495,7 +495,8 @@ struct ProtectionSpecInput final {
 struct UpsertScheduleCommand final {
     /// Absent = create; present = update an existing schedule.
     /// Update mutability (Service enforces against the durable record):
-    /// - Immutable after create: protection source, backup_type, exclude_page_and_hibernation_files,
+    /// - Immutable after create: protection source, backup_type,
+    /// exclude_page_and_hibernation_files,
     ///   deduplication_enabled, encryption_enabled, archive password (DPAPI ciphertext in SQLite).
     /// - Mutable: display_name, enabled, repository_connection_id, trigger (schedule settings).
     std::optional<std::string> schedule_id;
@@ -517,6 +518,13 @@ struct BrowseFileSourcesRequest final {
     std::optional<std::string> parent_node_token;
     ServicePageRequest page{};
     bool include_unavailable{false};
+};
+
+/// Lists immediate child directories of a previously connected Repository location.
+/// location_token is issued by ConnectRepositoryLocation and is pipe-session bound.
+struct RepositoryDirectoryListRequest final {
+    std::string location_token;
+    ServicePageRequest page{};
 };
 
 struct FileSourceNode final {
@@ -687,16 +695,17 @@ validate_event_acknowledgement(const EventAcknowledgement& acknowledgement);
 validate_command_acknowledgement(const CommandAcknowledgement& acknowledgement);
 [[nodiscard]] base::Result<void>
 validate_recovery_point_chain_result(const RecoveryPointChainResult& result);
-[[nodiscard]] base::Result<void>
-validate_recovery_point_layout(const RecoveryPointLayout& layout);
+[[nodiscard]] base::Result<void> validate_recovery_point_layout(const RecoveryPointLayout& layout);
 [[nodiscard]] base::Result<void> validate_delete_plan_summary(const DeletePlanSummary& summary);
 [[nodiscard]] base::Result<void>
 validate_execute_delete_plan_command(const ExecuteDeletePlanCommand& command);
 
-[[nodiscard]] base::Result<void> validate_protection_spec_input(const ProtectionSpecInput& protection,
-                                                                bool is_create);
+[[nodiscard]] base::Result<void>
+validate_protection_spec_input(const ProtectionSpecInput& protection, bool is_create);
 [[nodiscard]] base::Result<void>
 validate_browse_file_sources_request(const BrowseFileSourcesRequest& request);
+[[nodiscard]] base::Result<void>
+validate_repository_directory_list_request(const RepositoryDirectoryListRequest& request);
 [[nodiscard]] base::Result<void> validate_file_source_node(const FileSourceNode& node);
 [[nodiscard]] base::Result<void> validate_file_source_node_page(const FileSourceNodePage& page);
 [[nodiscard]] base::Result<void>

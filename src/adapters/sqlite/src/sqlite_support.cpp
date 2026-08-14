@@ -542,9 +542,6 @@ base::Result<void> validate_schedule_record(const ports::ScheduleRecord& record)
         record.updated_utc_ms < record.created_utc_ms) {
         return invalid("schedule record is invalid");
     }
-    if (record.owner_sid.size() > kMaximumLocatorBytes) {
-        return invalid("schedule owner identity is invalid");
-    }
     if (record.content_kind == contracts::ContentKind::kVolumeSet) {
         if (!valid_source_ids(record.source_ids, false) || !record.file_selections.empty()) {
             return invalid("volume schedule sources are invalid");
@@ -806,27 +803,26 @@ base::Result<ports::ScheduleRecord> read_schedule(sqlite3_stmt* const stmt) {
         return base::Result<ports::ScheduleRecord>::failure(source_ids.error());
     }
     record.source_ids = std::move(source_ids).value();
-    record.owner_sid = column_text_required(stmt, 5);
-    record.repository_connection_id = column_text_required(stmt, 6);
-    record.backup_type = static_cast<contracts::BackupType>(sqlite3_column_int(stmt, 7));
-    record.trigger.kind = static_cast<contracts::ScheduleTriggerKind>(sqlite3_column_int(stmt, 8));
-    auto local_minutes = decode_local_minutes_of_day(column_text_required(stmt, 9));
+    record.repository_connection_id = column_text_required(stmt, 5);
+    record.backup_type = static_cast<contracts::BackupType>(sqlite3_column_int(stmt, 6));
+    record.trigger.kind = static_cast<contracts::ScheduleTriggerKind>(sqlite3_column_int(stmt, 7));
+    auto local_minutes = decode_local_minutes_of_day(column_text_required(stmt, 8));
     if (!local_minutes) {
         return base::Result<ports::ScheduleRecord>::failure(local_minutes.error());
     }
     record.trigger.local_minutes_of_day = std::move(local_minutes).value();
-    record.trigger.weekday_mask = static_cast<std::uint8_t>(sqlite3_column_int(stmt, 10));
-    record.trigger.day_of_month_mask = static_cast<std::uint32_t>(sqlite3_column_int64(stmt, 11));
-    record.trigger.timezone_id = column_text_required(stmt, 12);
-    record.next_run_utc_ms = column_uint64_optional(stmt, 13);
-    record.exclude_page_and_hibernation_files = sqlite3_column_int(stmt, 14) != 0;
-    record.deduplication_enabled = sqlite3_column_int(stmt, 15) != 0;
-    record.encryption_enabled = sqlite3_column_int(stmt, 16) != 0;
-    record.archive_password_protected = column_text_required(stmt, 17);
-    record.backup_set_uuid = column_text_required(stmt, 18);
-    record.last_recovery_point_id = column_text_optional(stmt, 19);
-    record.created_utc_ms = column_uint64(stmt, 20);
-    record.updated_utc_ms = column_uint64(stmt, 21);
+    record.trigger.weekday_mask = static_cast<std::uint8_t>(sqlite3_column_int(stmt, 9));
+    record.trigger.day_of_month_mask = static_cast<std::uint32_t>(sqlite3_column_int64(stmt, 10));
+    record.trigger.timezone_id = column_text_required(stmt, 11);
+    record.next_run_utc_ms = column_uint64_optional(stmt, 12);
+    record.exclude_page_and_hibernation_files = sqlite3_column_int(stmt, 13) != 0;
+    record.deduplication_enabled = sqlite3_column_int(stmt, 14) != 0;
+    record.encryption_enabled = sqlite3_column_int(stmt, 15) != 0;
+    record.archive_password_protected = column_text_required(stmt, 16);
+    record.backup_set_uuid = column_text_required(stmt, 17);
+    record.last_recovery_point_id = column_text_optional(stmt, 18);
+    record.created_utc_ms = column_uint64(stmt, 19);
+    record.updated_utc_ms = column_uint64(stmt, 20);
     // file_selections loaded by schedule store after read when content_kind is file_set.
     auto valid = validate_schedule_record(record);
     if (!valid && record.content_kind == contracts::ContentKind::kFileSet &&
@@ -913,8 +909,8 @@ base::Result<ports::RestorePreflightRecord> read_restore_preflight(sqlite3_stmt*
 
 contracts::RepositoryConnectionSummary
 to_connection_summary(const ports::RepositoryConnectionRecord& record) {
-    return {record.connection_id, record.display_name, record.locator, record.state,
-            record.is_default, record.capabilities};
+    return {record.connection_id, record.display_name, record.locator,
+            record.state,         record.is_default,   record.capabilities};
 }
 
 contracts::JobSummary to_job_summary(const ports::JobRecord& record) {
@@ -1075,8 +1071,8 @@ decode_relative_path_blob(const std::string_view encoded) {
 base::Result<void>
 replace_schedule_file_selections(sqlite3* const db, const std::string_view schedule_id,
                                  const std::vector<contracts::FileSourceRef>& selections) {
-    auto clear = SqliteStatement::prepare(db,
-                                          "DELETE FROM schedule_file_selections WHERE schedule_id = ?");
+    auto clear =
+        SqliteStatement::prepare(db, "DELETE FROM schedule_file_selections WHERE schedule_id = ?");
     if (!clear) {
         return base::Result<void>::failure(clear.error());
     }
@@ -1111,16 +1107,18 @@ replace_schedule_file_selections(sqlite3* const db, const std::string_view sched
         if (auto bound = insert.value().bind_text(4, selection.volume_identity); !bound) {
             return bound;
         }
+        if (auto bound = insert.value().bind_text(
+                5, encode_relative_path_blob(selection.relative_components));
+            !bound) {
+            return bound;
+        }
         if (auto bound =
-                insert.value().bind_text(5, encode_relative_path_blob(selection.relative_components));
+                insert.value().bind_int64(6, static_cast<std::int64_t>(selection.entry_kind));
             !bound) {
             return bound;
         }
-        if (auto bound = insert.value().bind_int64(6, static_cast<std::int64_t>(selection.entry_kind));
-            !bound) {
-            return bound;
-        }
-        if (auto bound = insert.value().bind_int64(7, static_cast<std::int64_t>(selection.recursion));
+        if (auto bound =
+                insert.value().bind_int64(7, static_cast<std::int64_t>(selection.recursion));
             !bound) {
             return bound;
         }
@@ -1142,10 +1140,9 @@ replace_schedule_file_selections(sqlite3* const db, const std::string_view sched
 base::Result<std::vector<contracts::FileSourceRef>>
 load_schedule_file_selections(sqlite3* const db, const std::string_view schedule_id) {
     auto statement = SqliteStatement::prepare(
-        db,
-        "SELECT selection_id, volume_identity, relative_path_blob, entry_kind, recursion, "
-        "unreadable_policy, display_label FROM schedule_file_selections "
-        "WHERE schedule_id = ? ORDER BY ordinal ASC");
+        db, "SELECT selection_id, volume_identity, relative_path_blob, entry_kind, recursion, "
+            "unreadable_policy, display_label FROM schedule_file_selections "
+            "WHERE schedule_id = ? ORDER BY ordinal ASC");
     if (!statement) {
         return base::Result<std::vector<contracts::FileSourceRef>>::failure(statement.error());
     }
@@ -1164,7 +1161,8 @@ load_schedule_file_selections(sqlite3* const db, const std::string_view schedule
         contracts::FileSourceRef ref;
         ref.selection_id = column_text_required(statement.value().get(), 0);
         ref.volume_identity = column_text_required(statement.value().get(), 1);
-        auto components = decode_relative_path_blob(column_text_required(statement.value().get(), 2));
+        auto components =
+            decode_relative_path_blob(column_text_required(statement.value().get(), 2));
         if (!components) {
             return base::Result<std::vector<contracts::FileSourceRef>>::failure(components.error());
         }
@@ -1181,9 +1179,9 @@ load_schedule_file_selections(sqlite3* const db, const std::string_view schedule
     return base::Result<std::vector<contracts::FileSourceRef>>::success(std::move(selections));
 }
 
-base::Result<void>
-replace_restore_preflight_entry_ids(sqlite3* const db, const std::string_view preflight_token,
-                                    const std::vector<std::string>& entry_ids) {
+base::Result<void> replace_restore_preflight_entry_ids(sqlite3* const db,
+                                                       const std::string_view preflight_token,
+                                                       const std::vector<std::string>& entry_ids) {
     auto clear = SqliteStatement::prepare(
         db, "DELETE FROM restore_preflight_entry_ids WHERE preflight_token = ?");
     if (!clear) {
@@ -1198,9 +1196,9 @@ replace_restore_preflight_entry_ids(sqlite3* const db, const std::string_view pr
     if (entry_ids.empty()) {
         return base::Result<void>::success();
     }
-    auto insert = SqliteStatement::prepare(
-        db,
-        "INSERT INTO restore_preflight_entry_ids(preflight_token, ordinal, entry_id) VALUES(?,?,?)");
+    auto insert =
+        SqliteStatement::prepare(db, "INSERT INTO restore_preflight_entry_ids(preflight_token, "
+                                     "ordinal, entry_id) VALUES(?,?,?)");
     if (!insert) {
         return base::Result<void>::failure(insert.error());
     }

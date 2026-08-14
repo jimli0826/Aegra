@@ -42,8 +42,8 @@ constexpr std::uint64_t kFileRestorePreflightTtlMs = 30U * 60U * 1'000U;
     return static_cast<char>(value < 10U ? '0' + value : 'a' + (value - 10U));
 }
 
-[[nodiscard]] std::string encode_relative_path_blob(
-    const std::vector<contracts::EncodedName>& components) {
+[[nodiscard]] std::string
+encode_relative_path_blob(const std::vector<contracts::EncodedName>& components) {
     std::string encoded = "v1";
     for (const auto& component : components) {
         encoded.push_back('|');
@@ -93,8 +93,8 @@ encode_target_root_identity(const contracts::FileSourceRef& target) {
     const std::string_view archive_key, const std::string_view file_uuid,
     const std::string_view tip_index_digest, const std::string_view chain_generation,
     const std::uint32_t chain_depth, const contracts::FileConflictPolicy conflict,
-    const bool restore_security, const std::uint64_t entry_count,
-    const std::uint64_t logical_size, const std::string_view target_root_identity) {
+    const bool restore_security, const std::uint64_t entry_count, const std::uint64_t logical_size,
+    const std::string_view target_root_identity) {
     // FI8: filec|key|uuid|tip|chain_gen|depth|conflict|sec|count|logical|target
     std::string out = "filec|";
     out.append(archive_key);
@@ -159,8 +159,8 @@ parse_file_restore_fingerprint(const std::string_view fingerprint) {
     parsed.file_uuid = std::string(parts[2]);
     parsed.tip_index_digest = std::string(parts[3]);
     parsed.chain_generation = std::string(parts[4]);
-    if (parsed.archive_key.empty() || parsed.file_uuid.empty() ||
-        parsed.tip_index_digest.empty() || parsed.chain_generation.empty()) {
+    if (parsed.archive_key.empty() || parsed.file_uuid.empty() || parsed.tip_index_digest.empty() ||
+        parsed.chain_generation.empty()) {
         return base::Result<ParsedFileRestoreFingerprint>::failure(
             {base::ErrorCode::kConflict, "file restore preflight fingerprint is corrupt"});
     }
@@ -256,8 +256,7 @@ resolve_entry_streams(adapters::personal_archive::PersonalFileArchiveChainReader
     for (const auto& stream : entry.streams) {
         auto resolved = chain.resolve_stream_reference(stream.stream_index, cancellation);
         if (!resolved) {
-            return base::Result<void>::failure(
-                map_file_recover_open_error(resolved.error(), true));
+            return base::Result<void>::failure(map_file_recover_open_error(resolved.error(), true));
         }
     }
     return base::Result<void>::success();
@@ -266,9 +265,9 @@ resolve_entry_streams(adapters::personal_archive::PersonalFileArchiveChainReader
 /// Selection closure for free-space preflight + parent-stream resolution (FI8).
 /// Directory seeds expand to all reachable descendants (tip logical bytes sum).
 [[nodiscard]] base::Result<SelectionClosureTotals>
-compute_selection_closure_totals(
-    adapters::personal_archive::PersonalFileArchiveChainReader& chain,
-    const std::vector<std::string>& entry_ids, const base::CancellationToken cancellation) {
+compute_selection_closure_totals(adapters::personal_archive::PersonalFileArchiveChainReader& chain,
+                                 const std::vector<std::string>& entry_ids,
+                                 const base::CancellationToken cancellation) {
     SelectionClosureTotals totals;
     std::unordered_set<std::uint64_t> seen;
     std::vector<std::uint64_t> directory_queue;
@@ -340,8 +339,7 @@ compute_selection_closure_totals(
                 totals.logical_size_bytes += described.value().logical_size;
                 if (described.value().kind == contracts::FileEntryKind::kFile) {
                     totals.maximum_file_size_bytes =
-                        (std::max)(totals.maximum_file_size_bytes,
-                                   described.value().logical_size);
+                        (std::max)(totals.maximum_file_size_bytes, described.value().logical_size);
                 }
                 ++totals.entry_count;
                 if (described.value().kind == contracts::FileEntryKind::kDirectory) {
@@ -443,7 +441,7 @@ source_id_from_volume_identity(const std::string_view identity) {
 
 base::Result<contracts::FileRestorePreflight>
 WorkerJobService::prepare_file_restore(const contracts::PrepareFileRestoreRequest& request,
-                                       const ports::FileBrowseCaller& caller,
+                                       const ports::FileBrowseSession& session,
                                        const base::CancellationToken cancellation) {
     if (auto valid = contracts::validate_prepare_file_restore_request(request); !valid) {
         return base::Result<contracts::FileRestorePreflight>::failure(valid.error());
@@ -456,9 +454,8 @@ WorkerJobService::prepare_file_restore(const contracts::PrepareFileRestoreReques
         return base::Result<contracts::FileRestorePreflight>::failure(
             {base::ErrorCode::kInvalidArgument, "repository_connection_id is required"});
     }
-    auto target_ref =
-        file_browse_->resolve_selection(caller, request.target_node_token,
-                                        contracts::FileRecursion::kSelfOnly, {}, cancellation);
+    auto target_ref = file_browse_->resolve_selection(
+        session, request.target_node_token, contracts::FileRecursion::kSelfOnly, {}, cancellation);
     if (!target_ref) {
         return base::Result<contracts::FileRestorePreflight>::failure(target_ref.error());
     }
@@ -488,11 +485,9 @@ WorkerJobService::prepare_file_restore(const contracts::PrepareFileRestoreReques
     }
     auto target_capabilities = probe_target_capabilities(target_ref.value(), cancellation);
     if (!target_capabilities) {
-        return base::Result<contracts::FileRestorePreflight>::failure(
-            target_capabilities.error());
+        return base::Result<contracts::FileRestorePreflight>::failure(target_capabilities.error());
     }
-    if (request.restore_security &&
-        !target_capabilities.value().supports_security_descriptor) {
+    if (request.restore_security && !target_capabilities.value().supports_security_descriptor) {
         return base::Result<contracts::FileRestorePreflight>::failure(
             {base::ErrorCode::kInvalidArgument, "file_restore.target_capability_missing"});
     }
@@ -504,10 +499,9 @@ WorkerJobService::prepare_file_restore(const contracts::PrepareFileRestoreReques
                                     : inventory.value().free_bytes;
     const auto free_for_capacity =
         (std::max)(target_capabilities.value().free_bytes, inventory_free);
-    auto chain = open_file_recovery_chain(control_plane_, storage_factory_,
-                                          *request.repository_connection_id,
-                                          request.recovery_point_id, request.archive_secret_ref,
-                                          cancellation);
+    auto chain = open_file_recovery_chain(
+        control_plane_, storage_factory_, *request.repository_connection_id,
+        request.recovery_point_id, request.archive_secret_ref, cancellation);
     if (!chain) {
         return base::Result<contracts::FileRestorePreflight>::failure(chain.error());
     }
@@ -534,7 +528,7 @@ WorkerJobService::prepare_file_restore(const contracts::PrepareFileRestoreReques
     }
     const auto now_u = static_cast<std::uint64_t>(now);
     if (now_u > static_cast<std::uint64_t>((std::numeric_limits<std::int64_t>::max)()) -
-                     kFileRestorePreflightTtlMs) {
+                    kFileRestorePreflightTtlMs) {
         return base::Result<contracts::FileRestorePreflight>::failure(
             {base::ErrorCode::kInternal, "file restore preflight clock is invalid"});
     }
@@ -646,7 +640,8 @@ WorkerJobService::start_file_restore(const contracts::StartFileRestoreCommand& c
         return base::Result<contracts::CommandAcknowledgement>::failure(
             {base::ErrorCode::kConflict, "file restore preflight fingerprint is corrupt"});
     }
-    auto by_token = control_plane_.get_job_by_preflight_token(command.preflight_token, cancellation);
+    auto by_token =
+        control_plane_.get_job_by_preflight_token(command.preflight_token, cancellation);
     if (!by_token) {
         return base::Result<contracts::CommandAcknowledgement>::failure(by_token.error());
     }
@@ -656,14 +651,14 @@ WorkerJobService::start_file_restore(const contracts::StartFileRestoreCommand& c
     }
     // Re-open and revalidate full chain generation before Start (any layer change rejects).
     auto chain = open_file_recovery_chain(control_plane_, storage_factory_,
-                                          record.repository_connection_id,
-                                          record.recovery_point_id, command.archive_secret_ref,
-                                          cancellation);
+                                          record.repository_connection_id, record.recovery_point_id,
+                                          command.archive_secret_ref, cancellation);
     if (!chain) {
         return base::Result<contracts::CommandAcknowledgement>::failure(chain.error());
     }
     const auto& tip = chain.value().catalog_layers.back();
-    if (tip.archive_main_key != parsed.value().archive_key || tip.file_uuid != parsed.value().file_uuid ||
+    if (tip.archive_main_key != parsed.value().archive_key ||
+        tip.file_uuid != parsed.value().file_uuid ||
         chain.value().catalog_layers.size() != parsed.value().chain_depth ||
         chain.value().tip_index_digest != parsed.value().tip_index_digest ||
         chain.value().chain_generation_digest != parsed.value().chain_generation) {
@@ -673,8 +668,8 @@ WorkerJobService::start_file_restore(const contracts::StartFileRestoreCommand& c
     auto job_id = random_id("job-", random_, cancellation);
     auto trace_id = random_id("trace-", random_, cancellation);
     if (!job_id || !trace_id) {
-        return base::Result<contracts::CommandAcknowledgement>::failure(
-            !job_id ? job_id.error() : trace_id.error());
+        return base::Result<contracts::CommandAcknowledgement>::failure(!job_id ? job_id.error()
+                                                                                : trace_id.error());
     }
     contracts::JobRequest worker;
     worker.job_id = job_id.value();

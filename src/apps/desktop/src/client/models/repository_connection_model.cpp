@@ -81,6 +81,38 @@ QString RepositoryConnectionModel::default_connection_id() const {
     return {};
 }
 
+QStringList RepositoryConnectionModel::connection_ids() const {
+    QStringList result;
+    result.reserve(rows_.size());
+    for (const auto& row : rows_) {
+        result.push_back(row.connection_id);
+    }
+    return result;
+}
+
+bool RepositoryConnectionModel::set_refreshing(const QString& connection_id,
+                                                const bool refreshing) {
+    const auto row_index = indexOfConnectionId(connection_id);
+    if (row_index < 0 || rows_[row_index].refreshing == refreshing) {
+        return false;
+    }
+    rows_[row_index].refreshing = refreshing;
+    const auto changed = index(row_index, 0);
+    emit dataChanged(changed, changed, {StateTextRole, IsRefreshingRole});
+    return true;
+}
+
+void RepositoryConnectionModel::clear_refreshing() {
+    for (int row_index = 0; row_index < rows_.size(); ++row_index) {
+        if (!rows_[row_index].refreshing) {
+            continue;
+        }
+        rows_[row_index].refreshing = false;
+        const auto changed = index(row_index, 0);
+        emit dataChanged(changed, changed, {StateTextRole, IsRefreshingRole});
+    }
+}
+
 QString RepositoryConnectionModel::connectionIdAt(const int row) const {
     if (row < 0 || row >= rows_.size()) {
         return {};
@@ -126,11 +158,13 @@ QVariant RepositoryConnectionModel::data(const QModelIndex& index, const int rol
     case StateValueRole:
         return static_cast<qint64>(row.state);
     case StateTextRole:
-        return state_text(row.state);
+        return state_text(row);
     case IsDefaultRole:
         return row.is_default;
     case IsAvailableRole:
         return is_available_state(row.state);
+    case IsRefreshingRole:
+        return row.refreshing;
     case CapabilitiesRole:
         return row.capabilities;
     default:
@@ -146,6 +180,7 @@ QHash<int, QByteArray> RepositoryConnectionModel::roleNames() const {
             {StateTextRole, "stateText"},
             {IsDefaultRole, "isDefault"},
             {IsAvailableRole, "isAvailable"},
+            {IsRefreshingRole, "isRefreshing"},
             {CapabilitiesRole, "capabilities"}};
 }
 
@@ -153,12 +188,16 @@ bool RepositoryConnectionModel::is_available_state(const std::int64_t state) noe
     return state == kStateAvailable;
 }
 
-QString RepositoryConnectionModel::state_text(const std::int64_t state) const {
-    if (state == kStateAvailable) {
+QString RepositoryConnectionModel::state_text(const RepositoryConnectionRow& row) const {
+    if (row.refreshing) {
+        //% "Loading"
+        return qtTrId("aegra.common.loading");
+    }
+    if (row.state == kStateAvailable) {
         //% "Online"
         return qtTrId("aegra.backup.connection.online");
     }
-    if (state == kStateUnavailable) {
+    if (row.state == kStateUnavailable) {
         //% "Offline"
         return qtTrId("aegra.backup.connection.offline");
     }

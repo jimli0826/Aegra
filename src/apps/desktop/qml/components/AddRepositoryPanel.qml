@@ -32,7 +32,7 @@ Item {
             pathHint: "e.g. \\\\192.168.1.1\\share",
             hasAuth: true,
             needsPath: true,
-            needsConnect: true
+            needsConnect: false
         }
     ]
 
@@ -73,13 +73,7 @@ Item {
             root.isDriveListLoading = false
             return
         }
-        // Network: list share folders after WNet connect (matches backup AddRepositoryPanel).
-        var pathVal = networkPathInput.text.trim()
-        if (pathVal === "" || !root.isConnected) {
-            root.isDriveListLoading = false
-            return
-        }
-        root.driveList = serviceClient.listNetworkShareFolders(pathVal) || []
+        // Network validation and access belong to the asynchronous Service Add command.
         root.isDriveListLoading = false
     }
 
@@ -92,26 +86,8 @@ Item {
         }
         if (typeof serviceClient === "undefined" || !serviceClient)
             return
-        root.isConnecting = true
-        root.isConnected = false
         root.selectedPath = pathVal
-        root.driveList = []
-        var result = serviceClient.connectNetworkShare(
-                    pathVal,
-                    networkUserInput.text.trim(),
-                    networkPasswordInput.text,
-                    networkDomainInput.text.trim())
-        root.isConnecting = false
-        if (!result || !result.ok) {
-            var msg = (result && result.errorText) ? result.errorText : ""
-            if (msg.length === 0)
-                //% "Failed to connect to the network share"
-                msg = qsTrId("aegra.repository.network_connect_failed")
-            root.showError(msg)
-            return
-        }
         root.isConnected = true
-        root.refreshBrowse()
     }
 
     function selectDrive(name) {
@@ -167,6 +143,14 @@ Item {
         return base + "\\AegraRepo"
     }
 
+    function isValidNetworkRoot(path) {
+        var value = (path || "").trim()
+        if (value.indexOf("\\\\") !== 0)
+            return false
+        var serverEnd = value.indexOf("\\", 2)
+        return serverEnd > 2 && serverEnd < value.length - 1
+    }
+
     function submit() {
         var nameVal = nameInput.text.trim()
         if (nameVal === "") {
@@ -191,13 +175,12 @@ Item {
                 root.showError(qsTrId("aegra.repository.please_enter_path"))
                 return
             }
+            if (!root.isValidNetworkRoot(rootPath)) {
+                root.showError(qsTrId("aegra.repository.network_path_invalid"))
+                return
+            }
         }
         var pathVal = root.repositoryLocatorFromRoot(rootPath)
-        if (currentType().value === "network" && !root.isConnected) {
-            //% "Connect to the network share first"
-            root.showError(qsTrId("aegra.repository.please_connect_first"))
-            return
-        }
         if (typeof serviceClient === "undefined" || !serviceClient || !serviceClient.connected) {
             //% "Service is not connected"
             root.showError(qsTrId("aegra.repository.service_not_connected"))

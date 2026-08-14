@@ -193,12 +193,12 @@ WindowsFileSourceBrowser::create(std::vector<SnapshotVolumeBinding> roots) {
 }
 
 base::Result<contracts::FileSourceNodePage>
-WindowsFileSourceBrowser::list_children(const ports::FileBrowseCaller& caller,
+WindowsFileSourceBrowser::list_children(const ports::FileBrowseSession& session,
                                         const std::optional<std::string>& parent_node_token,
                                         const contracts::ServicePageRequest& page,
                                         const bool include_unavailable,
                                         const base::CancellationToken cancellation) {
-    static_cast<void>(caller);
+    static_cast<void>(session);
     static_cast<void>(include_unavailable);
     if (cancellation.stop_requested()) {
         return base::Result<contracts::FileSourceNodePage>::failure(
@@ -293,12 +293,12 @@ WindowsFileSourceBrowser::list_children(const ports::FileBrowseCaller& caller,
 }
 
 base::Result<contracts::FileSourceRef>
-WindowsFileSourceBrowser::resolve_selection(const ports::FileBrowseCaller& caller,
+WindowsFileSourceBrowser::resolve_selection(const ports::FileBrowseSession& session,
                                             const std::string& node_token,
                                             const contracts::FileRecursion recursion,
                                             const std::string& display_label,
                                             const base::CancellationToken cancellation) {
-    static_cast<void>(caller);
+    static_cast<void>(session);
     if (cancellation.stop_requested()) {
         return base::Result<contracts::FileSourceRef>::failure(
             {base::ErrorCode::kCancelled, "resolve selection cancelled"});

@@ -308,14 +308,14 @@ inline constexpr const char* kSelectCommandSql =
     "FROM commands WHERE idempotency_key = ?";
 
 inline constexpr const char* kSelectScheduleSql =
-    "SELECT schedule_id, display_name, enabled, content_kind, source_ids, owner_sid, "
+    "SELECT schedule_id, display_name, enabled, content_kind, source_ids, "
     "repository_connection_id, backup_type, trigger_kind, local_minutes_of_day, weekday_mask, "
     "day_of_month_mask, timezone_id, next_run_utc_ms, exclude_page_and_hibernation_files, "
     "deduplication_enabled, encryption_enabled, archive_password_protected, backup_set_uuid, "
     "last_recovery_point_id, created_utc_ms, updated_utc_ms FROM schedules WHERE schedule_id = ?";
 
-[[nodiscard]] std::string encode_relative_path_blob(
-    const std::vector<contracts::EncodedName>& components);
+[[nodiscard]] std::string
+encode_relative_path_blob(const std::vector<contracts::EncodedName>& components);
 [[nodiscard]] base::Result<std::vector<contracts::EncodedName>>
 decode_relative_path_blob(std::string_view encoded);
 [[nodiscard]] base::Result<void>

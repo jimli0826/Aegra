@@ -27,7 +27,7 @@ class ScheduleService final {
 
     [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
     upsert_schedule(const contracts::UpsertScheduleCommand& command,
-                    std::string_view idempotency_key, const ports::FileBrowseCaller& caller,
+                    std::string_view idempotency_key, const ports::FileBrowseSession& session,
                     base::CancellationToken cancellation);
 
     [[nodiscard]] base::Result<contracts::CommandAcknowledgement>

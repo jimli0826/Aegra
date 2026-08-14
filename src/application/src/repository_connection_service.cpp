@@ -374,26 +374,38 @@ persist_existing_connection(ports::IControlPlaneDatabase& control_plane, ports::
                      : base::Result<contracts::CommandAcknowledgement>::failure(committed.error());
 }
 
-[[nodiscard]] base::Result<bool>
+struct RepositoryAvailability final {
+    bool available{false};
+    std::optional<base::Error> failure;
+};
+
+[[nodiscard]] base::Result<RepositoryAvailability>
 repository_available(ports::IRepositoryStorageFactory& storage_factory,
                      const std::string_view locator, const base::CancellationToken cancellation) {
     auto storage = storage_factory.open(locator, cancellation);
     if (!storage) {
-        if (storage.error().code == base::ErrorCode::kNotFound ||
-            storage.error().code == base::ErrorCode::kIoFailure) {
-            return base::Result<bool>::success(false);
+        if (storage.error().code == base::ErrorCode::kCancelled) {
+            return base::Result<RepositoryAvailability>::failure(storage.error());
         }
-        return base::Result<bool>::failure(storage.error());
+        return base::Result<RepositoryAvailability>::success({false, storage.error()});
     }
     auto probed = probe_repository_descriptor(*storage.value(), cancellation);
-    if (probed)
-        return base::Result<bool>::success(true);
-    if (probed.error().code == base::ErrorCode::kCancelled ||
-        probed.error().code == base::ErrorCode::kUnauthorized ||
-        probed.error().code == base::ErrorCode::kInternal) {
-        return base::Result<bool>::failure(probed.error());
+    if (probed) {
+        return base::Result<RepositoryAvailability>::success({true, std::nullopt});
     }
-    return base::Result<bool>::success(false);
+    if (probed.error().code == base::ErrorCode::kCancelled) {
+        return base::Result<RepositoryAvailability>::failure(probed.error());
+    }
+    return base::Result<RepositoryAvailability>::success({false, probed.error()});
+}
+
+void set_connection_availability(ports::RepositoryConnectionRecord& record, const bool available,
+                                 const std::uint64_t updated_utc_ms) {
+    record.state = available ? contracts::RepositoryConnectionState::kAvailable
+                             : contracts::RepositoryConnectionState::kUnavailable;
+    record.capabilities = available ? std::vector<std::string>{kCapabilityRepositoryList}
+                                    : std::vector<std::string>{};
+    record.updated_utc_ms = updated_utc_ms;
 }
 
 struct ConnectionTestPersistence final {
@@ -410,13 +422,10 @@ struct CommandPersistenceRequest final {
 
 [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
 persist_connection_test(const ConnectionTestPersistence dependencies,
-                        ports::RepositoryConnectionRecord record, const bool available,
+                        ports::RepositoryConnectionRecord record,
+                        const RepositoryAvailability& availability,
                         CommandPersistenceRequest request) {
-    record.state = available ? contracts::RepositoryConnectionState::kAvailable
-                             : contracts::RepositoryConnectionState::kUnavailable;
-    record.capabilities = available ? std::vector<std::string>{kCapabilityRepositoryList}
-                                    : std::vector<std::string>{};
-    record.updated_utc_ms = utc_ms(dependencies.clock);
+    set_connection_availability(record, availability.available, utc_ms(dependencies.clock));
     auto unit = dependencies.control_plane.begin_unit_of_work(request.cancellation);
     if (!unit)
         return base::Result<contracts::CommandAcknowledgement>::failure(unit.error());
@@ -425,12 +434,16 @@ persist_connection_test(const ConnectionTestPersistence dependencies,
         unit.value()->rollback();
         return base::Result<contracts::CommandAcknowledgement>::failure(upserted.error());
     }
-    if (!available) {
+    if (!availability.available) {
         auto committed = unit.value()->commit(request.cancellation);
         if (!committed)
             return base::Result<contracts::CommandAcknowledgement>::failure(committed.error());
+        if (availability.failure) {
+            return base::Result<contracts::CommandAcknowledgement>::failure(
+                *availability.failure);
+        }
         return base::Result<contracts::CommandAcknowledgement>::failure(
-            make_error(base::ErrorCode::kIoFailure, "repository connection test failed"));
+            make_error(base::ErrorCode::kIoFailure, "repository.connection_failed"));
     }
     auto command_id = new_id("cmd-", dependencies.random, request.cancellation);
     if (!command_id) {
@@ -512,7 +525,7 @@ RepositoryConnectionService::add_connection(const contracts::RepositoryConnectio
                     initialized.error());
             }
             return persist_connection_test({control_plane_, clock_, random_},
-                                           std::move(*existing.value()), true,
+                                           std::move(*existing.value()), {true, std::nullopt},
                                            {idempotency_key, fingerprint, cancellation});
         }
         return base::Result<contracts::CommandAcknowledgement>::failure(
@@ -619,7 +632,38 @@ RepositoryConnectionService::test_connection(const contracts::ResourceRef& refer
         return base::Result<contracts::CommandAcknowledgement>::failure(available.error());
     }
     return persist_connection_test({control_plane_, clock_, random_}, std::move(*existing.value()),
-                                   available.value(), {idempotency_key, fingerprint, cancellation});
+                                   available.value(),
+                                   {idempotency_key, fingerprint, cancellation});
+}
+
+base::Result<void> RepositoryConnectionService::mark_connection_unavailable(
+    const contracts::ResourceRef& reference, const base::CancellationToken cancellation) {
+    auto valid = contracts::validate_resource_ref(reference);
+    if (!valid) {
+        return valid;
+    }
+    auto unit = control_plane_.begin_unit_of_work(cancellation);
+    if (!unit) {
+        return base::Result<void>::failure(unit.error());
+    }
+    auto existing = unit.value()->repository_connections().get(reference.resource_id, cancellation);
+    if (!existing) {
+        unit.value()->rollback();
+        return base::Result<void>::failure(existing.error());
+    }
+    if (!existing.value()) {
+        unit.value()->rollback();
+        return base::Result<void>::failure(
+            make_error(base::ErrorCode::kNotFound, "repository connection not found"));
+    }
+    auto record = std::move(*existing.value());
+    set_connection_availability(record, false, utc_ms(clock_));
+    auto stored = unit.value()->repository_connections().upsert(record, cancellation);
+    if (!stored) {
+        unit.value()->rollback();
+        return base::Result<void>::failure(stored.error());
+    }
+    return unit.value()->commit(cancellation);
 }
 
 base::Result<contracts::CommandAcknowledgement>

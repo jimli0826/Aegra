@@ -286,8 +286,4 @@ base::Result<void> WindowsNamedPipeChannel::send(const std::string_view message,
     return transfer_all(impl_->pipe.get(), body, cancellation);
 }
 
-base::Result<WindowsNamedPipePeerIdentity> WindowsNamedPipeChannel::peer_identity() const {
-    return detail::query_pipe_peer(impl_->pipe.get());
-}
-
 } // namespace aegra::adapters::windows_ipc

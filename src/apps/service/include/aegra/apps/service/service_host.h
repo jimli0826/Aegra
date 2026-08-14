@@ -23,7 +23,7 @@ class ISourceInventoryQuery;
 namespace aegra::ports {
 class IControlPlaneDatabase;
 class IRepositoryStorageFactory;
-}
+} // namespace aegra::ports
 
 namespace aegra::apps::service {
 
@@ -53,9 +53,9 @@ class IServiceLog {
                        std::string_view detail) noexcept = 0;
 };
 
-/// Per-pipe-session identity for browse token binding and schedule ownership.
+/// Service-generated per-pipe-session scope for opaque browse token binding.
 struct ServiceSessionContext final {
-    ports::FileBrowseCaller caller;
+    ports::FileBrowseSession browser_session;
 };
 
 struct ServiceRuntimeInfo final {
@@ -78,8 +78,7 @@ struct ServiceRuntimeInfo final {
 
 [[nodiscard]] base::Result<contracts::ServiceResponse>
 dispatch_service_request(const contracts::ServiceRequest& request,
-                         const ServiceRuntimeInfo& runtime,
-                         const ServiceSessionContext& session,
+                         const ServiceRuntimeInfo& runtime, const ServiceSessionContext& session,
                          base::CancellationToken cancellation = {});
 
 [[nodiscard]] base::Result<std::string>

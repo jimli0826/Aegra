@@ -40,6 +40,12 @@ class IRepositoryConnectionService {
     test_connection(const contracts::ResourceRef& reference, std::string_view idempotency_key,
                     base::CancellationToken cancellation) = 0;
 
+    // Persists the timeout result without touching Repository storage. Used by the Service
+    // request executor when a connection probe exceeds its deadline.
+    [[nodiscard]] virtual base::Result<void>
+    mark_connection_unavailable(const contracts::ResourceRef& reference,
+                                base::CancellationToken cancellation) = 0;
+
     [[nodiscard]] virtual base::Result<contracts::CommandAcknowledgement>
     set_default_connection(const contracts::ResourceRef& reference,
                            std::string_view idempotency_key,
@@ -76,6 +82,9 @@ class RepositoryConnectionService final : public IRepositoryConnectionService {
     [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
     test_connection(const contracts::ResourceRef& reference, std::string_view idempotency_key,
                     base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<void>
+    mark_connection_unavailable(const contracts::ResourceRef& reference,
+                                base::CancellationToken cancellation) override;
     [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
     set_default_connection(const contracts::ResourceRef& reference,
                            std::string_view idempotency_key,

@@ -64,7 +64,7 @@ baseline。Worker Job 为 schema 4。
 ### 4. 安全边界
 
 - Desktop 永不发送绝对路径、Volume GUID、NT device path、VSS path 作为选择输入；
-- node token / preflight token 为密码学随机、短期、绑定 caller SID + session + 资源；
+- node token / preflight token 为密码学随机、短期、绑定 Service session + 资源，不携带调用者身份；
 - 响应与 event 不返回 Archive 对象 key、分卷路径、security descriptor、完整选择路径列表；
 - 路径类客户数据不得进入默认 `message_arguments`。
 

@@ -2,6 +2,7 @@
 
 #include "client/ipc_frame_transport.h"
 
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMetaObject>
@@ -9,6 +10,28 @@
 #include <QTimer>
 
 namespace aegra::desktop {
+namespace {
+
+[[nodiscard]] int extract_request_kind(const QByteArray& body) {
+    const auto document = QJsonDocument::fromJson(body);
+    return document.isObject() ? document.object().value(QStringLiteral("kind")).toInt() : 0;
+}
+
+[[nodiscard]] QByteArray timeout_response(const QString& request_id, const int request_kind) {
+    QJsonObject root;
+    root.insert(QStringLiteral("schema_version"), 4);
+    root.insert(QStringLiteral("message_type"), 2);
+    root.insert(QStringLiteral("request_id"), request_id);
+    root.insert(QStringLiteral("kind"), 3);
+    root.insert(QStringLiteral("request_kind"), request_kind);
+    root.insert(QStringLiteral("boundary_error_code"), 3);
+    root.insert(QStringLiteral("message_code"), QStringLiteral("service.request_timeout"));
+    root.insert(QStringLiteral("message_arguments"), QJsonArray{});
+    root.insert(QStringLiteral("payload"), QJsonValue::Null);
+    return QJsonDocument(root).toJson(QJsonDocument::Compact);
+}
+
+} // namespace
 
 QString extract_response_request_id(const QByteArray& body) {
     const auto document = QJsonDocument::fromJson(body);
@@ -47,6 +70,7 @@ bool ServiceRequestCoordinator::begin_request(const QString& request_id, const Q
     auto* entry = new PendingRequest();
     entry->handler = std::move(handler);
     entry->deadline_ms = deadline_ms;
+    entry->request_kind = extract_request_kind(body);
     entry->deadline_timer = new QTimer(this);
     entry->deadline_timer->setSingleShot(true);
     pending_.insert(request_id, entry);
@@ -68,6 +92,7 @@ bool ServiceRequestCoordinator::continue_request(const QString& previous_request
     }
     auto* entry = pending_.take(previous_request_id);
     entry->deadline_ms = deadline_ms;
+    entry->request_kind = extract_request_kind(body);
     pending_.insert(request_id, entry);
     arm_deadline(request_id, *entry);
     return true;
@@ -124,11 +149,12 @@ void ServiceRequestCoordinator::arm_deadline(const QString& request_id, PendingR
     }
     QObject::disconnect(pending.deadline_timer, nullptr, this, nullptr);
     connect(pending.deadline_timer, &QTimer::timeout, this, [this, request_id]() {
-        if (!pending_.contains(request_id)) {
+        auto* entry = pending_.value(request_id, nullptr);
+        if (entry == nullptr || !entry->handler) {
             return;
         }
+        (void)entry->handler(timeout_response(request_id, entry->request_kind));
         clear_request(request_id);
-        emit request_failed(QStringLiteral("service.request_timeout"));
     });
     pending.deadline_timer->start(pending.deadline_ms);
 }

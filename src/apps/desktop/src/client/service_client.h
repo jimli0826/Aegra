@@ -76,6 +76,8 @@ class ServiceClient final : public QObject {
     Q_PROPERTY(QString schedulesErrorText READ schedulesErrorText NOTIFY schedulesChanged)
     Q_PROPERTY(aegra::desktop::RepositoryConnectionModel* connections READ connections CONSTANT)
     Q_PROPERTY(bool connectionsLoading READ connectionsLoading NOTIFY connectionsChanged)
+    Q_PROPERTY(bool repositoryRefreshRunning READ repositoryRefreshRunning NOTIFY
+                   connectionsChanged)
     Q_PROPERTY(bool connectionsAvailable READ connectionsAvailable NOTIFY stateChanged)
     Q_PROPERTY(QString connectionsErrorText READ connectionsErrorText NOTIFY connectionsChanged)
     Q_PROPERTY(QString selectedRepositoryConnectionId READ selectedRepositoryConnectionId NOTIFY
@@ -190,6 +192,7 @@ class ServiceClient final : public QObject {
     [[nodiscard]] QString schedulesErrorText() const;
     [[nodiscard]] RepositoryConnectionModel* connections() noexcept;
     [[nodiscard]] bool connectionsLoading() const noexcept;
+    [[nodiscard]] bool repositoryRefreshRunning() const noexcept;
     [[nodiscard]] bool connectionsAvailable() const noexcept;
     [[nodiscard]] QString connectionsErrorText() const;
     [[nodiscard]] QString selectedRepositoryConnectionId() const;
@@ -235,6 +238,8 @@ class ServiceClient final : public QObject {
     Q_INVOKABLE void refreshJobs();
     Q_INVOKABLE void refreshInventory();
     Q_INVOKABLE void refreshConnections();
+    /// Sequentially probes every registered Repository and persists each resulting state.
+    Q_INVOKABLE void refreshRepositoryConnections();
     Q_INVOKABLE void refreshSchedules();
     /// Loads Manifest volumes for a recovery point (Restore Source Disks). Async; emits
     /// recoveryPointLayoutChanged when finished. Pass empty recovery_point_id to clear.
@@ -333,24 +338,17 @@ class ServiceClient final : public QObject {
     Q_INVOKABLE void refreshMountSessions();
     /// Free drive letters for Mount Options (Auto + unused C:–Z:), matching old MountBackend.
     Q_INVOKABLE QVariantList availableDriveLetters() const;
-    /// Local drive roots for Add Repository browse (Desktop Qt only; not Service IPC).
+    /// Local drive roots derived from the latest asynchronous Service Inventory snapshot.
     Q_INVOKABLE QVariantList listLocalRepositoryDrives() const;
-    /// Immediate subdirectories under path for Add Repository browse (Desktop Qt only).
-    Q_INVOKABLE QVariantList listLocalRepositoryFolders(const QString& path) const;
-    /// Connect to UNC share via WNet (Desktop process). Returns {ok, errorText}.
-    Q_INVOKABLE QVariantMap connectNetworkShare(const QString& unc_path, const QString& username,
-                                                const QString& password,
-                                                const QString& domain = {}) const;
-    /// List subdirectories under a connected UNC path (Desktop Qt only).
-    Q_INVOKABLE QVariantList listNetworkShareFolders(const QString& unc_path) const;
     /// Locale-aware byte size for QML stat cards.
     Q_INVOKABLE QString formatBytes(qint64 bytes) const;
-    /// Free space on unique volumes hosting registered repository locators (OS volume query).
+    /// Free space on unique local volumes hosting registered repository locators. UNC is skipped
+    /// because Windows network-provider volume queries are synchronous and may block the UI.
     Q_INVOKABLE qint64 repositoryHostFreeBytes() const;
-    /// Used space of unique volumes hosting registered repository locators
+    /// Used space of unique local volumes hosting registered repository locators
     /// (volume total − free; never recursively scans repository files).
     Q_INVOKABLE qint64 repositoryHostUsedBytes() const;
-    /// Free space on the volume that contains the repository locator (OS volume query).
+    /// Free space on the local volume containing the locator; UNC returns unavailable.
     Q_INVOKABLE qint64 freeBytesForLocator(const QString& locator) const;
     Q_INVOKABLE QString freeSpaceTextForLocator(const QString& locator) const;
     Q_INVOKABLE void cancelActiveBackup();
@@ -465,6 +463,9 @@ class ServiceClient final : public QObject {
     [[nodiscard]] JobListQuery make_task_log_query(
         const std::optional<QString>& continuation_token) const;
     void start_connection_query();
+    void begin_next_repository_refresh();
+    void request_connection_snapshot_after_probe();
+    void stop_repository_refresh();
     void start_schedule_query();
     [[nodiscard]] RequestDisposition handle_service_info_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_recovery_point_frame(const QByteArray& body);
@@ -675,6 +676,10 @@ class ServiceClient final : public QObject {
     bool schedule_command_busy_{false};
     bool connections_loading_{false};
     bool connections_available_{false};
+    bool repository_refresh_running_{false};
+    bool repository_refresh_waiting_for_snapshot_{false};
+    QStringList repository_refresh_queue_;
+    QString repository_refresh_current_id_;
     bool repository_command_busy_{false};
     int repository_command_kind_{0};
     bool delete_plan_busy_{false};

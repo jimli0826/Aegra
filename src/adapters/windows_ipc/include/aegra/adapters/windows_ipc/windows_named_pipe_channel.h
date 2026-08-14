@@ -33,11 +33,6 @@ struct WindowsNamedPipeListenRequest final {
 class WindowsNamedPipeListener;
 class WindowsNamedPipeChannel;
 
-struct WindowsNamedPipeAcceptedClient final {
-    std::unique_ptr<WindowsNamedPipeChannel> channel;
-    WindowsNamedPipePeerIdentity peer;
-};
-
 class WindowsNamedPipeChannel final : public ports::IMessageChannel {
   public:
     ~WindowsNamedPipeChannel() override;
@@ -54,9 +49,6 @@ class WindowsNamedPipeChannel final : public ports::IMessageChannel {
     receive(const base::CancellationToken& cancellation) override;
     [[nodiscard]] base::Result<void> send(std::string_view message,
                                           const base::CancellationToken& cancellation) override;
-
-    // Queries the connected client. Safe only after a successful accept or connect handshake.
-    [[nodiscard]] base::Result<WindowsNamedPipePeerIdentity> peer_identity() const;
 
   private:
     struct Impl;
@@ -83,12 +75,6 @@ class WindowsNamedPipeListener final {
 
     [[nodiscard]] base::Result<std::unique_ptr<WindowsNamedPipeChannel>>
     accept(const base::CancellationToken& cancellation);
-
-    // Accepts one local client, reads peer identity, and applies authorization before returning.
-    // Unauthorized clients are disconnected and reported as kUnauthorized without a channel.
-    [[nodiscard]] base::Result<WindowsNamedPipeAcceptedClient>
-    accept_authorized(const WindowsServiceCallerAuthorization& authorization,
-                      const base::CancellationToken& cancellation);
 
   private:
     explicit WindowsNamedPipeListener(WindowsNamedPipeListenRequest request);

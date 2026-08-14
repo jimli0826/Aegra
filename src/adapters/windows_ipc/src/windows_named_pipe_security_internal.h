@@ -42,7 +42,5 @@ class UniqueLocal final {
 create_local_everyone_security_attributes(SECURITY_ATTRIBUTES& attributes,
                                           UniqueLocal& descriptor_owner);
 
-[[nodiscard]] base::Result<WindowsNamedPipePeerIdentity> query_pipe_peer(HANDLE pipe);
-
 } // namespace detail
 } // namespace aegra::adapters::windows_ipc

@@ -21,7 +21,7 @@
    `\\.\pipe\aegra-service-control`；禁止远程 Pipe Client。
 2. Service 是 Pipe Server，Desktop 是 Client。Service Adapter 使用进程 token 的默认 DACL；阶段 13A
    Service 与 Desktop 在同一交互用户下运行。安装为 LocalSystem Service 前必须增加显式用户授权与连接方
-   身份校验，不允许用 NULL DACL 或 Everyone full access 临时绕过。
+   本机 ACL 边界，不允许用 NULL DACL 或 Everyone full access 临时绕过；不执行调用方身份认证。
 3. 传输使用 byte mode、4 字节 little-endian unsigned length 和 UTF-8 JSON body。零长度无效，Service API
    默认最大 frame 为 1 MiB（控制面 Service↔Desktop）。Adapter 只负责连接、监听、framing、取消和 Handle 生命周期，不解析 JSON。
 4. `contracts` 定义传输无关的 `ServiceRequest`、`ServiceResponse` 与 `ServiceInfo`。每个根消息携带

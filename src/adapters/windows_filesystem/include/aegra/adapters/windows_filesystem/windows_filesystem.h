@@ -112,13 +112,13 @@ class WindowsFileSourceBrowser final : public ports::IFileSourceBrowser {
     create(std::vector<SnapshotVolumeBinding> roots);
 
     [[nodiscard]] base::Result<contracts::FileSourceNodePage>
-    list_children(const ports::FileBrowseCaller& caller,
+    list_children(const ports::FileBrowseSession& session,
                   const std::optional<std::string>& parent_node_token,
                   const contracts::ServicePageRequest& page, bool include_unavailable,
                   base::CancellationToken cancellation) override;
 
     [[nodiscard]] base::Result<contracts::FileSourceRef>
-    resolve_selection(const ports::FileBrowseCaller& caller, const std::string& node_token,
+    resolve_selection(const ports::FileBrowseSession& session, const std::string& node_token,
                       contracts::FileRecursion recursion, const std::string& display_label,
                       base::CancellationToken cancellation) override;
 

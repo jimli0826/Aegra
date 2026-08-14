@@ -347,8 +347,11 @@ RequestDisposition ServiceClient::handle_connection_list_frame(const QByteArray&
     }
     if (selected_repository_connection_id_.isEmpty()) {
         reset_repository();
-    } else if (!repository_loading_) {
-        start_repository_query();
+    }
+    if (repository_refresh_waiting_for_snapshot_) {
+        repository_refresh_waiting_for_snapshot_ = false;
+        repository_refresh_current_id_.clear();
+        begin_next_repository_refresh();
     }
     return RequestDisposition::kFinished;
 }
@@ -432,7 +435,7 @@ void ServiceClient::finish_inventory_failure(const QString& message_code) {
     inventory_loading_ = false;
     inventory_request_id_.clear();
     inventory_error_code_ = message_code;
-    sources_.clear();
+    // Preserve the last complete Service snapshot across transient refresh failures.
     emit inventoryChanged();
     emit loadingChanged();
 }
@@ -443,7 +446,10 @@ void ServiceClient::finish_connection_failure(const QString& message_code) {
     connections_loading_ = false;
     connection_request_id_.clear();
     connections_error_code_ = message_code;
-    connections_.clear();
+    if (repository_refresh_waiting_for_snapshot_) {
+        stop_repository_refresh();
+    }
+    // Preserve registered repositories while the Service reconnects.
     emit connectionsChanged();
     emit loadingChanged();
 }
@@ -479,6 +485,7 @@ void ServiceClient::reset_inventory() {
 }
 
 void ServiceClient::reset_connections() {
+    stop_repository_refresh();
     connections_.clear();
     pending_connections_.clear();
     connection_requested_token_.reset();

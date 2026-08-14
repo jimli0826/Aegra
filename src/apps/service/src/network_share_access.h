@@ -1,8 +1,10 @@
 #pragma once
 
+#include "aegra/base/cancellation.h"
 #include "aegra/base/result.h"
 #include "aegra/contracts/job.h"
 
+#include <chrono>
 #include <string>
 #include <string_view>
 
@@ -13,6 +15,13 @@ namespace aegra::apps::service {
 
 /// \\server\share prefix of a UNC locator (empty if invalid).
 [[nodiscard]] std::string extract_share_root(std::string_view locator);
+
+/// Performs a bounded TCP reachability check for an IP-literal UNC server before invoking
+/// synchronous Windows network-provider or filesystem APIs. Hostname locators are left to the
+/// provider because name resolution requires a separate cancellable adapter boundary.
+[[nodiscard]] base::Result<void>
+probe_network_share_server(std::string_view locator, base::CancellationToken cancellation,
+                           std::chrono::milliseconds timeout = std::chrono::milliseconds(1500));
 
 /// Temporary WNet connect (matches backup NetworkStorageBackend::ConnectToShare).
 [[nodiscard]] base::Result<void> connect_network_share(std::string_view locator,

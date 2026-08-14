@@ -175,7 +175,7 @@ little-endian 长度前缀和 UTF-8 body；零长度或超过配置上限的帧�
 同一实例允许一个接收和一个发送并发，不保证多 Reader 或多 Writer 安全。连接轮询响应取消，挂起
 Overlapped I/O 通过 `CancelIoEx` 中止。Worker 父进程负责 Server 生命周期与 Worker SID 授权，见
 [ADR-0008](../adr/0008-worker-session-named-pipe-protocol.md)。Service 控制 Pipe 的显式 ACL、远程拒绝
-与调用方 SID/session 校验见 [windows_ipc.md](windows_ipc.md) 与
+本机 ACL 与无调用方认证边界见 [windows_ipc.md](windows_ipc.md) 与
 [ADR-0014](../adr/0014-windows-service-ipc-security.md)。
 
 ## 核心不变量

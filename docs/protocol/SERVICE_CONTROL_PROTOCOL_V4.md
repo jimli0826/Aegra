@@ -415,7 +415,7 @@ Footer，其它任务为 0。file_set backup 成功时 `requested_backup_type` /
 
 - `display_name` 来自 UTF-16LE 的可展示投影，可含替换字符；**不是**恢复权威名称；
 - 不返回绝对路径、volume path、file id；
-- token TTL 默认 15 分钟；绑定 caller SID + connection session；
+- token TTL 默认 15 分钟；绑定 Service 生成的 connection session id；不携带调用者身份；
 - 最大 active tokens / connection：4096（按 session 计数，不是进程全局）；
 - 根列表首页（`parent_node_token=null` 且 `page.continuation_token=null`）必须先清空该
   session 上已有 node tokens，再 mint 本页；续页保留本轮根列表已发 token。Desktop 折叠/
@@ -616,6 +616,22 @@ payload 保持 repository/schedule/job 引用形状；若 Schedule 为 file_set�
 ### 7.4 其它命令 32–47
 
 字段级形状与 V3 相同（版本号 4），除非 Contracts 在 F1 明确收紧。`StartRestore`（40）仅 volume。
+
+Repository 网络命令失败使用以下稳定 `message_code`，不得返回 Win32 原始错误文本：
+
+- `repository.network_path_invalid`
+- `repository.network_unreachable`
+- `repository.network_share_not_found`
+- `repository.network_credentials_rejected`
+- `repository.network_access_denied`
+- `repository.network_credential_conflict`
+- `repository.network_connect_failed`（无法安全细分时）
+- `repository.storage_access_denied`
+- `repository.storage_path_not_found`
+- `repository.storage_io_failed`
+- `repository.descriptor_invalid`
+
+`TestRepositoryConnection` 失败先把连接状态持久化为 Unavailable，再返回本次稳定失败码。
 
 ---
 

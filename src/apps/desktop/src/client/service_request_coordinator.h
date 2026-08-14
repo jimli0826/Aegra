@@ -54,6 +54,7 @@ class ServiceRequestCoordinator final : public QObject {
         ResponseHandler handler;
         QTimer* deadline_timer{nullptr};
         int deadline_ms{kDefaultDeadlineMilliseconds};
+        int request_kind{0};
     };
 
     void on_frame_received(const QByteArray& body);

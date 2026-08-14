@@ -249,6 +249,9 @@ QString ServiceClient::inventoryErrorText() const {
 
 RepositoryConnectionModel* ServiceClient::connections() noexcept { return &connections_; }
 bool ServiceClient::connectionsLoading() const noexcept { return connections_loading_; }
+bool ServiceClient::repositoryRefreshRunning() const noexcept {
+    return repository_refresh_running_;
+}
 bool ServiceClient::connectionsAvailable() const noexcept { return connections_available_; }
 
 QString ServiceClient::connectionsErrorText() const {
@@ -325,9 +328,10 @@ bool ServiceClient::globalLoading() const noexcept {
     if (state_ != State::kReady || !first_ready_seen_) {
         return false;
     }
-    return repository_loading_ || recovery_point_layout_loading_ || jobs_loading_ ||
-           inventory_loading_ || connections_loading_ || schedules_loading_ ||
-           repository_command_busy_ || backup_command_busy_ || cancel_command_busy_ ||
+    return recovery_point_layout_loading_ || jobs_loading_ || inventory_loading_ ||
+           (connections_loading_ && !repository_refresh_running_) || schedules_loading_ ||
+           (repository_command_busy_ && !repository_refresh_running_) ||
+           backup_command_busy_ || cancel_command_busy_ ||
            (schedule_command_busy_ && !schedule_enable_patch_active_) || mount_command_busy_;
 }
 
@@ -385,6 +389,23 @@ void ServiceClient::refreshConnections() {
     start_connection_query();
 }
 
+void ServiceClient::refreshRepositoryConnections() {
+    if (state_ != State::kReady || !connections_available_ || connections_loading_ ||
+        repository_command_busy_ || repository_refresh_running_) {
+        return;
+    }
+    repository_refresh_queue_ = connections_.connection_ids();
+    if (repository_refresh_queue_.isEmpty()) {
+        return;
+    }
+    repository_refresh_running_ = true;
+    repository_refresh_waiting_for_snapshot_ = false;
+    repository_refresh_current_id_.clear();
+    connections_error_code_.clear();
+    emit connectionsChanged();
+    begin_next_repository_refresh();
+}
+
 void ServiceClient::dismissToast() {
     if (!toast_visible_) {
         return;
@@ -421,13 +442,12 @@ void ServiceClient::on_request_failed(const QString& message_code) {
     // Handshake-level failures drop the transport. Query failures after Ready must not tear down
     // the whole Service session (matches desktop.md: catalog errors stay on repository status).
     const bool transport_level = message_code == QLatin1String("service.protocol_invalid") ||
-                                 message_code == QLatin1String("service.request_timeout") ||
                                  message_code == QLatin1String("service.send_failed") ||
                                  message_code == QLatin1String("service.disconnected");
     if (!handshake_complete_ || transport_level) {
         // After Ready, soft-fail in-flight domain queries instead of IPC reconnect storms.
-        // protocol_invalid on a list/command keeps the socket; disconnect/send/timeout still
-        // drop the pipe but domain panels get an error and reconnect uses backoff (not 0ms).
+        // A request timeout is correlated by ServiceRequestCoordinator and never reaches this
+        // transport-level path. Protocol-invalid domain responses keep the live pipe.
         const bool domain_inflight =
             repository_loading_ || recovery_point_layout_loading_ || jobs_loading_ ||
             task_log_loading_ || inventory_loading_ || connections_loading_ || schedules_loading_ ||
@@ -766,9 +786,6 @@ RequestDisposition ServiceClient::handle_service_info_frame(const QByteArray& bo
         first_ready_seen_ = true;
         splash_error_ = false;
         update_splash_for_state();
-        if (!connections_available_) {
-            start_repository_query();
-        }
         if (job_list_available_) {
             // Terminal seed first (schedule status / toast baseline), then active poll.
             start_terminal_job_seed();
@@ -1079,7 +1096,8 @@ void ServiceClient::set_state(const State state, QString error_code) {
 
     if (state != State::kReady) {
         if (previous == State::kReady) {
-            // Dropped after a successful session — clear live models once.
+            // Dropped after a successful session. Disable commands but retain the last complete
+            // Service snapshots so a transient disconnect does not blank every page.
             service_version_.clear();
             api_version_ = 0;
             capabilities_.clear();
@@ -1100,18 +1118,10 @@ void ServiceClient::set_state(const State state, QString error_code) {
             mount_command_busy_ = false;
             job_cancel_available_ = false;
             handshake_complete_ = false;
-            reset_repository();
-            reset_recovery_point_layout();
-            reset_jobs();
-            reset_inventory();
-            reset_file_models();
-            reset_connections();
-            reset_schedules();
             reset_repository_command();
+            stop_repository_refresh();
             reset_backup_command();
-            reset_mount_sessions();
             reset_mount_command();
-            reset_service_settings();
         } else {
             // Pre-ready connect churn: clear handshake only (avoid model/signal storms).
             handshake_complete_ = false;

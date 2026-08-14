@@ -1,5 +1,6 @@
 #include "aegra/apps/service/service_host.h"
 
+#include "aegra/adapters/windows_system/windows_system.h"
 #include "aegra/application/connected_repository_query.h"
 #include "aegra/application/file_browse_service.h"
 #include "aegra/application/personal_repository_query.h"
@@ -12,12 +13,12 @@
 #include "aegra/apps/service/service_response_fit.h"
 #include "aegra/apps/service/worker_job_service.h"
 #include "aegra/apps/service/worker_supervisor.h"
-#include "aegra/adapters/windows_system/windows_system.h"
 #include "aegra/ports/control_plane.h"
 #include "file_recovery_point_query.h"
 #include "network_share_access.h"
 #include "recovery_point_layout_service.h"
 #include "service_log_formatter.h"
+#include "service_session_executor.h"
 
 #include <Windows.h>
 
@@ -51,8 +52,8 @@ void write_log(const ServiceRuntimeInfo& runtime, const ServiceLogLevel level,
 
 void write_interaction_log(const ServiceRuntimeInfo& runtime, const std::string_view direction,
                            const std::string_view encoded) noexcept {
-    const auto message_code = direction == "Inbound" ? "service.interaction.request"
-                                                       : "service.interaction.response";
+    const auto message_code =
+        direction == "Inbound" ? "service.interaction.request" : "service.interaction.response";
     write_log(runtime, ServiceLogLevel::kTrace, message_code,
               detail::sanitized_interaction_detail(direction, encoded));
 }
@@ -171,12 +172,11 @@ recovery_point_response(const contracts::ServiceRequest& request, const ServiceR
     };
 
     auto fitted = fetch_payload_within_frame_budget<contracts::ServiceRecoveryPointPage>(
-        response, query.page.maximum_results, fetch, [](const contracts::ServiceRecoveryPointPage& page) {
-            return page.catalog.items.size();
-        });
+        response, query.page.maximum_results, fetch,
+        [](const contracts::ServiceRecoveryPointPage& page) { return page.catalog.items.size(); });
     if (!fitted) {
-        return base::Result<contracts::ServiceResponse>::success(
-            failure(fitted.error().code, request.request_id, request.kind, "repository.query_failed"));
+        return base::Result<contracts::ServiceResponse>::success(failure(
+            fitted.error().code, request.request_id, request.kind, "repository.query_failed"));
     }
     if (fitted.value().catalog.state == contracts::RepositoryCatalogState::kNotConfigured) {
         response.message_code = "repository.not_configured";
@@ -196,11 +196,9 @@ query_response(const contracts::ServiceRequest& request, const ServiceRuntimeInf
     response.message_code = "control_plane.ready";
     if (request.kind == contracts::ServiceRequestKind::kListRepositoryConnections &&
         runtime.repository_connections) {
-        const auto& query =
-            std::get<contracts::RepositoryConnectionListRequest>(request.payload);
+        const auto& query = std::get<contracts::RepositoryConnectionListRequest>(request.payload);
         auto fitted = fetch_page_within_frame_budget<contracts::RepositoryConnectionPage>(
-            response, query.page.maximum_results,
-            [&](const std::uint32_t maximum_results) {
+            response, query.page.maximum_results, [&](const std::uint32_t maximum_results) {
                 auto scaled = query;
                 scaled.page.maximum_results = maximum_results;
                 return runtime.repository_connections->list_connections(scaled, cancellation);
@@ -250,9 +248,8 @@ query_response(const contracts::ServiceRequest& request, const ServiceRuntimeInf
             write_log(runtime, ServiceLogLevel::kWarning, "restore.preflight_failed",
                       result.error().message.empty() ? "prepare restore failed"
                                                      : result.error().message);
-            return base::Result<contracts::ServiceResponse>::success(
-                failure(result.error().code, request.request_id, request.kind,
-                        "restore.preflight_failed"));
+            return base::Result<contracts::ServiceResponse>::success(failure(
+                result.error().code, request.request_id, request.kind, "restore.preflight_failed"));
         }
         response.message_code = "restore.preflight_ready";
         response.payload = std::move(result).value();
@@ -281,11 +278,19 @@ query_response(const contracts::ServiceRequest& request, const ServiceRuntimeInf
 
 /// Connect UNC share when needed and DPAPI-protect network auth into credential_ref.
 [[nodiscard]] base::Result<contracts::RepositoryConnectionInput>
-prepare_repository_connection_input(contracts::RepositoryConnectionInput input) {
+prepare_repository_connection_input(contracts::RepositoryConnectionInput input,
+                                    const base::CancellationToken cancellation) {
     const bool has_network_auth = !input.network_username.empty() ||
-                                  !input.network_password.empty() ||
-                                  !input.network_domain.empty();
+                                  !input.network_password.empty() || !input.network_domain.empty();
+    if (has_network_auth && !is_unc_locator(input.locator)) {
+        return base::Result<contracts::RepositoryConnectionInput>::failure(
+            {base::ErrorCode::kInvalidArgument, "repository.network_path_invalid"});
+    }
     if (is_unc_locator(input.locator)) {
+        auto reachable = probe_network_share_server(input.locator, cancellation);
+        if (!reachable) {
+            return base::Result<contracts::RepositoryConnectionInput>::failure(reachable.error());
+        }
         auto connected = connect_network_share(input.locator, input.network_username,
                                                input.network_password, input.network_domain);
         if (!connected) {
@@ -322,7 +327,7 @@ run_repository_command(const contracts::ServiceRequest& request, const ServiceRu
     switch (request.kind) {
     case contracts::ServiceRequestKind::kAddRepositoryConnection: {
         auto prepared = prepare_repository_connection_input(
-            std::get<contracts::RepositoryConnectionInput>(request.payload));
+            std::get<contracts::RepositoryConnectionInput>(request.payload), cancellation);
         if (!prepared) {
             return base::Result<contracts::CommandAcknowledgement>::failure(prepared.error());
         }
@@ -330,7 +335,7 @@ run_repository_command(const contracts::ServiceRequest& request, const ServiceRu
     }
     case contracts::ServiceRequestKind::kImportRepositoryConnection: {
         auto prepared = prepare_repository_connection_input(
-            std::get<contracts::RepositoryConnectionInput>(request.payload));
+            std::get<contracts::RepositoryConnectionInput>(request.payload), cancellation);
         if (!prepared) {
             return base::Result<contracts::CommandAcknowledgement>::failure(prepared.error());
         }
@@ -349,6 +354,35 @@ run_repository_command(const contracts::ServiceRequest& request, const ServiceRu
     default:
         return base::Result<contracts::CommandAcknowledgement>::failure(
             {base::ErrorCode::kInvalidArgument, "repository command kind is invalid"});
+    }
+}
+
+[[nodiscard]] std::string repository_failure_message_code(const base::Error& error) {
+    const auto& detail = error.message;
+    if (detail.rfind("repository.", 0) == 0) {
+        return detail;
+    }
+    if (detail.find("repository locator already registered") != std::string::npos) {
+        return "repository.locator_exists";
+    }
+    if (detail.find("repository root is not empty") != std::string::npos ||
+        detail.find("repository root is not an empty directory") != std::string::npos) {
+        return "repository.location_occupied";
+    }
+    if (detail.find("local storage root is invalid") != std::string::npos) {
+        return "repository.storage_root_invalid";
+    }
+    switch (error.code) {
+    case base::ErrorCode::kUnauthorized:
+        return "repository.storage_access_denied";
+    case base::ErrorCode::kNotFound:
+        return "repository.storage_path_not_found";
+    case base::ErrorCode::kCorruptData:
+        return "repository.descriptor_invalid";
+    case base::ErrorCode::kIoFailure:
+        return "repository.storage_io_failed";
+    default:
+        return "service.request_failed";
     }
 }
 
@@ -403,13 +437,13 @@ command_response(const contracts::ServiceRequest& request, const ServiceRuntimeI
         handled = true;
         result = runtime.schedules->upsert_schedule(
             std::get<contracts::UpsertScheduleCommand>(request.payload), *request.idempotency_key,
-            session.caller, cancellation);
+            session.browser_session, cancellation);
     } else if (runtime.schedules && request.idempotency_key &&
                request.kind == contracts::ServiceRequestKind::kDeleteSchedule) {
         handled = true;
-        result = runtime.schedules->delete_schedule(
-            std::get<contracts::ResourceRef>(request.payload), *request.idempotency_key,
-            cancellation);
+        result =
+            runtime.schedules->delete_schedule(std::get<contracts::ResourceRef>(request.payload),
+                                               *request.idempotency_key, cancellation);
     } else if (runtime.mount_supervisor && request.idempotency_key &&
                request.kind == contracts::ServiceRequestKind::kMountRecoveryPoint) {
         handled = true;
@@ -419,9 +453,9 @@ command_response(const contracts::ServiceRequest& request, const ServiceRuntimeI
     } else if (runtime.mount_supervisor && request.idempotency_key &&
                request.kind == contracts::ServiceRequestKind::kUnmountSession) {
         handled = true;
-        result = runtime.mount_supervisor->unmount(
-            std::get<contracts::ResourceRef>(request.payload), *request.idempotency_key,
-            cancellation);
+        result =
+            runtime.mount_supervisor->unmount(std::get<contracts::ResourceRef>(request.payload),
+                                              *request.idempotency_key, cancellation);
     }
     if (!handled)
         return capability_unavailable(request);
@@ -429,18 +463,11 @@ command_response(const contracts::ServiceRequest& request, const ServiceRuntimeI
         // Prefer domain-specific message codes so Desktop can show actionable text.
         std::string message_code = "service.request_failed";
         const auto& detail = result.error().message;
-        if (detail.rfind("mount.", 0) == 0 || detail.rfind("repository.", 0) == 0) {
-            // Domain codes from Application (e.g. repository.import_available,
-            // repository.locator_exists, repository.location_occupied).
+        if (request.kind >= contracts::ServiceRequestKind::kAddRepositoryConnection &&
+            request.kind <= contracts::ServiceRequestKind::kRemoveRepositoryConnection) {
+            message_code = repository_failure_message_code(result.error());
+        } else if (detail.rfind("mount.", 0) == 0) {
             message_code = detail;
-        } else if (detail.find("repository locator already registered") != std::string::npos) {
-            message_code = "repository.locator_exists";
-        } else if (detail.find("repository root is not empty") != std::string::npos ||
-                   detail.find("repository root is not an empty directory") != std::string::npos) {
-            // Fallback when a lower layer still returns a raw non-empty root error.
-            message_code = "repository.location_occupied";
-        } else if (detail.find("local storage root is invalid") != std::string::npos) {
-            message_code = "repository.storage_root_invalid";
         } else if (detail.find("repository is unavailable") != std::string::npos) {
             message_code = "backup.repository_unavailable";
         } else if (detail.find("source is not selectable") != std::string::npos) {
@@ -473,8 +500,8 @@ command_response(const contracts::ServiceRequest& request, const ServiceRuntimeI
         // Log domain detail (never secrets): response_detail only has message_code.
         write_log(runtime, ServiceLogLevel::kWarning, "service.command_failed_detail",
                   request_detail(request) + "; detail=" + detail);
-        return base::Result<contracts::ServiceResponse>::success(
-            failure(result.error().code, request.request_id, request.kind, std::move(message_code)));
+        return base::Result<contracts::ServiceResponse>::success(failure(
+            result.error().code, request.request_id, request.kind, std::move(message_code)));
     }
     contracts::ServiceResponse response;
     response.request_id = request.request_id;
@@ -609,18 +636,16 @@ mount_list_response(const contracts::ServiceRequest& request, const ServiceRunti
 
 } // namespace
 
-[[nodiscard]] base::Result<contracts::ServiceResponse>
-browse_file_sources_response(const contracts::ServiceRequest& request,
-                             const ServiceRuntimeInfo& runtime,
-                             const ServiceSessionContext& session,
-                             const base::CancellationToken cancellation) {
+[[nodiscard]] base::Result<contracts::ServiceResponse> browse_file_sources_response(
+    const contracts::ServiceRequest& request, const ServiceRuntimeInfo& runtime,
+    const ServiceSessionContext& session, const base::CancellationToken cancellation) {
     if (runtime.file_browse == nullptr) {
         return capability_unavailable(request);
     }
-    if (session.caller.caller_sid.empty() || session.caller.session_id.empty()) {
+    if (session.browser_session.session_id.empty()) {
         return base::Result<contracts::ServiceResponse>::success(
-            failure(base::ErrorCode::kUnauthorized, request.request_id, request.kind,
-                    "file_browse.caller_required"));
+            failure(base::ErrorCode::kInvalidArgument, request.request_id, request.kind,
+                    "file_browse.session_required"));
     }
     const auto& query = std::get<contracts::BrowseFileSourcesRequest>(request.payload);
     contracts::ServiceResponse response;
@@ -633,7 +658,7 @@ browse_file_sources_response(const contracts::ServiceRequest& request,
         response, query.page.maximum_results, [&](const std::uint32_t maximum_results) {
             auto scaled = query;
             scaled.page.maximum_results = maximum_results;
-            return runtime.file_browse->browse(session.caller, scaled, cancellation);
+            return runtime.file_browse->browse(session.browser_session, scaled, cancellation);
         });
     if (!fitted) {
         return base::Result<contracts::ServiceResponse>::success(failure(
@@ -676,16 +701,14 @@ list_recovery_point_entries_response(const contracts::ServiceRequest& request,
     return base::Result<contracts::ServiceResponse>::success(std::move(response));
 }
 
-[[nodiscard]] base::Result<contracts::ServiceResponse>
-prepare_file_restore_response(const contracts::ServiceRequest& request,
-                              const ServiceRuntimeInfo& runtime,
-                              const ServiceSessionContext& session,
-                              const base::CancellationToken cancellation) {
+[[nodiscard]] base::Result<contracts::ServiceResponse> prepare_file_restore_response(
+    const contracts::ServiceRequest& request, const ServiceRuntimeInfo& runtime,
+    const ServiceSessionContext& session, const base::CancellationToken cancellation) {
     if (runtime.worker_jobs == nullptr) {
         return capability_unavailable(request);
     }
     auto result = runtime.worker_jobs->prepare_file_restore(
-        std::get<contracts::PrepareFileRestoreRequest>(request.payload), session.caller,
+        std::get<contracts::PrepareFileRestoreRequest>(request.payload), session.browser_session,
         cancellation);
     if (!result) {
         const auto& error = result.error();
@@ -707,10 +730,9 @@ prepare_file_restore_response(const contracts::ServiceRequest& request,
 }
 
 [[nodiscard]] std::uint64_t host_now_utc_ms() {
-    return static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch())
-            .count());
+    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                          std::chrono::system_clock::now().time_since_epoch())
+                                          .count());
 }
 
 [[nodiscard]] contracts::ServiceSettings
@@ -721,8 +743,8 @@ to_service_settings(const ports::ServiceSettingsRecord& record) {
     return settings;
 }
 
-[[nodiscard]] base::Result<std::uint64_t>
-retention_cutoff_utc_ms(const std::uint8_t months, const std::uint64_t now_utc_ms) {
+[[nodiscard]] base::Result<std::uint64_t> retention_cutoff_utc_ms(const std::uint8_t months,
+                                                                  const std::uint64_t now_utc_ms) {
     if (!contracts::is_valid_job_retention_months(months)) {
         return base::Result<std::uint64_t>::failure(
             {base::ErrorCode::kInvalidArgument, "job retention months is invalid"});
@@ -754,9 +776,8 @@ service_settings_response(const contracts::ServiceRequest& request,
     }
     auto loaded = runtime.control_plane->get_service_settings(cancellation);
     if (!loaded) {
-        return base::Result<contracts::ServiceResponse>::success(
-            failure(loaded.error().code, request.request_id, request.kind,
-                    "service.settings_load_failed"));
+        return base::Result<contracts::ServiceResponse>::success(failure(
+            loaded.error().code, request.request_id, request.kind, "service.settings_load_failed"));
     }
     auto settings = to_service_settings(loaded.value());
     auto valid = contracts::validate_service_settings(settings);
@@ -783,9 +804,8 @@ update_service_settings_response(const contracts::ServiceRequest& request,
     const auto& command = std::get<contracts::UpdateServiceSettingsCommand>(request.payload);
     auto unit = runtime.control_plane->begin_unit_of_work(cancellation);
     if (!unit) {
-        return base::Result<contracts::ServiceResponse>::success(
-            failure(unit.error().code, request.request_id, request.kind,
-                    "service.settings_update_failed"));
+        return base::Result<contracts::ServiceResponse>::success(failure(
+            unit.error().code, request.request_id, request.kind, "service.settings_update_failed"));
     }
     const auto existing = unit.value()->commands().get(*request.idempotency_key, cancellation);
     if (!existing) {
@@ -794,9 +814,8 @@ update_service_settings_response(const contracts::ServiceRequest& request,
             failure(existing.error().code, request.request_id, request.kind,
                     "service.settings_update_failed"));
     }
-    const auto fingerprint =
-        std::string("settings|job_retention_months=") +
-        std::to_string(static_cast<unsigned>(command.job_retention_months));
+    const auto fingerprint = std::string("settings|job_retention_months=") +
+                             std::to_string(static_cast<unsigned>(command.job_retention_months));
     if (existing.value()) {
         unit.value()->rollback();
         if (existing.value()->request_fingerprint != fingerprint) {
@@ -873,8 +892,7 @@ base::Result<contracts::ServiceResponse>
 dispatch_service_request(const contracts::ServiceRequest& request,
                          const ServiceRuntimeInfo& runtime, const ServiceSessionContext& session,
                          const base::CancellationToken cancellation) {
-    write_log(runtime, ServiceLogLevel::kInfo, "service.request_received",
-              request_detail(request));
+    write_log(runtime, ServiceLogLevel::kInfo, "service.request_received", request_detail(request));
     auto valid_request = contracts::validate_service_request(request);
     if (!valid_request) {
         write_log(runtime, ServiceLogLevel::kWarning, "service.request_invalid",
@@ -1034,35 +1052,12 @@ base::Result<void> run_service_session(ports::IMessageChannel& channel,
                                        const ServiceSessionContext& session,
                                        const base::CancellationToken& cancellation,
                                        const std::size_t maximum_requests) {
-    std::size_t processed = 0;
-    while (maximum_requests == 0 || processed < maximum_requests) {
-        auto request = channel.receive(cancellation);
-        if (!request) {
-            if (runtime.file_browse != nullptr && !session.caller.session_id.empty()) {
-                runtime.file_browse->clear_session(session.caller.session_id);
-            }
-            return base::Result<void>::failure(request.error());
-        }
-        auto response = handle_service_message(request.value(), runtime, session, cancellation);
-        if (!response) {
-            if (runtime.file_browse != nullptr && !session.caller.session_id.empty()) {
-                runtime.file_browse->clear_session(session.caller.session_id);
-            }
-            return base::Result<void>::failure(response.error());
-        }
-        auto sent = channel.send(response.value(), cancellation);
-        if (!sent) {
-            if (runtime.file_browse != nullptr && !session.caller.session_id.empty()) {
-                runtime.file_browse->clear_session(session.caller.session_id);
-            }
-            return sent;
-        }
-        ++processed;
+    auto result = detail::run_concurrent_service_session(channel, runtime, session, cancellation,
+                                                         maximum_requests);
+    if (runtime.file_browse != nullptr && !session.browser_session.session_id.empty()) {
+        runtime.file_browse->clear_session(session.browser_session.session_id);
     }
-    if (runtime.file_browse != nullptr && !session.caller.session_id.empty()) {
-        runtime.file_browse->clear_session(session.caller.session_id);
-    }
-    return base::Result<void>::success();
+    return result;
 }
 
 } // namespace aegra::apps::service

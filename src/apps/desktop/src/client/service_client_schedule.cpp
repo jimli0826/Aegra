@@ -3,13 +3,9 @@
 #include "client/service_protocol.h"
 #include "locale/message_code_map.h"
 
-#include <QDateTime>
-#include <QDir>
-#include <QFile>
 #include <QJsonObject>
 #include <QRegularExpression>
 #include <QSet>
-#include <QTextStream>
 #include <QTimeZone>
 #include <QUuid>
 #include <QVariantMap>
@@ -212,13 +208,7 @@ QVariantList ServiceClient::displayChainsForSchedule(const QString& schedule_id)
 }
 
 void ServiceClient::logScheduleEdit(const QString& message) {
-    QDir().mkpath(QStringLiteral("D:/Work/OpenSource/Aegra/out"));
-    QFile file(QStringLiteral("D:/Work/OpenSource/Aegra/out/schedule-edit-debug.log"));
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
-        return;
-    }
-    QTextStream stream(&file);
-    stream << QDateTime::currentDateTime().toString(Qt::ISODateWithMs) << " " << message << "\n";
+    Q_UNUSED(message)
 }
 
 bool ServiceClient::schedulesLoading() const noexcept { return schedules_loading_; }

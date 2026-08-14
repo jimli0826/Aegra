@@ -243,14 +243,14 @@ application/control_plane_sqlite/service_host 模块文档。
 
 ### F6.1：Browse use case
 
-- 组合 F1 `IFileSourceBrowser` 与 F4 Windows 实现；Service 负责 caller identity 授权和 token 生命周期。
+- 组合 F1 `IFileSourceBrowser` 与 F4 Windows 实现；Service 负责 pipe session token 生命周期。
 - token store 有 TTL、随机 token、caller/session binding、最大 active tokens 和断线清理。
 - 分页稳定排序，重复/倒退 token、超限页和过期 token 返回稳定错误。
 
 ### F6.2：Schedule persistence
 
 - `UpsertSchedule` 创建时解析 token、重新验证 identity、规范化/去重 selection 并事务持久化。
-- 保存 owner identity；update 保持 source frozen；列表只返回安全 display summary。
+- update 保持 source frozen；列表只返回安全 display summary；不保存调用者身份。
 - command fingerprint 对规范化业务输入稳定；replay 返回已存结果，不重新消费过期 token。
 
 ### F6.3：Backup orchestration
@@ -460,12 +460,12 @@ Files owned/changed:
   src/ports/include/aegra/ports/control_plane.h (schema 11, Job/Schedule content_kind + file_selections)
   src/adapters/sqlite/* (schema v11, schedule_file_selections, job/schedule stores)
   src/application/include|src/file_browse_service.* (token TTL/caller binding)
-  src/apps/service/schedule_service.* (file_set create resolve + owner_sid)
+  src/apps/service/schedule_service.* (file_set create resolve + session binding)
   src/apps/service/worker_job_service.cpp (prepare_file_set_backup + volume revalidate)
   src/apps/service/worker_supervisor.cpp (JobRecord.content_kind)
   src/apps/service/backup_catalog_registrar.cpp (Catalog V2 file_set fields)
   src/apps/service/service_host.* (session context, BrowseFileSources, Upsert caller)
-  src/apps/service/service_security_host.cpp / service_main.cpp (peer SID session + browser roots)
+  src/apps/service/service_security_host.cpp / service_main.cpp (Service-generated session + browser roots)
   src/apps/service/CMakeLists.txt (AdapterWindowsFilesystem)
   docs/modules/control_plane_sqlite.md, service_host.md, contracts.md
   docs/development/FILE_SET_BACKUP_DEVELOPMENT_PLAN.md
@@ -477,7 +477,7 @@ Manual validation performed:
   Live browse unauthorized/token expiry and schedule create/replay require elevated Service run
 Security/path cases reviewed:
   Desktop never receives paths; Job source_ids are selection UUIDs only
-  Browse tokens bound to caller SID + pipe session; cleared on disconnect
+  Browse tokens bound to Service-generated pipe session; cleared on disconnect
 Format/protocol docs updated: module docs for schema 11 and F6 host behavior
 Known remaining work (only outside this package):
   F7 RP file query + verify; F8 selective restore; F9 Desktop UX

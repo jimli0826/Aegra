@@ -161,7 +161,7 @@ Worker 的 Windows 时钟、CNG 随机源和 DPAPI Credential Resolver 也由独
 `Aegra::AdapterWindowsIpc` 实现本地 Worker Named Pipe Client 与 Service/Worker Named Pipe Listener。它只接受
 受限逻辑名称，使用 4 字节 little-endian 长度前缀和帧上限，支持一个 Reader/Writer 并发及
 `CancelIoEx` 取消；它不解析 JSON。Worker 侧 ACL 仍由父进程决定（[ADR-0008](../adr/0008-worker-session-named-pipe-protocol.md)）；
-Service 侧提供显式本地 ACL 与调用方身份校验（[ADR-0014](../adr/0014-windows-service-ipc-security.md)、
+Service 侧提供显式本地 ACL，不执行调用方身份认证（[ADR-0014](../adr/0014-windows-service-ipc-security.md)、
 [windows_ipc.md](windows_ipc.md)）。
 
 S3/S4 增加 `Aegra::AdapterWindowsProcess`、`WindowsSourceInventory` 与

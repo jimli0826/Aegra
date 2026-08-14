@@ -54,6 +54,10 @@ NetworkAwareRepositoryStorageFactory::ensure_network_access(
     if (!is_unc_locator(locator)) {
         return base::Result<void>::success();
     }
+    auto reachable = probe_network_share_server(locator, cancellation);
+    if (!reachable) {
+        return reachable;
+    }
     auto found = find_connection_for_locator(control_plane_, locator, cancellation);
     if (!found) {
         return base::Result<void>::failure(found.error());

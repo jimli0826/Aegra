@@ -1997,6 +1997,30 @@ Server: %1</translation>
         <source>Failed to connect to the network share</source>
         <translation>Failed to connect to the network share</translation>
     </message>
+    <message id="aegra.repository.network_unreachable">
+        <source>The network host is unreachable or timed out</source>
+        <translation>The network host is unreachable or timed out</translation>
+    </message>
+    <message id="aegra.repository.network_credentials_rejected">
+        <source>The network username or password was rejected</source>
+        <translation>The network username or password was rejected</translation>
+    </message>
+    <message id="aegra.repository.network_access_denied">
+        <source>Access to the network share was denied</source>
+        <translation>Access to the network share was denied</translation>
+    </message>
+    <message id="aegra.repository.network_share_not_found">
+        <source>The network share or path was not found</source>
+        <translation>The network share or path was not found</translation>
+    </message>
+    <message id="aegra.repository.network_credential_conflict">
+        <source>Windows already has a connection to this server with different credentials</source>
+        <translation>Windows already has a connection to this server with different credentials</translation>
+    </message>
+    <message id="aegra.repository.connection_failed">
+        <source>The repository could not be opened</source>
+        <translation>The repository could not be opened</translation>
+    </message>
     <message id="aegra.repository.network_path_invalid">
         <source>Invalid network path (expected \\server\share)</source>
         <translation>Invalid network path (expected \\server\share)</translation>
@@ -2004,6 +2028,22 @@ Server: %1</translation>
     <message id="aegra.repository.storage_root_invalid">
         <source>The repository location is not a valid storage path</source>
         <translation>The repository location is not a valid storage path</translation>
+    </message>
+    <message id="aegra.repository.storage_access_denied">
+        <source>Permission to access or create the repository was denied</source>
+        <translation>Permission to access or create the repository was denied</translation>
+    </message>
+    <message id="aegra.repository.storage_path_not_found">
+        <source>The repository storage path was not found</source>
+        <translation>The repository storage path was not found</translation>
+    </message>
+    <message id="aegra.repository.storage_io_failed">
+        <source>The repository storage could not be read or written</source>
+        <translation>The repository storage could not be read or written</translation>
+    </message>
+    <message id="aegra.repository.descriptor_invalid">
+        <source>The repository metadata is missing or invalid</source>
+        <translation>The repository metadata is missing or invalid</translation>
     </message>
     <message id="aegra.repository.remove_title">
         <source>Remove repository connection?</source>

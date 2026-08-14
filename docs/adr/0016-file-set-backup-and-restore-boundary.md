@@ -47,7 +47,7 @@ feature flag 或“先尝试新格式、失败后读取旧格式”的分支。�
 7. Desktop 只消费 Service 的分页文件浏览结果。Service 返回与调用者身份、浏览会话和有效期绑定的 opaque
    `node_token`；Desktop 不发送绝对路径、Volume GUID、NT device path 或 VSS path。
 8. 创建 Schedule 时，Service 把有效 token 解析为 durable `FileSelectionSpec`，保存稳定 Volume identity、
-   规范化相对组件、递归与排除策略以及 schedule owner identity。后台执行不依赖 Desktop 会话或 token。
+   规范化相对组件、递归与排除策略。后台执行不依赖 Desktop 会话或 token。
 9. Service 到 Worker 的受保护内部协议携带已经解析的可信 File Source Ref。Worker 仍要重新验证组件、Volume
    归属和根逃逸，不信任持久化内容或进程输入。
 10. 一个 File Job 涉及的全部本地 NTFS/ReFS Volume 加入同一个 VSS Snapshot Set，先完成快照，再从快照枚举

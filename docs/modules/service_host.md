@@ -5,9 +5,16 @@
 `apps/service` 是个人版本地控制面的进程入口和协议 Host。阶段 13B 提供 Desktop 握手和个人版 Repository
 Catalog 分页查询，建立后续任务和策略 API 的稳定入口。
 
-Service Host 负责 framing、dispatch、会话生命周期、取消收口，以及正式 Windows Service 安全边界。
+Service Host 负责 framing、并发 dispatch、deadline、会话生命周期、取消收口，以及正式 Windows Service
+本机 Pipe ACL 边界。
 Composition root 打开个人版 SQLite 控制面、注入 Inventory/Repository Application use case，并通过
 `WorkerSupervisor` 启动单任务 Worker；Service 本身不执行备份/恢复数据面，也不直接解析 `.bkf`。
+
+UNC Repository 在进入同步 WNet 或文件系统调用前，对 IP-literal Server 的 SMB 445 端口执行 1.5 秒
+非阻塞可达性探测（每 100ms 检查取消）。断网时直接返回 Repository unavailable，避免单 Service IPC
+会话被 Windows 网络重试无界占用；hostname locator 仍由 Windows 网络 Provider 负责解析与连接。
+WNet 失败按路径无效、主机不可达、共享不存在、凭据被拒、访问拒绝和已有连接凭据冲突映射为稳定
+`repository.network_*` message code；Service 不返回 Win32 文本，也不为解决凭据冲突强制断开现有映射。
 
 ## 依赖与 Target
 
@@ -56,14 +63,23 @@ Service 默认监听逻辑名称 `control`，实际 Pipe 名称见 [ADR-0011](..
 见 [SERVICE_CONTROL_PROTOCOL_V3](../protocol/SERVICE_CONTROL_PROTOCOL_V3.md)。
 `--once` 只接受一个连接并处理一个请求，用于受控诊断；默认模式在会话断开后继续接受连接。
 
-每个 session 顺序执行：
+每个 session 的接收、请求执行和响应写回解耦：
 
 ```text
-Accept -> Receive Frame -> Decode/Validate -> Dispatch -> Encode -> Send -> Receive Next
+single reader -> bounded domain lanes -> bounded response queue -> single writer
+                         \-> per-request deadline/cancellation/correlation
 ```
 
-断线结束当前 session，不结束 Service。取消必须唤醒 pending accept/receive。未知请求形成拒绝响应；只有传输
-已经不可用或响应编码失败时 Host 返回边界错误。
+快速控制面、Repository 读取、文件浏览和命令使用独立串行 lane；一个断网 Repository 调用只占用其 lane，
+不能阻止 Service 继续接收请求或让 Jobs/Schedules/Connections 等快速查询失去响应。响应允许乱序，唯一按
+`request_id` correlation。每条请求自接收起有独立 30 秒 deadline 和取消源；deadline 只生成该请求的
+`service.request_timeout`，迟到结果被丢弃且 session 保持连接。所有队列有界，只有一个 reader 和一个 writer。
+`TestRepositoryConnection` deadline 还会在发送超时响应前把该 connection 的状态持久化为 Unavailable；
+该状态写入不再次访问 Repository，Desktop 随后的 ListRepositoryConnections 可直接读取最终快照。
+非超时探测失败同样先持久化 Unavailable，再在该请求响应中保留底层稳定 `repository.*` 原因码。
+
+断线结束当前 session，不结束 Service。取消必须唤醒 pending accept/receive。未知请求形成拒绝响应；只有
+Pipe/framing/peer close、Service stop 或响应写失败才结束 session。请求业务失败和 deadline 不得断开 session。
 
 ## 协议与安全
 
@@ -86,10 +102,10 @@ Accept -> Receive Frame -> Decode/Validate -> Dispatch -> Encode -> Send -> Rece
 - Job list 只合并 Worker 监督器缓存中的真实 progress；无缓存时 `progress` 为 null（不注入 1/1）。
 - 错误响应使用稳定 `ErrorCode` 和 message code，不返回 JSON/Win32 异常文本。
 - Service 控制 Pipe 在交互模式和 LocalSystem 正式模式都使用 `kLocalEveryoneControl`：允许本机
-  Everyone 读写，同时拒绝远程 Client，并在连接后执行调用方 SID/session 授权。见
+  Everyone 读写，同时拒绝远程 Client；连接后不查询或授权调用方 SID/session。见
   [ADR-0014](../adr/0014-windows-service-ipc-security.md) 与
   [windows_ipc.md](windows_ipc.md)。
-- 授权 Host：`run_authorized_service_host`；SCM stop 有界等待 STOPPED；`WindowsServiceScmHost`
+- 本机 Pipe Host：`run_service_host`；SCM stop 有界等待 STOPPED；`WindowsServiceScmHost`
   在 `stop_deadline` 内收口（非协作 worker 超时失败）。
 - 正式 `--service` 模式在构造 runtime 前进入 `StartServiceCtrlDispatcherW`；两种模式的 Service 控制 Pipe
   都使用 `kLocalEveryoneControl`。Desktop 到 Service 的本地安全模型保持轻量，不承担远程零信任认证。
@@ -165,7 +181,7 @@ per-file Archive Credential 映射与 Local Storage 故障恢复验证仍待补�
 - **API**：Service 控制协议 **V4**（见 [ADR-0017](../adr/0017-service-control-protocol-v4.md) 与
   [SERVICE_CONTROL_PROTOCOL_V4](../protocol/SERVICE_CONTROL_PROTOCOL_V4.md)）。
 - **Browse**：`BrowseFileSources` 经 `FileBrowseService` 组合 Windows `IFileSourceBrowser`；
-  Service 铸造短期 opaque token（TTL、caller SID + pipe session 绑定；**每 session 最多 4096**；
+  Service 铸造短期 opaque token（TTL、pipe session 绑定；**每 session 最多 4096**；
   根列表首页清空该 session 旧 token；断线 `clear_session`）。
   根节点仅包含带盘符的卷（如 `新加卷 (D:)` / `System (C:)`）；无盘符的系统隐藏分区
   （EFI/MSR/Recovery 等）不进入树。子节点枚举跳过 `HIDDEN|SYSTEM` 与
@@ -173,8 +189,8 @@ per-file Archive Credential 映射与 Local Storage 故障恢复验证仍待补�
   **Backup 对齐**：`WindowsFileSnapshotView` 递归枚举同样跳过
   `System Volume Information` 与 `$RECYCLE.BIN`（整卷 file_set 选择时不写入 Archive）。
   `display_name` 为 UTF-8（含中文等非 ASCII 文件名），不再做 ASCII `?` 投影。
-- **Session**：每个 Named Pipe 连接携带 `ServiceSessionContext`（peer SID + 唯一 session id）；
-  `UpsertSchedule` 用其解析 file_set selection 并写入 `owner_sid`。
+- **Session**：每个 Named Pipe 连接携带 Service 生成的唯一 session id；不读取或认证客户端 SID。
+  `UpsertSchedule` 用该 session 解析 file_set selection。
 - **Schedule / Job**：控制面 schema **12**（含 F8 `restore_preflight_entry_ids`）；file_set selections
   存 `schedule_file_selections`；`StartBackup` 按 `content_kind` 构造 schema 4 Worker Job
   （file 路径走 `file_source_refs`，Job `source_ids` 仅为 selection UUID）。

@@ -14,8 +14,8 @@ namespace {
     return now < 0 ? 0 : static_cast<std::uint64_t>(now);
 }
 
-[[nodiscard]] base::Result<std::string>
-random_token(ports::IRandomSource& random, const base::CancellationToken& cancellation) {
+[[nodiscard]] base::Result<std::string> random_token(ports::IRandomSource& random,
+                                                     const base::CancellationToken& cancellation) {
     std::array<std::byte, 16> bytes{};
     if (auto filled = random.fill(bytes, cancellation); !filled) {
         return base::Result<std::string>::failure(filled.error());
@@ -38,7 +38,7 @@ FileBrowseService::FileBrowseService(ports::IFileSourceBrowser& browser, ports::
     : browser_(browser), clock_(clock), random_(random) {}
 
 base::Result<std::string>
-FileBrowseService::mint_token(const ports::FileBrowseCaller& caller, std::string adapter_token,
+FileBrowseService::mint_token(const ports::FileBrowseSession& session, std::string adapter_token,
                               const base::CancellationToken cancellation) {
     auto token = random_token(random_, cancellation);
     if (!token) {
@@ -50,7 +50,7 @@ FileBrowseService::mint_token(const ports::FileBrowseCaller& caller, std::string
     // L22: active tokens are limited per connection session, not process-wide.
     std::uint32_t session_active = 0;
     for (const auto& item : tokens_) {
-        if (item.second.session_id != caller.session_id) {
+        if (item.second.session_id != session.session_id) {
             continue;
         }
         ++session_active;
@@ -61,15 +61,14 @@ FileBrowseService::mint_token(const ports::FileBrowseCaller& caller, std::string
     }
     TokenEntry entry;
     entry.adapter_token = std::move(adapter_token);
-    entry.caller_sid = caller.caller_sid;
-    entry.session_id = caller.session_id;
+    entry.session_id = session.session_id;
     entry.expires_utc_ms = now + kDefaultTokenTtlMs;
     tokens_.emplace(token.value(), std::move(entry));
     return token;
 }
 
 base::Result<FileBrowseService::TokenEntry>
-FileBrowseService::lookup_token(const ports::FileBrowseCaller& caller,
+FileBrowseService::lookup_token(const ports::FileBrowseSession& session,
                                 const std::string& service_token) {
     const auto now = utc_ms(clock_);
     std::lock_guard lock(mutex_);
@@ -77,17 +76,16 @@ FileBrowseService::lookup_token(const ports::FileBrowseCaller& caller,
     const auto found = tokens_.find(service_token);
     if (found == tokens_.end()) {
         return base::Result<TokenEntry>::failure(
-            {base::ErrorCode::kUnauthorized, "file_browse.token_invalid"});
+            {base::ErrorCode::kNotFound, "file_browse.token_invalid"});
     }
-    if (found->second.caller_sid != caller.caller_sid ||
-        found->second.session_id != caller.session_id) {
+    if (found->second.session_id != session.session_id) {
         return base::Result<TokenEntry>::failure(
-            {base::ErrorCode::kUnauthorized, "file_browse.token_invalid"});
+            {base::ErrorCode::kNotFound, "file_browse.token_invalid"});
     }
     if (found->second.expires_utc_ms <= now) {
         tokens_.erase(found);
         return base::Result<TokenEntry>::failure(
-            {base::ErrorCode::kUnauthorized, "file_browse.token_invalid"});
+            {base::ErrorCode::kNotFound, "file_browse.token_invalid"});
     }
     return base::Result<TokenEntry>::success(found->second);
 }
@@ -114,19 +112,19 @@ void FileBrowseService::clear_session(const std::string_view session_id) noexcep
 }
 
 base::Result<contracts::FileSourceNodePage>
-FileBrowseService::browse(const ports::FileBrowseCaller& caller,
+FileBrowseService::browse(const ports::FileBrowseSession& session,
                           const contracts::BrowseFileSourcesRequest& request,
                           const base::CancellationToken cancellation) {
     if (auto valid = contracts::validate_browse_file_sources_request(request); !valid) {
         return base::Result<contracts::FileSourceNodePage>::failure(valid.error());
     }
-    if (caller.caller_sid.empty() || caller.session_id.empty()) {
+    if (session.session_id.empty()) {
         return base::Result<contracts::FileSourceNodePage>::failure(
-            {base::ErrorCode::kUnauthorized, "file_browse.caller_required"});
+            {base::ErrorCode::kInvalidArgument, "file_browse.session_required"});
     }
     std::optional<std::string> adapter_parent;
     if (request.parent_node_token) {
-        auto parent = lookup_token(caller, *request.parent_node_token);
+        auto parent = lookup_token(session, *request.parent_node_token);
         if (!parent) {
             return base::Result<contracts::FileSourceNodePage>::failure(parent.error());
         }
@@ -135,11 +133,10 @@ FileBrowseService::browse(const ports::FileBrowseCaller& caller,
         // First root page replaces the Desktop tree; drop prior session tokens so
         // collapse / re-open / locked hydrate cannot accumulate past L22. Continuation
         // pages keep earlier root tokens from this listing.
-        clear_session(caller.session_id);
+        clear_session(session.session_id);
     }
-    auto page =
-        browser_.list_children(caller, adapter_parent, request.page, request.include_unavailable,
-                               cancellation);
+    auto page = browser_.list_children(session, adapter_parent, request.page,
+                                       request.include_unavailable, cancellation);
     if (!page) {
         return page;
     }
@@ -147,7 +144,7 @@ FileBrowseService::browse(const ports::FileBrowseCaller& caller,
     remapped.continuation_token = page.value().continuation_token;
     remapped.items.reserve(page.value().items.size());
     for (auto& item : page.value().items) {
-        auto service_token = mint_token(caller, item.node_token, cancellation);
+        auto service_token = mint_token(session, item.node_token, cancellation);
         if (!service_token) {
             return base::Result<contracts::FileSourceNodePage>::failure(service_token.error());
         }
@@ -157,23 +154,20 @@ FileBrowseService::browse(const ports::FileBrowseCaller& caller,
     return base::Result<contracts::FileSourceNodePage>::success(std::move(remapped));
 }
 
-base::Result<contracts::FileSourceRef>
-FileBrowseService::resolve_selection(const ports::FileBrowseCaller& caller,
-                                     const std::string& node_token,
-                                     const contracts::FileRecursion recursion,
-                                     const std::string& display_label,
-                                     const base::CancellationToken cancellation) {
-    if (caller.caller_sid.empty() || caller.session_id.empty()) {
+base::Result<contracts::FileSourceRef> FileBrowseService::resolve_selection(
+    const ports::FileBrowseSession& session, const std::string& node_token,
+    const contracts::FileRecursion recursion, const std::string& display_label,
+    const base::CancellationToken cancellation) {
+    if (session.session_id.empty()) {
         return base::Result<contracts::FileSourceRef>::failure(
-            {base::ErrorCode::kUnauthorized, "file_browse.caller_required"});
+            {base::ErrorCode::kInvalidArgument, "file_browse.session_required"});
     }
-    auto entry = lookup_token(caller, node_token);
+    auto entry = lookup_token(session, node_token);
     if (!entry) {
         return base::Result<contracts::FileSourceRef>::failure(entry.error());
     }
-    auto resolved =
-        browser_.resolve_selection(caller, entry.value().adapter_token, recursion, display_label,
-                                   cancellation);
+    auto resolved = browser_.resolve_selection(session, entry.value().adapter_token, recursion,
+                                               display_label, cancellation);
     if (!resolved) {
         return resolved;
     }

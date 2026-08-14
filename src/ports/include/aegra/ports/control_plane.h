@@ -20,7 +20,7 @@ namespace aegra::ports {
 // v11: content_kind on jobs/schedules + schedule_file_selections (file_set).
 // v12: restore_preflight_entry_ids for file_set selective restore preflight.
 // v16: service_settings (job retention months) + terminal job purge support.
-inline constexpr std::uint32_t kControlPlaneSchemaVersion = 18;
+inline constexpr std::uint32_t kControlPlaneSchemaVersion = 19;
 
 // ---- Durable records (control-plane only; no plaintext secrets, no RP authority) ----
 
@@ -82,8 +82,6 @@ struct ScheduleRecord final {
     std::vector<std::string> source_ids;
     /// file_set only; empty for volume_set. Durable FileSourceRef (selection_id is UUID).
     std::vector<contracts::FileSourceRef> file_selections;
-    /// Owner caller SID at create time. Empty only when not captured (legacy reject on open).
-    std::string owner_sid;
     std::string repository_connection_id;
     contracts::BackupType backup_type{contracts::BackupType::kFull};
     contracts::ScheduleTrigger trigger;
@@ -101,7 +99,8 @@ struct ScheduleRecord final {
     /// Control-plane tip for the next Incremental parent (file_uuid of last successful backup).
     /// Empty until the first successful Catalog publish. Not returned in ScheduleSummary.
     /// Incremental StartBackup uses this as the only parent candidate (no Catalog tip scan);
-    /// missing/invalid tip or incomplete chain demotes to Full. Advanced only after Catalog publish.
+    /// missing/invalid tip or incomplete chain demotes to Full. Advanced only after Catalog
+    /// publish.
     std::optional<std::string> last_recovery_point_id;
     std::uint64_t created_utc_ms{0};
     std::uint64_t updated_utc_ms{0};

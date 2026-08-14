@@ -71,9 +71,9 @@ make_canonical_uuid(ports::IRandomSource& random, const base::CancellationToken&
     return day >= 1 && day <= 31 && (mask & (1U << (day - 1U))) != 0;
 }
 
-[[nodiscard]] std::uint64_t
-compute_next_run_for_minute(const contracts::ScheduleTrigger& trigger, const std::uint64_t now_ms,
-                            const std::uint16_t local_minute) {
+[[nodiscard]] std::uint64_t compute_next_run_for_minute(const contracts::ScheduleTrigger& trigger,
+                                                        const std::uint64_t now_ms,
+                                                        const std::uint16_t local_minute) {
     constexpr std::uint64_t kDayMs = 24ULL * 60ULL * 60ULL * 1000ULL;
     constexpr std::uint64_t kMinuteMs = 60ULL * 1000ULL;
     const auto minute = static_cast<std::uint64_t>(local_minute);
@@ -304,7 +304,8 @@ normalize_file_selections(std::vector<contracts::FileSourceRef> selections) {
     }
     if (pruned.empty()) {
         return base::Result<std::vector<contracts::FileSourceRef>>::failure(
-            {base::ErrorCode::kInvalidArgument, "file protection selections are empty after prune"});
+            {base::ErrorCode::kInvalidArgument,
+             "file protection selections are empty after prune"});
     }
     return base::Result<std::vector<contracts::FileSourceRef>>::success(std::move(pruned));
 }
@@ -314,16 +315,16 @@ enforce_schedule_update_invariants(const contracts::UpsertScheduleCommand& comma
                                    const ports::ScheduleRecord& existing) {
     if (command.protection.content_kind != existing.content_kind) {
         return base::Result<void>::failure(
-            {base::ErrorCode::kInvalidArgument, "schedule content_kind cannot be changed after create"});
+            {base::ErrorCode::kInvalidArgument,
+             "schedule content_kind cannot be changed after create"});
     }
     if (existing.content_kind == contracts::ContentKind::kVolumeSet) {
         if (command.protection.volume_source_ids != existing.source_ids) {
-            return base::Result<void>::failure(
-                {base::ErrorCode::kInvalidArgument, "schedule sources cannot be changed after create"});
+            return base::Result<void>::failure({base::ErrorCode::kInvalidArgument,
+                                                "schedule sources cannot be changed after create"});
         }
     } else if (!command.protection.file_selections.empty()) {
-        return base::Result<void>::failure(
-            {base::ErrorCode::kConflict, "schedule.source_frozen"});
+        return base::Result<void>::failure({base::ErrorCode::kConflict, "schedule.source_frozen"});
     }
     if (command.exclude_page_and_hibernation_files != existing.exclude_page_and_hibernation_files) {
         return base::Result<void>::failure(
@@ -336,13 +337,12 @@ enforce_schedule_update_invariants(const contracts::UpsertScheduleCommand& comma
              "schedule deduplication cannot be changed after create"});
     }
     if (command.encryption_enabled != existing.encryption_enabled) {
-        return base::Result<void>::failure(
-            {base::ErrorCode::kInvalidArgument,
-             "schedule encryption cannot be changed after create"});
+        return base::Result<void>::failure({base::ErrorCode::kInvalidArgument,
+                                            "schedule encryption cannot be changed after create"});
     }
     if (!command.archive_password.empty()) {
-        return base::Result<void>::failure(
-            {base::ErrorCode::kInvalidArgument, "schedule password cannot be changed after create"});
+        return base::Result<void>::failure({base::ErrorCode::kInvalidArgument,
+                                            "schedule password cannot be changed after create"});
     }
     return base::Result<void>::success();
 }
@@ -360,11 +360,9 @@ ScheduleService::list_schedules(const contracts::ScheduleListRequest& request,
     return control_plane_.list_schedules(request, cancellation);
 }
 
-base::Result<contracts::CommandAcknowledgement>
-ScheduleService::upsert_schedule(const contracts::UpsertScheduleCommand& command,
-                                 const std::string_view idempotency_key,
-                                 const ports::FileBrowseCaller& caller,
-                                 const base::CancellationToken cancellation) {
+base::Result<contracts::CommandAcknowledgement> ScheduleService::upsert_schedule(
+    const contracts::UpsertScheduleCommand& command, const std::string_view idempotency_key,
+    const ports::FileBrowseSession& session, const base::CancellationToken cancellation) {
     if (auto key = require_idempotency_key(idempotency_key); !key) {
         return base::Result<contracts::CommandAcknowledgement>::failure(key.error());
     }
@@ -383,16 +381,17 @@ ScheduleService::upsert_schedule(const contracts::UpsertScheduleCommand& command
     }
 
     std::vector<contracts::FileSourceRef> resolved_files;
-    if (command.protection.content_kind == contracts::ContentKind::kFileSet && !command.schedule_id) {
+    if (command.protection.content_kind == contracts::ContentKind::kFileSet &&
+        !command.schedule_id) {
         if (file_browse_ == nullptr) {
             return base::Result<contracts::CommandAcknowledgement>::failure(
                 {base::ErrorCode::kConflict, "file_set schedules are not enabled"});
         }
         resolved_files.reserve(command.protection.file_selections.size());
         for (const auto& selection : command.protection.file_selections) {
-            auto resolved = file_browse_->resolve_selection(
-                caller, selection.node_token, selection.recursion, selection.display_label,
-                cancellation);
+            auto resolved =
+                file_browse_->resolve_selection(session, selection.node_token, selection.recursion,
+                                                selection.display_label, cancellation);
             if (!resolved) {
                 return base::Result<contracts::CommandAcknowledgement>::failure(resolved.error());
             }
@@ -420,7 +419,6 @@ ScheduleService::upsert_schedule(const contracts::UpsertScheduleCommand& command
     std::string schedule_id;
     std::string backup_set_uuid;
     std::string archive_password_protected;
-    std::string owner_sid = caller.caller_sid;
     std::vector<std::string> source_ids;
     std::vector<contracts::FileSourceRef> file_selections;
     contracts::ContentKind content_kind = command.protection.content_kind;
@@ -445,7 +443,6 @@ ScheduleService::upsert_schedule(const contracts::UpsertScheduleCommand& command
         created_utc_ms = existing.value()->created_utc_ms;
         backup_set_uuid = existing.value()->backup_set_uuid;
         archive_password_protected = existing.value()->archive_password_protected;
-        owner_sid = existing.value()->owner_sid;
         content_kind = existing.value()->content_kind;
         source_ids = existing.value()->source_ids;
         file_selections = existing.value()->file_selections;
@@ -489,7 +486,6 @@ ScheduleService::upsert_schedule(const contracts::UpsertScheduleCommand& command
     record.content_kind = content_kind;
     record.source_ids = std::move(source_ids);
     record.file_selections = std::move(file_selections);
-    record.owner_sid = std::move(owner_sid);
     record.repository_connection_id = command.repository_connection_id;
     // Scheduled runs always request Incremental; first backup / missing parent demote to Full.
     record.backup_type = contracts::BackupType::kIncremental;

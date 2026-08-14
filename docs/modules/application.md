@@ -57,7 +57,8 @@ S4 已增加：
 
 上述用例依赖 `IControlPlaneDatabase`、`IRepositoryStorageFactory`、`ISourceInventory` 与 `IClock`，现已由
 Service composition root 注入。Repository command 使用持久化幂等记录；同键同请求 replay，同键不同请求
-返回冲突。连接测试只把可用性写入控制面，不把 Catalog 或 Archive metadata 复制为权威数据。
+返回冲突。连接测试把可用性写入控制面，同时把本次失败的稳定 `repository.*` message code 返回给
+调用方；不持久化本地化文本、Win32 原始错误、Catalog 或 Archive metadata。
 
 S5 增加 `RecoveryPointOperations`：按 connection 打开 Repository、扫描 Catalog、构建
 `RecoveryPointGraph`、返回 base-first 链摘要；生成 descendant-first 删除计划（plan token 持久化在

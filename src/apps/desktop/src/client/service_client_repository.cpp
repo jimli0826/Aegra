@@ -1,15 +1,12 @@
 #include "client/service_client.h"
 
-#include "client/network_share_access.h"
 #include "client/service_protocol.h"
 #include "locale/locale_format.h"
 #include "locale/message_code_map.h"
 
-#include <QDir>
 #include <QHash>
 #include <QJsonObject>
 #include <QSet>
-#include <QStorageInfo>
 #include <QUuid>
 
 #include <algorithm>
@@ -17,7 +14,14 @@
 namespace aegra::desktop {
 namespace {
 
+constexpr int kRepositoryQueryDeadlineMilliseconds = 5'000;
+constexpr int kRepositoryProbeDeadlineMilliseconds = 35'000;
+
 constexpr qsizetype kMaximumRecoveryPoints = 10'000;
+
+[[nodiscard]] bool is_unc_path(const QString& path) {
+    return path.startsWith(QStringLiteral("\\\\")) || path.startsWith(QStringLiteral("//"));
+}
 
 [[nodiscard]] QString new_request_id() {
     return QUuid::createUuid().toString(QUuid::WithoutBraces);
@@ -269,9 +273,10 @@ void ServiceClient::start_repository_query() {
             : std::optional{selected_repository_connection_id_};
     const auto body = encode_recovery_point_request(request_id, std::nullopt, connection_id);
     const auto started =
-        coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
-            return handle_recovery_point_frame(frame_body);
-        });
+        coordinator_->begin_request(
+            request_id, body,
+            [this](const QByteArray& frame_body) { return handle_recovery_point_frame(frame_body); },
+            kRepositoryQueryDeadlineMilliseconds);
     if (!started) {
         finish_repository_failure(QStringLiteral("repository.query_failed"));
     }
@@ -328,7 +333,8 @@ RequestDisposition ServiceClient::handle_recovery_point_frame(const QByteArray& 
         const auto next_id = new_request_id();
         const auto next_body =
             encode_recovery_point_request(next_id, requested_token_, expected_connection);
-        if (!coordinator_->continue_request(request_id, next_id, next_body)) {
+        if (!coordinator_->continue_request(request_id, next_id, next_body,
+                                            kRepositoryQueryDeadlineMilliseconds)) {
             return RequestDisposition::kProtocolError;
         }
         repository_request_id_ = next_id;
@@ -346,15 +352,14 @@ RequestDisposition ServiceClient::handle_recovery_point_frame(const QByteArray& 
 }
 
 void ServiceClient::finish_repository_failure(const QString& message_code) {
-    repository_uuid_.clear();
     pending_recovery_points_.clear();
     requested_token_.reset();
     last_file_uuid_.clear();
     repository_loading_ = false;
-    repository_configured_ = false;
     repository_request_id_.clear();
-    recovery_points_.clear();
     repository_error_code_ = message_code;
+    // Keep the last complete catalog snapshot. A transient Service or network failure must not
+    // replace valid UI data with an empty repository.
     emit repositoryChanged();
     emit loadingChanged();
 }
@@ -540,6 +545,50 @@ void ServiceClient::testRepositoryConnection(const QString& connection_id) {
     start_repository_resource_command(kTestRepositoryConnectionRequestKind, connection_id);
 }
 
+void ServiceClient::begin_next_repository_refresh() {
+    if (!repository_refresh_running_) {
+        return;
+    }
+    if (!connected() || repository_refresh_queue_.isEmpty()) {
+        stop_repository_refresh();
+        return;
+    }
+    repository_refresh_current_id_ = repository_refresh_queue_.takeFirst();
+    if (!connections_.find(repository_refresh_current_id_)) {
+        begin_next_repository_refresh();
+        return;
+    }
+    connections_.set_refreshing(repository_refresh_current_id_, true);
+    emit connectionsChanged();
+    start_repository_resource_command(kTestRepositoryConnectionRequestKind,
+                                      repository_refresh_current_id_);
+}
+
+void ServiceClient::request_connection_snapshot_after_probe() {
+    if (!repository_refresh_running_) {
+        return;
+    }
+    repository_refresh_waiting_for_snapshot_ = true;
+    if (!connections_loading_) {
+        start_connection_query();
+    }
+}
+
+void ServiceClient::stop_repository_refresh() {
+    const bool changed = repository_refresh_running_ ||
+                         repository_refresh_waiting_for_snapshot_ ||
+                         !repository_refresh_current_id_.isEmpty() ||
+                         !repository_refresh_queue_.isEmpty();
+    repository_refresh_running_ = false;
+    repository_refresh_waiting_for_snapshot_ = false;
+    repository_refresh_current_id_.clear();
+    repository_refresh_queue_.clear();
+    connections_.clear_refreshing();
+    if (changed) {
+        emit connectionsChanged();
+    }
+}
+
 void ServiceClient::setDefaultRepositoryConnection(const QString& connection_id) {
     start_repository_resource_command(kSetDefaultRepositoryRequestKind, connection_id);
 }
@@ -589,10 +638,13 @@ void ServiceClient::start_repository_resource_command(const int request_kind,
     const auto body = encode_repository_connection_resource_request(
         repository_command_request_id_, repository_command_idempotency_key_, request_kind,
         connection_id);
+    const auto deadline = request_kind == kTestRepositoryConnectionRequestKind
+                              ? kRepositoryProbeDeadlineMilliseconds
+                              : ServiceRequestCoordinator::kDefaultDeadlineMilliseconds;
     const auto started = coordinator_->begin_request(
         repository_command_request_id_, body, [this](const QByteArray& frame_body) {
             return handle_repository_command_frame(frame_body);
-        });
+        }, deadline);
     if (!started) {
         finish_repository_command_failure(QStringLiteral("service.send_failed"));
     }
@@ -604,36 +656,54 @@ RequestDisposition ServiceClient::handle_repository_command_frame(const QByteArr
         return RequestDisposition::kProtocolError;
     }
     if (is_command_failure_response(root, repository_command_kind_)) {
+        const bool refresh_probe = repository_refresh_running_ &&
+                                   repository_command_kind_ ==
+                                       kTestRepositoryConnectionRequestKind;
         const auto message_code = root.value(QStringLiteral("message_code")).toString();
         finish_repository_command_failure(
             message_code.isEmpty() ? QStringLiteral("service.request_failed") : message_code);
-        refreshConnections();
+        if (!refresh_probe) {
+            refreshConnections();
+        }
         return RequestDisposition::kFinished;
     }
     CommandAck acknowledgement;
     if (!parse_command_ack_response(root, repository_command_kind_, acknowledgement)) {
         return RequestDisposition::kProtocolError;
     }
-    if (repository_command_kind_ == kRemoveRepositoryConnectionRequestKind &&
+    const auto completed_kind = repository_command_kind_;
+    const bool refresh_probe = repository_refresh_running_ &&
+                               completed_kind == kTestRepositoryConnectionRequestKind;
+    if (completed_kind == kRemoveRepositoryConnectionRequestKind &&
         acknowledgement.resource_id == selected_repository_connection_id_) {
         selected_repository_connection_id_.clear();
         reset_repository();
-    } else if (acknowledgement.has_resource_id) {
+    } else if (acknowledgement.has_resource_id && !refresh_probe) {
         selected_repository_connection_id_ = acknowledgement.resource_id;
     }
     reset_repository_command();
-    refreshConnections();
+    if (refresh_probe) {
+        request_connection_snapshot_after_probe();
+    } else {
+        refreshConnections();
+    }
     emit repositoryChanged();
     return RequestDisposition::kFinished;
 }
 
 void ServiceClient::finish_repository_command_failure(const QString& message_code) {
+    const bool refresh_probe = repository_refresh_running_ &&
+                               repository_command_kind_ ==
+                                   kTestRepositoryConnectionRequestKind;
     repository_command_busy_ = false;
     repository_command_request_id_.clear();
     repository_command_idempotency_key_.clear();
     repository_command_kind_ = 0;
     repository_command_error_code_ = message_code;
     emit repositoryCommandChanged();
+    if (refresh_probe) {
+        request_connection_snapshot_after_probe();
+    }
 }
 
 void ServiceClient::reset_repository_command() {
@@ -805,59 +875,32 @@ void ServiceClient::finish_execute_delete_failure(const QString& message_code) {
 
 QVariantList ServiceClient::listLocalRepositoryDrives() const {
     QVariantList drives;
-    const auto volumes = QStorageInfo::mountedVolumes();
-    for (const auto& volume : volumes) {
-        if (!volume.isValid() || !volume.isReady()) {
-            continue;
+    QSet<QString> seen;
+    for (const auto& disk_value : sources_.disksTree()) {
+        const auto volumes = disk_value.toMap().value(QStringLiteral("volumes")).toList();
+        for (const auto& volume_value : volumes) {
+            auto letter = volume_value.toMap().value(QStringLiteral("letter")).toString().trimmed();
+            if (letter.isEmpty()) {
+                letter = volume_value.toMap()
+                             .value(QStringLiteral("mountLetter"))
+                             .toString()
+                             .trimmed();
+            }
+            if (letter.isEmpty()) {
+                continue;
+            }
+            const auto root = letter.left(1).toUpper() + QStringLiteral(":\\");
+            if (seen.contains(root)) {
+                continue;
+            }
+            seen.insert(root);
+            drives.push_back(root);
         }
-        const auto root = QDir::toNativeSeparators(volume.rootPath());
-        if (root.isEmpty()) {
-            continue;
-        }
-        // Skip optical / empty removable shells without a usable path.
-        if (!QDir(root).exists()) {
-            continue;
-        }
-        drives.push_back(root);
     }
     std::sort(drives.begin(), drives.end(), [](const QVariant& left, const QVariant& right) {
         return left.toString().compare(right.toString(), Qt::CaseInsensitive) < 0;
     });
     return drives;
-}
-
-QVariantList ServiceClient::listLocalRepositoryFolders(const QString& path) const {
-    QVariantList folders;
-    const auto trimmed = path.trimmed();
-    if (trimmed.isEmpty()) {
-        return folders;
-    }
-    QDir dir(trimmed);
-    if (!dir.exists()) {
-        return folders;
-    }
-    const auto entries = dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name | QDir::IgnoreCase);
-    folders.reserve(entries.size());
-    for (const auto& name : entries) {
-        folders.push_back(name);
-    }
-    return folders;
-}
-
-QVariantMap ServiceClient::connectNetworkShare(const QString& unc_path, const QString& username,
-                                               const QString& password,
-                                               const QString& domain) const {
-    return connect_network_share(unc_path, username, password, domain);
-}
-
-QVariantList ServiceClient::listNetworkShareFolders(const QString& unc_path) const {
-    QVariantList folders;
-    const auto names = list_network_share_folders(unc_path);
-    folders.reserve(names.size());
-    for (const auto& name : names) {
-        folders.push_back(name);
-    }
-    return folders;
 }
 
 QString ServiceClient::formatBytes(const qint64 bytes) const {
@@ -866,44 +909,27 @@ QString ServiceClient::formatBytes(const qint64 bytes) const {
 
 namespace {
 
-/// Resolve the host volume for a repository locator (no directory walk).
-[[nodiscard]] QStorageInfo volume_for_locator(const QString& locator) {
+[[nodiscard]] QVariantMap inventory_volume(const SourceInventoryModel& sources,
+                                           const QString& locator) {
     const auto trimmed = locator.trimmed();
-    if (trimmed.isEmpty()) {
+    if (trimmed.size() < 2 || trimmed.at(1) != QLatin1Char(':')) {
         return {};
     }
-    QStorageInfo volume(trimmed);
-    if (!volume.isValid() || !volume.isReady()) {
-        // Drive form "D:\AegraRepo" — fall back to the volume root letter.
-        if (trimmed.size() >= 2 && trimmed.at(1) == QLatin1Char(':')) {
-            volume.setPath(trimmed.left(3));
+    const auto wanted = trimmed.left(1).toUpper();
+    for (const auto& disk_value : sources.disksTree()) {
+        const auto volumes = disk_value.toMap().value(QStringLiteral("volumes")).toList();
+        for (const auto& volume_value : volumes) {
+            const auto volume = volume_value.toMap();
+            auto letter = volume.value(QStringLiteral("letter")).toString();
+            if (letter.isEmpty()) {
+                letter = volume.value(QStringLiteral("mountLetter")).toString();
+            }
+            if (letter.left(1).compare(wanted, Qt::CaseInsensitive) == 0) {
+                return volume;
+            }
         }
     }
-    if (!volume.isValid() || !volume.isReady()) {
-        return {};
-    }
-    return volume;
-}
-
-[[nodiscard]] QString volume_root_key(const QStorageInfo& volume) {
-    return QDir::toNativeSeparators(volume.rootPath()).toUpper();
-}
-
-/// Volume used space = total − free (OS query; never recurse repository files).
-[[nodiscard]] qint64 volume_used_bytes(const QStorageInfo& volume) {
-    const auto total = volume.bytesTotal();
-    if (total <= 0) {
-        return 0;
-    }
-    const auto free = volume.bytesFree();
-    if (free >= 0 && free <= total) {
-        return total - free;
-    }
-    const auto available = volume.bytesAvailable();
-    if (available >= 0 && available <= total) {
-        return total - available;
-    }
-    return 0;
+    return {};
 }
 
 } // namespace
@@ -918,16 +944,13 @@ qint64 ServiceClient::repositoryHostFreeBytes() const {
             connections_
                 .data(connections_.index(row, 0), RepositoryConnectionModel::LocatorRole)
                 .toString();
-        const auto volume = volume_for_locator(locator);
-        if (!volume.isValid()) {
-            continue;
-        }
-        const auto key = volume_root_key(volume);
-        if (key.isEmpty() || seen_roots.contains(key)) {
+        const auto key = locator.left(1).toUpper();
+        const auto volume = inventory_volume(sources_, locator);
+        if (volume.isEmpty() || seen_roots.contains(key)) {
             continue;
         }
         seen_roots.insert(key);
-        free_bytes += volume.bytesAvailable();
+        free_bytes += volume.value(QStringLiteral("freeBytes")).toLongLong();
     }
     return free_bytes;
 }
@@ -942,29 +965,27 @@ qint64 ServiceClient::repositoryHostUsedBytes() const {
             connections_
                 .data(connections_.index(row, 0), RepositoryConnectionModel::LocatorRole)
                 .toString();
-        const auto volume = volume_for_locator(locator);
-        if (!volume.isValid()) {
-            continue;
-        }
-        const auto key = volume_root_key(volume);
-        if (key.isEmpty() || seen_roots.contains(key)) {
+        const auto key = locator.left(1).toUpper();
+        const auto volume = inventory_volume(sources_, locator);
+        if (volume.isEmpty() || seen_roots.contains(key)) {
             continue;
         }
         seen_roots.insert(key);
-        used_bytes += volume_used_bytes(volume);
+        const auto capacity = volume.value(QStringLiteral("capacityBytes")).toLongLong();
+        const auto free = volume.value(QStringLiteral("freeBytes")).toLongLong();
+        used_bytes += (std::max)(qint64{0}, capacity - free);
     }
     return used_bytes;
 }
 
 qint64 ServiceClient::freeBytesForLocator(const QString& locator) const {
-    const auto volume = volume_for_locator(locator);
-    if (!volume.isValid()) {
-        return 0;
-    }
-    return volume.bytesAvailable();
+    return inventory_volume(sources_, locator).value(QStringLiteral("freeBytes")).toLongLong();
 }
 
 QString ServiceClient::freeSpaceTextForLocator(const QString& locator) const {
+    if (is_unc_path(locator.trimmed())) {
+        return QStringLiteral("—");
+    }
     return format_.format_bytes(freeBytesForLocator(locator));
 }
 

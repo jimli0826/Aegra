@@ -1997,6 +1997,30 @@ Server: %1</source>
         <source>Failed to connect to the network share</source>
         <translation>無法連線網路共用</translation>
     </message>
+    <message id="aegra.repository.network_unreachable">
+        <source>The network host is unreachable or timed out</source>
+        <translation>無法存取網路主機或連線已逾時</translation>
+    </message>
+    <message id="aegra.repository.network_credentials_rejected">
+        <source>The network username or password was rejected</source>
+        <translation>網路使用者名稱或密碼不正確</translation>
+    </message>
+    <message id="aegra.repository.network_access_denied">
+        <source>Access to the network share was denied</source>
+        <translation>沒有存取該網路共用的權限</translation>
+    </message>
+    <message id="aegra.repository.network_share_not_found">
+        <source>The network share or path was not found</source>
+        <translation>找不到網路共用或路徑</translation>
+    </message>
+    <message id="aegra.repository.network_credential_conflict">
+        <source>Windows already has a connection to this server with different credentials</source>
+        <translation>Windows 已使用其他認證連線到該伺服器，請先中斷現有連線</translation>
+    </message>
+    <message id="aegra.repository.connection_failed">
+        <source>The repository could not be opened</source>
+        <translation>無法開啟 Repository</translation>
+    </message>
     <message id="aegra.repository.network_path_invalid">
         <source>Invalid network path (expected \\server\share)</source>
         <translation>無效的網路路徑（應為 \\伺服器\共用）</translation>
@@ -2004,6 +2028,22 @@ Server: %1</source>
     <message id="aegra.repository.storage_root_invalid">
         <source>The repository location is not a valid storage path</source>
         <translation>Repository 位置不是有效的儲存路徑</translation>
+    </message>
+    <message id="aegra.repository.storage_access_denied">
+        <source>Permission to access or create the repository was denied</source>
+        <translation>沒有存取或建立 Repository 的權限</translation>
+    </message>
+    <message id="aegra.repository.storage_path_not_found">
+        <source>The repository storage path was not found</source>
+        <translation>找不到 Repository 儲存路徑</translation>
+    </message>
+    <message id="aegra.repository.storage_io_failed">
+        <source>The repository storage could not be read or written</source>
+        <translation>無法讀取或寫入 Repository 儲存空間</translation>
+    </message>
+    <message id="aegra.repository.descriptor_invalid">
+        <source>The repository metadata is missing or invalid</source>
+        <translation>Repository 中繼資料遺失或無效</translation>
     </message>
     <message id="aegra.repository.remove_title">
         <source>Remove repository connection?</source>

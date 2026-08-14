@@ -10,7 +10,7 @@
 namespace aegra::application {
 class FileBrowseService;
 class ISourceInventoryQuery;
-}
+} // namespace aegra::application
 
 namespace aegra::ports {
 class IClock;
@@ -36,7 +36,8 @@ class IWorkerJobService {
     [[nodiscard]] virtual base::Result<contracts::CommandAcknowledgement>
     start_verify(const contracts::StartVerifyCommand& command, std::string_view idempotency_key,
                  base::CancellationToken cancellation) = 0;
-    /// Restore preflight: `disk.N` (whole disk) or `vol.…` (single volume); tip Full or Incremental.
+    /// Restore preflight: `disk.N` (whole disk) or `vol.…` (single volume); tip Full or
+    /// Incremental.
     [[nodiscard]] virtual base::Result<contracts::RestorePreflight>
     prepare_restore(const contracts::RestorePreflightRequest& request,
                     base::CancellationToken cancellation) = 0;
@@ -45,12 +46,11 @@ class IWorkerJobService {
                   base::CancellationToken cancellation) = 0;
     [[nodiscard]] virtual base::Result<contracts::FileRestorePreflight>
     prepare_file_restore(const contracts::PrepareFileRestoreRequest& request,
-                         const ports::FileBrowseCaller& caller,
+                         const ports::FileBrowseSession& session,
                          base::CancellationToken cancellation) = 0;
     [[nodiscard]] virtual base::Result<contracts::CommandAcknowledgement>
     start_file_restore(const contracts::StartFileRestoreCommand& command,
-                       std::string_view idempotency_key,
-                       base::CancellationToken cancellation) = 0;
+                       std::string_view idempotency_key, base::CancellationToken cancellation) = 0;
     [[nodiscard]] virtual base::Result<contracts::CommandAcknowledgement>
     cancel_job(const contracts::ResourceRef& job, std::string_view idempotency_key,
                base::CancellationToken cancellation) = 0;
@@ -79,7 +79,7 @@ class WorkerJobService final : public IWorkerJobService {
                   base::CancellationToken cancellation) override;
     [[nodiscard]] base::Result<contracts::FileRestorePreflight>
     prepare_file_restore(const contracts::PrepareFileRestoreRequest& request,
-                         const ports::FileBrowseCaller& caller,
+                         const ports::FileBrowseSession& session,
                          base::CancellationToken cancellation) override;
     [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
     start_file_restore(const contracts::StartFileRestoreCommand& command,

@@ -17,6 +17,7 @@ struct RepositoryConnectionRow final {
     QString locator;
     std::int64_t state{2};
     bool is_default{false};
+    bool refreshing{false};
     QStringList capabilities;
 };
 
@@ -35,6 +36,7 @@ class RepositoryConnectionModel final : public QAbstractListModel {
         StateTextRole,
         IsDefaultRole,
         IsAvailableRole,
+        IsRefreshingRole,
         CapabilitiesRole,
     };
 
@@ -48,6 +50,9 @@ class RepositoryConnectionModel final : public QAbstractListModel {
     [[nodiscard]] bool contains_available(const QString& connection_id) const;
     [[nodiscard]] std::optional<RepositoryConnectionRow> find(const QString& connection_id) const;
     [[nodiscard]] QString default_connection_id() const;
+    [[nodiscard]] QStringList connection_ids() const;
+    bool set_refreshing(const QString& connection_id, bool refreshing);
+    void clear_refreshing();
 
     /// QML helpers for wizard destination selection by list index.
     Q_INVOKABLE [[nodiscard]] QString connectionIdAt(int row) const;
@@ -63,7 +68,7 @@ class RepositoryConnectionModel final : public QAbstractListModel {
 
   private:
     [[nodiscard]] static bool is_available_state(std::int64_t state) noexcept;
-    [[nodiscard]] QString state_text(std::int64_t state) const;
+    [[nodiscard]] QString state_text(const RepositoryConnectionRow& row) const;
 
     QVector<RepositoryConnectionRow> rows_;
     int available_count_{0};

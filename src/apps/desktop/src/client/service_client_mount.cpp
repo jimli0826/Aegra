@@ -10,13 +10,6 @@
 #include <QUuid>
 #include <QVariantMap>
 
-#ifdef Q_OS_WIN
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <Windows.h>
-#endif
-
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -133,14 +126,25 @@ QVariantList ServiceClient::availableDriveLetters() const {
         auto_opt.insert(QStringLiteral("value"), QString{});
         options.push_back(auto_opt);
     }
-#ifdef Q_OS_WIN
-    // Free letters only (old MountBackend::driveLetterOptions): skip A:/B: and assigned drives.
-    const DWORD mask = GetLogicalDrives();
+    QSet<QChar> occupied;
+    for (const auto& disk_value : sources_.disksTree()) {
+        const auto volumes = disk_value.toMap().value(QStringLiteral("volumes")).toList();
+        for (const auto& volume_value : volumes) {
+            auto letter = volume_value.toMap().value(QStringLiteral("letter")).toString();
+            if (letter.isEmpty()) {
+                letter = volume_value.toMap().value(QStringLiteral("mountLetter")).toString();
+            }
+            if (!letter.isEmpty()) {
+                occupied.insert(letter.at(0).toUpper());
+            }
+        }
+    }
+    // Service Inventory is the authority for assigned letters; Desktop performs no OS query.
     for (int index = 2; index < 26; ++index) {
-        if ((mask & (1u << static_cast<DWORD>(index))) != 0U) {
+        const auto letter = QChar(QLatin1Char(static_cast<char>('A' + index)));
+        if (occupied.contains(letter)) {
             continue;
         }
-        const auto letter = QChar(QLatin1Char(static_cast<char>('A' + index)));
         // UI value keeps "Z:" form (old MountBackend); wire path normalizes to a single letter.
         const auto with_colon = QString(letter) + QLatin1Char(':');
         QVariantMap option;
@@ -148,16 +152,6 @@ QVariantList ServiceClient::availableDriveLetters() const {
         option.insert(QStringLiteral("value"), with_colon);
         options.push_back(option);
     }
-#else
-    for (int index = 2; index < 26; ++index) {
-        const auto letter = QChar(QLatin1Char(static_cast<char>('A' + index)));
-        const auto with_colon = QString(letter) + QLatin1Char(':');
-        QVariantMap option;
-        option.insert(QStringLiteral("label"), with_colon);
-        option.insert(QStringLiteral("value"), with_colon);
-        options.push_back(option);
-    }
-#endif
     return options;
 }
 

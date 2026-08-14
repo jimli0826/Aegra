@@ -204,7 +204,6 @@ Window {
                                 serviceClient.refreshJobs()
                         } else if (newIndex === 4) {
                             serviceClient.refreshConnections()
-                            serviceClient.refreshRepository()
                         } else if (newIndex === 5) {
                             // Task Log: terminal jobs via ListJobs scope=terminal.
                             if (serviceClient.jobListAvailable)
@@ -410,7 +409,7 @@ Window {
             onQuitRequested: window.close()
         }
 
-        // Global loading overlay (old Main.qml): menu switch / catalog reload / busy commands.
+        // Global loading overlay (old Main.qml): bounded control-plane queries / busy commands.
         LoadingOverlay {
             anchors.fill: parent
             z: 8000

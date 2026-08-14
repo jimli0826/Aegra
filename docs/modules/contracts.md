@@ -81,9 +81,9 @@ Volume schedule 创建/更新：
 
 file_set schedule（F6）：
 
-- **创建**：`protection.file_selections[]` 携带短期 browse `node_token`；Service 在调用方 SID/session 下
+- **创建**：`protection.file_selections[]` 携带短期 browse `node_token`；Service 在当前 pipe session 下
   解析为 durable `FileSourceRef`（canonical `selection_id` UUID + `volume_identity` + 相对组件），
-  规范化/去重后写入控制面；`owner_sid` 记录创建者。同样固定 Incremental。
+  规范化/去重后写入控制面；不记录调用者身份。同样固定 Incremental。
 - **更新**：不得更换 `content_kind` 或重新提交 file selections（`schedule.source_frozen`）；
   加密选项冻结。
 - Desktop 永不发送绝对路径；列表摘要含 `display_label` 与 volume-relative `display_chain`（UI 名，不是路径）。

@@ -692,11 +692,16 @@ bool is_repository_failure_response(const QJsonObject& root) {
     qint64 kind = 0;
     qint64 request_kind = 0;
     qint64 error = 0;
+    const auto message_code = root.value(QStringLiteral("message_code")).toString();
+    const bool recognized_failure =
+        message_code == QLatin1String("repository.query_failed") ||
+        message_code == QLatin1String("service.request_timeout") ||
+        message_code == QLatin1String("service.request_queue_full") ||
+        message_code == QLatin1String("service.request_failed");
     return integer_in_range(root.value(QStringLiteral("kind")), 3, 3, kind) &&
            integer_in_range(root.value(QStringLiteral("request_kind")), 2, 2, request_kind) &&
            integer_in_range(root.value(QStringLiteral("boundary_error_code")), 1, 11, error) &&
-           root.value(QStringLiteral("message_code")).toString() ==
-               QStringLiteral("repository.query_failed") &&
+           recognized_failure &&
            root.value(QStringLiteral("payload")).isNull();
 }
 
@@ -704,13 +709,18 @@ bool is_recovery_point_layout_failure_response(const QJsonObject& root) {
     qint64 kind = 0;
     qint64 request_kind = 0;
     qint64 error = 0;
+    const auto message_code = root.value(QStringLiteral("message_code")).toString();
+    const bool recognized_failure =
+        message_code == QLatin1String("recovery_point.layout_failed") ||
+        message_code == QLatin1String("service.request_timeout") ||
+        message_code == QLatin1String("service.request_queue_full") ||
+        message_code == QLatin1String("service.request_failed");
     return integer_in_range(root.value(QStringLiteral("kind")), 3, 3, kind) &&
            integer_in_range(root.value(QStringLiteral("request_kind")),
                             kGetRecoveryPointLayoutRequestKind, kGetRecoveryPointLayoutRequestKind,
                             request_kind) &&
            integer_in_range(root.value(QStringLiteral("boundary_error_code")), 1, 11, error) &&
-           root.value(QStringLiteral("message_code")).toString() ==
-               QStringLiteral("recovery_point.layout_failed") &&
+           recognized_failure &&
            root.value(QStringLiteral("payload")).isNull();
 }
 

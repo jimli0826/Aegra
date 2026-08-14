@@ -78,7 +78,7 @@ unsupported/corrupt 边界错误，不识别旧版本的具体结构，也不提
 Desktop FileTreeModel
   -> Service V4 BrowseFileSources (paged opaque nodes)
   -> Service UpsertSchedule(FileSetSelectionInput)
-  -> SQLite durable FileSelectionSpec + owner identity
+  -> SQLite durable FileSelectionSpec
   -> Service StartBackup / Scheduler
   -> Worker Job schema 4 (trusted FileSourceRef[])
   -> one VSS Snapshot Set for all involved volumes
@@ -140,7 +140,7 @@ FI0：删除 `reparse_policy`；枚举到 reparse/hard-link/sparse/ADS 时 Backu
 
 ### 5.2 SQLite authority
 
-SQLite 保存 Schedule、owner identity 和 durable selection，但不是文件树或恢复内容权威。文件选择拆到
+SQLite 保存 Schedule 和 durable selection，但不是文件树或恢复内容权威。文件选择拆到
 `schedule_file_selections` 表，不把可变 JSON 塞入 `schedules`：
 
 ```text
@@ -152,12 +152,11 @@ unreadable_policy, display_label
 `relative_path_blob` 保存版本化组件编码，不保存 VSS path。表与 Schedule 在同一事务创建；Schedule 更新继续
 冻结保护源和备份选项。产品未发布，直接更新正式 schema，不增加旧 schema 数据迁移分支。
 
-### 5.3 身份与授权
+### 5.3 Session 与 opaque token
 
-- 浏览会话绑定 Named Pipe 调用者 SID、logon session、Service session 和到期时间；
+- 浏览会话绑定 Service 生成的 Named Pipe session id 和到期时间；不读取调用者 SID/token；
 - token 使用密码学随机 128 bit 以上，不包含可逆路径，单次 Service 生命周期内存维护；
 - 创建 Schedule 前重新打开根并校验 token 指向对象仍在同一 Volume；
-- Schedule 持久化 owner SID；只有 owner 或显式管理员策略可以查询或执行；
 - 后台 Worker 使用 Service 已解析引用和所需 backup privilege，不继承 Desktop 句柄；
 - 路径字段禁止进入 Command acknowledgement、TaskResult、普通日志和 Catalog。
 
@@ -187,7 +186,7 @@ UUID、file UUID、index root digest、parent entry ID 和调用者。每页最�
 ```text
 repository UUID, recovery point UUID, index root digest,
 selected entry IDs digest, target root identity,
-conflict policy, logical bytes, entry count, expiration, owner identity
+conflict policy, logical bytes, entry count, expiration
 ```
 
 `StartFileRestore` 重新检查 Archive generation、index digest、目标 identity 和 token 唯一占用，防止 TOCTOU

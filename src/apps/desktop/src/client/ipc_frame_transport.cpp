@@ -1,6 +1,8 @@
 #include "client/ipc_frame_transport.h"
 
 #include <QLocalSocket>
+#include <QMetaObject>
+#include <QThread>
 #include <QTimer>
 
 #include <algorithm>
@@ -29,40 +31,44 @@ namespace {
 
 } // namespace
 
-IpcFrameTransport::IpcFrameTransport(QString pipe_name, QObject* parent)
-    : QObject(parent), pipe_name_(std::move(pipe_name)), socket_(new QLocalSocket(this)),
-      reconnect_timer_(new QTimer(this)) {
+IpcFrameTransportWorker::IpcFrameTransportWorker(QString pipe_name)
+    : pipe_name_(std::move(pipe_name)) {}
+
+void IpcFrameTransportWorker::initialize() {
+    socket_ = new QLocalSocket(this);
+    reconnect_timer_ = new QTimer(this);
     reconnect_timer_->setSingleShot(true);
     reconnect_timer_->setInterval(kDefaultReconnectDelayMilliseconds);
-    connect(reconnect_timer_, &QTimer::timeout, this, &IpcFrameTransport::connect_to_service);
-    connect(socket_, &QLocalSocket::connected, this, &IpcFrameTransport::on_connected);
-    connect(socket_, &QLocalSocket::disconnected, this, &IpcFrameTransport::on_disconnected);
-    connect(socket_, &QLocalSocket::readyRead, this, &IpcFrameTransport::on_ready_read);
-    connect(socket_, &QLocalSocket::errorOccurred, this, &IpcFrameTransport::on_socket_error);
+    connect(reconnect_timer_, &QTimer::timeout, this,
+            &IpcFrameTransportWorker::connect_to_service);
+    connect(socket_, &QLocalSocket::connected, this, &IpcFrameTransportWorker::on_connected);
+    connect(socket_, &QLocalSocket::disconnected, this,
+            &IpcFrameTransportWorker::on_disconnected);
+    connect(socket_, &QLocalSocket::readyRead, this, &IpcFrameTransportWorker::on_ready_read);
+    connect(socket_, &QLocalSocket::errorOccurred, this,
+            &IpcFrameTransportWorker::on_socket_error);
 }
 
-void IpcFrameTransport::set_reconnect_delay_milliseconds(const int delay_ms) {
+void IpcFrameTransportWorker::shutdown() {
+    intentional_disconnect_ = true;
+    reconnect_timer_->stop();
+    socket_->abort();
+}
+
+void IpcFrameTransportWorker::set_reconnect_delay_milliseconds(const int delay_ms) {
     reconnect_delay_ms_ = delay_ms > 0 ? delay_ms : kDefaultReconnectDelayMilliseconds;
     next_reconnect_delay_ms_ = reconnect_delay_ms_;
     reconnect_timer_->setInterval(reconnect_delay_ms_);
 }
 
-void IpcFrameTransport::set_auto_reconnect_enabled(const bool enabled) {
+void IpcFrameTransportWorker::set_auto_reconnect_enabled(const bool enabled) {
     auto_reconnect_enabled_ = enabled;
     if (!enabled) {
         reconnect_timer_->stop();
     }
 }
 
-bool IpcFrameTransport::auto_reconnect_enabled() const noexcept {
-    return auto_reconnect_enabled_;
-}
-
-bool IpcFrameTransport::is_connected() const noexcept {
-    return socket_->state() == QLocalSocket::ConnectedState;
-}
-
-void IpcFrameTransport::connect_to_service() {
+void IpcFrameTransportWorker::connect_to_service() {
     reconnect_timer_->stop();
     // Suppress error/disconnect signals while resetting the socket — abort() otherwise
     // reports a false connect_failed and can leave the client permanently offline.
@@ -89,7 +95,7 @@ void IpcFrameTransport::connect_to_service() {
     }
 }
 
-void IpcFrameTransport::disconnect_from_service() {
+void IpcFrameTransportWorker::disconnect_from_service() {
     intentional_disconnect_ = true;
     reconnect_timer_->stop();
     error_notified_ = true;
@@ -104,22 +110,24 @@ void IpcFrameTransport::disconnect_from_service() {
     error_notified_ = false;
 }
 
-bool IpcFrameTransport::send_frame(const QByteArray& body) {
-    if (!is_connected()) {
-        return false;
+void IpcFrameTransportWorker::send_frame(const QByteArray& body) {
+    if (socket_->state() != QLocalSocket::ConnectedState) {
+        emit transport_error(QStringLiteral("service.send_failed"));
+        return;
     }
     if (body.isEmpty() || static_cast<quint32>(body.size()) > kMaximumFrameBytes) {
-        return false;
+        emit transport_error(QStringLiteral("service.send_failed"));
+        return;
     }
     const auto encoded = frame(body);
     if (socket_->write(encoded) != encoded.size()) {
-        return false;
+        emit transport_error(QStringLiteral("service.send_failed"));
+        return;
     }
     socket_->flush();
-    return true;
 }
 
-void IpcFrameTransport::on_connected() {
+void IpcFrameTransportWorker::on_connected() {
     input_.clear();
     expected_frame_bytes_ = 0;
     error_notified_ = false;
@@ -128,7 +136,7 @@ void IpcFrameTransport::on_connected() {
     emit connected();
 }
 
-void IpcFrameTransport::on_disconnected() {
+void IpcFrameTransportWorker::on_disconnected() {
     input_.clear();
     expected_frame_bytes_ = 0;
     // Socket error path already notified the client; avoid a second disconnect+reconnect cycle.
@@ -141,12 +149,12 @@ void IpcFrameTransport::on_disconnected() {
     }
 }
 
-void IpcFrameTransport::on_ready_read() {
+void IpcFrameTransportWorker::on_ready_read() {
     input_.append(socket_->readAll());
     consume_frames();
 }
 
-void IpcFrameTransport::on_socket_error() {
+void IpcFrameTransportWorker::on_socket_error() {
     if (socket_->state() == QLocalSocket::ConnectedState) {
         return;
     }
@@ -160,7 +168,7 @@ void IpcFrameTransport::on_socket_error() {
     }
 }
 
-void IpcFrameTransport::consume_frames() {
+void IpcFrameTransportWorker::consume_frames() {
     for (;;) {
         if (expected_frame_bytes_ == 0) {
             if (input_.size() < 4) {
@@ -183,7 +191,7 @@ void IpcFrameTransport::consume_frames() {
     }
 }
 
-void IpcFrameTransport::schedule_reconnect() {
+void IpcFrameTransportWorker::schedule_reconnect() {
     if (!auto_reconnect_enabled_ || intentional_disconnect_) {
         return;
     }
@@ -193,10 +201,11 @@ void IpcFrameTransport::schedule_reconnect() {
     }
 }
 
-void IpcFrameTransport::schedule_reconnect_with_backoff() {
+void IpcFrameTransportWorker::schedule_reconnect_with_backoff() {
     intentional_disconnect_ = false;
     auto_reconnect_enabled_ = true;
-    if (is_connected() || socket_->state() == QLocalSocket::ConnectingState) {
+    if (socket_->state() == QLocalSocket::ConnectedState ||
+        socket_->state() == QLocalSocket::ConnectingState) {
         return;
     }
     if (reconnect_timer_->isActive()) {
@@ -210,10 +219,10 @@ void IpcFrameTransport::schedule_reconnect_with_backoff() {
                    (std::max)(reconnect_delay_ms_, next_reconnect_delay_ms_ * 2));
 }
 
-void IpcFrameTransport::ensure_reconnect_scheduled() {
+void IpcFrameTransportWorker::ensure_reconnect_scheduled() {
     intentional_disconnect_ = false;
     auto_reconnect_enabled_ = true;
-    if (is_connected()) {
+    if (socket_->state() == QLocalSocket::ConnectedState) {
         return;
     }
     if (socket_->state() == QLocalSocket::ConnectingState) {
@@ -229,9 +238,93 @@ void IpcFrameTransport::ensure_reconnect_scheduled() {
     }
 }
 
-void IpcFrameTransport::fail_protocol() {
+void IpcFrameTransportWorker::fail_protocol() {
     emit transport_error(QStringLiteral("service.protocol_invalid"));
     socket_->abort();
+}
+
+IpcFrameTransport::IpcFrameTransport(QString pipe_name, QObject* parent)
+    : QObject(parent), thread_(new QThread(this)),
+      worker_(new IpcFrameTransportWorker(std::move(pipe_name))) {
+    worker_->moveToThread(thread_);
+    connect(thread_, &QThread::started, worker_, &IpcFrameTransportWorker::initialize);
+    connect(thread_, &QThread::finished, worker_, &QObject::deleteLater);
+    connect(worker_, &IpcFrameTransportWorker::connected, this, [this] {
+        connected_.store(true);
+        emit connected();
+    });
+    connect(worker_, &IpcFrameTransportWorker::disconnected, this, [this] {
+        connected_.store(false);
+        emit disconnected();
+    });
+    connect(worker_, &IpcFrameTransportWorker::frame_received, this,
+            &IpcFrameTransport::frame_received);
+    connect(worker_, &IpcFrameTransportWorker::transport_error, this,
+            &IpcFrameTransport::transport_error);
+    thread_->start();
+}
+
+IpcFrameTransport::~IpcFrameTransport() {
+    if (!thread_->isRunning()) {
+        return;
+    }
+    QMetaObject::invokeMethod(worker_, &IpcFrameTransportWorker::shutdown,
+                              Qt::BlockingQueuedConnection);
+    thread_->quit();
+    thread_->wait();
+}
+
+void IpcFrameTransport::invoke_worker(const char* method) {
+    QMetaObject::invokeMethod(worker_, method, Qt::QueuedConnection);
+}
+
+void IpcFrameTransport::set_reconnect_delay_milliseconds(const int delay_ms) {
+    QMetaObject::invokeMethod(worker_, [worker = worker_, delay_ms] {
+        worker->set_reconnect_delay_milliseconds(delay_ms);
+    });
+}
+
+void IpcFrameTransport::set_auto_reconnect_enabled(const bool enabled) {
+    auto_reconnect_enabled_.store(enabled);
+    QMetaObject::invokeMethod(worker_, [worker = worker_, enabled] {
+        worker->set_auto_reconnect_enabled(enabled);
+    });
+}
+
+bool IpcFrameTransport::auto_reconnect_enabled() const noexcept {
+    return auto_reconnect_enabled_.load();
+}
+
+bool IpcFrameTransport::is_connected() const noexcept {
+    return connected_.load();
+}
+
+void IpcFrameTransport::connect_to_service() {
+    invoke_worker("connect_to_service");
+}
+
+void IpcFrameTransport::disconnect_from_service() {
+    connected_.store(false);
+    invoke_worker("disconnect_from_service");
+}
+
+void IpcFrameTransport::ensure_reconnect_scheduled() {
+    auto_reconnect_enabled_.store(true);
+    invoke_worker("ensure_reconnect_scheduled");
+}
+
+void IpcFrameTransport::schedule_reconnect_with_backoff() {
+    auto_reconnect_enabled_.store(true);
+    invoke_worker("schedule_reconnect_with_backoff");
+}
+
+bool IpcFrameTransport::send_frame(const QByteArray& body) {
+    if (!is_connected() || body.isEmpty() ||
+        static_cast<quint32>(body.size()) > kMaximumFrameBytes) {
+        return false;
+    }
+    QMetaObject::invokeMethod(worker_, [worker = worker_, body] { worker->send_frame(body); });
+    return true;
 }
 
 } // namespace aegra::desktop

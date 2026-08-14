@@ -22,36 +22,33 @@ std::atomic<std::uint64_t> g_next_session_serial{1};
     return true;
 }
 
-[[nodiscard]] ServiceSessionContext
-make_session_context(const adapters::windows_ipc::WindowsNamedPipePeerIdentity& peer) {
+[[nodiscard]] ServiceSessionContext make_session_context() {
     ServiceSessionContext session;
-    session.caller.caller_sid = peer.user_sid;
-    session.caller.session_id =
-        "pipe|" + std::to_string(peer.process_id) + "|" + std::to_string(peer.session_id) + "|" +
+    session.browser_session.session_id =
+        "pipe-session-" +
         std::to_string(g_next_session_serial.fetch_add(1, std::memory_order_relaxed));
     return session;
 }
 
 [[nodiscard]] base::Result<void>
 serve_one(adapters::windows_ipc::WindowsNamedPipeListener& listener,
-          const ServiceRuntimeInfo& runtime, const ServiceSecurityHostOptions& options,
+          const ServiceRuntimeInfo& runtime, const ServiceHostOptions& options,
           const base::CancellationToken& cancellation) {
-    auto accepted = listener.accept_authorized(options.authorization, cancellation);
+    auto accepted = listener.accept(cancellation);
     if (!accepted) {
         return base::Result<void>::failure(accepted.error());
     }
-    const auto session = make_session_context(accepted.value().peer);
-    return run_service_session(*accepted.value().channel, runtime, session, cancellation,
+    const auto session = make_session_context();
+    return run_service_session(*accepted.value(), runtime, session, cancellation,
                                options.maximum_requests_per_session);
 }
 
 } // namespace
 
-base::Result<void>
-run_authorized_service_host(adapters::windows_ipc::WindowsNamedPipeListener& listener,
-                            const ServiceRuntimeInfo& runtime,
-                            const ServiceSecurityHostOptions& options,
-                            const base::CancellationToken& cancellation) {
+base::Result<void> run_service_host(adapters::windows_ipc::WindowsNamedPipeListener& listener,
+                                    const ServiceRuntimeInfo& runtime,
+                                    const ServiceHostOptions& options,
+                                    const base::CancellationToken& cancellation) {
     if (options.stop_deadline.count() <= 0) {
         return base::Result<void>::failure(
             base::Error{base::ErrorCode::kInvalidArgument, "service stop deadline is invalid"});
@@ -76,18 +73,10 @@ run_authorized_service_host(adapters::windows_ipc::WindowsNamedPipeListener& lis
             return base::Result<void>::failure(
                 base::Error{base::ErrorCode::kInternal, "service host stop deadline exceeded"});
         }
-        if (served.error().code == base::ErrorCode::kUnauthorized) {
-            // Rejected peers are disconnected; keep accepting unless once mode was requested.
-            if (options.once) {
-                return base::Result<void>::failure(served.error());
-            }
-            continue;
-        }
         // Session transport failures end one session without stopping the host, matching
         // interactive forever mode, unless once mode was requested.
-        if (!options.once &&
-            (served.error().code == base::ErrorCode::kIoFailure ||
-             served.error().code == base::ErrorCode::kInvalidArgument)) {
+        if (!options.once && (served.error().code == base::ErrorCode::kIoFailure ||
+                              served.error().code == base::ErrorCode::kInvalidArgument)) {
             continue;
         }
         return base::Result<void>::failure(served.error());

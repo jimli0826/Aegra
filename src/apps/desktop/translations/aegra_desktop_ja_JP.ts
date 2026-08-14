@@ -1997,6 +1997,30 @@ Server: %1</source>
         <source>Failed to connect to the network share</source>
         <translation>ネットワーク共有に接続できません</translation>
     </message>
+    <message id="aegra.repository.network_unreachable">
+        <source>The network host is unreachable or timed out</source>
+        <translation>ネットワーク ホストに到達できないか、接続がタイムアウトしました</translation>
+    </message>
+    <message id="aegra.repository.network_credentials_rejected">
+        <source>The network username or password was rejected</source>
+        <translation>ネットワークのユーザー名またはパスワードが拒否されました</translation>
+    </message>
+    <message id="aegra.repository.network_access_denied">
+        <source>Access to the network share was denied</source>
+        <translation>ネットワーク共有へのアクセスが拒否されました</translation>
+    </message>
+    <message id="aegra.repository.network_share_not_found">
+        <source>The network share or path was not found</source>
+        <translation>ネットワーク共有またはパスが見つかりません</translation>
+    </message>
+    <message id="aegra.repository.network_credential_conflict">
+        <source>Windows already has a connection to this server with different credentials</source>
+        <translation>Windows は別の資格情報でこのサーバーに接続済みです。既存の接続を切断してください</translation>
+    </message>
+    <message id="aegra.repository.connection_failed">
+        <source>The repository could not be opened</source>
+        <translation>Repository を開けませんでした</translation>
+    </message>
     <message id="aegra.repository.network_path_invalid">
         <source>Invalid network path (expected \\server\share)</source>
         <translation>ネットワーク パスが無効です（\\server\share 形式）</translation>
@@ -2004,6 +2028,22 @@ Server: %1</source>
     <message id="aegra.repository.storage_root_invalid">
         <source>The repository location is not a valid storage path</source>
         <translation>リポジトリの場所が有効なストレージ パスではありません</translation>
+    </message>
+    <message id="aegra.repository.storage_access_denied">
+        <source>Permission to access or create the repository was denied</source>
+        <translation>Repository へのアクセスまたは作成が拒否されました</translation>
+    </message>
+    <message id="aegra.repository.storage_path_not_found">
+        <source>The repository storage path was not found</source>
+        <translation>Repository の保存先パスが見つかりません</translation>
+    </message>
+    <message id="aegra.repository.storage_io_failed">
+        <source>The repository storage could not be read or written</source>
+        <translation>Repository ストレージを読み書きできませんでした</translation>
+    </message>
+    <message id="aegra.repository.descriptor_invalid">
+        <source>The repository metadata is missing or invalid</source>
+        <translation>Repository メタデータが見つからないか無効です</translation>
     </message>
     <message id="aegra.repository.remove_title">
         <source>Remove repository connection?</source>

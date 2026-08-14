@@ -11,7 +11,6 @@
 #include "aegra/application/recovery_point_operations.h"
 #include "aegra/application/repository_connection_service.h"
 #include "aegra/application/source_inventory_query.h"
-#include "aegra/base/error.h"
 #include "aegra/apps/service/backup_catalog_registrar.h"
 #include "aegra/apps/service/mount_supervisor.h"
 #include "aegra/apps/service/schedule_service.h"
@@ -21,6 +20,7 @@
 #include "aegra/apps/service/windows_service_scm_host.h"
 #include "aegra/apps/service/worker_job_service.h"
 #include "aegra/apps/service/worker_supervisor.h"
+#include "aegra/base/error.h"
 #include "aegra/ports/repository_storage.h"
 #include "network_aware_storage_factory.h"
 #include "service_log_formatter.h"
@@ -85,9 +85,8 @@ enum class ServiceExitCode : int {
 class LevelOnlyFileSink final : public spdlog::sinks::base_sink<std::mutex> {
   public:
     LevelOnlyFileSink(spdlog::filename_t path, const spdlog::level::level_enum only_level)
-        : only_level_(only_level),
-          file_(std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-              std::move(path), 10U * 1024U * 1024U, 5U)) {
+        : only_level_(only_level), file_(std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+                                       std::move(path), 10U * 1024U * 1024U, 5U)) {
         set_level(only_level);
         file_->set_level(spdlog::level::trace);
     }
@@ -311,8 +310,9 @@ resolve_data_dir(const ServiceArguments& arguments) {
     return environment_directory(arguments.service_mode ? L"ProgramData" : L"LOCALAPPDATA");
 }
 
-[[nodiscard]] aegra::base::Result<std::filesystem::path> resolve_sibling_executable(
-    const std::optional<std::filesystem::path>& explicit_path, const wchar_t* sibling_name) {
+[[nodiscard]] aegra::base::Result<std::filesystem::path>
+resolve_sibling_executable(const std::optional<std::filesystem::path>& explicit_path,
+                           const wchar_t* sibling_name) {
     if (explicit_path) {
         return aegra::base::Result<std::filesystem::path>::success(*explicit_path);
     }
@@ -404,8 +404,7 @@ create_service_log(const std::filesystem::path& data_dir, const bool service_mod
         sinks.push_back(std::move(sink).value());
     }
     try {
-        auto logger =
-            std::make_shared<spdlog::logger>("aegra_service", sinks.begin(), sinks.end());
+        auto logger = std::make_shared<spdlog::logger>("aegra_service", sinks.begin(), sinks.end());
         logger->set_level(spdlog::level::trace);
         logger->flush_on(spdlog::level::info);
         logger->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] %v");
@@ -472,16 +471,25 @@ create_service_log(const std::filesystem::path& data_dir, const bool service_mod
     return aegra::base::Result<void>::success();
 }
 
-[[nodiscard]] std::vector<std::string>
-runtime_capabilities(const bool file_browse_enabled) {
+[[nodiscard]] std::vector<std::string> runtime_capabilities(const bool file_browse_enabled) {
     // Chain/delete stay off until durable delete resume meets S5 Definition of Done.
     // F8 enables file.restore (PrepareFileRestore + StartFileRestore) when browse is available.
     std::vector<std::string> capabilities{
-        "backup.start",          "job.cancel",            "job.list",
-        "mount.list",            "mount.start",           "mount.unmount",
-        "recovery_point.verify", "repository.connection", "repository.list",
-        "restore.preflight",     "restore.start",         "schedule",
-        "service.info",          "service.settings",      "source.inventory",
+        "backup.start",
+        "job.cancel",
+        "job.list",
+        "mount.list",
+        "mount.start",
+        "mount.unmount",
+        "recovery_point.verify",
+        "repository.connection",
+        "repository.list",
+        "restore.preflight",
+        "restore.start",
+        "schedule",
+        "service.info",
+        "service.settings",
+        "source.inventory",
         "file.recover_browse",
     };
     if (file_browse_enabled) {
@@ -497,9 +505,8 @@ runtime_capabilities(const bool file_browse_enabled) {
     if (utf8.empty()) {
         return {};
     }
-    const int required =
-        ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8.data(),
-                              static_cast<int>(utf8.size()), nullptr, 0);
+    const int required = ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8.data(),
+                                               static_cast<int>(utf8.size()), nullptr, 0);
     if (required <= 0) {
         return {};
     }
@@ -524,12 +531,11 @@ runtime_capabilities(const bool file_browse_enabled) {
 }
 
 /// UI label for file browse roots: "Label (D:)" or "D:" when the label is empty.
-[[nodiscard]] std::string browse_root_display_name(
-    const aegra::ports::SourceInventoryRecord& source) {
+[[nodiscard]] std::string
+browse_root_display_name(const aegra::ports::SourceInventoryRecord& source) {
     std::string letter(source.mount_letter);
     if (letter.size() == 2) {
-        letter[0] = static_cast<char>(
-            std::toupper(static_cast<unsigned char>(letter[0])));
+        letter[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(letter[0])));
     }
     const auto& label = source.display_name;
     if (!label.empty() && label != letter && label != source.mount_letter) {
@@ -640,8 +646,8 @@ create_runtime(const ServiceArguments& arguments) {
         std::move(supervisor_config), *components.process_launcher, *components.control_plane,
         *components.clock, *components.random, service::SupervisorProgressCallback{},
         [log, jobs_db, catalog_registrar](const service::WorkerJobRequest& request,
-                                         const aegra::contracts::ServiceJobState final_state,
-                                         const aegra::contracts::WorkerResponse* response) {
+                                          const aegra::contracts::ServiceJobState final_state,
+                                          const aegra::contracts::WorkerResponse* response) {
             const auto& job_id = request.worker_request.job_id;
             if (response != nullptr && catalog_registrar != nullptr) {
                 auto registered = catalog_registrar->publish(request, *response, {});
@@ -692,16 +698,15 @@ create_runtime(const ServiceArguments& arguments) {
     bool file_browse_enabled = false;
     auto browse_roots = build_browse_roots(*components.source_inventory);
     if (browse_roots && !browse_roots.value().empty()) {
-        auto browser = windows_filesystem::WindowsFileSourceBrowser::create(
-            std::move(browse_roots).value());
+        auto browser =
+            windows_filesystem::WindowsFileSourceBrowser::create(std::move(browse_roots).value());
         if (browser) {
             components.file_browser = std::move(browser).value();
             components.file_browse = std::make_unique<aegra::application::FileBrowseService>(
                 *components.file_browser, *components.clock, *components.random);
             file_browse_enabled = true;
         } else if (components.logger != nullptr) {
-            components.logger->write(service::ServiceLogLevel::kWarning,
-                                     "file_browse.unavailable",
+            components.logger->write(service::ServiceLogLevel::kWarning, "file_browse.unavailable",
                                      "status=browser_create_failed");
         }
     } else if (components.logger != nullptr) {
@@ -750,34 +755,27 @@ create_listener(const ServiceArguments& arguments) {
          windows_ipc::WindowsNamedPipeAclProfile::kLocalEveryoneControl});
 }
 
-[[nodiscard]] service::ServiceSessionContext
-session_from_peer(const windows_ipc::WindowsNamedPipePeerIdentity& peer,
-                  const std::uint64_t serial) {
+[[nodiscard]] service::ServiceSessionContext session_from_serial(const std::uint64_t serial) {
     service::ServiceSessionContext session;
-    session.caller.caller_sid = peer.user_sid;
-    session.caller.session_id = "pipe|" + std::to_string(peer.process_id) + "|" +
-                                std::to_string(peer.session_id) + "|" + std::to_string(serial);
+    session.browser_session.session_id = "pipe-session-" + std::to_string(serial);
     return session;
 }
 
 [[nodiscard]] ServiceExitCode run_once(windows_ipc::WindowsNamedPipeListener& listener,
                                        const service::ServiceRuntimeInfo& runtime) {
-    windows_ipc::WindowsServiceCallerAuthorization authorization{};
-    auto accepted = listener.accept_authorized(authorization, {});
+    auto accepted = listener.accept({});
     if (!accepted)
         return ServiceExitCode::kHostFailure;
     if (runtime.logger != nullptr) {
         runtime.logger->write(service::ServiceLogLevel::kInfo, "service.session_started",
                               "mode=once");
     }
-    const auto session = session_from_peer(accepted.value().peer, 1);
-    auto result =
-        service::run_service_session(*accepted.value().channel, runtime, session, {}, 1);
+    const auto session = session_from_serial(1);
+    auto result = service::run_service_session(*accepted.value(), runtime, session, {}, 1);
     if (runtime.logger != nullptr) {
-        runtime.logger->write(result ? service::ServiceLogLevel::kInfo
-                                     : service::ServiceLogLevel::kError,
-                              result ? "service.session_completed" : "service.session_failed",
-                              "mode=once");
+        runtime.logger->write(
+            result ? service::ServiceLogLevel::kInfo : service::ServiceLogLevel::kError,
+            result ? "service.session_completed" : "service.session_failed", "mode=once");
     }
     return result ? ServiceExitCode::kSucceeded : ServiceExitCode::kHostFailure;
 }
@@ -785,9 +783,8 @@ session_from_peer(const windows_ipc::WindowsNamedPipePeerIdentity& peer,
 [[nodiscard]] ServiceExitCode run_forever(windows_ipc::WindowsNamedPipeListener& listener,
                                           const service::ServiceRuntimeInfo& runtime) {
     std::uint64_t serial = 1;
-    windows_ipc::WindowsServiceCallerAuthorization authorization{};
     for (;;) {
-        auto accepted = listener.accept_authorized(authorization, {});
+        auto accepted = listener.accept({});
         if (!accepted) {
             if (runtime.logger != nullptr) {
                 runtime.logger->write(service::ServiceLogLevel::kError, "service.accept_failed",
@@ -799,14 +796,12 @@ session_from_peer(const windows_ipc::WindowsNamedPipePeerIdentity& peer,
             runtime.logger->write(service::ServiceLogLevel::kInfo, "service.session_started",
                                   "mode=forever");
         }
-        const auto session = session_from_peer(accepted.value().peer, serial++);
-        auto result =
-            service::run_service_session(*accepted.value().channel, runtime, session, {});
+        const auto session = session_from_serial(serial++);
+        auto result = service::run_service_session(*accepted.value(), runtime, session, {});
         if (runtime.logger != nullptr) {
-            runtime.logger->write(result ? service::ServiceLogLevel::kInfo
-                                         : service::ServiceLogLevel::kWarning,
-                                  result ? "service.session_completed" : "service.session_failed",
-                                  "mode=forever");
+            runtime.logger->write(
+                result ? service::ServiceLogLevel::kInfo : service::ServiceLogLevel::kWarning,
+                result ? "service.session_completed" : "service.session_failed", "mode=forever");
         }
     }
 }
@@ -867,10 +862,10 @@ VOID WINAPI service_main_entry(DWORD, LPWSTR*) noexcept {
                                                       "service.listener_started",
                                                       "status=listening mode=service");
             }
-            service::ServiceSecurityHostOptions options;
+            service::ServiceHostOptions options;
             options.once = parsed.once;
-            return service::run_authorized_service_host(*listener.value(), runtime.value().runtime,
-                                                        options, cancellation);
+            return service::run_service_host(*listener.value(), runtime.value().runtime, options,
+                                             cancellation);
         });
     } catch (...) {
         return;

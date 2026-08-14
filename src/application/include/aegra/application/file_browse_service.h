@@ -18,7 +18,7 @@
 
 namespace aegra::application {
 
-/// Service-facing browse use case: opaque token TTL, caller binding, and selection resolve.
+/// Service-facing browse use case: opaque token TTL, session binding, and selection resolve.
 /// Adapter tokens stay private; Desktop only sees Service-minted tokens.
 class FileBrowseService final {
   public:
@@ -29,11 +29,12 @@ class FileBrowseService final {
                       ports::IRandomSource& random) noexcept;
 
     [[nodiscard]] base::Result<contracts::FileSourceNodePage>
-    browse(const ports::FileBrowseCaller& caller, const contracts::BrowseFileSourcesRequest& request,
+    browse(const ports::FileBrowseSession& session,
+           const contracts::BrowseFileSourcesRequest& request,
            base::CancellationToken cancellation);
 
     [[nodiscard]] base::Result<contracts::FileSourceRef>
-    resolve_selection(const ports::FileBrowseCaller& caller, const std::string& node_token,
+    resolve_selection(const ports::FileBrowseSession& session, const std::string& node_token,
                       contracts::FileRecursion recursion, const std::string& display_label,
                       base::CancellationToken cancellation);
 
@@ -43,16 +44,15 @@ class FileBrowseService final {
   private:
     struct TokenEntry final {
         std::string adapter_token;
-        std::string caller_sid;
         std::string session_id;
         std::uint64_t expires_utc_ms{0};
     };
 
-    [[nodiscard]] base::Result<std::string>
-    mint_token(const ports::FileBrowseCaller& caller, std::string adapter_token,
-               base::CancellationToken cancellation);
-    [[nodiscard]] base::Result<TokenEntry>
-    lookup_token(const ports::FileBrowseCaller& caller, const std::string& service_token);
+    [[nodiscard]] base::Result<std::string> mint_token(const ports::FileBrowseSession& session,
+                                                       std::string adapter_token,
+                                                       base::CancellationToken cancellation);
+    [[nodiscard]] base::Result<TokenEntry> lookup_token(const ports::FileBrowseSession& session,
+                                                        const std::string& service_token);
     void purge_expired_unlocked(std::uint64_t now_utc_ms) noexcept;
 
     ports::IFileSourceBrowser& browser_;

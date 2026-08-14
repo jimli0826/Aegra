@@ -16,6 +16,7 @@ add_library(aegra_app_service STATIC
     src/service_protocol_response_json.cpp
     src/service_response_fit.cpp
     src/service_security_host.cpp
+    src/service_session_executor.cpp
     src/windows_service_control.cpp
     src/windows_service_control_win32.cpp
     src/windows_service_scm_host.cpp
@@ -51,6 +52,7 @@ target_link_libraries(
         nlohmann_json::nlohmann_json
         Advapi32
         Mpr
+        Ws2_32
 )
 aegra_configure_target(aegra_app_service)
 

@@ -108,8 +108,13 @@ Item {
             root.refreshStorageStats()
         }
         function onRepositoryCommandChanged() {
-            if (!serviceClient.repositoryCommandBusy)
+            if (!serviceClient.repositoryCommandBusy) {
+                if (serviceClient.repositoryRefreshRunning
+                        && serviceClient.repositoryCommandErrorText.length > 0) {
+                    serviceClient.showToast(serviceClient.repositoryCommandErrorText, true)
+                }
                 root.refreshStorageStats()
+            }
         }
     }
 
@@ -368,10 +373,10 @@ Item {
                               ? qsTrId("aegra.common.refresh")
                               : qsTrId("aegra.common.reconnect")
                         enabled: !serviceClient.repositoryLoading
+                                 && !serviceClient.repositoryRefreshRunning
                         onClicked: {
                             if (serviceClient.connected) {
-                                serviceClient.refreshConnections()
-                                serviceClient.refreshRepository()
+                                serviceClient.refreshRepositoryConnections()
                                 root.refreshStorageStats()
                             } else {
                                 serviceClient.reconnect()
@@ -383,6 +388,7 @@ Item {
                         text: qsTrId("aegra.common.add")
                         primary: true
                         enabled: serviceClient.connected && !serviceClient.repositoryCommandBusy
+                                 && !serviceClient.repositoryRefreshRunning
                         onClicked: root.openAddRepositoryPanel()
                     }
                 }
@@ -560,6 +566,7 @@ Item {
                             required property string stateText
                             required property bool isDefault
                             required property bool isAvailable
+                            required property bool isRefreshing
                             required property int index
                             width: repositoryTable.width
                             height: 52
@@ -595,6 +602,7 @@ Item {
                             MouseArea {
                                 anchors.fill: parent
                                 acceptedButtons: Qt.LeftButton
+                                enabled: !serviceClient.repositoryRefreshRunning
                                 onClicked: serviceClient.selectRepositoryConnection(connectionId)
                             }
 
@@ -634,7 +642,8 @@ Item {
                                     Layout.minimumWidth: 90
                                     Layout.maximumWidth: 90
                                     text: stateText
-                                    color: isAvailable ? Theme.colorGreen : Theme.colorTextGrey
+                                    color: isAvailable && !isRefreshing
+                                           ? Theme.colorGreen : Theme.colorTextGrey
                                     font.pixelSize: 13
                                     font.bold: true
                                     font.family: Theme.fontFamily
@@ -731,6 +740,7 @@ Item {
                                                    ? Theme.colorButtonHover : Theme.colorButton
                                             opacity: serviceClient.connected
                                                      && !serviceClient.repositoryCommandBusy
+                                                     && !serviceClient.repositoryRefreshRunning
                                                      ? 1.0 : 0.45
                                             Text {
                                                 anchors.centerIn: parent
@@ -744,6 +754,7 @@ Item {
                                                 hoverEnabled: true
                                                 enabled: serviceClient.connected
                                                          && !serviceClient.repositoryCommandBusy
+                                                         && !serviceClient.repositoryRefreshRunning
                                                 cursorShape: Qt.PointingHandCursor
                                                 onClicked: serviceClient.setDefaultRepositoryConnection(
                                                                connectionId)
@@ -759,6 +770,7 @@ Item {
                                             color: delHover.containsMouse ? "#e03333" : "#cc3333"
                                             opacity: serviceClient.connected
                                                      && !serviceClient.repositoryCommandBusy
+                                                     && !serviceClient.repositoryRefreshRunning
                                                      ? 1.0 : 0.45
                                             Item {
                                                 anchors.centerIn: parent
@@ -795,6 +807,7 @@ Item {
                                                 hoverEnabled: true
                                                 enabled: serviceClient.connected
                                                          && !serviceClient.repositoryCommandBusy
+                                                         && !serviceClient.repositoryRefreshRunning
                                                 cursorShape: Qt.PointingHandCursor
                                                 onClicked: root.requestRemoveConnection(connectionId)
                                             }

@@ -21,7 +21,7 @@ Rectangle {
     Accessible.name: message.length > 0 ? message : qsTrId("aegra.common.loading")
     Accessible.role: Accessible.Pane
 
-    // Block interaction underneath while catalog reloads after menu switch.
+    // Block interaction underneath only for operations represented by globalLoading.
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.AllButtons

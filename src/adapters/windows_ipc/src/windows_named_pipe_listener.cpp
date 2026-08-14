@@ -189,25 +189,4 @@ WindowsNamedPipeListener::accept(const base::CancellationToken& cancellation) {
         WindowsNamedPipeChannel::adopt_connected(native_handle, request_.maximum_frame_bytes));
 }
 
-base::Result<WindowsNamedPipeAcceptedClient>
-WindowsNamedPipeListener::accept_authorized(const WindowsServiceCallerAuthorization& authorization,
-                                            const base::CancellationToken& cancellation) {
-    auto channel = accept(cancellation);
-    if (!channel) {
-        return base::Result<WindowsNamedPipeAcceptedClient>::failure(channel.error());
-    }
-    auto peer = channel.value()->peer_identity();
-    if (!peer) {
-        return base::Result<WindowsNamedPipeAcceptedClient>::failure(peer.error());
-    }
-    auto authorized = authorize_service_caller(peer.value(), authorization);
-    if (!authorized) {
-        return base::Result<WindowsNamedPipeAcceptedClient>::failure(authorized.error());
-    }
-    WindowsNamedPipeAcceptedClient accepted;
-    accepted.channel = std::move(channel).value();
-    accepted.peer = std::move(peer).value();
-    return base::Result<WindowsNamedPipeAcceptedClient>::success(std::move(accepted));
-}
-
 } // namespace aegra::adapters::windows_ipc

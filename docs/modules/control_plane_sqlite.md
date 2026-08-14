@@ -38,7 +38,8 @@ src/adapters/sqlite/
 
 ## 端口拆分
 
-- `IRepositoryConnectionStore`：upsert/get/list/set_default/remove（仅删除控制面引用）。
+- `IRepositoryConnectionStore`：upsert/get/list/set_default/remove（仅删除控制面引用）。`state` 是最后一次
+  显式连接探测的持久化快照；list 只读该值，不触发 Repository I/O。
 - `IJobStore`：insert/get/list/CAS `transition`/`mark_active_as_interrupted`/
   `purge_terminal_completed_before`。
 - `IServiceSettingsStore`：get/upsert 单行控制面偏好（job retention）。
@@ -56,11 +57,12 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
 
 ## Schema 与不变量
 
-- `schema_meta.version` 当前为 `18`（`ports::kControlPlaneSchemaVersion`）。产品未发布：
+- `schema_meta.version` 当前为 `19`（`ports::kControlPlaneSchemaVersion`）。产品未发布：
   - 新库 `CREATE IF NOT EXISTS` 即为当前完整表结构，再写入 version=18；
   - **不提供** 历史 schema 的 `ALTER` 迁移或兼容读取；旧开发库必须删除后重建；
   - 非 0 且非当前版本 → `kUnsupportedVersion`。
 - schema 18：`schedules.local_minutes_of_day`（TEXT，逗号分隔分钟，如 `120,900`）替换单值
+- schema 19：删除 `schedules.owner_sid`；Service 不持久化或认证调用方身份
   `local_minute_of_day`；一条 Schedule 可配置多个当日时刻。
 - `service_settings`（schema 16）：单行 `id=1`；`job_retention_months` ∈ {1,3,6} 默认 3；
   `updated_utc_ms`。Service 启动与 `UpdateServiceSettings` 时按 30 天/月对终端 Job 做
@@ -81,7 +83,7 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
 - `jobs` FI7 结果投影（schema 13）：`result_requested_backup_type`、`result_effective_backup_type`、
   `result_effective_parent_uuid`、`result_incremental_downgrade_reason`。终端 transition 从 TaskResult
   写入；`backup_type`/`parent_recovery_point_id` 仍为请求侧 requested type 与 candidate parent。
-- `schedules.content_kind` + `schedules.owner_sid`：创建时写入；`content_kind` 终身不可改。
+- `schedules.content_kind`：创建时写入并终身不可改；不持久化调用者身份。
 - `schedule_file_selections`：file_set 专用子表（`selection_id`、`volume_identity`、相对路径 blob、
   entry/recursion/reparse/unreadable policy、display_label）；volume_set 时为空。
 - `schedules.exclude_page_and_hibernation_files` 与 `schedules.deduplication_enabled` 必填；后者对 file_set

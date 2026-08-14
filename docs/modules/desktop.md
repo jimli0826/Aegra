@@ -73,7 +73,8 @@ ServiceClient (QML 门面)
   └── FileRecoverModel           # ListRecoveryPointEntries lazy 树（entry_id only）
 ```
 
-- 每个请求有唯一 correlation ID 与 deadline；协议损坏、超时断开并重连。
+- 每个请求有唯一 correlation ID 与 deadline；协议损坏断开并重连，单请求超时只结束对应
+  correlation，不降级健康 Service session。
 - 重连后只重新握手并恢复幂等 query（当前为 Repository catalog 分页查询）。
 - 模型只暴露拥有生命周期的数据与展示用角色；QML 不解析 JSON、Service 枚举数值或 message code。
 - Backup 列表 STATUS 通过 `JobModel.latestBackupStatus(scheduleId)` 关联 Job：
@@ -102,6 +103,8 @@ ServiceClient (QML 门面)
   并重连。
 - `refreshRepository()` 只在 Service Ready 且没有 pending request 时启动新分页查询；重复点击不会并发发送
   第二组请求。
+- Repository Catalog 查询使用 5 秒逐页 deadline；刷新网络 Repository 时不触发全屏 Loading overlay，
+  页面导航保持可用。超时只按该 request correlation 进入 Repository 域失败，不断开或重连 Service session。
 - 断线或错误进入 Disconnected 状态，并以有界固定间隔重连；同一时刻最多一个连接尝试。
 - QML 只观察 `connected`、`statusText`、`serviceVersion`、`apiVersion`、`errorText`、
   `repository*` 与 `recoveryPoints` model 等拥有数据的属性。
@@ -127,10 +130,18 @@ connection 的显示名、稳定 ID、状态、默认标记与 capabilities；�
 Recovery Point 列表展示备份类型、创建时间、逻辑/存储大小和链完整性（展示文本由 model/翻译提供）。
 Catalog-only 数据不表示 Archive 结构或认证完成，因此 Restore、Verify 和 Delete 图标保持禁用。
 
-Refresh 通过当前 Service session 重新查询 connection 与选中 connection 的 Recovery Point Catalog；查询或命令
-错误仍留在页面内，不破坏 Service Ready 状态。Add、Import、Set Default、Test 与 Remove 调用 Service V3
+首次显示 Repository 表格只读取 Service 返回的 SQLite connection 快照，不打开 Repository、不扫描 Catalog。
+Refresh 按表格顺序逐个调用 TestRepositoryConnection；当前行显示 Loading，探测完成后 Service 将
+Available/Unavailable 写回 SQLite，Desktop 重新读取快照后再处理下一行。单行超时只将该连接持久化为
+Unavailable，不破坏 Service Ready 状态；单行失败通过 toast 显示 Service 返回的本地化稳定原因。
+Add/Import 的 UNC 失败区分路径无效、主机不可达、共享不存在、凭据被拒、访问拒绝和凭据冲突。
+Add、Import、Set Default、Test 与 Remove 调用 Service V4
 命令，成功后自动刷新列表；Remove 只删除控制面连接引用，不删除备份数据。Lock、Unlock、Rebuild、Export 与
 Password 在 Service 没有对应能力时不显示。布局必须在 900x600、1080x720 和更大窗口下不重叠。
+
+Repository 容量卡片只使用 Service 异步返回的本机 volume inventory 快照。Desktop 不使用 `QStorageInfo`、
+`QDir` 或 Windows 网络 Provider 查询 Repository；UNC 的逐行可用空间显示为不可用。该边界防止断网 UNC
+在 QML 属性重算期间冻结 Desktop 消息循环。
 
 ## 验证与完成标准
 
@@ -226,3 +237,11 @@ Password 在 Service 没有对应能力时不显示。布局必须在 900x600、
   - 可见文案经 `qsTrId`/`message_code_map` 五语言。
 - F10：file_set 首版发布门禁已通过（Debug/Release 全量生产构建 + 静态边界审查）。Desktop 仍不得
   用 `QDir`/`QFileInfo` 枚举 protect 源或 Archive；现场 UI 矩阵在 elevated Service 上人工执行。
+
+## Desktop I/O 边界
+
+完整审计和 UI→Service 接口清单见
+[DESKTOP_BACKEND_INTERFACE_AUDIT](../development/DESKTOP_BACKEND_INTERFACE_AUDIT.md)。Named Pipe transport 的
+socket、重连 timer、frame 收发与组装均归属专用 `QThread`；GUI 线程只提交 queued 请求并处理 queued 响应。
+本机卷、盘符、容量和 Repository locator 等业务系统数据必须来自 Service 快照或命令，Desktop 不得直接调用
+`QStorageInfo`、目录枚举、WNet 或 Win32 volume API。刷新失败与短暂断线保留最后一次完整模型快照。

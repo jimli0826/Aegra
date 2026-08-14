@@ -74,7 +74,6 @@ CREATE TABLE IF NOT EXISTS schedules (
     enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
     content_kind INTEGER NOT NULL DEFAULT 1 CHECK (content_kind IN (1, 2)),
     source_ids TEXT NOT NULL,
-    owner_sid TEXT NOT NULL DEFAULT '',
     repository_connection_id TEXT NOT NULL,
     backup_type INTEGER NOT NULL CHECK (backup_type BETWEEN 1 AND 3),
     trigger_kind INTEGER NOT NULL CHECK (trigger_kind IN (1, 2, 3)),

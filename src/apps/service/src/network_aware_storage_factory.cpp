@@ -66,7 +66,7 @@ NetworkAwareRepositoryStorageFactory::ensure_network_access(
         // Guest/anonymous or first-time create (credentials applied by service_host).
         return base::Result<void>::success();
     }
-    return connect_network_share_from_secret(locator, *found.value()->credential_ref);
+    return connect_network_share_from_secret(locator, *found.value()->credential_ref, cancellation);
 }
 
 base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>
@@ -89,6 +89,16 @@ NetworkAwareRepositoryStorageFactory::create_empty(const std::string_view locato
             ready.error());
     }
     return inner_.create_empty(locator, cancellation);
+}
+
+base::Result<std::uint64_t>
+NetworkAwareRepositoryStorageFactory::query_free_bytes(const std::string_view locator,
+                                                       const base::CancellationToken cancellation) {
+    auto ready = ensure_network_access(locator, cancellation);
+    if (!ready) {
+        return base::Result<std::uint64_t>::failure(ready.error());
+    }
+    return inner_.query_free_bytes(locator, cancellation);
 }
 
 } // namespace aegra::apps::service

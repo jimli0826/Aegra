@@ -1929,6 +1929,22 @@ Server: %1</translation>
         <source>Network path</source>
         <translation>Network path</translation>
     </message>
+    <message id="aegra.repository.field.hostname_ip">
+        <source>Hostname/IP</source>
+        <translation>Hostname/IP</translation>
+    </message>
+    <message id="aegra.repository.hostname_placeholder">
+        <source>e.g. 192.168.1.1</source>
+        <translation>e.g. 192.168.1.1</translation>
+    </message>
+    <message id="aegra.repository.please_enter_hostname">
+        <source>Please enter a hostname or IP</source>
+        <translation>Please enter a hostname or IP</translation>
+    </message>
+    <message id="aegra.repository.hostname_invalid">
+        <source>Invalid hostname or IP</source>
+        <translation>Invalid hostname or IP</translation>
+    </message>
     <message id="aegra.repository.field.authentication">
         <source>Authentication</source>
         <translation>Authentication</translation>
@@ -2084,6 +2100,10 @@ Server: %1</translation>
     <message id="aegra.repository.column.name">
         <source>NAME</source>
         <translation>NAME</translation>
+    </message>
+    <message id="aegra.repository.column.path">
+        <source>PATH</source>
+        <translation>PATH</translation>
     </message>
     <message id="aegra.repository.column.status">
         <source>STATUS</source>

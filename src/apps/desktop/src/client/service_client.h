@@ -708,6 +708,7 @@ class ServiceClient final : public QObject {
     bool repository_command_busy_{false};
     bool repository_directories_loading_{false};
     int repository_command_kind_{0};
+    QString repository_command_connection_id_;
     bool delete_plan_busy_{false};
     QString delete_plan_request_id_;
     QString execute_delete_request_id_;

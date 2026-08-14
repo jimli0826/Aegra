@@ -932,12 +932,14 @@ template <typename Item, typename Parser>
                 {"resource_id", optional_string_json(acknowledgement.resource_id)},
                 {"event_subscription", acknowledgement.event_subscription
                                            ? encode_event_lease(*acknowledgement.event_subscription)
-                                           : Json(nullptr)}};
+                                           : Json(nullptr)},
+                {"free_bytes", acknowledgement.free_bytes ? Json(*acknowledgement.free_bytes)
+                                                          : Json(nullptr)}};
 }
 
 [[nodiscard]] contracts::CommandAcknowledgement parse_command_ack(const Json& payload) {
-    constexpr std::array<std::string_view, 4> keys{"command_id", "disposition", "resource_id",
-                                                   "event_subscription"};
+    constexpr std::array<std::string_view, 5> keys{"command_id", "disposition", "resource_id",
+                                                   "event_subscription", "free_bytes"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("command acknowledgement fields are invalid");
     }
@@ -948,6 +950,9 @@ template <typename Item, typename Parser>
     acknowledgement.resource_id = optional_string(payload.at("resource_id"));
     if (!payload.at("event_subscription").is_null()) {
         acknowledgement.event_subscription = parse_event_lease(payload.at("event_subscription"));
+    }
+    if (!payload.at("free_bytes").is_null()) {
+        acknowledgement.free_bytes = unsigned_value<std::uint64_t>(payload, "free_bytes");
     }
     return acknowledgement;
 }

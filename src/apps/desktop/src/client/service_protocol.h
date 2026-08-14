@@ -134,6 +134,8 @@ struct CommandAck final {
     QString resource_id;
     bool has_resource_id{false};
     QString message_code;
+    /// Set after Online TestRepositoryConnection free-space probe; nullopt when absent.
+    std::optional<qint64> free_bytes;
 };
 
 struct FileBrowsePage final {

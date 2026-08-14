@@ -131,17 +131,24 @@ Recovery Point 列表展示备份类型、创建时间、逻辑/存储大小和�
 Catalog-only 数据不表示 Archive 结构或认证完成，因此 Restore、Verify 和 Delete 图标保持禁用。
 
 首次显示 Repository 表格只读取 Service 返回的 SQLite connection 快照，不打开 Repository、不扫描 Catalog。
-Refresh 按表格顺序逐个调用 TestRepositoryConnection；当前行显示 Loading，探测完成后 Service 将
-Available/Unavailable 写回 SQLite，Desktop 重新读取快照后再处理下一行。单行超时只将该连接持久化为
-Unavailable，不破坏 Service Ready 状态；单行失败通过 toast 显示 Service 返回的本地化稳定原因。
+Refresh（`refreshRepositoryConnections()`）按表格顺序逐个调用 `TestRepositoryConnection`：
+当前行 `isRefreshing` → 状态列显示与 Schedule 任务 Running 相同的旋转 sync 图标（不显示 Loading 文案）；探测完成后 Service 将 Available/Unavailable 写回
+SQLite，Desktop 再 `ListRepositoryConnections` 拉快照，然后处理下一行。整段串行刷新期间
+`repositoryRefreshRunning=true`，**不**触发全屏 Loading overlay（与 `ServiceClient::globalLoading`
+及 `Main.qml` `appLoading` 的排除规则一致），页面导航与列表仍可阅读；Refresh/Add/行点击在
+刷新完成前禁用。单行超时（Desktop 侧约 35s probe deadline；Service 超时会
+`mark_connection_unavailable`）只将该连接持久化为 Unavailable，不破坏 Service Ready；单行失败
+通过 toast 显示 Service 返回的本地化稳定原因，并继续下一行（快照失败则中止整段刷新）。
 Add/Import 的 UNC 失败区分路径无效、主机不可达、共享不存在、凭据被拒、访问拒绝和凭据冲突。
 Add、Import、Set Default、Test 与 Remove 调用 Service V4
 命令，成功后自动刷新列表；Remove 只删除控制面连接引用，不删除备份数据。Lock、Unlock、Rebuild、Export 与
 Password 在 Service 没有对应能力时不显示。布局必须在 900x600、1080x720 和更大窗口下不重叠。
 
 Repository 容量卡片只使用 Service 异步返回的本机 volume inventory 快照。Desktop 不使用 `QStorageInfo`、
-`QDir` 或 Windows 网络 Provider 查询 Repository；UNC 的逐行可用空间显示为不可用。该边界防止断网 UNC
-在 QML 属性重算期间冻结 Desktop 消息循环。
+`QDir` 或 Windows 网络 Provider 查询 Repository。逐行 FREE SPACE：本地 locator 可回退 inventory；
+在 Test/Refresh 探测为 Online 后，Service 通过 `GetDiskFreeSpaceExW`（`IRepositoryStorageFactory::query_free_bytes`）
+查询并在 CommandAccepted.payload.free_bytes 返回，Desktop 会话内缓存；UNC 仅在该探测成功后显示，
+否则仍为 `—`。该边界防止断网 UNC 在 QML 属性重算期间冻结 Desktop 消息循环。
 
 ## 验证与完成标准
 
@@ -245,6 +252,9 @@ Repository 容量卡片只使用 Service 异步返回的本机 volume inventory 
 socket、重连 timer、frame 收发与组装均归属专用 `QThread`；GUI 线程只提交 queued 请求并处理 queued 响应。
 本机卷、盘符、容量和 Repository locator 等业务系统数据必须来自 Service 快照或命令，Desktop 不得直接调用
 `QStorageInfo`、目录枚举、WNet 或 Win32 volume API。刷新失败与短暂断线保留最后一次完整模型快照。
-新增网络 Repository 时，Connect 按钮通过异步 Service kind 50 探测 UNC 根路径；Desktop 不直接调用
-WNet，路径或凭据变化后必须重新 Connect，成功后才允许 Add。Connect acknowledgement 返回 session
-绑定的 location token；Desktop 随后异步调用 kind 17 获取共享根目录的直接子目录并更新 Browse 列表。
+新增网络 Repository 时，表单输入 Hostname/IP；Connect 时 Desktop 规范为 `\\host_or_ip`，再通过
+异步 Service kind 50 探测（对 host-only 使用 `\\host\IPC$` 建立会话凭据）；Desktop 不直接调用
+WNet，主机或凭据变化后必须重新 Connect，成功后才允许 Add。Connect acknowledgement 返回 session
+绑定的 location token；Desktop 随后异步调用 kind 17 列出共享：host-only 根使用 `NetShareEnum`
+（与资源管理器 Network 主机视图一致，而非 `FindFirstFile \\host\*`）；进入 `\\host\share` 后改用
+文件系统目录枚举。用户选中 share（或更深路径）后再 Add 为 `\\host\share\AegraRepo`。

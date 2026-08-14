@@ -1,8 +1,11 @@
 #include "aegra/adapters/storage_local/local_object_storage.h"
 
+#include <Windows.h>
+
 #include <exception>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -107,6 +110,42 @@ base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>
 LocalRepositoryStorageFactory::create_empty(const std::string_view locator,
                                             const base::CancellationToken cancellation) {
     return open_local_repository(locator, LocalRootMode::kCreateIfMissing, cancellation);
+}
+
+base::Result<std::uint64_t>
+LocalRepositoryStorageFactory::query_free_bytes(const std::string_view locator,
+                                                const base::CancellationToken cancellation) {
+    if (cancellation.stop_requested()) {
+        return base::Result<std::uint64_t>::failure(
+            {base::ErrorCode::kCancelled, "repository free space query cancelled"});
+    }
+    auto path = path_from_utf8(locator);
+    if (!path) {
+        return base::Result<std::uint64_t>::failure(path.error());
+    }
+    const auto native = path.value().native();
+    auto query = [](const std::wstring& root) -> std::optional<std::uint64_t> {
+        if (root.empty()) {
+            return std::nullopt;
+        }
+        ULARGE_INTEGER free_bytes_available{};
+        if (GetDiskFreeSpaceExW(root.c_str(), &free_bytes_available, nullptr, nullptr) != FALSE) {
+            return free_bytes_available.QuadPart;
+        }
+        return std::nullopt;
+    };
+    auto free = query(native);
+    if (!free && !native.empty() && native.back() != L'\\') {
+        free = query(native + L'\\');
+    }
+    if (!free && native.size() > 1 && native.back() == L'\\') {
+        free = query(native.substr(0, native.size() - 1));
+    }
+    if (!free) {
+        return base::Result<std::uint64_t>::failure(
+            {base::ErrorCode::kIoFailure, "repository free space query failed"});
+    }
+    return base::Result<std::uint64_t>::success(*free);
 }
 
 } // namespace aegra::adapters::storage_local

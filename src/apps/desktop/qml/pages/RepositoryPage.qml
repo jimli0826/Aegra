@@ -108,11 +108,9 @@ Item {
             root.refreshStorageStats()
         }
         function onRepositoryCommandChanged() {
+            // Refresh/Test probe failures are shown per-row (warning + tooltip), not as
+            // a global toast — toast cannot identify which repository failed.
             if (!serviceClient.repositoryCommandBusy) {
-                if (serviceClient.repositoryRefreshRunning
-                        && serviceClient.repositoryCommandErrorText.length > 0) {
-                    serviceClient.showToast(serviceClient.repositoryCommandErrorText, true)
-                }
                 root.refreshStorageStats()
             }
         }
@@ -488,8 +486,9 @@ Item {
                                     horizontalAlignment: Text.AlignHCenter
                                 }
                                 Text {
-                                    Layout.fillWidth: true
-                                    Layout.minimumWidth: 120
+                                    Layout.preferredWidth: 100
+                                    Layout.minimumWidth: 80
+                                    Layout.maximumWidth: 160
                                     //% "NAME"
                                     text: qsTrId("aegra.repository.column.name")
                                     color: Theme.colorTextDim
@@ -498,10 +497,29 @@ Item {
                                     font.letterSpacing: 0.8
                                     font.family: Theme.fontFamily
                                 }
+                                Item {
+                                    Layout.fillWidth: true
+                                    Layout.minimumWidth: 140
+                                    Layout.fillHeight: true
+                                    Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
+                                    Text {
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        //% "PATH"
+                                        text: qsTrId("aegra.repository.column.path")
+                                        color: Theme.colorTextDim
+                                        font.pixelSize: 11
+                                        font.bold: true
+                                        font.letterSpacing: 0.8
+                                        font.family: Theme.fontFamily
+                                        horizontalAlignment: Text.AlignLeft
+                                    }
+                                }
                                 Text {
-                                    Layout.preferredWidth: 90
-                                    Layout.minimumWidth: 90
-                                    Layout.maximumWidth: 90
+                                    Layout.preferredWidth: 110
+                                    Layout.minimumWidth: 110
+                                    Layout.maximumWidth: 110
                                     //% "STATUS"
                                     text: qsTrId("aegra.repository.column.status")
                                     color: Theme.colorTextDim
@@ -551,9 +569,9 @@ Item {
                                     horizontalAlignment: Text.AlignHCenter
                                 }
                                 Item {
-                                    Layout.preferredWidth: 72
-                                    Layout.minimumWidth: 72
-                                    Layout.maximumWidth: 72
+                                    Layout.preferredWidth: 40
+                                    Layout.minimumWidth: 40
+                                    Layout.maximumWidth: 40
                                 }
                             }
                         }
@@ -567,6 +585,7 @@ Item {
                             required property bool isDefault
                             required property bool isAvailable
                             required property bool isRefreshing
+                            required property string probeErrorText
                             required property int index
                             width: repositoryTable.width
                             height: 52
@@ -625,30 +644,191 @@ Item {
                                     verticalAlignment: Text.AlignVCenter
                                 }
 
-                                Text {
-                                    Layout.fillWidth: true
-                                    Layout.minimumWidth: 120
-                                    text: displayName
-                                    color: Theme.colorTextWhite
-                                    font.pixelSize: 14
-                                    font.bold: true
-                                    font.family: Theme.fontFamily
-                                    elide: Text.ElideRight
-                                    verticalAlignment: Text.AlignVCenter
+                                RowLayout {
+                                    Layout.preferredWidth: 100
+                                    Layout.minimumWidth: 80
+                                    Layout.maximumWidth: 160
+                                    Layout.fillHeight: true
+                                    spacing: 6
+
+                                    // Online / Offline marker before name.
+                                    Item {
+                                        Layout.preferredWidth: 10
+                                        Layout.preferredHeight: 10
+                                        Layout.alignment: Qt.AlignVCenter
+                                        Rectangle {
+                                            anchors.centerIn: parent
+                                            width: 8
+                                            height: 8
+                                            radius: 4
+                                            color: {
+                                                if (isRefreshing)
+                                                    return Theme.colorAccentBlue
+                                                if (isAvailable)
+                                                    return Theme.colorGreen
+                                                return Theme.colorTextDim
+                                            }
+                                            opacity: isRefreshing ? 0.85 : 1.0
+                                        }
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: displayName
+                                        color: Theme.colorTextWhite
+                                        font.pixelSize: 14
+                                        font.bold: true
+                                        font.family: Theme.fontFamily
+                                        elide: Text.ElideRight
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
                                 }
 
-                                Text {
-                                    Layout.preferredWidth: 90
-                                    Layout.minimumWidth: 90
-                                    Layout.maximumWidth: 90
-                                    text: stateText
-                                    color: isAvailable && !isRefreshing
-                                           ? Theme.colorGreen : Theme.colorTextGrey
-                                    font.pixelSize: 13
-                                    font.bold: true
-                                    font.family: Theme.fontFamily
-                                    horizontalAlignment: Text.AlignHCenter
-                                    elide: Text.ElideRight
+                                Item {
+                                    Layout.fillWidth: true
+                                    Layout.minimumWidth: 140
+                                    Layout.fillHeight: true
+                                    Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
+                                    Text {
+                                        id: pathText
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: locator || ""
+                                        color: Theme.colorTextGrey
+                                        font.pixelSize: 12
+                                        font.family: Theme.fontFamily
+                                        elide: Text.ElideMiddle
+                                        horizontalAlignment: Text.AlignLeft
+                                        verticalAlignment: Text.AlignVCenter
+                                        ToolTip.visible: truncated && rowHover.hovered
+                                        ToolTip.delay: 400
+                                        ToolTip.text: locator || ""
+                                    }
+                                }
+
+                                // Status: Online/Offline (+ warning on probe fail), or spinning while refreshing.
+                                Item {
+                                    Layout.preferredWidth: 110
+                                    Layout.minimumWidth: 110
+                                    Layout.maximumWidth: 110
+                                    Layout.fillHeight: true
+
+                                    Row {
+                                        anchors.centerIn: parent
+                                        spacing: 4
+                                        visible: !isRefreshing
+
+                                        // Warning before Offline when last Test/Refresh failed.
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            visible: !isAvailable && probeErrorText
+                                                     && probeErrorText.length > 0
+                                            text: "\u26A0"
+                                            color: Theme.colorAccentRed
+                                            font.pixelSize: 12
+                                            font.bold: true
+                                            font.family: Theme.fontFamily
+                                            ToolTip.visible: visible && statusWarnHover.hovered
+                                            ToolTip.delay: 300
+                                            ToolTip.text: probeErrorText || ""
+
+                                            HoverHandler {
+                                                id: statusWarnHover
+                                                acceptedDevices: PointerDevice.Mouse
+                                                                 | PointerDevice.TouchPad
+                                            }
+                                        }
+
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: stateText
+                                            color: isAvailable ? Theme.colorGreen
+                                                               : Theme.colorTextGrey
+                                            font.pixelSize: 13
+                                            font.bold: true
+                                            font.family: Theme.fontFamily
+                                        }
+                                    }
+
+                                    Item {
+                                        id: refreshStatusIcon
+                                        anchors.centerIn: parent
+                                        width: 22
+                                        height: 22
+                                        visible: isRefreshing
+                                        property real spinAngle: 0
+                                        rotation: spinAngle
+
+                                        Rectangle {
+                                            anchors.fill: parent
+                                            radius: width / 2
+                                            color: Qt.rgba(Theme.colorAccentBlue.r,
+                                                           Theme.colorAccentBlue.g,
+                                                           Theme.colorAccentBlue.b, 0.18)
+                                        }
+
+                                        // Dual circular arrows (sync) — same glyph as schedule task running.
+                                        Canvas {
+                                            id: refreshSyncCanvas
+                                            anchors.centerIn: parent
+                                            width: 16
+                                            height: 16
+                                            antialiasing: true
+                                            onVisibleChanged: if (visible)
+                                                requestPaint()
+                                            Component.onCompleted: requestPaint()
+                                            onPaint: {
+                                                var ctx = getContext("2d")
+                                                ctx.reset()
+                                                ctx.clearRect(0, 0, width, height)
+                                                var ink = Theme.colorAccentBlue
+                                                ctx.strokeStyle = ink
+                                                ctx.fillStyle = ink
+                                                ctx.lineWidth = 1.6
+                                                ctx.lineCap = "round"
+                                                ctx.lineJoin = "round"
+
+                                                var cx = width / 2
+                                                var cy = height / 2
+                                                var r = Math.min(width, height) / 2 - 2.2
+
+                                                function drawArcArrow(startAng, endAng) {
+                                                    ctx.beginPath()
+                                                    ctx.arc(cx, cy, r, startAng, endAng, false)
+                                                    ctx.stroke()
+                                                    var tipX = cx + Math.cos(endAng) * r
+                                                    var tipY = cy + Math.sin(endAng) * r
+                                                    var tang = endAng + Math.PI / 2
+                                                    var hx = Math.cos(tang)
+                                                    var hy = Math.sin(tang)
+                                                    var nx = Math.cos(endAng)
+                                                    var ny = Math.sin(endAng)
+                                                    var len = 3.2
+                                                    var wing = 2.2
+                                                    ctx.beginPath()
+                                                    ctx.moveTo(tipX + hx * len, tipY + hy * len)
+                                                    ctx.lineTo(tipX - nx * wing - hx * 0.4,
+                                                               tipY - ny * wing - hy * 0.4)
+                                                    ctx.lineTo(tipX + nx * wing - hx * 0.4,
+                                                               tipY + ny * wing - hy * 0.4)
+                                                    ctx.closePath()
+                                                    ctx.fill()
+                                                }
+
+                                                drawArcArrow(-Math.PI * 0.85, -Math.PI * 0.15)
+                                                drawArcArrow(Math.PI * 0.15, Math.PI * 0.85)
+                                            }
+                                        }
+
+                                        NumberAnimation on spinAngle {
+                                            running: isRefreshing
+                                            from: 0
+                                            to: 360
+                                            loops: Animation.Infinite
+                                            duration: 1200
+                                        }
+                                    }
                                 }
 
                                 Text {
@@ -667,11 +847,13 @@ Item {
                                     elide: Text.ElideRight
                                 }
 
+                                // DEFAULT: badge when default, otherwise star to set default.
                                 Item {
                                     Layout.preferredWidth: 80
                                     Layout.minimumWidth: 80
                                     Layout.maximumWidth: 80
                                     Layout.fillHeight: true
+
                                     Rectangle {
                                         anchors.centerIn: parent
                                         width: defLab.implicitWidth + 14
@@ -692,12 +874,36 @@ Item {
                                             font.bold: true
                                         }
                                     }
-                                    Text {
+
+                                    Rectangle {
                                         anchors.centerIn: parent
+                                        width: 28
+                                        height: 28
+                                        radius: 8
                                         visible: !isDefault
-                                        text: "\u2013"
-                                        color: Theme.colorTextDim
-                                        font.pixelSize: 13
+                                        color: starHover.containsMouse
+                                               ? Theme.colorButtonHover : Theme.colorButton
+                                        opacity: serviceClient.connected
+                                                 && !serviceClient.repositoryCommandBusy
+                                                 && !serviceClient.repositoryRefreshRunning
+                                                 ? 1.0 : 0.45
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "\u2605"
+                                            color: Theme.colorAccentBlue
+                                            font.pixelSize: 13
+                                        }
+                                        MouseArea {
+                                            id: starHover
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            enabled: serviceClient.connected
+                                                     && !serviceClient.repositoryCommandBusy
+                                                     && !serviceClient.repositoryRefreshRunning
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: serviceClient.setDefaultRepositoryConnection(
+                                                           connectionId)
+                                        }
                                     }
                                 }
 
@@ -719,98 +925,63 @@ Item {
                                     }
                                 }
 
-                                // Actions — fixed width, right-aligned icons
+                                // Actions — delete only (set-default star lives in DEFAULT column).
                                 Item {
-                                    Layout.preferredWidth: 72
-                                    Layout.minimumWidth: 72
-                                    Layout.maximumWidth: 72
+                                    Layout.preferredWidth: 40
+                                    Layout.minimumWidth: 40
+                                    Layout.maximumWidth: 40
                                     Layout.fillHeight: true
 
-                                    Row {
-                                        anchors.right: parent.right
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        spacing: 4
-
-                                        Rectangle {
-                                            width: 28
-                                            height: 28
-                                            radius: 8
-                                            visible: !isDefault
-                                            color: starHover.containsMouse
-                                                   ? Theme.colorButtonHover : Theme.colorButton
-                                            opacity: serviceClient.connected
-                                                     && !serviceClient.repositoryCommandBusy
-                                                     && !serviceClient.repositoryRefreshRunning
-                                                     ? 1.0 : 0.45
-                                            Text {
-                                                anchors.centerIn: parent
-                                                text: "\u2605"
-                                                color: Theme.colorAccentBlue
-                                                font.pixelSize: 13
+                                    Rectangle {
+                                        anchors.centerIn: parent
+                                        width: 28
+                                        height: 28
+                                        radius: 8
+                                        // Hidden until the row is hovered (keeps table clean).
+                                        visible: rowHover.hovered
+                                        color: delHover.containsMouse ? "#e03333" : "#cc3333"
+                                        opacity: serviceClient.connected
+                                                 && !serviceClient.repositoryCommandBusy
+                                                 && !serviceClient.repositoryRefreshRunning
+                                                 ? 1.0 : 0.45
+                                        Item {
+                                            anchors.centerIn: parent
+                                            width: 12
+                                            height: 13
+                                            Rectangle {
+                                                x: 1; y: 0; width: 10; height: 2; radius: 1
+                                                color: "#ffffff"
                                             }
-                                            MouseArea {
-                                                id: starHover
-                                                anchors.fill: parent
-                                                hoverEnabled: true
-                                                enabled: serviceClient.connected
-                                                         && !serviceClient.repositoryCommandBusy
-                                                         && !serviceClient.repositoryRefreshRunning
-                                                cursorShape: Qt.PointingHandCursor
-                                                onClicked: serviceClient.setDefaultRepositoryConnection(
-                                                               connectionId)
+                                            Rectangle {
+                                                x: 3; y: 2; width: 6; height: 2
+                                                color: "#ffffff"
+                                            }
+                                            Rectangle {
+                                                x: 2; y: 4; width: 8; height: 9; radius: 1
+                                                color: "#ffffff"
+                                            }
+                                            Rectangle {
+                                                x: 3.5; y: 6; width: 1.2; height: 5
+                                                color: "#cc3333"
+                                            }
+                                            Rectangle {
+                                                x: 5.5; y: 6; width: 1.2; height: 5
+                                                color: "#cc3333"
+                                            }
+                                            Rectangle {
+                                                x: 7.5; y: 6; width: 1.2; height: 5
+                                                color: "#cc3333"
                                             }
                                         }
-
-                                        Rectangle {
-                                            width: 28
-                                            height: 28
-                                            radius: 8
-                                            // Hidden until the row is hovered (keeps table clean).
-                                            visible: rowHover.hovered
-                                            color: delHover.containsMouse ? "#e03333" : "#cc3333"
-                                            opacity: serviceClient.connected
+                                        MouseArea {
+                                            id: delHover
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            enabled: serviceClient.connected
                                                      && !serviceClient.repositoryCommandBusy
                                                      && !serviceClient.repositoryRefreshRunning
-                                                     ? 1.0 : 0.45
-                                            Item {
-                                                anchors.centerIn: parent
-                                                width: 12
-                                                height: 13
-                                                Rectangle {
-                                                    x: 1; y: 0; width: 10; height: 2; radius: 1
-                                                    color: "#ffffff"
-                                                }
-                                                Rectangle {
-                                                    x: 3; y: 2; width: 6; height: 2
-                                                    color: "#ffffff"
-                                                }
-                                                Rectangle {
-                                                    x: 2; y: 4; width: 8; height: 9; radius: 1
-                                                    color: "#ffffff"
-                                                }
-                                                Rectangle {
-                                                    x: 3.5; y: 6; width: 1.2; height: 5
-                                                    color: "#cc3333"
-                                                }
-                                                Rectangle {
-                                                    x: 5.5; y: 6; width: 1.2; height: 5
-                                                    color: "#cc3333"
-                                                }
-                                                Rectangle {
-                                                    x: 7.5; y: 6; width: 1.2; height: 5
-                                                    color: "#cc3333"
-                                                }
-                                            }
-                                            MouseArea {
-                                                id: delHover
-                                                anchors.fill: parent
-                                                hoverEnabled: true
-                                                enabled: serviceClient.connected
-                                                         && !serviceClient.repositoryCommandBusy
-                                                         && !serviceClient.repositoryRefreshRunning
-                                                cursorShape: Qt.PointingHandCursor
-                                                onClicked: root.requestRemoveConnection(connectionId)
-                                            }
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: root.requestRemoveConnection(connectionId)
                                         }
                                     }
                                 }

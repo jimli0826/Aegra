@@ -18,7 +18,7 @@ Item {
             value: "local",
             icon: "\uD83D\uDCBB",
             color: "#4a9eff",
-            pathHint: "e.g. \\\\192.168.1.1\\share",
+            pathHint: "",
             hasAuth: false,
             needsPath: false,
             needsConnect: false
@@ -29,7 +29,8 @@ Item {
             value: "network",
             icon: "\uD83C\uDF10",
             color: "#ff8c42",
-            pathHint: "e.g. \\\\192.168.1.1\\share",
+            //% "e.g. 192.168.1.1"
+            pathHint: qsTrId("aegra.repository.hostname_placeholder"),
             hasAuth: true,
             needsPath: true,
             needsConnect: true
@@ -77,35 +78,65 @@ Item {
         root.isDriveListLoading = false
     }
 
+    /// Normalize Hostname/IP input to UNC host root: \\host_or_ip
+    function networkUncRootFromInput(text) {
+        var v = (text || "").trim()
+        while (v.indexOf("\\\\") === 0)
+            v = v.substring(2)
+        while (v.indexOf("//") === 0)
+            v = v.substring(2)
+        // Drop share/path if the user pasted a full UNC; only the host is used for Connect.
+        var cut = v.indexOf("\\")
+        if (cut < 0)
+            cut = v.indexOf("/")
+        if (cut >= 0)
+            v = v.substring(0, cut)
+        v = v.trim()
+        if (v === "")
+            return ""
+        return "\\\\" + v
+    }
+
+    function isValidNetworkHost(text) {
+        var unc = root.networkUncRootFromInput(text)
+        if (unc.indexOf("\\\\") !== 0 || unc.length <= 3)
+            return false
+        var host = unc.substring(2)
+        // Host must not contain path separators or spaces.
+        return host.length > 0 && host.indexOf("\\") < 0 && host.indexOf("/") < 0
+               && host.indexOf(" ") < 0
+    }
+
     function connectNetworkShare() {
-        var pathVal = networkPathInput.text.trim()
-        if (pathVal === "") {
-            //% "Please enter a network path"
-            root.showError(qsTrId("aegra.repository.please_enter_path"))
+        if (networkPathInput.text.trim() === "") {
+            //% "Please enter a hostname or IP"
+            root.showError(qsTrId("aegra.repository.please_enter_hostname"))
             return
         }
-        if (!root.isValidNetworkRoot(pathVal)) {
-            root.showError(qsTrId("aegra.repository.network_path_invalid"))
+        if (!root.isValidNetworkHost(networkPathInput.text)) {
+            //% "Invalid hostname or IP"
+            root.showError(qsTrId("aegra.repository.hostname_invalid"))
             return
         }
+        var uncRoot = root.networkUncRootFromInput(networkPathInput.text)
         if (typeof serviceClient === "undefined" || !serviceClient || !serviceClient.connected) {
             root.showError(qsTrId("aegra.repository.service_not_connected"))
             return
         }
         if (serviceClient.repositoryCommandBusy)
             return
-        root.selectedPath = pathVal
+        root.selectedPath = uncRoot
         root.isConnected = false
         root.isConnecting = true
         serviceClient.connectRepositoryLocation(
-                    pathVal, networkUserInput.text.trim(), networkPasswordInput.text,
+                    uncRoot, networkUserInput.text.trim(), networkPasswordInput.text,
                     networkDomainInput.text.trim())
     }
 
     function selectDrive(name) {
         root.selectedPath = name
         if (currentType().value === "network") {
-            var base = networkPathInput.text.trim()
+            var base = root.networkUncRootFromInput(networkPathInput.text)
             if (base !== "" && name.indexOf("\\\\") !== 0 && name.indexOf(":") !== 1) {
                 var last = base.charAt(base.length - 1)
                 if (last === "\\" || last === "/")
@@ -184,13 +215,12 @@ Item {
                 return
             }
             rootPath = root.selectedPath.trim()
-            if (rootPath === "")
-                rootPath = networkPathInput.text.trim()
             if (rootPath === "") {
-                //% "Please enter a network path"
-                root.showError(qsTrId("aegra.repository.please_enter_path"))
+                //% "Please select a share or folder"
+                root.showError(qsTrId("aegra.repository.please_select_path"))
                 return
             }
+            // Final repository root must be \\host\share[...] (not host-only).
             if (!root.isValidNetworkRoot(rootPath)) {
                 root.showError(qsTrId("aegra.repository.network_path_invalid"))
                 return
@@ -538,7 +568,7 @@ Item {
                                 Item { Layout.fillWidth: true }
                             }
 
-                            // Network path
+                            // Hostname / IP (Connect uses \\host)
                             RowLayout {
                                 Layout.fillWidth: true
                                 spacing: root.fieldRowSpacing
@@ -546,8 +576,8 @@ Item {
                                 Text {
                                     Layout.preferredWidth: root.fieldLabelWidth
                                     Layout.alignment: Qt.AlignVCenter
-                                    //% "Network path"
-                                    text: qsTrId("aegra.repository.field.network_path")
+                                    //% "Hostname/IP"
+                                    text: qsTrId("aegra.repository.field.hostname_ip")
                                     color: Theme.colorTextGrey
                                     font.pixelSize: 13
                                     font.family: Theme.fontFamily
@@ -1047,9 +1077,9 @@ Item {
             return false
         if (root.selectedPath === name)
             return true
-        // Network: selected path may be base + child folder name.
+        // Network: selected path may be \\host + share/folder name.
         if (currentType().value === "network") {
-            var base = networkPathInput.text.trim()
+            var base = root.networkUncRootFromInput(networkPathInput.text)
             if (base === "")
                 return false
             var last = base.charAt(base.length - 1)

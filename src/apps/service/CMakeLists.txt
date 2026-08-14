@@ -52,6 +52,7 @@ target_link_libraries(
         nlohmann_json::nlohmann_json
         Advapi32
         Mpr
+        Netapi32
         Ws2_32
 )
 aegra_configure_target(aegra_app_service)

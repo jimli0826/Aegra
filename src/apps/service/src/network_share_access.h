@@ -26,10 +26,13 @@ probe_network_share_server(std::string_view locator, base::CancellationToken can
                            std::chrono::milliseconds timeout = std::chrono::milliseconds(1500));
 
 /// Temporary WNet connect (matches backup NetworkStorageBackend::ConnectToShare).
-[[nodiscard]] base::Result<void> connect_network_share(std::string_view locator,
-                                                       std::string_view username,
-                                                       std::string_view password,
-                                                       std::string_view domain);
+/// Default timeout is longer than the TCP probe so wrong passwords can surface as
+/// ERROR_LOGON_FAILURE instead of a generic timeout.
+[[nodiscard]] base::Result<void>
+connect_network_share(std::string_view locator, std::string_view username,
+                      std::string_view password, std::string_view domain,
+                      base::CancellationToken cancellation = {},
+                      std::chrono::milliseconds timeout = std::chrono::milliseconds(8000));
 
 /// Pack network auth for DPAPI blob (magic + user + domain + password).
 [[nodiscard]] std::string pack_network_auth_material(std::string_view username,
@@ -42,7 +45,8 @@ probe_network_share_server(std::string_view locator, base::CancellationToken can
 
 /// Connect using resolved SecretRef material when it is a network auth pack.
 [[nodiscard]] base::Result<void>
-connect_network_share_from_secret(std::string_view locator, const contracts::SecretRef& secret_ref);
+connect_network_share_from_secret(std::string_view locator, const contracts::SecretRef& secret_ref,
+                                  base::CancellationToken cancellation = {});
 
 /// Session-scoped registry for browsing a connected Repository share. It stores locators only;
 /// credentials are never retained. All methods are thread-safe.

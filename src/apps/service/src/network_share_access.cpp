@@ -5,14 +5,19 @@
 #include <WinSock2.h>
 #include <Windows.h>
 #include <Ws2tcpip.h>
+#include <lm.h>
+#include <lmshare.h>
 #include <winnetwk.h>
 
 #include <algorithm>
+#include <atomic>
 #include <charconv>
 #include <chrono>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <utility>
+#include <vector>
 
 namespace aegra::apps::service {
 namespace {
@@ -26,13 +31,20 @@ constexpr u_short kSmbPort = 445;
 
 [[nodiscard]] base::Error network_connection_error(const DWORD status) {
     switch (status) {
-    case ERROR_LOGON_FAILURE:
-    case ERROR_INVALID_PASSWORD:
-    case ERROR_BAD_USERNAME:
-    case ERROR_ACCOUNT_RESTRICTION:
-    case ERROR_ACCOUNT_DISABLED:
-    case ERROR_PASSWORD_EXPIRED:
-    case ERROR_LOGON_TYPE_NOT_GRANTED:
+    case ERROR_LOGON_FAILURE:          // 1326 wrong user/password
+    case ERROR_INVALID_PASSWORD:       // 86
+    case 1323:                         // ERROR_WRONG_PASSWORD
+    case ERROR_INVALID_ACCOUNT_NAME:   // 1315
+    case ERROR_NO_SUCH_USER:           // 1317
+    case ERROR_ACCOUNT_RESTRICTION:    // 1327
+    case ERROR_ACCOUNT_DISABLED:       // 1331
+    case ERROR_PASSWORD_EXPIRED:       // 1330
+    case 1907:                         // ERROR_PASSWORD_MUST_CHANGE
+    case 1909:                         // ERROR_ACCOUNT_LOCKED_OUT
+    case ERROR_LOGON_TYPE_NOT_GRANTED: // 1385
+    case 1244:                         // ERROR_NOT_AUTHENTICATED
+    case ERROR_INVALID_LOGON_HOURS:    // 1328
+    case ERROR_INVALID_WORKSTATION:    // 1329
         return make_error(base::ErrorCode::kUnauthorized,
                           "repository.network_credentials_rejected");
     case ERROR_ACCESS_DENIED:
@@ -112,9 +124,154 @@ class FindHandle final {
            (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0;
 }
 
+/// True for host-only UNC (\\server) — not \\server\share\...
+[[nodiscard]] bool is_host_only_unc(const std::string_view locator) noexcept {
+    if (!is_unc_locator(locator)) {
+        return false;
+    }
+    std::string_view body = locator;
+    while (body.size() > 2 && (body.back() == '\\' || body.back() == '/')) {
+        body.remove_suffix(1);
+    }
+    const auto server_end = body.find('\\', 2);
+    return server_end == std::string_view::npos && body.size() > 2;
+}
+
+/// Server name without leading \\ (e.g. "192.168.1.1" from "\\192.168.1.1\share").
+[[nodiscard]] std::string server_name_from_unc(const std::string_view locator) {
+    if (!is_unc_locator(locator)) {
+        return {};
+    }
+    const auto server_end = locator.find('\\', 2);
+    if (server_end == std::string_view::npos) {
+        return std::string(locator.substr(2));
+    }
+    if (server_end <= 2) {
+        return {};
+    }
+    return std::string(locator.substr(2, server_end - 2));
+}
+
+[[nodiscard]] base::Result<std::uint64_t>
+parse_directory_page_offset(const contracts::ServicePageRequest& page) {
+    if (!page.continuation_token) {
+        return base::Result<std::uint64_t>::success(0);
+    }
+    const auto& value = *page.continuation_token;
+    std::uint64_t offset = 0;
+    const auto parsed = std::from_chars(value.data(), value.data() + value.size(), offset);
+    if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size()) {
+        return base::Result<std::uint64_t>::failure(
+            make_error(base::ErrorCode::kInvalidArgument, "repository.directory_page_invalid"));
+    }
+    return base::Result<std::uint64_t>::success(offset);
+}
+
+/// List SMB disk shares under \\server (Explorer "Network > host" view).
+/// FindFirstFile on \\server\* is not a share listing API and fails with share-not-found.
 [[nodiscard]] base::Result<contracts::FileSourceNodePage>
-enumerate_directories(const std::string_view locator, const contracts::ServicePageRequest& page,
-                      const base::CancellationToken cancellation) {
+enumerate_smb_shares(const std::string_view locator, const contracts::ServicePageRequest& page,
+                     const base::CancellationToken cancellation) {
+    if (cancellation.stop_requested()) {
+        return base::Result<contracts::FileSourceNodePage>::failure(
+            make_error(base::ErrorCode::kCancelled, "repository.directory_list_cancelled"));
+    }
+    auto offset = parse_directory_page_offset(page);
+    if (!offset) {
+        return base::Result<contracts::FileSourceNodePage>::failure(offset.error());
+    }
+    const auto host = server_name_from_unc(locator);
+    if (host.empty()) {
+        return base::Result<contracts::FileSourceNodePage>::failure(
+            make_error(base::ErrorCode::kInvalidArgument, "repository.network_path_invalid"));
+    }
+    // NetShareEnum accepts "\\server" (with leading backslashes).
+    std::wstring server = utf8_to_wide(host);
+    if (server.empty()) {
+        return base::Result<contracts::FileSourceNodePage>::failure(
+            make_error(base::ErrorCode::kInvalidArgument, "repository.network_path_invalid"));
+    }
+    if (server.size() < 2 || server[0] != L'\\' || server[1] != L'\\') {
+        server.insert(0, L"\\\\");
+    }
+
+    LPBYTE buffer = nullptr;
+    DWORD entries_read = 0;
+    DWORD total_entries = 0;
+    DWORD resume_handle = 0;
+    const NET_API_STATUS enum_status =
+        NetShareEnum(server.data(), 1, &buffer, MAX_PREFERRED_LENGTH, &entries_read, &total_entries,
+                     &resume_handle);
+    if (enum_status != NERR_Success && enum_status != ERROR_MORE_DATA) {
+        if (buffer != nullptr) {
+            NetApiBufferFree(buffer);
+        }
+        return base::Result<contracts::FileSourceNodePage>::failure(
+            network_connection_error(static_cast<DWORD>(enum_status)));
+    }
+
+    contracts::FileSourceNodePage result;
+    std::uint64_t share_index = 0;
+    if (buffer != nullptr && entries_read > 0) {
+        // SHARE_INFO_1 layout (level 1); avoid UNICODE-only typedef names under lean headers.
+        struct ShareInfo1 final {
+            LPWSTR net_name;
+            DWORD share_type;
+            LPWSTR remark;
+        };
+        const auto* shares = reinterpret_cast<const ShareInfo1*>(buffer);
+        for (DWORD i = 0; i < entries_read; ++i) {
+            if (cancellation.stop_requested()) {
+                NetApiBufferFree(buffer);
+                return base::Result<contracts::FileSourceNodePage>::failure(
+                    make_error(base::ErrorCode::kCancelled, "repository.directory_list_cancelled"));
+            }
+            if (shares[i].net_name == nullptr) {
+                continue;
+            }
+            const std::wstring_view netname(shares[i].net_name);
+            if (netname.empty()) {
+                continue;
+            }
+            // Disk tree only; skip IPC$/print and hidden admin shares (name ends with $).
+            constexpr DWORD kShareTypeMask = 0x000000FFU;
+            const DWORD type = shares[i].share_type & kShareTypeMask;
+            if (type != STYPE_DISKTREE) {
+                continue;
+            }
+            if (!netname.empty() && netname.back() == L'$') {
+                continue;
+            }
+            if (share_index++ < offset.value()) {
+                continue;
+            }
+            if (result.items.size() >= page.maximum_results) {
+                result.continuation_token = std::to_string(share_index - 1U);
+                break;
+            }
+            auto display_name = wide_to_utf8(netname);
+            if (display_name.empty()) {
+                continue;
+            }
+            contracts::FileSourceNode node;
+            node.node_token = "repository-share-" + std::to_string(share_index);
+            node.display_name = std::move(display_name);
+            node.entry_kind = contracts::FileEntryKind::kDirectory;
+            node.selectability = contracts::FileNodeSelectability::kSelectable;
+            node.has_children = true;
+            node.is_directory = true;
+            node.availability = contracts::SourceAvailability::kAvailable;
+            result.items.push_back(std::move(node));
+        }
+        NetApiBufferFree(buffer);
+    }
+    return base::Result<contracts::FileSourceNodePage>::success(std::move(result));
+}
+
+[[nodiscard]] base::Result<contracts::FileSourceNodePage>
+enumerate_filesystem_directories(const std::string_view locator,
+                                 const contracts::ServicePageRequest& page,
+                                 const base::CancellationToken cancellation) {
     auto root = utf8_to_wide(locator);
     if (root.empty()) {
         return base::Result<contracts::FileSourceNodePage>::failure(
@@ -131,14 +288,9 @@ enumerate_directories(const std::string_view locator, const contracts::ServicePa
         return base::Result<contracts::FileSourceNodePage>::failure(
             network_connection_error(GetLastError()));
     }
-    std::uint64_t offset = 0;
-    if (page.continuation_token) {
-        const auto& value = *page.continuation_token;
-        const auto parsed = std::from_chars(value.data(), value.data() + value.size(), offset);
-        if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size()) {
-            return base::Result<contracts::FileSourceNodePage>::failure(
-                make_error(base::ErrorCode::kInvalidArgument, "repository.directory_page_invalid"));
-        }
+    auto offset = parse_directory_page_offset(page);
+    if (!offset) {
+        return base::Result<contracts::FileSourceNodePage>::failure(offset.error());
     }
     contracts::FileSourceNodePage result;
     std::uint64_t directory_index = 0;
@@ -150,7 +302,7 @@ enumerate_directories(const std::string_view locator, const contracts::ServicePa
         if (!is_directory_entry(data)) {
             continue;
         }
-        if (directory_index++ < offset) {
+        if (directory_index++ < offset.value()) {
             continue;
         }
         if (result.items.size() >= page.maximum_results) {
@@ -172,6 +324,17 @@ enumerate_directories(const std::string_view locator, const contracts::ServicePa
         result.items.push_back(std::move(node));
     } while (FindNextFileW(find.get(), &data) != FALSE);
     return base::Result<contracts::FileSourceNodePage>::success(std::move(result));
+}
+
+[[nodiscard]] base::Result<contracts::FileSourceNodePage>
+enumerate_directories(const std::string_view locator, const contracts::ServicePageRequest& page,
+                      const base::CancellationToken cancellation) {
+    // \\server → list shares (Explorer Network host view).
+    // \\server\share[\path] → list filesystem directories under the share.
+    if (is_host_only_unc(locator)) {
+        return enumerate_smb_shares(locator, page, cancellation);
+    }
+    return enumerate_filesystem_directories(locator, page, cancellation);
 }
 
 class WinsockSession final {
@@ -211,13 +374,7 @@ class SocketHandle final {
 };
 
 [[nodiscard]] std::string extract_server_name(const std::string_view locator) {
-    if (!is_unc_locator(locator)) {
-        return {};
-    }
-    const auto server_end = locator.find('\\', 2);
-    return server_end == std::string_view::npos || server_end == 2
-               ? std::string{}
-               : std::string(locator.substr(2, server_end - 2));
+    return server_name_from_unc(locator);
 }
 
 [[nodiscard]] bool parse_ip_literal(const std::wstring_view server, SOCKADDR_STORAGE& address,
@@ -284,10 +441,18 @@ std::string extract_share_root(const std::string_view locator) {
     if (!is_unc_locator(locator)) {
         return {};
     }
+    // Allow host-only UNC (\\server) for Connect / share browse, and \\server\share for access.
     const auto server_end = locator.find('\\', 2);
-    if (server_end == std::string_view::npos || server_end == 2 ||
-        server_end + 1 >= locator.size()) {
+    if (server_end == std::string_view::npos) {
+        // \\hostname_or_ip
+        return locator.size() > 2 ? std::string(locator) : std::string{};
+    }
+    if (server_end <= 2) {
         return {};
+    }
+    if (server_end + 1 >= locator.size()) {
+        // \\server\  → treat as host root
+        return std::string(locator.substr(0, server_end));
     }
     const auto share_end = locator.find('\\', server_end + 1);
     if (share_end == server_end + 1) {
@@ -343,11 +508,28 @@ base::Result<void> probe_network_share_server(const std::string_view locator,
 base::Result<void> connect_network_share(const std::string_view locator,
                                          const std::string_view username,
                                          const std::string_view password,
-                                         const std::string_view domain) {
-    const auto share = extract_share_root(locator);
+                                         const std::string_view domain,
+                                         const base::CancellationToken cancellation,
+                                         const std::chrono::milliseconds timeout) {
+    if (timeout.count() <= 0) {
+        return base::Result<void>::failure(
+            make_error(base::ErrorCode::kInvalidArgument, "repository network timeout invalid"));
+    }
+    if (cancellation.stop_requested()) {
+        return base::Result<void>::failure(
+            make_error(base::ErrorCode::kCancelled, "repository network probe cancelled"));
+    }
+    auto share = extract_share_root(locator);
     if (share.empty()) {
         return base::Result<void>::failure(
             make_error(base::ErrorCode::kInvalidArgument, "repository.network_path_invalid"));
+    }
+    // Host-only Connect (\\server): authenticate against IPC$ so NetShareEnum can list shares.
+    if (is_host_only_unc(locator)) {
+        while (!share.empty() && (share.back() == '\\' || share.back() == '/')) {
+            share.pop_back();
+        }
+        share.append("\\IPC$");
     }
 
     auto w_share = utf8_to_wide(share);
@@ -364,19 +546,52 @@ base::Result<void> connect_network_share(const std::string_view locator,
     const auto w_user = utf8_to_wide(account);
     const auto w_pass = utf8_to_wide(password);
 
-    NETRESOURCEW resource{};
-    resource.dwType = RESOURCETYPE_DISK;
-    resource.lpRemoteName = w_share.data();
+    // WNetAddConnection2W is synchronous and often blocks 30–60s on a powered-off host.
+    // Run it off-thread and bound the wait so Test/Refresh cannot monopolize the command lane.
+    const DWORD resource_type =
+        is_host_only_unc(locator) ? RESOURCETYPE_ANY : RESOURCETYPE_DISK;
+    std::atomic<DWORD> status{ERROR_NO_NETWORK};
+    std::atomic_bool finished{false};
+    std::thread worker([&, resource_type] {
+        NETRESOURCEW resource{};
+        // IPC$ is a non-disk resource; disk shares use RESOURCETYPE_DISK.
+        resource.dwType = resource_type;
+        resource.lpRemoteName = w_share.data();
+        status.store(WNetAddConnection2W(&resource, w_pass.empty() ? nullptr : w_pass.c_str(),
+                                         w_user.empty() ? nullptr : w_user.c_str(),
+                                         CONNECT_TEMPORARY),
+                     std::memory_order_release);
+        finished.store(true, std::memory_order_release);
+    });
 
-    auto try_connect = [&]() -> DWORD {
-        return WNetAddConnection2W(&resource, w_pass.empty() ? nullptr : w_pass.c_str(),
-                                   w_user.empty() ? nullptr : w_user.c_str(), CONNECT_TEMPORARY);
-    };
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (!finished.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < deadline) {
+        if (cancellation.stop_requested()) {
+            worker.detach();
+            return base::Result<void>::failure(
+                make_error(base::ErrorCode::kCancelled, "repository network probe cancelled"));
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    if (!finished.load(std::memory_order_acquire)) {
+        worker.detach();
+        // Host reachability was already checked (or will be) separately. A WNet wait
+        // that expires with credentials supplied is almost always auth failure / stall,
+        // not "host unreachable".
+        if (!username.empty() || !password.empty()) {
+            return base::Result<void>::failure(make_error(
+                base::ErrorCode::kUnauthorized, "repository.network_credentials_rejected"));
+        }
+        return base::Result<void>::failure(
+            make_error(base::ErrorCode::kIoFailure, "repository.network_connect_failed"));
+    }
+    worker.join();
 
-    const DWORD status = try_connect();
-    if (status != NO_ERROR && status != ERROR_ALREADY_ASSIGNED &&
-        status != ERROR_DEVICE_ALREADY_REMEMBERED) {
-        return base::Result<void>::failure(network_connection_error(status));
+    const DWORD result = status.load(std::memory_order_acquire);
+    if (result != NO_ERROR && result != ERROR_ALREADY_ASSIGNED &&
+        result != ERROR_DEVICE_ALREADY_REMEMBERED) {
+        return base::Result<void>::failure(network_connection_error(result));
     }
     return base::Result<void>::success();
 }
@@ -417,7 +632,8 @@ bool unpack_network_auth_material(const std::string_view material, std::string& 
 }
 
 base::Result<void> connect_network_share_from_secret(const std::string_view locator,
-                                                     const contracts::SecretRef& secret_ref) {
+                                                     const contracts::SecretRef& secret_ref,
+                                                     const base::CancellationToken cancellation) {
     auto resolved = adapters::windows_system::WindowsCredentialResolver{}.resolve(secret_ref, {});
     if (!resolved) {
         return base::Result<void>::failure(resolved.error());
@@ -430,7 +646,7 @@ base::Result<void> connect_network_share_from_secret(const std::string_view loca
         // Not a network pack (e.g. archive default credential) — no share connect needed.
         return base::Result<void>::success();
     }
-    auto connected = connect_network_share(locator, username, password, domain);
+    auto connected = connect_network_share(locator, username, password, domain, cancellation);
     if (!password.empty()) {
         SecureZeroMemory(password.data(), password.size());
     }

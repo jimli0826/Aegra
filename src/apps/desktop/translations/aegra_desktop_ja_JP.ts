@@ -1929,6 +1929,22 @@ Server: %1</source>
         <source>Network path</source>
         <translation>ネットワーク パス</translation>
     </message>
+    <message id="aegra.repository.field.hostname_ip">
+        <source>Hostname/IP</source>
+        <translation>ホスト名/IP</translation>
+    </message>
+    <message id="aegra.repository.hostname_placeholder">
+        <source>e.g. 192.168.1.1</source>
+        <translation>例: 192.168.1.1</translation>
+    </message>
+    <message id="aegra.repository.please_enter_hostname">
+        <source>Please enter a hostname or IP</source>
+        <translation>ホスト名または IP を入力してください</translation>
+    </message>
+    <message id="aegra.repository.hostname_invalid">
+        <source>Invalid hostname or IP</source>
+        <translation>ホスト名または IP が無効です</translation>
+    </message>
     <message id="aegra.repository.field.authentication">
         <source>Authentication</source>
         <translation>認証</translation>
@@ -2084,6 +2100,10 @@ Server: %1</source>
     <message id="aegra.repository.column.name">
         <source>NAME</source>
         <translation>名前</translation>
+    </message>
+    <message id="aegra.repository.column.path">
+        <source>PATH</source>
+        <translation>パス</translation>
     </message>
     <message id="aegra.repository.column.status">
         <source>STATUS</source>

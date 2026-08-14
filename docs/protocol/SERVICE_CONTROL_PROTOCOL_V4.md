@@ -165,6 +165,20 @@ Job list 的 `progress`：仅合并 Worker 监督器缓存中的真实 progress�
 
 同 V3 形状（见历史 V3 文档 §4.1–4.2），版本无关字段名保持不变。
 
+`CommandAcknowledgement` payload 精确字段为：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `command_id` | string | 命令 id |
+| `disposition` | number | Accepted / Replayed |
+| `resource_id` | string \| null | 资源 id（若有） |
+| `event_subscription` | object \| null | 事件订阅租约 |
+| `free_bytes` | number \| null | 成功 Online `TestRepositoryConnection` 后由 Service `GetDiskFreeSpaceExW` 填充；其它命令必须为 null |
+
+### 4.1.1 TestRepositoryConnection 与 free space
+
+探测 Online 成功后，Service 在同一命令路径调用 `IRepositoryStorageFactory::query_free_bytes`（UNC 先 ensure 网络再查询）。查询失败不推翻 Online 结果，仅 `free_bytes = null`。Desktop 将非 null 值缓存到会话 connection 行，用于 FREE SPACE 列（含 UNC）。
+
 ### 4.2 ContentKind
 
 | 值 | 名称 |

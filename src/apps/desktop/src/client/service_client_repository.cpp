@@ -576,10 +576,25 @@ void ServiceClient::begin_next_repository_refresh() {
         begin_next_repository_refresh();
         return;
     }
+    // A prior command must already be finished before the next probe starts.
+    // If not, put the id back and stop rather than dropping the connection.
+    if (repository_command_busy_) {
+        repository_refresh_queue_.prepend(repository_refresh_current_id_);
+        repository_refresh_current_id_.clear();
+        connections_.clear_refreshing();
+        stop_repository_refresh();
+        return;
+    }
     connections_.set_refreshing(repository_refresh_current_id_, true);
+    connections_.clear_probe_error(repository_refresh_current_id_);
     emit connectionsChanged();
     start_repository_resource_command(kTestRepositoryConnectionRequestKind,
                                       repository_refresh_current_id_);
+    // start_repository_resource_command returns without setting busy when the
+    // connection disappeared between find() and send; advance to the next row.
+    if (!repository_command_busy_) {
+        begin_next_repository_refresh();
+    }
 }
 
 void ServiceClient::request_connection_snapshot_after_probe() {
@@ -656,6 +671,10 @@ void ServiceClient::start_repository_resource_command(const int request_kind,
     repository_command_busy_ = true;
     repository_command_error_code_.clear();
     repository_command_kind_ = request_kind;
+    repository_command_connection_id_ = connection_id;
+    if (request_kind == kTestRepositoryConnectionRequestKind) {
+        connections_.clear_probe_error(connection_id);
+    }
     repository_command_request_id_ = new_request_id();
     repository_command_idempotency_key_ = new_idempotency_key();
     emit repositoryCommandChanged();
@@ -711,6 +730,15 @@ RequestDisposition ServiceClient::handle_repository_command_frame(const QByteArr
     }
     if (location_probe && acknowledgement.has_resource_id) {
         repository_location_token_ = acknowledgement.resource_id;
+    }
+    if (completed_kind == kTestRepositoryConnectionRequestKind &&
+        !repository_command_connection_id_.isEmpty()) {
+        connections_.clear_probe_error(repository_command_connection_id_);
+        if (acknowledgement.free_bytes) {
+            connections_.set_free_bytes(repository_command_connection_id_,
+                                        *acknowledgement.free_bytes);
+        }
+        emit connectionsChanged();
     }
     reset_repository_command();
     if (refresh_probe) {
@@ -787,12 +815,22 @@ void ServiceClient::finish_repository_directories_failure(const QString& message
 }
 
 void ServiceClient::finish_repository_command_failure(const QString& message_code) {
-    const bool refresh_probe = repository_refresh_running_ &&
-                               repository_command_kind_ == kTestRepositoryConnectionRequestKind;
+    const bool test_probe = repository_command_kind_ == kTestRepositoryConnectionRequestKind;
+    const bool refresh_probe = repository_refresh_running_ && test_probe;
+    // Row-level error for Test/Refresh: store message_code; model localizes for display.
+    if (test_probe && !repository_command_connection_id_.isEmpty()) {
+        const auto code = message_code.isEmpty() ? QStringLiteral("service.request_failed")
+                                                 : message_code;
+        connections_.set_probe_error(repository_command_connection_id_, code);
+        connections_.set_refreshing(repository_command_connection_id_, false);
+        connections_.set_free_bytes(repository_command_connection_id_, std::nullopt);
+        emit connectionsChanged();
+    }
     repository_command_busy_ = false;
     repository_command_request_id_.clear();
     repository_command_idempotency_key_.clear();
     repository_command_kind_ = 0;
+    repository_command_connection_id_.clear();
     repository_command_error_code_ = message_code;
     emit repositoryCommandChanged();
     if (refresh_probe) {
@@ -805,6 +843,7 @@ void ServiceClient::reset_repository_command() {
     repository_command_request_id_.clear();
     repository_command_idempotency_key_.clear();
     repository_command_kind_ = 0;
+    repository_command_connection_id_.clear();
     repository_command_error_code_.clear();
     emit repositoryCommandChanged();
 }
@@ -1070,6 +1109,11 @@ qint64 ServiceClient::freeBytesForLocator(const QString& locator) const {
 }
 
 QString ServiceClient::freeSpaceTextForLocator(const QString& locator) const {
+    // Prefer free space from last Online Test (GetDiskFreeSpaceExW via Service),
+    // including UNC after a successful network probe.
+    if (const auto probed = connections_.free_bytes_for_locator(locator.trimmed())) {
+        return format_.format_bytes(*probed);
+    }
     if (is_unc_path(locator.trimmed())) {
         return QStringLiteral("—");
     }

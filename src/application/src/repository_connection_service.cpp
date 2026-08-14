@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string>
@@ -631,9 +632,22 @@ RepositoryConnectionService::test_connection(const contracts::ResourceRef& refer
     if (!available) {
         return base::Result<contracts::CommandAcknowledgement>::failure(available.error());
     }
-    return persist_connection_test({control_plane_, clock_, random_}, std::move(*existing.value()),
-                                   available.value(),
-                                   {idempotency_key, fingerprint, cancellation});
+    std::optional<std::uint64_t> free_bytes;
+    if (available.value().available) {
+        // Online: refresh free space via GetDiskFreeSpaceExW (local + connected UNC).
+        auto free = storage_factory_.query_free_bytes(existing.value()->locator, cancellation);
+        if (free) {
+            free_bytes = free.value();
+        }
+        // Free-space probe failure does not fail the Online test result.
+    }
+    auto ack = persist_connection_test({control_plane_, clock_, random_},
+                                       std::move(*existing.value()), available.value(),
+                                       {idempotency_key, fingerprint, cancellation});
+    if (ack && free_bytes) {
+        ack.value().free_bytes = free_bytes;
+    }
+    return ack;
 }
 
 base::Result<void> RepositoryConnectionService::mark_connection_unavailable(

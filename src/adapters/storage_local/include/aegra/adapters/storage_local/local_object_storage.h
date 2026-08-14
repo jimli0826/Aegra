@@ -69,6 +69,8 @@ class LocalRepositoryStorageFactory final : public ports::IRepositoryStorageFact
     open(std::string_view locator, base::CancellationToken cancellation) override;
     [[nodiscard]] base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>
     create_empty(std::string_view locator, base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<std::uint64_t>
+    query_free_bytes(std::string_view locator, base::CancellationToken cancellation) override;
 };
 
 } // namespace aegra::adapters::storage_local

@@ -4,6 +4,7 @@
 #include "aegra/base/result.h"
 #include "aegra/ports/object_storage.h"
 
+#include <cstdint>
 #include <memory>
 #include <string_view>
 
@@ -46,6 +47,11 @@ class IRepositoryStorageFactory {
     // kConflict; this operation never adopts an existing Repository.
     [[nodiscard]] virtual base::Result<std::unique_ptr<IRepositoryStorageAccess>>
     create_empty(std::string_view locator, base::CancellationToken cancellation) = 0;
+
+    // Volume free space at the repository locator root (GetDiskFreeSpaceExW on Windows).
+    // Used after a successful Online Test to refresh FREE SPACE for local and UNC roots.
+    [[nodiscard]] virtual base::Result<std::uint64_t>
+    query_free_bytes(std::string_view locator, base::CancellationToken cancellation) = 0;
 };
 
 } // namespace aegra::ports

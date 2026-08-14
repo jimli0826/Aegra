@@ -291,8 +291,9 @@ prepare_repository_connection_input(contracts::RepositoryConnectionInput input,
         if (!reachable) {
             return base::Result<contracts::RepositoryConnectionInput>::failure(reachable.error());
         }
-        auto connected = connect_network_share(input.locator, input.network_username,
-                                               input.network_password, input.network_domain);
+        auto connected =
+            connect_network_share(input.locator, input.network_username, input.network_password,
+                                  input.network_domain, cancellation);
         if (!connected) {
             return base::Result<contracts::RepositoryConnectionInput>::failure(connected.error());
         }
@@ -324,12 +325,27 @@ connect_repository_location(const contracts::RepositoryConnectionInput& input,
         return base::Result<void>::failure(
             {base::ErrorCode::kInvalidArgument, "repository.network_path_invalid"});
     }
+    // TCP reachability first: only this path may report network_unreachable.
     auto reachable = probe_network_share_server(input.locator, cancellation);
     if (!reachable) {
         return reachable;
     }
-    return connect_network_share(input.locator, input.network_username, input.network_password,
-                                 input.network_domain);
+    auto connected = connect_network_share(input.locator, input.network_username,
+                                           input.network_password, input.network_domain,
+                                           cancellation);
+    if (!connected) {
+        // Host already answered on 445. Do not surface auth/provider failures as "unreachable".
+        const auto& detail = connected.error().message;
+        if (detail == "repository.network_unreachable") {
+            const bool has_auth =
+                !input.network_username.empty() || !input.network_password.empty();
+            return base::Result<void>::failure(
+                {has_auth ? base::ErrorCode::kUnauthorized : base::ErrorCode::kIoFailure,
+                 has_auth ? "repository.network_credentials_rejected"
+                          : "repository.network_connect_failed"});
+        }
+    }
+    return connected;
 }
 
 [[nodiscard]] base::Result<contracts::CommandAcknowledgement>

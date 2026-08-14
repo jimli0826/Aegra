@@ -646,6 +646,8 @@ struct CommandAcknowledgement final {
     CommandDisposition disposition{CommandDisposition::kAccepted};
     std::optional<std::string> resource_id;
     std::optional<EventSubscriptionLease> event_subscription;
+    /// Present after a successful Online TestRepositoryConnection free-space probe; null otherwise.
+    std::optional<std::uint64_t> free_bytes;
 };
 
 [[nodiscard]] base::Result<void> validate_message_arguments(const MessageArguments& arguments);

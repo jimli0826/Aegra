@@ -71,7 +71,11 @@ template <typename Value> class BlockingQueue final {
 struct RequestState final {
     contracts::ServiceRequest request;
     std::string encoded;
-    Clock::time_point deadline;
+    // Deadline starts when a worker begins execution, not when the request is
+    // queued. Otherwise a hung network TestRepositoryConnection burns the
+    // deadline of every following command in the same lane and mark them
+    // Unavailable without ever opening their locator (false Offline for local).
+    Clock::time_point deadline{Clock::time_point::max()};
     base::CancellationSource cancellation;
     std::atomic_bool response_emitted{false};
 };
@@ -188,7 +192,6 @@ class SessionExecutor final {
             auto state = std::make_shared<RequestState>();
             state->request = std::move(decoded).value();
             state->encoded = std::move(encoded).value();
-            state->deadline = Clock::now() + kRequestDeadline;
             {
                 std::lock_guard lock(states_mutex_);
                 states_.push_back(state);
@@ -218,6 +221,10 @@ class SessionExecutor final {
                                               [&state] { (*state)->cancellation.request_stop(); });
             if ((*state)->response_emitted.load()) {
                 continue;
+            }
+            {
+                std::lock_guard lock(states_mutex_);
+                (*state)->deadline = Clock::now() + kRequestDeadline;
             }
             auto response = handle_service_message((*state)->encoded, runtime_, session_,
                                                    (*state)->cancellation.get_token());

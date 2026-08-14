@@ -837,8 +837,8 @@ bool parse_command_ack_response(const QJsonObject& root, const int expected_requ
         return false;
     }
     const auto payload = root.value(QStringLiteral("payload")).toObject();
-    if (!has_exact_keys(payload,
-                        {"command_id", "disposition", "resource_id", "event_subscription"})) {
+    if (!has_exact_keys(payload, {"command_id", "disposition", "resource_id", "event_subscription",
+                                  "free_bytes"})) {
         return false;
     }
     const auto command_id = payload.value(QStringLiteral("command_id")).toString();
@@ -859,6 +859,19 @@ bool parse_command_ack_response(const QJsonObject& root, const int expected_requ
     } else {
         return false;
     }
+    std::optional<qint64> free_bytes;
+    const auto free_value = payload.value(QStringLiteral("free_bytes"));
+    if (free_value.isNull()) {
+        free_bytes = std::nullopt;
+    } else if (free_value.isDouble() || free_value.isString()) {
+        qint64 free = 0;
+        if (!integer_in_range(free_value, 0, (std::numeric_limits<qint64>::max)(), free)) {
+            return false;
+        }
+        free_bytes = free;
+    } else {
+        return false;
+    }
     const auto message = root.value(QStringLiteral("message_code")).toString();
     if ((disposition == kCommandDispositionAccepted &&
          message != QLatin1String("command.accepted")) ||
@@ -866,7 +879,7 @@ bool parse_command_ack_response(const QJsonObject& root, const int expected_requ
          message != QLatin1String("command.replayed"))) {
         return false;
     }
-    result = {command_id, disposition, resource_id, has_resource, message};
+    result = {command_id, disposition, resource_id, has_resource, message, free_bytes};
     return true;
 }
 

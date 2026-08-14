@@ -18,6 +18,10 @@ struct RepositoryConnectionRow final {
     std::int64_t state{2};
     bool is_default{false};
     bool refreshing{false};
+    /// Service message_code for last Test/Refresh probe failure (localized in data()).
+    QString probe_error_code;
+    /// Free bytes from last Online Test free-space probe; nullopt = unknown / not probed.
+    std::optional<qint64> free_bytes;
     QStringList capabilities;
 };
 
@@ -37,6 +41,9 @@ class RepositoryConnectionModel final : public QAbstractListModel {
         IsDefaultRole,
         IsAvailableRole,
         IsRefreshingRole,
+        ProbeErrorTextRole,
+        FreeBytesRole,
+        HasFreeBytesRole,
         CapabilitiesRole,
     };
 
@@ -53,6 +60,10 @@ class RepositoryConnectionModel final : public QAbstractListModel {
     [[nodiscard]] QStringList connection_ids() const;
     bool set_refreshing(const QString& connection_id, bool refreshing);
     void clear_refreshing();
+    bool set_probe_error(const QString& connection_id, const QString& message_code);
+    void clear_probe_error(const QString& connection_id);
+    bool set_free_bytes(const QString& connection_id, std::optional<qint64> free_bytes);
+    [[nodiscard]] std::optional<qint64> free_bytes_for_locator(const QString& locator) const;
 
     /// QML helpers for wizard destination selection by list index.
     Q_INVOKABLE [[nodiscard]] QString connectionIdAt(int row) const;

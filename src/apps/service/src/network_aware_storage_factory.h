@@ -20,6 +20,9 @@ class NetworkAwareRepositoryStorageFactory final : public ports::IRepositoryStor
     [[nodiscard]] base::Result<std::unique_ptr<ports::IRepositoryStorageAccess>>
     create_empty(std::string_view locator, base::CancellationToken cancellation) override;
 
+    [[nodiscard]] base::Result<std::uint64_t>
+    query_free_bytes(std::string_view locator, base::CancellationToken cancellation) override;
+
   private:
     [[nodiscard]] base::Result<void> ensure_network_access(std::string_view locator,
                                                            base::CancellationToken cancellation);

@@ -43,12 +43,14 @@ Window {
     property bool settingsPanelOpen: false
     /// Latched once splash dismisses so main opacity/animation never re-toggles.
     property bool appReady: false
-    // App loading overlay is for heavy blocking commands (not background catalog refreshes
-    // and not schedule enable/disable row toggles — those must not flash the whole window).
+    // App loading overlay is for heavy blocking commands only.
+    // Exclude: sequential Repository Refresh probes (row-level Loading),
+    // background catalog refreshes, and schedule enable/disable row toggles.
     readonly property bool appLoading: {
         if (!window.appReady || !serviceClient.connected)
             return false
-        return serviceClient.repositoryCommandBusy
+        return (serviceClient.repositoryCommandBusy
+                    && !serviceClient.repositoryRefreshRunning)
                 || serviceClient.backupCommandBusy
                 || serviceClient.cancelCommandBusy
                 || serviceClient.mountCommandBusy

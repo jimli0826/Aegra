@@ -1,5 +1,8 @@
 #include "client/models/repository_connection_model.h"
 
+#include "locale/message_code_map.h"
+
+#include <QHash>
 #include <QVariantMap>
 
 #include <utility>
@@ -16,13 +19,36 @@ RepositoryConnectionModel::RepositoryConnectionModel(QObject* parent)
     : QAbstractListModel(parent) {}
 
 void RepositoryConnectionModel::set_rows(QVector<RepositoryConnectionRow> rows) {
+    // Keep session probe errors and free-space probes across Service snapshot reloads.
+    QHash<QString, QString> probe_error_codes;
+    QHash<QString, qint64> free_bytes_by_id;
+    QHash<QString, bool> refreshing_by_id;
+    for (const auto& existing : rows_) {
+        if (!existing.probe_error_code.isEmpty()) {
+            probe_error_codes.insert(existing.connection_id, existing.probe_error_code);
+        }
+        if (existing.free_bytes) {
+            free_bytes_by_id.insert(existing.connection_id, *existing.free_bytes);
+        }
+        if (existing.refreshing) {
+            refreshing_by_id.insert(existing.connection_id, true);
+        }
+    }
     beginResetModel();
     rows_ = std::move(rows);
     available_count_ = 0;
-    for (const auto& row : rows_) {
+    for (auto& row : rows_) {
         if (is_available_state(row.state)) {
             ++available_count_;
+            row.probe_error_code.clear();
+            if (free_bytes_by_id.contains(row.connection_id)) {
+                row.free_bytes = free_bytes_by_id.value(row.connection_id);
+            }
+        } else {
+            row.probe_error_code = probe_error_codes.value(row.connection_id);
+            row.free_bytes = std::nullopt;
         }
+        row.refreshing = refreshing_by_id.value(row.connection_id, false);
     }
     endResetModel();
     emit countChanged();
@@ -113,6 +139,53 @@ void RepositoryConnectionModel::clear_refreshing() {
     }
 }
 
+bool RepositoryConnectionModel::set_probe_error(const QString& connection_id,
+                                                const QString& message_code) {
+    const auto row_index = indexOfConnectionId(connection_id);
+    if (row_index < 0 || rows_[row_index].probe_error_code == message_code) {
+        return false;
+    }
+    rows_[row_index].probe_error_code = message_code;
+    const auto changed = index(row_index, 0);
+    emit dataChanged(changed, changed, {ProbeErrorTextRole});
+    return true;
+}
+
+void RepositoryConnectionModel::clear_probe_error(const QString& connection_id) {
+    const auto row_index = indexOfConnectionId(connection_id);
+    if (row_index < 0 || rows_[row_index].probe_error_code.isEmpty()) {
+        return;
+    }
+    rows_[row_index].probe_error_code.clear();
+    const auto changed = index(row_index, 0);
+    emit dataChanged(changed, changed, {ProbeErrorTextRole});
+}
+
+bool RepositoryConnectionModel::set_free_bytes(const QString& connection_id,
+                                               const std::optional<qint64> free_bytes) {
+    const auto row_index = indexOfConnectionId(connection_id);
+    if (row_index < 0 || rows_[row_index].free_bytes == free_bytes) {
+        return false;
+    }
+    rows_[row_index].free_bytes = free_bytes;
+    const auto changed = index(row_index, 0);
+    emit dataChanged(changed, changed, {FreeBytesRole, HasFreeBytesRole});
+    return true;
+}
+
+std::optional<qint64>
+RepositoryConnectionModel::free_bytes_for_locator(const QString& locator) const {
+    if (locator.isEmpty()) {
+        return std::nullopt;
+    }
+    for (const auto& row : rows_) {
+        if (row.locator == locator && row.free_bytes) {
+            return row.free_bytes;
+        }
+    }
+    return std::nullopt;
+}
+
 QString RepositoryConnectionModel::connectionIdAt(const int row) const {
     if (row < 0 || row >= rows_.size()) {
         return {};
@@ -165,6 +238,13 @@ QVariant RepositoryConnectionModel::data(const QModelIndex& index, const int rol
         return is_available_state(row.state);
     case IsRefreshingRole:
         return row.refreshing;
+    case ProbeErrorTextRole:
+        return row.probe_error_code.isEmpty() ? QString{}
+                                              : localize_message_code(row.probe_error_code);
+    case FreeBytesRole:
+        return row.free_bytes ? QVariant{*row.free_bytes} : QVariant{};
+    case HasFreeBytesRole:
+        return row.free_bytes.has_value();
     case CapabilitiesRole:
         return row.capabilities;
     default:
@@ -181,6 +261,9 @@ QHash<int, QByteArray> RepositoryConnectionModel::roleNames() const {
             {IsDefaultRole, "isDefault"},
             {IsAvailableRole, "isAvailable"},
             {IsRefreshingRole, "isRefreshing"},
+            {ProbeErrorTextRole, "probeErrorText"},
+            {FreeBytesRole, "freeBytes"},
+            {HasFreeBytesRole, "hasFreeBytes"},
             {CapabilitiesRole, "capabilities"}};
 }
 

@@ -167,7 +167,7 @@ Makefile、`release/` 生成物和 `.bak` 文件全部禁止迁移。
 | D5  | 等待前置 | P2   | Repository 管理              | add/import/test/default/delete/verify actions           | D0, D1, S4, S5 |
 | S7  | 进行中   | P3   | Mount Host 编排              | mounted session、unmount、崩溃清理                            | S3, S5         |
 | D6  | 进行中   | P3   | Mount 页面                   | mount/unmount/session table                             | D0, D1, S7     |
-| S8  | 可开始  | P3   | Schedule 与 Event/Audit     | trigger engine、history、paged queries                    | S2, S3         |
+| S8  | 进行中   | P3   | Schedule 与 Event/Audit     | trigger engine（已落地）、history、paged queries             | S2, S3         |
 | D7  | 等待前置 | P3   | Event Log 页面               | filter、分页、详情、导出入口                                       | D0, D1, S8     |
 | D8  | 可开始  | P3   | Settings 页面                | language、theme、service/repository settings              | D0, D1, S1, S4 |
 | R0  | 等待前置 | Gate | 发布工程                       | installer、upgrade/uninstall、recovery、diagnostics、E2E    | 全部发布范围         |
@@ -592,10 +592,15 @@ composition/capability；未完成 Release 构建或隔离非系统卷人工 Res
 
 ### S8 / D7：Schedule 与 Event Log
 
-**状态：S8 可开始；D7 等待前置 S8。**
+**状态：S8 进行中（Schedule trigger engine 已落地；Event/Audit 查询与 D7 仍待）；D7 等待前置 S8 Event 部分。**
 
-- Schedule engine 使用持久化 next-run 和 timezone/UTC 规则；机器休眠、时钟跳变和 missed run 有确定策略。
-- 同一 schedule 触发使用幂等 key，避免 Service 重启重复启动备份。
+- **已完成 — Schedule engine**：`ScheduleEngine` 15s 轮询 enabled 且 `next_run_utc_ms <= now` 的计划，经
+  `WorkerJobService::start_backup` 启动 Incremental（缺父 demote Full）；幂等键
+  `schedule-fire|<schedule_id>|<due_next_run_utc_ms>`；Accepted/Replayed 后 CAS 推进 next_run；
+  missed run = 该 due 槽只跑一次并跳到下一未来候选；Conflict/容量满不推进、下轮重试。见
+  [service_host.md](../modules/service_host.md#schedule-触发引擎s8)。
+- **未完成 — timezone 精细化**：当前与 Upsert 一致使用 UTC 日网格解释 `local_minutes_of_day`；
+  完整 IANA timezone 解释仍可后续加强。
 - Event/Audit 使用稳定类型、severity、message code、参数和 correlation ID，支持过滤与 cursor 分页。
 - Event Log 页面不展示原始异常、SecretRef 或敏感路径；详情和导出遵循脱敏策略。
 

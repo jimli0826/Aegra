@@ -1144,6 +1144,67 @@ WorkerJobService::start_backup(const contracts::StartBackupCommand& command,
                         prepared.value().job_id));
 }
 
+base::Result<ScheduledBackupResult>
+WorkerJobService::start_scheduled_backup(const std::string_view schedule_id,
+                                         const std::uint64_t expected_due_utc_ms,
+                                         const std::string_view idempotency_key,
+                                         const base::CancellationToken cancellation) {
+    if (schedule_id.empty() || idempotency_key.empty()) {
+        return base::Result<ScheduledBackupResult>::failure(
+            {base::ErrorCode::kInvalidArgument, "scheduled backup arguments are invalid"});
+    }
+    auto schedule = control_plane_.get_schedule(schedule_id, cancellation);
+    if (!schedule) {
+        return base::Result<ScheduledBackupResult>::failure(schedule.error());
+    }
+    ScheduledBackupResult skipped;
+    skipped.outcome = ScheduledBackupOutcome::kSkipped;
+    if (!schedule.value()) {
+        skipped.detail = "schedule_not_found";
+        return base::Result<ScheduledBackupResult>::success(std::move(skipped));
+    }
+    const auto& record = *schedule.value();
+    if (!record.enabled) {
+        skipped.detail = "schedule_disabled";
+        return base::Result<ScheduledBackupResult>::success(std::move(skipped));
+    }
+    if (!record.next_run_utc_ms.has_value()) {
+        skipped.detail = "next_run_empty";
+        return base::Result<ScheduledBackupResult>::success(std::move(skipped));
+    }
+    if (*record.next_run_utc_ms != expected_due_utc_ms) {
+        skipped.detail = "due_slot_changed";
+        return base::Result<ScheduledBackupResult>::success(std::move(skipped));
+    }
+    const auto now_raw = clock_.now_utc_ms();
+    const auto now = now_raw < 0 ? 0 : static_cast<std::uint64_t>(now_raw);
+    if (*record.next_run_utc_ms > now) {
+        skipped.detail = "not_due";
+        return base::Result<ScheduledBackupResult>::success(std::move(skipped));
+    }
+    contracts::StartBackupCommand command;
+    command.schedule_id = std::string(schedule_id);
+    command.backup_type = contracts::BackupType::kIncremental;
+    auto started = start_backup(command, idempotency_key, cancellation);
+    if (!started) {
+        const auto& error = started.error();
+        if (error.code == base::ErrorCode::kConflict &&
+            error.message.find("worker capacity") != std::string::npos) {
+            ScheduledBackupResult deferred;
+            deferred.outcome = ScheduledBackupOutcome::kDeferredCapacity;
+            deferred.detail = error.message;
+            return base::Result<ScheduledBackupResult>::success(std::move(deferred));
+        }
+        return base::Result<ScheduledBackupResult>::failure(error);
+    }
+    ScheduledBackupResult result;
+    result.outcome = started.value().disposition == contracts::CommandDisposition::kReplayed
+                         ? ScheduledBackupOutcome::kReplayed
+                         : ScheduledBackupOutcome::kAccepted;
+    result.job_id = started.value().resource_id;
+    return base::Result<ScheduledBackupResult>::success(std::move(result));
+}
+
 base::Result<contracts::CommandAcknowledgement>
 WorkerJobService::start_verify(const contracts::StartVerifyCommand& command,
                                const std::string_view idempotency_key,

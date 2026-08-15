@@ -13,6 +13,8 @@
 #include "aegra/application/source_inventory_query.h"
 #include "aegra/apps/service/backup_catalog_registrar.h"
 #include "aegra/apps/service/mount_supervisor.h"
+#include "aegra/apps/service/schedule_engine.h"
+#include "aegra/apps/service/schedule_execution_coordinator.h"
 #include "aegra/apps/service/schedule_service.h"
 #include "aegra/apps/service/service_host.h"
 #include "aegra/apps/service/service_protocol.h"
@@ -200,7 +202,10 @@ struct RuntimeComponents final {
     std::unique_ptr<service::RepositoryLocationBrowseRegistry> repository_location_browse;
     std::unique_ptr<service::WorkerSupervisor> supervisor;
     std::unique_ptr<service::WorkerJobService> worker_jobs;
+    std::unique_ptr<service::ScheduleExecutionCoordinator> schedule_coordinator;
     std::unique_ptr<service::ScheduleService> schedules;
+    /// Declared after worker_jobs so destruction stops the poll thread first.
+    std::unique_ptr<service::ScheduleEngine> schedule_engine;
     std::unique_ptr<service::MountSupervisor> mount_supervisor;
     service::ServiceRuntimeInfo runtime;
 };
@@ -721,9 +726,13 @@ create_runtime(const ServiceArguments& arguments) {
         components.file_browse.get());
     components.repository_location_browse =
         std::make_unique<service::RepositoryLocationBrowseRegistry>();
+    components.schedule_coordinator = std::make_unique<service::ScheduleExecutionCoordinator>();
     components.schedules = std::make_unique<service::ScheduleService>(
         *components.control_plane, *components.clock, *components.random,
-        components.file_browse.get());
+        *components.schedule_coordinator, components.file_browse.get());
+    components.schedule_engine = std::make_unique<service::ScheduleEngine>(
+        *components.control_plane, *components.worker_jobs, *components.clock,
+        *components.schedule_coordinator, components.logger.get());
     service::MountSupervisorConfig mount_config;
     mount_config.mount_host_executable_path = std::move(mount_host_path_utf8).value();
     mount_config.overlay_root = data_dir.value() / L"mount_overlays";
@@ -748,6 +757,9 @@ create_runtime(const ServiceArguments& arguments) {
         .control_plane = components.control_plane.get(),
         .storage_factory = components.storage_factory.get(),
     };
+    // Start the due-fire thread only after the full runtime is assembled so a partial
+    // create_runtime failure never briefly submits work.
+    components.schedule_engine->start();
     components.logger->write(service::ServiceLogLevel::kInfo, "service.runtime_ready",
                              "status=ready");
     return aegra::base::Result<RuntimeComponents>::success(std::move(components));

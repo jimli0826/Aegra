@@ -2,11 +2,12 @@
 
 #include "aegra/adapters/windows_system/windows_system.h"
 #include "aegra/application/file_browse_service.h"
+#include "aegra/apps/service/schedule_execution_coordinator.h"
+#include "aegra/apps/service/schedule_next_run.h"
 #include "aegra/base/uuid.h"
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -58,64 +59,6 @@ make_canonical_uuid(ports::IRandomSource& random, const base::CancellationToken&
             {base::ErrorCode::kInvalidArgument, "idempotency key is invalid"});
     }
     return base::Result<void>::success();
-}
-
-[[nodiscard]] unsigned utc_day_of_month(const std::uint64_t utc_ms) {
-    using namespace std::chrono;
-    const sys_seconds time_point{seconds{static_cast<std::int64_t>(utc_ms / 1000ULL)}};
-    const year_month_day date{floor<days>(time_point)};
-    return static_cast<unsigned>(date.day());
-}
-
-[[nodiscard]] bool month_day_is_selected(const std::uint32_t mask, const unsigned day) noexcept {
-    return day >= 1 && day <= 31 && (mask & (1U << (day - 1U))) != 0;
-}
-
-[[nodiscard]] std::uint64_t compute_next_run_for_minute(const contracts::ScheduleTrigger& trigger,
-                                                        const std::uint64_t now_ms,
-                                                        const std::uint16_t local_minute) {
-    constexpr std::uint64_t kDayMs = 24ULL * 60ULL * 60ULL * 1000ULL;
-    constexpr std::uint64_t kMinuteMs = 60ULL * 1000ULL;
-    const auto minute = static_cast<std::uint64_t>(local_minute);
-    const auto day_start = (now_ms / kDayMs) * kDayMs;
-    auto candidate = day_start + minute * kMinuteMs;
-    if (candidate <= now_ms) {
-        candidate += kDayMs;
-    }
-    if (trigger.kind == contracts::ScheduleTriggerKind::kWeekly && trigger.weekday_mask != 0) {
-        for (int step = 0; step < 8; ++step) {
-            const auto days_since_epoch = candidate / kDayMs;
-            const auto weekday = static_cast<std::uint8_t>((days_since_epoch + 4U) % 7U);
-            if ((trigger.weekday_mask & static_cast<std::uint8_t>(1U << weekday)) != 0) {
-                break;
-            }
-            candidate += kDayMs;
-        }
-    }
-    if (trigger.kind == contracts::ScheduleTriggerKind::kMonthly &&
-        trigger.day_of_month_mask != 0) {
-        for (int step = 0; step < 40; ++step) {
-            if (month_day_is_selected(trigger.day_of_month_mask, utc_day_of_month(candidate))) {
-                break;
-            }
-            candidate += kDayMs;
-        }
-    }
-    return candidate;
-}
-
-[[nodiscard]] std::uint64_t compute_next_run_utc_ms(const contracts::ScheduleTrigger& trigger,
-                                                    const std::uint64_t now_ms) {
-    std::uint64_t best = 0;
-    bool have_best = false;
-    for (const auto minute : trigger.local_minutes_of_day) {
-        const auto candidate = compute_next_run_for_minute(trigger, now_ms, minute);
-        if (!have_best || candidate < best) {
-            best = candidate;
-            have_best = true;
-        }
-    }
-    return have_best ? best : now_ms;
 }
 
 [[nodiscard]] contracts::CommandAcknowledgement accepted(std::string command_id,
@@ -351,8 +294,10 @@ enforce_schedule_update_invariants(const contracts::UpsertScheduleCommand& comma
 
 ScheduleService::ScheduleService(ports::IControlPlaneDatabase& control_plane, ports::IClock& clock,
                                  ports::IRandomSource& random,
+                                 ScheduleExecutionCoordinator& coordinator,
                                  application::FileBrowseService* const file_browse) noexcept
-    : control_plane_(control_plane), clock_(clock), random_(random), file_browse_(file_browse) {}
+    : control_plane_(control_plane), clock_(clock), random_(random), coordinator_(coordinator),
+      file_browse_(file_browse) {}
 
 base::Result<contracts::SchedulePage>
 ScheduleService::list_schedules(const contracts::ScheduleListRequest& request,
@@ -371,6 +316,13 @@ base::Result<contracts::CommandAcknowledgement> ScheduleService::upsert_schedule
         return base::Result<contracts::CommandAcknowledgement>::failure(valid.error());
     }
 
+    // Hold the shared coordinator for the entire mutation so the engine cannot fire a stale due
+    // slot against a schedule that is being disabled or retimed.
+    auto acquired = coordinator_.acquire(cancellation);
+    if (!acquired) {
+        return base::Result<contracts::CommandAcknowledgement>::failure(acquired.error());
+    }
+    auto schedule_lock = std::move(acquired).value();
     const auto fingerprint = upsert_fingerprint(command);
     auto existing_command = control_plane_.get_command(idempotency_key, cancellation);
     if (!existing_command) {
@@ -542,6 +494,11 @@ ScheduleService::delete_schedule(const contracts::ResourceRef& reference,
         return base::Result<contracts::CommandAcknowledgement>::failure(valid.error());
     }
 
+    auto acquired = coordinator_.acquire(cancellation);
+    if (!acquired) {
+        return base::Result<contracts::CommandAcknowledgement>::failure(acquired.error());
+    }
+    auto schedule_lock = std::move(acquired).value();
     const auto fingerprint = std::string("delete-schedule|") + reference.resource_id;
     auto existing_command = control_plane_.get_command(idempotency_key, cancellation);
     if (!existing_command) {

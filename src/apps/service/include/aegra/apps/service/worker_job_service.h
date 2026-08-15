@@ -1,10 +1,12 @@
 #pragma once
 
+#include "aegra/apps/service/schedule_execution_coordinator.h"
 #include "aegra/base/cancellation.h"
 #include "aegra/base/result.h"
 #include "aegra/contracts/service_control.h"
 #include "aegra/ports/file_browser.h"
 
+#include <cstdint>
 #include <string_view>
 
 namespace aegra::application {
@@ -33,6 +35,12 @@ class IWorkerJobService {
     [[nodiscard]] virtual base::Result<contracts::CommandAcknowledgement>
     start_backup(const contracts::StartBackupCommand& command, std::string_view idempotency_key,
                  base::CancellationToken cancellation) = 0;
+    /// Engine path: re-validates the due slot then starts Incremental. Caller must hold the
+    /// ScheduleExecutionCoordinator lock for the whole fire (validate → start → advance).
+    [[nodiscard]] virtual base::Result<ScheduledBackupResult>
+    start_scheduled_backup(std::string_view schedule_id, std::uint64_t expected_due_utc_ms,
+                           std::string_view idempotency_key,
+                           base::CancellationToken cancellation) = 0;
     [[nodiscard]] virtual base::Result<contracts::CommandAcknowledgement>
     start_verify(const contracts::StartVerifyCommand& command, std::string_view idempotency_key,
                  base::CancellationToken cancellation) = 0;
@@ -68,6 +76,10 @@ class WorkerJobService final : public IWorkerJobService {
     [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
     start_backup(const contracts::StartBackupCommand& command, std::string_view idempotency_key,
                  base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<ScheduledBackupResult>
+    start_scheduled_backup(std::string_view schedule_id, std::uint64_t expected_due_utc_ms,
+                           std::string_view idempotency_key,
+                           base::CancellationToken cancellation) override;
     [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
     start_verify(const contracts::StartVerifyCommand& command, std::string_view idempotency_key,
                  base::CancellationToken cancellation) override;

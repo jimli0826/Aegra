@@ -14,11 +14,13 @@ class FileBrowseService;
 
 namespace aegra::apps::service {
 
+class ScheduleExecutionCoordinator;
+
 // Personal-edition schedule CRUD over the control-plane schedule store.
 class ScheduleService final {
   public:
     ScheduleService(ports::IControlPlaneDatabase& control_plane, ports::IClock& clock,
-                    ports::IRandomSource& random,
+                    ports::IRandomSource& random, ScheduleExecutionCoordinator& coordinator,
                     application::FileBrowseService* file_browse = nullptr) noexcept;
 
     [[nodiscard]] base::Result<contracts::SchedulePage>
@@ -38,6 +40,7 @@ class ScheduleService final {
     ports::IControlPlaneDatabase& control_plane_;
     ports::IClock& clock_;
     ports::IRandomSource& random_;
+    ScheduleExecutionCoordinator& coordinator_;
     application::FileBrowseService* file_browse_;
 };
 

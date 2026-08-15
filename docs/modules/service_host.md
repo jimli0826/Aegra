@@ -26,6 +26,10 @@ correlated acknowledgement，不持久化 Repository connection 或凭据。成�
 src/apps/service/
 ├── CMakeLists.txt
 ├── include/aegra/apps/service/
+│   ├── schedule_engine.h                  # S8 due-schedule poll / fire
+│   ├── schedule_execution_coordinator.h   # Schedule mutation / fire cancellation-aware lock
+│   ├── schedule_next_run.h                # next_run 计算与 fire 幂等键
+│   ├── schedule_service.h
 │   ├── service_host.h
 │   ├── service_protocol.h
 │   ├── service_response_fit.h
@@ -37,6 +41,9 @@ src/apps/service/
 └── src/
     ├── recovery_point_layout_service.cpp  # GetRecoveryPointLayout：Catalog → Archive Manifest volumes
     ├── file_recovery_point_query.cpp      # ListRecoveryPointEntries：file_set Index 分页
+    ├── schedule_engine.cpp
+    ├── schedule_next_run.cpp
+    ├── schedule_service.cpp
     ├── service_host.cpp
     ├── service_log_formatter.cpp
     ├── service_main.cpp
@@ -157,10 +164,46 @@ Pipe/framing/peer close、Service stop 或响应写失败才结束 session。请
 - 人工运行验证覆盖 SQLite 启动收敛、capability、数据目录、实际 Worker 启动、失败结果持久化及 session 回收。
 - Debug/Release、源码规模、格式和秘密扫描通过。
 
+## Schedule 触发引擎（S8）
+
+Service 进程内 `ScheduleEngine` 在 **完整 Runtime 装配完成之后**、`service.runtime_ready` 之前启动后台
+轮询（默认 15s），不依赖 Desktop 在线。
+
+`ScheduleExecutionCoordinator`（composition root 注入，非 Singleton）在 **Upsert/Delete Schedule** 与
+**到期 fire** 之间串行化；等待锁时每 100ms 检查 request deadline 或 Service stop 取消：
+
+```text
+list enabled schedules (paged, 无锁快照)
+  -> next_run_utc_ms <= now
+  -> acquire coordinator lock
+  -> start_scheduled_backup(schedule_id, expected_due, key)
+       重新读 ScheduleRecord；校验 enabled / next_run == expected_due / due <= now
+       Incremental + key = "schedule-fire|<id>|<due>"
+  -> Accepted/Replayed: CAS advance next_run（仍持锁）
+  -> Skipped / DeferredCapacity: 不推进 due
+  -> release lock
+```
+
+| 策略 | 行为 |
+| --- | --- |
+| Missed run（休眠跨过 due） | 该 due 槽只触发 **一次**，以 CAS 推进时重新读取的当前时钟计算下一未来候选 |
+| Service 重启 | 同一 due 槽同一幂等键；已有 Job → Replayed |
+| Worker 容量满 | `kDeferredCapacity`，**不**推进 `next_run`；其他 Conflict 记 `fire_failed` |
+| 禁用/改期 vs 触发 | 协调锁保证先后清晰：禁用先完成则引擎 re-read 后 Skipped；引擎先认领启动则禁用只影响未来 |
+| 月度 next_run | `year_month_day` 按自然月；`ok()` 排除 2/31 等；从当月起找严格 `> now` 的最小候选 |
+| 时区 | `local_minutes_of_day` 落在 **UTC 日切分**网格；`timezone_id` 持久化但未做 IANA 解释 |
+
+日志：`schedule.engine_started|stopped`、`schedule.fired`、`schedule.fire_skipped`、
+`schedule.fire_deferred`、`schedule.fire_failed`、`schedule.coordination_failed`、
+`schedule.next_run_advanced`、`schedule.scan_failed`。
+
+手动 Run 仍走 Desktop → `start_backup`（独立幂等键）。创建后立即备份不经过引擎。
+
 ## 后续控制面工作
 
 Service 剩余工作按 [Desktop 迁移与个人版 Service 完成计划](../migration/DESKTOP_SERVICE_COMPLETION_PLAN.md)
-中的 `S5` 至 `S8` 工作包推进：Archive authenticate/Verify/删除计划、Restore、Mount、Schedule 与 Event/Audit。
+中的 `S5` 至 `S8` 工作包推进：Archive authenticate/Verify/删除计划、Restore、Mount 与 Event/Audit。
+**Schedule due-fire 引擎已落地**；Event/Audit 分页查询与 Desktop Event Log 仍属 S8/D7 余量。
 现有 Worker 数据面继续复用，Service 不重复实现 Backup、Verify 或 Restore Pipeline。
 
 Service 协议只返回稳定枚举、错误码和 message code，不返回本地化文本。个人版 SQLite 不保存 Recovery Point、

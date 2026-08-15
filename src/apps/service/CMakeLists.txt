@@ -8,6 +8,8 @@ add_library(aegra_app_service STATIC
     src/network_aware_storage_factory.cpp
     src/network_share_access.cpp
     src/recovery_point_layout_service.cpp
+    src/schedule_engine.cpp
+    src/schedule_next_run.cpp
     src/schedule_service.cpp
     src/service_host.cpp
     src/service_log_formatter.cpp

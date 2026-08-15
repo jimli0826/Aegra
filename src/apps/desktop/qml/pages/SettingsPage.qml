@@ -208,86 +208,78 @@ Item {
                         font.family: Theme.fontFamily
                         wrapMode: Text.WordWrap
                     }
-                    Flow {
-                        Layout.fillWidth: true
-                        spacing: 12
-
-                        Repeater {
-                            model: Theme.themes
-                            delegate: Rectangle {
-                                id: themeCard
-                                required property var modelData
-                                readonly property bool selected: Theme.themeId === modelData.id
-                                width: 140
-                                height: 106
-                                radius: 10
-                                color: Theme.colorInput
-                                border.width: selected ? 2 : 1
-                                border.color: selected ? Theme.colorAccentBlue : Theme.colorBorder
-                                Behavior on border.color { ColorAnimation { duration: 150 } }
-
-                                ColumnLayout {
-                                    anchors.fill: parent
-                                    anchors.margins: 8
-                                    spacing: 6
-                                    Rectangle {
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: 50
-                                        radius: 6
-                                        color: modelData.previewBg
-                                        clip: true
-                                        Row {
-                                            anchors.fill: parent
-                                            anchors.margins: 6
-                                            spacing: 4
-                                            Rectangle { width: 16; height: parent.height; radius: 2; color: modelData.previewCard }
-                                            Column {
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                spacing: 3
-                                                Rectangle { width: 64; height: 7; radius: 2; color: modelData.previewAccent }
-                                                Rectangle { width: 50; height: 5; radius: 2; color: modelData.previewText; opacity: 0.55 }
-                                                Rectangle { width: 36; height: 5; radius: 2; color: modelData.previewText; opacity: 0.35 }
-                                            }
-                                        }
-                                    }
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: Theme.themeLabel(modelData)
-                                        color: Theme.colorTextWhite
-                                        font.pixelSize: 11
-                                        font.bold: themeCard.selected
-                                        font.family: Theme.fontFamily
-                                        horizontalAlignment: Text.AlignHCenter
-                                        elide: Text.ElideRight
-                                    }
-                                    Item {
-                                        Layout.alignment: Qt.AlignHCenter
-                                        Layout.preferredWidth: 16
-                                        Layout.preferredHeight: 14
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: "\u2713"
-                                            color: Theme.colorAccentBlue
-                                            font.pixelSize: 12
-                                            font.bold: true
-                                            visible: themeCard.selected
-                                        }
-                                    }
-                                }
-
-                                MouseArea {
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: Theme.setTheme(modelData.id)
-                                    Rectangle {
-                                        anchors.fill: parent
-                                        radius: themeCard.radius
-                                        color: Theme.colorHover
-                                        opacity: parent.containsMouse && !themeCard.selected ? 0.3 : 0
-                                        Behavior on opacity { NumberAnimation { duration: 120 } }
-                                    }
-                                }
+                    ComboBox {
+                        id: themeCombo
+                        Layout.preferredWidth: 280
+                        Layout.preferredHeight: 34
+                        model: Theme.themes
+                        currentIndex: {
+                            const list = Theme.themes
+                            for (let i = 0; i < list.length; ++i) {
+                                if (list[i].id === Theme.themeId)
+                                    return i
+                            }
+                            return 0
+                        }
+                        onActivated: function(index) {
+                            const list = Theme.themes
+                            if (index >= 0 && index < list.length)
+                                Theme.setTheme(list[index].id)
+                        }
+                        background: Rectangle {
+                            color: Theme.colorInput
+                            radius: 8
+                            border.width: 1
+                            border.color: Theme.colorBorder
+                        }
+                        indicator: ComboBoxIndicator { combo: themeCombo }
+                        contentItem: Text {
+                            leftPadding: 12
+                            rightPadding: 24
+                            text: Theme.themeLabel(Theme.themes[themeCombo.currentIndex])
+                            color: Theme.colorTextWhite
+                            font.pixelSize: 13
+                            font.family: Theme.fontFamily
+                            verticalAlignment: Text.AlignVCenter
+                            elide: Text.ElideRight
+                        }
+                        popup: Popup {
+                            y: themeCombo.height + 2
+                            width: themeCombo.width
+                            padding: 4
+                            implicitHeight: Math.min(200, contentItem.implicitHeight + 8)
+                            contentItem: ListView {
+                                clip: true
+                                implicitHeight: contentHeight
+                                model: themeCombo.popup.visible ? themeCombo.delegateModel : null
+                                currentIndex: themeCombo.highlightedIndex
+                            }
+                            background: Rectangle {
+                                color: Theme.colorPopup
+                                border.color: Theme.colorBorder
+                                radius: 8
+                            }
+                        }
+                        delegate: ItemDelegate {
+                            id: themeItemDel
+                            width: themeCombo.width - 8
+                            height: 32
+                            hoverEnabled: true
+                            highlighted: themeCombo.highlightedIndex === index
+                            contentItem: Text {
+                                leftPadding: 10
+                                text: Theme.themeLabel(modelData)
+                                color: Theme.colorTextWhite
+                                font.pixelSize: 13
+                                font.family: Theme.fontFamily
+                                verticalAlignment: Text.AlignVCenter
+                                elide: Text.ElideRight
+                            }
+                            background: Rectangle {
+                                radius: 6
+                                color: themeItemDel.highlighted
+                                       ? Theme.colorHover
+                                       : (themeItemDel.hovered ? Theme.colorHover : "transparent")
                             }
                         }
                     }

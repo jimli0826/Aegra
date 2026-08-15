@@ -690,6 +690,18 @@ void FileBrowseModel::prune_locked_hydrate_dead_ends(const QVector<bool>& chain_
     if (!locked_hydrate_in_progress_ || chain_resolved.size() != locked_chains_.size()) {
         return;
     }
+    // Only drop dig branches that cannot help remaining unresolved chains. When every chain is
+    // already matched, leave children for collapse_locked_view (do not empty the tree first).
+    bool any_unresolved = false;
+    for (const bool resolved : chain_resolved) {
+        if (!resolved) {
+            any_unresolved = true;
+            break;
+        }
+    }
+    if (!any_unresolved) {
+        return;
+    }
     for (int index = rows_.size() - 1; index >= 0; --index) {
         if (rows_[index].depth != 0 || !rows_[index].children_loaded) {
             continue;
@@ -722,31 +734,39 @@ void FileBrowseModel::collapse_locked_view() {
     // Drop hydrated children from the model so ListView does not keep empty gaps.
     // Preserve root check_state (full / partial). User expand will re-fetch children.
     // Service tokens for dropped nodes are released on the next root browse.
+    bool has_deep = false;
+    for (const auto& row : rows_) {
+        if (row.depth != 0) {
+            has_deep = true;
+            break;
+        }
+    }
+    if (!has_deep) {
+        // Never move roots out of rows_ on this path — a prior prune may have already removed
+        // descendants; moved-from QString members would blank every SOURCE label in QML.
+        for (int index = 0; index < rows_.size(); ++index) {
+            auto& row = rows_[index];
+            if (!row.expanded && !row.children_loaded && !row.loading) {
+                continue;
+            }
+            row.expanded = false;
+            row.children_loaded = false;
+            row.loading = false;
+            emit_row(index);
+        }
+        notify_row_visibility();
+        return;
+    }
     QVector<FileBrowseNode> roots;
     roots.reserve(rows_.size());
-    bool removed_deep = false;
     for (auto& row : rows_) {
         if (row.depth != 0) {
-            removed_deep = true;
             continue;
         }
         row.expanded = false;
         row.loading = false;
         row.children_loaded = false;
         roots.push_back(std::move(row));
-    }
-    if (!removed_deep) {
-        for (int index = 0; index < rows_.size(); ++index) {
-            if (!rows_[index].expanded && !rows_[index].children_loaded) {
-                continue;
-            }
-            rows_[index].expanded = false;
-            rows_[index].children_loaded = false;
-            rows_[index].loading = false;
-            emit_row(index);
-        }
-        notify_row_visibility();
-        return;
     }
     beginResetModel();
     rows_ = std::move(roots);
@@ -764,12 +784,26 @@ void FileBrowseModel::apply_locked_selection() {
     if (!selection_locked_ || rows_.isEmpty()) {
         return;
     }
-    for (int index = 0; index < rows_.size(); ++index) {
-        if (rows_[index].check_state == 0) {
-            continue;
+    // User expand sets parent.expanded before set_children → apply_locked_selection. Keep the
+    // browsable tree open: refresh checks on loaded rows only; do not restart dig-and-collapse
+    // (that path used to blank root display names via collapse_locked_view).
+    bool user_tree_open = false;
+    if (!locked_hydrate_in_progress_) {
+        for (const auto& row : rows_) {
+            if (row.depth == 0 && row.expanded) {
+                user_tree_open = true;
+                break;
+            }
         }
-        rows_[index].check_state = 0;
-        emit_row(index);
+    }
+    if (!user_tree_open) {
+        for (int index = 0; index < rows_.size(); ++index) {
+            if (rows_[index].check_state == 0) {
+                continue;
+            }
+            rows_[index].check_state = 0;
+            emit_row(index);
+        }
     }
     if (locked_chains_.isEmpty()) {
         refresh_selection_cache();
@@ -791,6 +825,11 @@ void FileBrowseModel::apply_locked_selection() {
                 recompute_ancestors(index);
             }
         }
+    }
+    if (user_tree_open) {
+        refresh_selection_cache();
+        notify_row_visibility();
+        return;
     }
     prune_locked_hydrate_dead_ends(chain_resolved);
     QString expand_token;

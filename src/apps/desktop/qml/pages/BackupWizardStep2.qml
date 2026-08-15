@@ -413,13 +413,22 @@ Item {
                 title: qsTrId("aegra.backup.schedule_settings")
                 clip: true
 
-                ColumnLayout {
+                ScrollView {
                     anchors.fill: parent
-                    anchors.topMargin: 56
-                    anchors.margins: 20
-                    spacing: 16
+                    anchors.topMargin: 54
+                    anchors.bottomMargin: 12
+                    anchors.leftMargin: 20
+                    anchors.rightMargin: 6
+                    clip: true
+                    contentWidth: availableWidth
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
-                    Text {
+                    ColumnLayout {
+                        width: Math.max(300, parent.width - 8)
+                        spacing: 16
+
+                        Text {
                         Layout.fillWidth: true
                         wrapMode: Text.WordWrap
                         visible: root.filesMode
@@ -813,6 +822,7 @@ Item {
                     }
 
                     Item { Layout.fillHeight: true }
+                    }
                 }
             }
 
@@ -826,19 +836,20 @@ Item {
                 title: qsTrId("aegra.restore.options")
                 clip: true
 
-                Flickable {
+                ScrollView {
                     anchors.fill: parent
-                    anchors.topMargin: 56
-                    // Match Schedule settings card inner padding (20) so card gutters match.
-                    anchors.margins: 20
-                    contentWidth: width
-                    contentHeight: optCol.implicitHeight
+                    anchors.topMargin: 54
+                    anchors.bottomMargin: 12
+                    anchors.leftMargin: 20
+                    anchors.rightMargin: 6
                     clip: true
-                    boundsBehavior: Flickable.StopAtBounds
+                    contentWidth: availableWidth
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
                     ColumnLayout {
                         id: optCol
-                        width: parent.width
+                        width: Math.max(220, parent.width - 8)
                         spacing: 14
 
                         // Volume Set single-chunk DEDUP only (ADR-0022); hidden for file_set.

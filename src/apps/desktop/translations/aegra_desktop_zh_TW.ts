@@ -577,6 +577,10 @@ Server: %1</source>
         <source>SOURCE</source>
         <translation>來源</translation>
     </message>
+    <message id="aegra.backup.source_locked_hint">
+        <source>(Modification not supported)</source>
+        <translation>（不支援修改）</translation>
+    </message>
     <message id="aegra.backup.section.destination_upper">
         <source>DESTINATION</source>
         <translation>目標</translation>
@@ -1929,22 +1933,6 @@ Server: %1</source>
         <source>Network path</source>
         <translation>網路路徑</translation>
     </message>
-    <message id="aegra.repository.field.hostname_ip">
-        <source>Hostname/IP</source>
-        <translation>主機名稱/IP</translation>
-    </message>
-    <message id="aegra.repository.hostname_placeholder">
-        <source>e.g. 192.168.1.1</source>
-        <translation>例如：192.168.1.1</translation>
-    </message>
-    <message id="aegra.repository.please_enter_hostname">
-        <source>Please enter a hostname or IP</source>
-        <translation>請輸入主機名稱或 IP</translation>
-    </message>
-    <message id="aegra.repository.hostname_invalid">
-        <source>Invalid hostname or IP</source>
-        <translation>主機名稱或 IP 無效</translation>
-    </message>
     <message id="aegra.repository.field.authentication">
         <source>Authentication</source>
         <translation>驗證</translation>
@@ -2100,10 +2088,6 @@ Server: %1</source>
     <message id="aegra.repository.column.name">
         <source>NAME</source>
         <translation>名稱</translation>
-    </message>
-    <message id="aegra.repository.column.path">
-        <source>PATH</source>
-        <translation>路徑</translation>
     </message>
     <message id="aegra.repository.column.status">
         <source>STATUS</source>

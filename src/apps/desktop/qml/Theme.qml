@@ -105,39 +105,22 @@ QtObject {
 
     property string fontFamily: "Segoe UI"
 
-    /// Catalog for Settings UI (preview chips) — glass (blueExtra) first (default)
+    /// Catalog for Settings UI (Theme selection) — glass (blueExtra) first (default)
     readonly property var themes: [
         {
             id: "blueExtra",
             labelKey: "aegra.settings.theme.blue_extra",
-            previewBg: "#C4D6D8",
-            previewCard: "#DBE9EA",
-            previewAccent: "#3798A3",
-            previewText: "#122C30"
+            label: "Blue Extra"
         },
         {
             id: "oceanBlue",
             labelKey: "aegra.settings.theme.ocean_blue",
-            previewBg: "#EBF3FC",
-            previewCard: "#ECF3FD",
-            previewAccent: "#3B82F6",
-            previewText: "#1E293B"
+            label: "Ocean Blue"
         },
         {
             id: "dark",
             labelKey: "aegra.settings.theme.dark",
-            previewBg: "#1e1e1e",
-            previewCard: "#2d2d30",
-            previewAccent: "#007acc",
-            previewText: "#ffffff"
-        },
-        {
-            id: "light",
-            labelKey: "aegra.settings.theme.light",
-            previewBg: "#F1F5F9",
-            previewCard: "#ffffff",
-            previewAccent: "#0078d4",
-            previewText: "#0F172A"
+            label: "Dark"
         }
     ]
 
@@ -317,65 +300,6 @@ QtObject {
             radiusControl: 10,
             radiusMenu: 14,
             radiusButton: 10
-        },
-        "light": {
-            // Modern Clean Light theme (Fluent / Slate)
-            colorBg: "#F1F5F9",
-            colorBgEnd: "#E0EFFE",
-            colorCard: "#ffffff",
-            colorCardEnd: "#EEF5FD",
-            colorBorder: "#CBD5E1",
-            colorCardShadow: Qt.rgba(0.08, 0.12, 0.20, 0.08),
-            colorHeader: "#F1F5F9",
-            colorSidebar: "#F1F5F9",
-            colorSidebarDivider: "#E2E8F0",
-            colorTableHeader: "#E2E8F0",
-            colorTableRow: "#ffffff",
-            colorTableAlt: "#F8FAFC",
-            colorPopup: "#ffffff",
-            colorInput: "#ffffff",
-            colorListItem: "#F1F5F9",
-            colorListItemAlt: "#ffffff",
-            colorAccentRed: "#EF4444",
-            colorAccentBlue: "#0078D4",
-            colorGreen: "#10B981",
-            colorMenuActive: "#0078D4",
-            colorMenuActiveEnd: "#005A9E",
-            colorMenuActiveText: "#ffffff",
-            colorMenuIdle: "#64748B",
-            colorMenuHoverText: "#0F172A",
-            colorMenuHoverBg: "#E2E8F0",
-            colorOnAccent: "#ffffff",
-            colorLinkHover: "#005A9E",
-            colorTextWhite: "#0F172A",
-            colorTextGrey: "#475569",
-            colorTextDim: "#94A3B8",
-            colorHover: "#E2E8F0",
-            colorHoverClose: "#EF4444",
-            colorButton: "#E2E8F0",
-            colorButtonHover: "#CBD5E1",
-            colorButtonDisabled: "#F1F5F9",
-            colorButtonDisabledText: "#94A3B8",
-            colorProgressTrack: "#E2E8F0",
-            colorCalendarMuted: "#94A3B8",
-            colorCalendarHasBackup: "#E0F2FE",
-            colorToastSuccessBg: "#ECFDF5",
-            colorToastSuccessBorder: "#10B981",
-            colorToastErrorBg: "#FEF2F2",
-            colorToastErrorBorder: "#EF4444",
-            colorScrim: "#66000000",
-            volumeColors: [
-                "#0078D4", "#6366F1", "#0EA5E9", "#10B981",
-                "#EC4899", "#8B5CF6", "#14B8A6", "#F59E0B"
-            ],
-            colorVolumeText: "#0F172A",
-            colorUnallocated: "#E2E8F0",
-            colorUnallocatedHatch: "#CBD5E1",
-            colorUnallocatedText: "#64748B",
-            radiusCard: 18,
-            radiusControl: 10,
-            radiusMenu: 14,
-            radiusButton: 10
         }
     })
 
@@ -498,8 +422,13 @@ QtObject {
     function themeLabel(item) {
         if (!item)
             return ""
-        if (item.labelKey)
-            return qsTrId(item.labelKey)
+        if (item.labelKey) {
+            var text = qsTrId(item.labelKey)
+            if (text && text !== item.labelKey)
+                return text
+        }
+        if (item.label)
+            return item.label
         return item.id || ""
     }
 }

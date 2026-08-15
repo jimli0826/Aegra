@@ -2770,6 +2770,9 @@ Item {
                                 Layout.fillHeight: true
                                 //% "SOURCE"
                                 title: qsTrId("aegra.backup.section.source_upper")
+                                //% "(Modification not supported)"
+                                subtitle: (root.editingScheduleId.length > 0 || root.wizardSourceLocked)
+                                          ? qsTrId("aegra.backup.source_locked_hint") : ""
 
                                 // Header right: refresh inventory (disks + file browse)
                                 headerRightComponent: Component {

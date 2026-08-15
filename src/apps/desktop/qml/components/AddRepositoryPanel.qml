@@ -37,6 +37,15 @@ Item {
         }
     ]
 
+    Component {
+        id: driveDiskIconComponent
+        DiskIcon { size: 16; variant: "hdd" }
+    }
+    Component {
+        id: driveFolderIconComponent
+        FolderIcon { size: 16 }
+    }
+
     property int selectedTypeIndex: 0
     property bool isDefault: false
     property bool isConnecting: false
@@ -442,7 +451,8 @@ Item {
 
                 // ---- Left: form (label | control columns) ----
                 ColumnLayout {
-                    Layout.preferredWidth: parent.width * 2 / 3
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: (parent.width - 16) / 2
                     Layout.fillHeight: true
                     spacing: 0
 
@@ -850,7 +860,8 @@ Item {
 
                 // ---- Right: browse (drive letters only for Local) ----
                 ColumnLayout {
-                    Layout.preferredWidth: parent.width / 3
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: (parent.width - 16) / 2
                     Layout.fillHeight: true
                     spacing: 6
 
@@ -987,13 +998,15 @@ Item {
                                                     visible: root.isDriveSelected(modelData)
                                                 }
                                             }
+                                            Loader {
+                                                Layout.preferredWidth: 16
+                                                Layout.preferredHeight: 16
+                                                Layout.alignment: Qt.AlignVCenter
+                                                sourceComponent: root.locationTypes[root.selectedTypeIndex].value === "local"
+                                                                 ? driveDiskIconComponent : driveFolderIconComponent
+                                            }
                                             Text {
-                                                text: {
-                                                    var t = root.locationTypes[root.selectedTypeIndex].value
-                                                    var icon = t === "local"
-                                                               ? "\uD83D\uDCBE " : "\uD83D\uDCC1 "
-                                                    return icon + modelData
-                                                }
+                                                text: modelData
                                                 color: Theme.colorTextWhite
                                                 font.pixelSize: 12
                                                 font.family: Theme.fontFamily

@@ -6,6 +6,7 @@ import ".."
 Rectangle {
     id: card
     property string title: ""
+    property string subtitle: ""
     property string actionText: ""
     property Component headerRightComponent: null
     signal actionClicked()
@@ -52,14 +53,28 @@ Rectangle {
         // Taller when custom header actions (e.g. Repository Refresh/Add/Import).
         height: card.headerRightComponent !== null ? 36 : 32
 
-        Text {
+        RowLayout {
+            spacing: 8
             visible: card.title.length > 0
-            text: card.title
-            color: Theme.colorTextWhite
-            font.pixelSize: 16
-            font.bold: true
-            font.family: Theme.fontFamily
             Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
+
+            Text {
+                text: card.title
+                color: Theme.colorTextWhite
+                font.pixelSize: 16
+                font.bold: true
+                font.family: Theme.fontFamily
+                Layout.alignment: Qt.AlignVCenter
+            }
+
+            Text {
+                visible: card.subtitle.length > 0
+                text: card.subtitle
+                color: Theme.colorTextDim
+                font.pixelSize: 12
+                font.family: Theme.fontFamily
+                Layout.alignment: Qt.AlignVCenter
+            }
         }
 
         Item { Layout.fillWidth: true }

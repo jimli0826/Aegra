@@ -664,6 +664,14 @@ entries = [
     ("aegra.backup.section.source", "Source", "源", "來源", "ソース", "Quelle"),
     ("aegra.backup.section.source_upper", "SOURCE", "源", "來源", "ソース", "QUELLE"),
     (
+        "aegra.backup.source_locked_hint",
+        "(Modification not supported)",
+        "（不支持修改）",
+        "（不支援修改）",
+        "（変更不可）",
+        "(Nicht änderbar)",
+    ),
+    (
         "aegra.backup.section.destination_upper",
         "DESTINATION",
         "目标",

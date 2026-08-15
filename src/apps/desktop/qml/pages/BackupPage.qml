@@ -523,9 +523,11 @@ Item {
     }
 
     function canGoNext() {
-        // Require at least one backup source and an available destination connection.
-        // Empty Locations list (screenshot) must keep Next disabled.
-        if (selectedConnectionId().length === 0)
+        // Require at least one backup source and a selected destination.
+        var conns = serviceClient.connections
+        if (!conns || conns.count <= 0)
+            return false
+        if (selectedLocationIndex < 0 || selectedLocationIndex >= conns.count)
             return false
         if (root.wizardSourceLocked)
             return true
@@ -534,6 +536,23 @@ Item {
             return !!(tree && tree.selectedCount > 0)
         }
         return selectedSources().length > 0
+    }
+
+    function handleStep1Next() {
+        var conns = serviceClient.connections
+        if (!conns || conns.count <= 0)
+            return
+        var idx = selectedLocationIndex
+        if (idx < 0 || idx >= conns.count)
+            return
+
+        var isOnline = (typeof conns.isAvailableAt === "function") ? conns.isAvailableAt(idx) : true
+        if (isOnline) {
+            root.wizardStep = 2
+            return
+        }
+
+        offlineRepoDialog.open()
     }
 
     function freqLabel(f) {
@@ -1068,6 +1087,200 @@ Item {
                         destChangeConfirm.close()
                         root.commitEditedSchedule()
                     }
+                }
+            }
+        }
+    }
+
+    // Dialog shown when user clicks Next while an offline repository is selected.
+    Popup {
+        id: offlineRepoDialog
+        parent: Overlay.overlay
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        anchors.centerIn: Overlay.overlay
+        width: Math.min(480, Overlay.overlay ? Overlay.overlay.width - 48 : 480)
+        padding: 22
+
+        background: Rectangle {
+            color: Theme.colorPopup
+            radius: 16
+            border.width: 1
+            border.color: Theme.colorBorder
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 16
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 10
+
+                Rectangle {
+                    width: 32
+                    height: 32
+                    radius: 8
+                    color: Qt.rgba(Theme.colorAccentRed.r, Theme.colorAccentRed.g, Theme.colorAccentRed.b, 0.15)
+                    Layout.alignment: Qt.AlignVCenter
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "\u26A0"
+                        color: Theme.colorAccentRed
+                        font.pixelSize: 16
+                        font.bold: true
+                    }
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    //% "Repository Offline"
+                    text: qsTrId("aegra.backup.offline_dialog_title")
+                    color: Theme.colorTextWhite
+                    font.pixelSize: 16
+                    font.bold: true
+                    font.family: Theme.fontFamily
+                }
+            }
+
+            Text {
+                Layout.fillWidth: true
+                //% "The selected backup destination is offline and cannot receive backups. Please choose an online repository below to continue:"
+                text: qsTrId("aegra.backup.offline_dialog_message")
+                color: Theme.colorTextGrey
+                font.pixelSize: 13
+                font.family: Theme.fontFamily
+                wrapMode: Text.WordWrap
+            }
+
+            // Online repositories list
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 6
+                visible: serviceClient.connections && serviceClient.connections.availableCount > 0
+
+                Repeater {
+                    model: serviceClient.connections
+                    delegate: Rectangle {
+                        id: onlineItemRow
+                        required property int index
+                        required property string displayName
+                        required property string locator
+                        required property bool isAvailable
+                        required property string stateText
+
+                        visible: isAvailable
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: visible ? 50 : 0
+                        radius: 8
+                        color: onlineItemHover.containsMouse ? Theme.colorHover : Theme.colorCard
+                        border.width: 1
+                        border.color: onlineItemHover.containsMouse ? Theme.colorAccentBlue : Theme.colorBorder
+
+                        readonly property bool isNetwork: {
+                            var p = (locator || "").trim()
+                            return p.indexOf("\\\\") === 0 || p.indexOf("//") === 0
+                        }
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 10
+                            anchors.rightMargin: 10
+                            spacing: 10
+
+                            Rectangle {
+                                width: 24
+                                height: 24
+                                radius: 4
+                                color: "#4a9eff"
+                                Layout.alignment: Qt.AlignVCenter
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: onlineItemRow.isNetwork ? "\uD83C\uDF10" : "\uD83D\uDCBB"
+                                    font.pixelSize: 12
+                                }
+                            }
+
+                            Column {
+                                Layout.fillWidth: true
+                                spacing: 2
+                                Layout.alignment: Qt.AlignVCenter
+
+                                Text {
+                                    width: parent.width
+                                    text: onlineItemRow.displayName.length > 0 ? onlineItemRow.displayName : onlineItemRow.locator
+                                    color: Theme.colorTextWhite
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                    font.family: Theme.fontFamily
+                                    elide: Text.ElideRight
+                                }
+                                Text {
+                                    width: parent.width
+                                    text: onlineItemRow.locator
+                                    color: Theme.colorTextGrey
+                                    font.pixelSize: 11
+                                    font.family: Theme.fontFamily
+                                    elide: Text.ElideMiddle
+                                }
+                            }
+
+                            Row {
+                                spacing: 4
+                                Layout.alignment: Qt.AlignVCenter
+                                Text {
+                                    text: "\u2713"
+                                    color: Theme.colorGreen
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                }
+                                Text {
+                                    text: onlineItemRow.stateText || "Online"
+                                    color: Theme.colorGreen
+                                    font.pixelSize: 12
+                                    font.bold: true
+                                    font.family: Theme.fontFamily
+                                }
+                            }
+                        }
+
+                        MouseArea {
+                            id: onlineItemHover
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                root.selectedLocationIndex = onlineItemRow.index
+                                offlineRepoDialog.close()
+                                root.wizardStep = 2
+                            }
+                        }
+                    }
+                }
+            }
+
+            Text {
+                Layout.fillWidth: true
+                visible: !serviceClient.connections || serviceClient.connections.availableCount === 0
+                //% "No online repositories found. Please bring a repository online or add a new location in the Repository page."
+                text: qsTrId("aegra.backup.offline_dialog_none_available")
+                color: Theme.colorAccentRed
+                font.pixelSize: 12
+                font.family: Theme.fontFamily
+                wrapMode: Text.WordWrap
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 10
+                Item { Layout.fillWidth: true }
+
+                AppButton {
+                    //% "Cancel"
+                    text: qsTrId("aegra.common.cancel")
+                    Layout.preferredHeight: 36
+                    onClicked: offlineRepoDialog.close()
                 }
             }
         }
@@ -3087,13 +3300,14 @@ Item {
                                                 readonly property string locName: {
                                                     if (liveModel)
                                                         return (model.displayName
-                                                                || model.connectionId || "")
+                                                                || model.locator
+                                                                || qsTrId("aegra.repository.title"))
                                                     return (modelData && modelData.name)
                                                            ? modelData.name : ""
                                                 }
                                                 readonly property string locPath: {
                                                     if (liveModel)
-                                                        return model.connectionId || ""
+                                                        return model.locator || ""
                                                     return (modelData && modelData.path)
                                                            ? modelData.path : ""
                                                 }
@@ -3102,10 +3316,19 @@ Item {
                                                         return !!model.isDefault
                                                     return !!(modelData && modelData.isDefault)
                                                 }
+                                                readonly property bool locAvailable: {
+                                                    if (liveModel)
+                                                        return !!model.isAvailable
+                                                    return true
+                                                }
                                                 readonly property string locState: {
                                                     if (liveModel)
                                                         return model.stateText || ""
                                                     return ""
+                                                }
+                                                readonly property bool isNetwork: {
+                                                    var p = (locRow.locPath || "").trim()
+                                                    return p.indexOf("\\\\") === 0 || p.indexOf("//") === 0
                                                 }
                                                 readonly property bool selected:
                                                     root.selectedLocationIndex === index
@@ -3143,7 +3366,7 @@ Item {
                                                         color: "#4a9eff"
                                                         Text {
                                                             anchors.centerIn: parent
-                                                            text: "\uD83D\uDCBB"
+                                                            text: locRow.isNetwork ? "\uD83C\uDF10" : "\uD83D\uDCBB"
                                                             font.pixelSize: 12
                                                         }
                                                     }
@@ -3175,7 +3398,7 @@ Item {
                                                         Text {
                                                             width: parent.width
                                                             text: locRow.locState
-                                                            color: Theme.colorTextDim
+                                                            color: locRow.locAvailable ? Theme.colorGreen : Theme.colorAccentRed
                                                             font.pixelSize: 10
                                                             font.family: Theme.fontFamily
                                                             visible: locRow.locState.length > 0
@@ -3245,7 +3468,7 @@ Item {
                                 Layout.preferredHeight: 40
                                 enabled: root.canGoNext()
                                 primary: true
-                                onClicked: root.wizardStep = 2
+                                onClicked: root.handleStep1Next()
                             }
                         }
                         } // step1 ColumnLayout

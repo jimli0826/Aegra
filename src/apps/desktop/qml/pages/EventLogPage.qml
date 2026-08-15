@@ -698,8 +698,8 @@ Item {
                         Text {
                             Layout.preferredWidth: 160
                             Layout.fillWidth: true
-                            //% "Destination"
-                            text: qsTrId("aegra.backup.section.destination_upper")
+                            //% "Repository"
+                            text: qsTrId("aegra.repository.title").toUpperCase()
                             color: Theme.colorTextDim
                             font.pixelSize: 11
                             font.bold: true
@@ -768,6 +768,7 @@ Item {
                             height: 52
 
                             required property int index
+                            required property int stateValue
                             required property string operationText
                             required property string sourceName
                             required property string destinationName
@@ -927,14 +928,133 @@ Item {
                                 }
 
                                 // Status
-                                Text {
+                                Item {
                                     Layout.preferredWidth: 110
-                                    text: logRow.stateText || ""
-                                    color: logRow.stateColor
-                                    font.pixelSize: 13
-                                    font.bold: true
-                                    font.family: Theme.fontFamily
-                                    horizontalAlignment: Text.AlignHCenter
+                                    Layout.fillHeight: true
+
+                                    Row {
+                                        anchors.centerIn: parent
+                                        spacing: 6
+
+                                        // Status icon (Canvas vector)
+                                        Canvas {
+                                            id: logStatusCanvas
+                                            width: 16
+                                            height: 16
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            antialiasing: true
+                                            renderTarget: Canvas.FramebufferObject
+                                            renderStrategy: Canvas.Cooperative
+
+                                            property int stVal: logRow.stateValue
+                                            property color greenColor: Theme.colorGreen
+                                            property color redColor: Theme.colorAccentRed
+                                            property color blueColor: Theme.colorAccentBlue
+
+                                            onStValChanged: requestPaint()
+                                            onGreenColorChanged: requestPaint()
+                                            onRedColorChanged: requestPaint()
+                                            onBlueColorChanged: requestPaint()
+                                            Component.onCompleted: requestPaint()
+
+                                            onPaint: {
+                                                var ctx = getContext("2d")
+                                                ctx.reset()
+                                                ctx.clearRect(0, 0, width, height)
+                                                var cx = width / 2
+                                                var cy = height / 2
+
+                                                if (stVal === 4) {
+                                                    // Succeeded: Green check-circle
+                                                    ctx.strokeStyle = Theme.colorGreen
+                                                    ctx.lineWidth = 1.6
+                                                    ctx.lineCap = "round"
+                                                    ctx.lineJoin = "round"
+
+                                                    // Circle
+                                                    ctx.beginPath()
+                                                    ctx.arc(cx, cy, 6.2, 0, Math.PI * 2)
+                                                    ctx.stroke()
+
+                                                    // Checkmark
+                                                    ctx.beginPath()
+                                                    ctx.moveTo(cx - 3.4, cy - 0.1)
+                                                    ctx.lineTo(cx - 0.8, cy + 2.4)
+                                                    ctx.lineTo(cx + 3.6, cy - 2.4)
+                                                    ctx.stroke()
+                                                } else if (stVal === 5) {
+                                                    // Failed: Red x-circle
+                                                    ctx.strokeStyle = Theme.colorAccentRed
+                                                    ctx.lineWidth = 1.6
+                                                    ctx.lineCap = "round"
+                                                    ctx.lineJoin = "round"
+
+                                                    // Circle
+                                                    ctx.beginPath()
+                                                    ctx.arc(cx, cy, 6.2, 0, Math.PI * 2)
+                                                    ctx.stroke()
+
+                                                    // Cross
+                                                    var r = 2.6
+                                                    ctx.beginPath()
+                                                    ctx.moveTo(cx - r, cy - r)
+                                                    ctx.lineTo(cx + r, cy + r)
+                                                    ctx.stroke()
+
+                                                    ctx.beginPath()
+                                                    ctx.moveTo(cx + r, cy - r)
+                                                    ctx.lineTo(cx - r, cy + r)
+                                                    ctx.stroke()
+                                                } else if (stVal === 6 || stVal === 7) {
+                                                    // Cancelled / Interrupted: Amber minus-circle
+                                                    ctx.strokeStyle = "#e6a817"
+                                                    ctx.lineWidth = 1.6
+                                                    ctx.lineCap = "round"
+                                                    ctx.lineJoin = "round"
+
+                                                    // Circle
+                                                    ctx.beginPath()
+                                                    ctx.arc(cx, cy, 6.2, 0, Math.PI * 2)
+                                                    ctx.stroke()
+
+                                                    // Minus
+                                                    ctx.beginPath()
+                                                    ctx.moveTo(cx - 2.8, cy)
+                                                    ctx.lineTo(cx + 2.8, cy)
+                                                    ctx.stroke()
+                                                } else {
+                                                    // Queued / Running / Cancelling / Active: Blue dot-circle
+                                                    ctx.strokeStyle = Theme.colorAccentBlue
+                                                    ctx.fillStyle = Theme.colorAccentBlue
+                                                    ctx.lineWidth = 1.6
+                                                    ctx.lineCap = "round"
+                                                    ctx.lineJoin = "round"
+
+                                                    ctx.beginPath()
+                                                    ctx.arc(cx, cy, 6.2, 0, Math.PI * 2)
+                                                    ctx.stroke()
+
+                                                    ctx.beginPath()
+                                                    ctx.arc(cx, cy, 2.2, 0, Math.PI * 2)
+                                                    ctx.fill()
+                                                }
+                                            }
+                                        }
+
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: logRow.stateText || ""
+                                            color: {
+                                                if (logRow.stateValue === 4) return Theme.colorGreen
+                                                if (logRow.stateValue === 5) return Theme.colorAccentRed
+                                                if (logRow.stateValue === 6 || logRow.stateValue === 7) return "#e6a817"
+                                                return logRow.stateColor || Theme.colorAccentBlue
+                                            }
+                                            font.pixelSize: 13
+                                            font.bold: true
+                                            font.family: Theme.fontFamily
+                                        }
+                                    }
                                 }
 
                                 // Started

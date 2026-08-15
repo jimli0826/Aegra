@@ -644,44 +644,18 @@ Item {
                                     verticalAlignment: Text.AlignVCenter
                                 }
 
-                                RowLayout {
+                                Text {
                                     Layout.preferredWidth: 100
                                     Layout.minimumWidth: 80
                                     Layout.maximumWidth: 160
                                     Layout.fillHeight: true
-                                    spacing: 6
-
-                                    // Online / Offline marker before name.
-                                    Item {
-                                        Layout.preferredWidth: 10
-                                        Layout.preferredHeight: 10
-                                        Layout.alignment: Qt.AlignVCenter
-                                        Rectangle {
-                                            anchors.centerIn: parent
-                                            width: 8
-                                            height: 8
-                                            radius: 4
-                                            color: {
-                                                if (isRefreshing)
-                                                    return Theme.colorAccentBlue
-                                                if (isAvailable)
-                                                    return Theme.colorGreen
-                                                return Theme.colorTextDim
-                                            }
-                                            opacity: isRefreshing ? 0.85 : 1.0
-                                        }
-                                    }
-
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: displayName
-                                        color: Theme.colorTextWhite
-                                        font.pixelSize: 14
-                                        font.bold: true
-                                        font.family: Theme.fontFamily
-                                        elide: Text.ElideRight
-                                        verticalAlignment: Text.AlignVCenter
-                                    }
+                                    text: displayName
+                                    color: Theme.colorTextWhite
+                                    font.pixelSize: 14
+                                    font.bold: true
+                                    font.family: Theme.fontFamily
+                                    elide: Text.ElideRight
+                                    verticalAlignment: Text.AlignVCenter
                                 }
 
                                 Item {
@@ -701,9 +675,15 @@ Item {
                                         elide: Text.ElideMiddle
                                         horizontalAlignment: Text.AlignLeft
                                         verticalAlignment: Text.AlignVCenter
-                                        ToolTip.visible: truncated && rowHover.hovered
+                                        ToolTip.visible: truncated && pathHover.hovered
                                         ToolTip.delay: 400
                                         ToolTip.text: locator || ""
+
+                                        HoverHandler {
+                                            id: pathHover
+                                            acceptedDevices: PointerDevice.Mouse
+                                                             | PointerDevice.TouchPad
+                                        }
                                     }
                                 }
 
@@ -716,64 +696,116 @@ Item {
 
                                     Row {
                                         anchors.centerIn: parent
-                                        spacing: 4
+                                        spacing: 6
                                         visible: !isRefreshing
 
-                                        // Warning before Offline when last Test/Refresh failed.
-                                        Text {
+                                        // Status icon (Online check-circle / Offline warning-triangle)
+                                        Canvas {
+                                            id: statusIconCanvas
+                                            width: 18
+                                            height: 18
                                             anchors.verticalCenter: parent.verticalCenter
-                                            visible: !isAvailable && probeErrorText
-                                                     && probeErrorText.length > 0
-                                            text: "\u26A0"
-                                            color: Theme.colorAccentRed
-                                            font.pixelSize: 12
-                                            font.bold: true
-                                            font.family: Theme.fontFamily
-                                            ToolTip.visible: visible && statusWarnHover.hovered
-                                            ToolTip.delay: 300
-                                            ToolTip.text: probeErrorText || ""
+                                            antialiasing: true
+                                            renderTarget: Canvas.FramebufferObject
+                                            renderStrategy: Canvas.Cooperative
 
-                                            HoverHandler {
-                                                id: statusWarnHover
-                                                acceptedDevices: PointerDevice.Mouse
-                                                                 | PointerDevice.TouchPad
+                                            property bool available: isAvailable
+                                            property color greenColor: Theme.colorGreen
+                                            property color redColor: Theme.colorAccentRed
+
+                                            onAvailableChanged: requestPaint()
+                                            onGreenColorChanged: requestPaint()
+                                            onRedColorChanged: requestPaint()
+                                            Component.onCompleted: requestPaint()
+
+                                            onPaint: {
+                                                var ctx = getContext("2d")
+                                                ctx.reset()
+                                                ctx.clearRect(0, 0, width, height)
+                                                var cx = width / 2
+                                                var cy = height / 2
+
+                                                if (available) {
+                                                    // Online: Green check-circle icon
+                                                    ctx.strokeStyle = Theme.colorGreen
+                                                    ctx.lineWidth = 1.8
+                                                    ctx.lineCap = "round"
+                                                    ctx.lineJoin = "round"
+
+                                                    // Circle outline
+                                                    ctx.beginPath()
+                                                    ctx.arc(cx, cy, 7.0, 0, Math.PI * 2)
+                                                    ctx.stroke()
+
+                                                    // Checkmark
+                                                    ctx.beginPath()
+                                                    ctx.moveTo(cx - 3.8, cy - 0.2)
+                                                    ctx.lineTo(cx - 1.0, cy + 2.6)
+                                                    ctx.lineTo(cx + 4.0, cy - 2.8)
+                                                    ctx.stroke()
+                                                } else {
+                                                    // Offline: Red warning / alert triangle icon
+                                                    var color = Theme.colorAccentRed
+                                                    ctx.strokeStyle = color
+                                                    ctx.fillStyle = color
+                                                    ctx.lineWidth = 1.8
+                                                    ctx.lineCap = "round"
+                                                    ctx.lineJoin = "round"
+
+                                                    // Warning triangle
+                                                    ctx.beginPath()
+                                                    ctx.moveTo(cx, cy - 7.0)
+                                                    ctx.lineTo(cx + 7.5, cy + 6.5)
+                                                    ctx.lineTo(cx - 7.5, cy + 6.5)
+                                                    ctx.closePath()
+                                                    ctx.stroke()
+
+                                                    // Exclamation mark line & dot
+                                                    ctx.beginPath()
+                                                    ctx.moveTo(cx, cy - 2.8)
+                                                    ctx.lineTo(cx, cy + 1.6)
+                                                    ctx.stroke()
+
+                                                    ctx.beginPath()
+                                                    ctx.arc(cx, cy + 4.2, 1.0, 0, Math.PI * 2)
+                                                    ctx.fill()
+                                                }
                                             }
                                         }
 
                                         Text {
                                             anchors.verticalCenter: parent.verticalCenter
                                             text: stateText
-                                            color: isAvailable ? Theme.colorGreen
-                                                               : Theme.colorTextGrey
+                                            color: isAvailable ? Theme.colorGreen : Theme.colorAccentRed
                                             font.pixelSize: 13
                                             font.bold: true
                                             font.family: Theme.fontFamily
+                                        }
+
+                                        ToolTip.visible: !isAvailable && probeErrorText && probeErrorText.length > 0 && statusWarnHover.hovered
+                                        ToolTip.delay: 300
+                                        ToolTip.text: probeErrorText || ""
+
+                                        HoverHandler {
+                                            id: statusWarnHover
+                                            acceptedDevices: PointerDevice.Mouse
+                                                             | PointerDevice.TouchPad
                                         }
                                     }
 
                                     Item {
                                         id: refreshStatusIcon
                                         anchors.centerIn: parent
-                                        width: 22
-                                        height: 22
+                                        width: 18
+                                        height: 18
                                         visible: isRefreshing
                                         property real spinAngle: 0
                                         rotation: spinAngle
 
-                                        Rectangle {
-                                            anchors.fill: parent
-                                            radius: width / 2
-                                            color: Qt.rgba(Theme.colorAccentBlue.r,
-                                                           Theme.colorAccentBlue.g,
-                                                           Theme.colorAccentBlue.b, 0.18)
-                                        }
-
-                                        // Dual circular arrows (sync) — same glyph as schedule task running.
+                                        // Dual circular arrows (sync)
                                         Canvas {
                                             id: refreshSyncCanvas
-                                            anchors.centerIn: parent
-                                            width: 16
-                                            height: 16
+                                            anchors.fill: parent
                                             antialiasing: true
                                             onVisibleChanged: if (visible)
                                                 requestPaint()
@@ -785,13 +817,13 @@ Item {
                                                 var ink = Theme.colorAccentBlue
                                                 ctx.strokeStyle = ink
                                                 ctx.fillStyle = ink
-                                                ctx.lineWidth = 1.6
+                                                ctx.lineWidth = 1.8
                                                 ctx.lineCap = "round"
                                                 ctx.lineJoin = "round"
 
                                                 var cx = width / 2
                                                 var cy = height / 2
-                                                var r = Math.min(width, height) / 2 - 2.2
+                                                var r = width / 2 - 2.0
 
                                                 function drawArcArrow(startAng, endAng) {
                                                     ctx.beginPath()
@@ -804,8 +836,8 @@ Item {
                                                     var hy = Math.sin(tang)
                                                     var nx = Math.cos(endAng)
                                                     var ny = Math.sin(endAng)
-                                                    var len = 3.2
-                                                    var wing = 2.2
+                                                    var len = 3.6
+                                                    var wing = 2.4
                                                     ctx.beginPath()
                                                     ctx.moveTo(tipX + hx * len, tipY + hy * len)
                                                     ctx.lineTo(tipX - nx * wing - hx * 0.4,

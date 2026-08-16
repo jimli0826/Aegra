@@ -25,6 +25,7 @@ struct SourceInventoryRow final {
     bool is_read_only{false};
     bool is_selectable{false};
     std::uint32_t disk_number{0};
+    std::int64_t offset_bytes{0};
     QString mount_letter;
     QString volume_label;
     QString health_status;

@@ -55,8 +55,8 @@ using protocol_detail::stable_code;
     if (!has_exact_keys(object,
                         {"source_id", "display_name", "kind", "availability", "capacity_bytes",
                          "free_bytes", "disk_capacity_bytes", "is_system", "is_read_only",
-                         "is_selectable", "disk_number", "mount_letter", "volume_label",
-                         "health_status", "partition_style", "media_type"})) {
+                         "is_selectable", "disk_number", "offset_bytes", "mount_letter",
+                         "volume_label", "health_status", "partition_style", "media_type"})) {
         return false;
     }
     const auto source_id = object.value(QStringLiteral("source_id")).toString();
@@ -67,6 +67,7 @@ using protocol_detail::stable_code;
     qint64 free_bytes = 0;
     qint64 disk_capacity_bytes = 0;
     qint64 disk_number = 0;
+    qint64 offset_bytes = 0;
     if (!object.value(QStringLiteral("source_id")).isString() || !stable_code(source_id, 128) ||
         !parse_display_name(object.value(QStringLiteral("display_name")), display_name) ||
         !integer_in_range(object.value(QStringLiteral("kind")), 1, 1, kind) ||
@@ -80,6 +81,8 @@ using protocol_detail::stable_code;
                           (std::numeric_limits<qint64>::max)(), disk_capacity_bytes) ||
         !integer_in_range(object.value(QStringLiteral("disk_number")), 0,
                           (std::numeric_limits<qint64>::max)(), disk_number) ||
+        !integer_in_range(object.value(QStringLiteral("offset_bytes")), 0,
+                          (std::numeric_limits<qint64>::max)(), offset_bytes) ||
         !object.value(QStringLiteral("is_system")).isBool() ||
         !object.value(QStringLiteral("is_read_only")).isBool() ||
         !object.value(QStringLiteral("is_selectable")).isBool() ||
@@ -105,6 +108,7 @@ using protocol_detail::stable_code;
               {QStringLiteral("isReadOnly"), object.value(QStringLiteral("is_read_only")).toBool()},
               {QStringLiteral("isSelectable"), is_selectable},
               {QStringLiteral("diskNumber"), disk_number},
+              {QStringLiteral("offsetBytes"), offset_bytes},
               {QStringLiteral("mountLetter"), object.value(QStringLiteral("mount_letter")).toString()},
               {QStringLiteral("volumeLabel"), object.value(QStringLiteral("volume_label")).toString()},
               {QStringLiteral("healthStatus"),

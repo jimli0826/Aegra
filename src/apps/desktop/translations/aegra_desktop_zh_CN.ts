@@ -1615,6 +1615,30 @@
         <source>Unallocated</source>
         <translation>未分配</translation>
     </message>
+    <message id="aegra.volume.local_disk">
+        <source>Local Disk</source>
+        <translation>本地磁盘</translation>
+    </message>
+    <message id="aegra.volume.new_volume">
+        <source>New Volume</source>
+        <translation>新加卷</translation>
+    </message>
+    <message id="aegra.volume.hidden_partition">
+        <source>Hidden Partition</source>
+        <translation>隐藏分区</translation>
+    </message>
+    <message id="aegra.volume.efi_system">
+        <source>EFI System Partition</source>
+        <translation>EFI 系统分区</translation>
+    </message>
+    <message id="aegra.volume.recovery">
+        <source>Recovery Partition</source>
+        <translation>恢复分区</translation>
+    </message>
+    <message id="aegra.volume.system">
+        <source>System</source>
+        <translation>系统</translation>
+    </message>
     <message id="aegra.restore.no_partitions">
         <source>No partitions</source>
         <translation>无分区</translation>

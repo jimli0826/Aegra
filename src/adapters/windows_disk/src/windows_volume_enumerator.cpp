@@ -169,6 +169,14 @@ struct PhysicalDiskInfo final {
     std::vector<PhysicalPartitionRange> partitions;
 };
 
+// GPT Microsoft Reserved Partition type (E3C9E316-0B5C-4DB8-817D-F92DF00215AE).
+inline constexpr GUID kMicrosoftReservedPartitionGuid = {
+    0xE3C9E316, 0x0B5C, 0x4DB8, {0x81, 0x7D, 0xF9, 0x2D, 0xF0, 0x02, 0x15, 0xAE}};
+
+[[nodiscard]] bool guid_equal(const GUID& left, const GUID& right) noexcept {
+    return std::memcmp(&left, &right, sizeof(GUID)) == 0;
+}
+
 [[nodiscard]] detail::UniqueHandle open_physical_drive(const std::uint32_t disk_number) {
     const auto path = std::wstring(LR"(\\.\PhysicalDrive)") + std::to_wstring(disk_number);
     // Prefer query-only access; fall back to GENERIC_READ (old StorageManager path).
@@ -456,10 +464,6 @@ bool load_disk_extents(const wchar_t* volume_name, WindowsVolumeInfo& info) {
     return false;
 }
 
-[[nodiscard]] bool guid_equal(const GUID& left, const GUID& right) noexcept {
-    return std::memcmp(&left, &right, sizeof(GUID)) == 0;
-}
-
 // Hidden / unmounted partitions: name from GPT type (old EFI/MSR/Recovery mapping).
 void load_partition_identity(const wchar_t* volume_name, WindowsVolumeInfo& info) {
     const auto device_path = volume_device_path(volume_name);
@@ -485,8 +489,6 @@ void load_partition_identity(const wchar_t* volume_name, WindowsVolumeInfo& info
     // GPT partition type GUIDs (same as old storage_manager.cpp).
     static constexpr GUID kEfiSystemPartition = {
         0xC12A7328, 0xF81F, 0x11D2, {0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B}};
-    static constexpr GUID kMicrosoftReserved = {
-        0xE3C9E316, 0x0B5C, 0x4DB8, {0x81, 0x7D, 0xF9, 0x2D, 0xF0, 0x02, 0x15, 0xAE}};
     static constexpr GUID kWindowsRecovery = {
         0xDE94BBA4, 0x06D1, 0x4D40, {0xA1, 0x6A, 0xBF, 0xD5, 0x01, 0x79, 0xD6, 0xAC}};
     if (part.PartitionStyle == PARTITION_STYLE_GPT) {
@@ -495,7 +497,7 @@ void load_partition_identity(const wchar_t* volume_name, WindowsVolumeInfo& info
             if (info.filesystem.empty()) {
                 info.filesystem = "FAT32";
             }
-        } else if (guid_equal(part.Gpt.PartitionType, kMicrosoftReserved)) {
+        } else if (guid_equal(part.Gpt.PartitionType, kMicrosoftReservedPartitionGuid)) {
             info.label = "Microsoft Reserved Partition";
             if (info.filesystem.empty()) {
                 info.filesystem = "RAW";
@@ -655,6 +657,7 @@ make_disk_shell_record(const PhysicalDiskInfo& disk, const bool is_system_disk) 
         .is_system = is_system_disk,
         .is_read_only = true,
         .disk_number = disk.disk_number,
+        .offset_bytes = 0,
         .mount_letter = {},
         .volume_label = {},
         .health_status = "Unallocated",
@@ -698,6 +701,21 @@ make_volume_record(const WindowsVolumeInfo& volume, const PhysicalDiskInfo& disk
     if (free_bytes > volume.total_size_bytes) {
         free_bytes = volume.total_size_bytes;
     }
+    // Prefer the matched partition start for layout bars; fall back to the primary extent.
+    std::uint64_t offset_bytes = 0;
+    if (!volume.extents.empty()) {
+        offset_bytes = volume.extents.front().disk_offset_bytes;
+        constexpr std::uint64_t kOffsetToleranceBytes = 1024ULL * 1024ULL;
+        for (const auto& part : disk.partitions) {
+            const auto delta = offset_bytes >= part.offset_bytes
+                                   ? offset_bytes - part.offset_bytes
+                                   : part.offset_bytes - offset_bytes;
+            if (delta <= kOffsetToleranceBytes) {
+                offset_bytes = part.offset_bytes;
+                break;
+            }
+        }
+    }
     return base::Result<ports::SourceInventoryRecord>::success(ports::SourceInventoryRecord{
         .source_id = std::move(source_id),
         .stable_key = std::move(stable_key).value(),
@@ -712,6 +730,7 @@ make_volume_record(const WindowsVolumeInfo& volume, const PhysicalDiskInfo& disk
         .is_system = is_system,
         .is_read_only = volume.is_read_only,
         .disk_number = disk.disk_number,
+        .offset_bytes = offset_bytes,
         .mount_letter = std::move(mount_letter),
         .volume_label = volume_label,
         .health_status = std::move(health),

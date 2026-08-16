@@ -1615,6 +1615,30 @@
         <source>Unallocated</source>
         <translation>Unallocated</translation>
     </message>
+    <message id="aegra.volume.local_disk">
+        <source>Local Disk</source>
+        <translation>Local Disk</translation>
+    </message>
+    <message id="aegra.volume.new_volume">
+        <source>New Volume</source>
+        <translation>New Volume</translation>
+    </message>
+    <message id="aegra.volume.hidden_partition">
+        <source>Hidden Partition</source>
+        <translation>Hidden Partition</translation>
+    </message>
+    <message id="aegra.volume.efi_system">
+        <source>EFI System Partition</source>
+        <translation>EFI System Partition</translation>
+    </message>
+    <message id="aegra.volume.recovery">
+        <source>Recovery Partition</source>
+        <translation>Recovery Partition</translation>
+    </message>
+    <message id="aegra.volume.system">
+        <source>System</source>
+        <translation>System</translation>
+    </message>
     <message id="aegra.restore.no_partitions">
         <source>No partitions</source>
         <translation>No partitions</translation>

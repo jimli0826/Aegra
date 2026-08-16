@@ -362,7 +362,7 @@ Footer，其它任务为 0。file_set backup 成功时 `requested_backup_type` /
 | ---: | --- |
 | 1 GetServiceInfo | api 仅 4；capabilities 可含 `file.*` |
 | 2 ListRecoveryPoints | item 含 `content_kind` |
-| 4 ListSourceInventory | 仍以 Volume 为主；不返回任意文件系统树 |
+| 4 ListSourceInventory | 仍以 Volume 为主；不返回任意文件系统树。`SourceInventoryItem` 含 `offset_bytes`（卷主 extent 在物理盘上的起始字节，disk shell 为 0），供 Desktop 分区条按物理布局绘制未分配区域 |
 | 5 ListJobs | summary 含 `content_kind` 与 requested/effective backup 投影（FI7）；请求增加 `scope`（1=all / 2=active / 3=terminal）与可选 `from_utc_ms`/`to_utc_ms`（按 `created_utc_ms`）。热路径用 active；Task Log 用 terminal + 时间窗 |
 | 6 ListSchedules | summary 含 `content_kind` 与 file selection 安全摘要 |
 | 9 PrepareRestore | **仅 volume_set** RP；file_set RP 必须用 kind 15 |

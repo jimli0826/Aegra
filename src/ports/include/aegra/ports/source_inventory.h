@@ -25,6 +25,8 @@ struct SourceInventoryRecord final {
     bool is_system{false};
     bool is_read_only{false};
     std::uint32_t disk_number{0};
+    // Primary extent start on the physical disk (bytes). 0 when unknown or disk shell.
+    std::uint64_t offset_bytes{0};
     std::string mount_letter;
     std::string volume_label;
     std::string health_status;

@@ -75,6 +75,7 @@ decode_inventory_token(const std::optional<std::string>& token, const bool inclu
     item.is_read_only = record.is_read_only;
     item.is_selectable = detail::is_source_selectable(record);
     item.disk_number = record.disk_number;
+    item.offset_bytes = record.offset_bytes;
     item.mount_letter = normalize_mount_letter(record.mount_letter);
     item.volume_label = record.volume_label;
     item.health_status = record.health_status.empty() ? "Healthy" : record.health_status;

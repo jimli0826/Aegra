@@ -222,7 +222,7 @@ base::Result<void> validate_source_inventory_item(const SourceInventoryItem& ite
         item.free_bytes > item.capacity_bytes || !valid_wire_integer(item.disk_capacity_bytes) ||
         (item.is_selectable && item.availability != SourceAvailability::kAvailable) ||
         !valid_wire_integer(static_cast<std::uint64_t>(item.disk_number)) ||
-        item.mount_letter.size() > 16 ||
+        !valid_wire_integer(item.offset_bytes) || item.mount_letter.size() > 16 ||
         (!item.mount_letter.empty() && !valid_text(item.mount_letter, 16)) ||
         item.volume_label.size() > kMaximumDisplayNameBytes ||
         (!item.volume_label.empty() && !valid_text(item.volume_label, kMaximumDisplayNameBytes)) ||

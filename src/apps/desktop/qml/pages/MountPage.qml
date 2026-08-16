@@ -154,48 +154,210 @@ Item {
         root.selectedSessionsEpoch++
     }
 
-    /// Volumes for proportional bar (same rules as RestorePage / old MountPage).
+    /// Volumes for proportional bar (same rules as RestorePage).
     function displayVolumesForDisk(diskData) {
         var raw = (diskData && diskData.volumes) ? diskData.volumes : []
-        var list = []
-        var sumBytes = 0
-        for (var i = 0; i < raw.length; ++i) {
-            var v = raw[i]
-            if (!v)
-                continue
-            var tb = Number(v.capacityBytes) || 0
-            list.push({
-                letter: v.letter || "",
-                name: v.name || "",
-                size: v.size || "",
-                fileSystem: v.fs || v.fileSystem || "",
-                totalBytes: tb,
-                unallocated: false
-            })
-            sumBytes += tb
-        }
         var diskTotal = diskData ? (Number(diskData.capacityBytes) || 0) : 0
-        if (diskTotal <= 0 && sumBytes > 0)
-            diskTotal = sumBytes
-        for (var j = 0; j < list.length; ++j) {
-            var r = diskTotal > 0 ? (list[j].totalBytes / diskTotal)
-                                  : (1.0 / Math.max(1, list.length))
-            list[j].ratio = r > 0 ? r : 0.04
+        var list = []
+        var minUnallocBytes = 128 * 1024 * 1024
+        var hasPrebuiltUnalloc = false
+        var hasOffsets = false
+        for (var i = 0; i < raw.length; ++i) {
+            if (!raw[i])
+                continue
+            if (raw[i].unallocated === true)
+                hasPrebuiltUnalloc = true
+            if (raw[i].offsetBytes !== undefined && raw[i].offsetBytes !== null
+                    && raw[i].offsetBytes !== "")
+                hasOffsets = true
         }
-        if (diskTotal > 0 && sumBytes > 0 && diskTotal > sumBytes + 1024 * 1024) {
-            var unallocBytes = diskTotal - sumBytes
+
+        function isMsrVolume(v) {
+            if (!v)
+                return false
+            var n = ((v.name || "") + " " + (v.letter || "")).toLowerCase()
+            return n.indexOf("microsoft reserved") >= 0 || n.indexOf(" msr") >= 0
+                   || n === "msr" || n.indexOf("msr partition") >= 0
+        }
+
+        function formatUnallocSize(bytes) {
+            var n = Number(bytes) || 0
+            if (n <= 0)
+                return ""
+            if (typeof serviceClient !== "undefined" && serviceClient
+                    && typeof serviceClient.formatBytes === "function")
+                return serviceClient.formatBytes(n)
+            return ""
+        }
+
+        function pushUnalloc(bytes) {
+            if (bytes <= minUnallocBytes)
+                return
             list.push({
                 letter: "",
                 //% "Unallocated"
                 name: qsTrId("aegra.restore.unallocated"),
-                size: "",
+                size: formatUnallocSize(bytes),
                 fileSystem: "",
-                ratio: unallocBytes / diskTotal,
-                totalBytes: unallocBytes,
+                totalBytes: bytes,
                 unallocated: true
             })
         }
+
+        function pushVolume(v, isUnalloc) {
+            if (!isUnalloc && isMsrVolume(v))
+                return
+            var tb = Number(v.capacityBytes) || 0
+            if (isUnalloc && tb <= minUnallocBytes)
+                return
+            var sz = v.size || ""
+            if (isUnalloc && sz.length === 0)
+                sz = formatUnallocSize(tb)
+            list.push({
+                letter: isUnalloc ? "" : (v.letter || ""),
+                //% "Unallocated"
+                name: isUnalloc ? qsTrId("aegra.restore.unallocated") : (v.name || ""),
+                size: sz,
+                fileSystem: isUnalloc ? "" : (v.fs || v.fileSystem || ""),
+                totalBytes: tb,
+                unallocated: isUnalloc
+            })
+        }
+
+        if (hasPrebuiltUnalloc) {
+            for (var p = 0; p < raw.length; ++p) {
+                if (!raw[p])
+                    continue
+                pushVolume(raw[p], raw[p].unallocated === true)
+            }
+        } else if (hasOffsets) {
+            var sorted = []
+            for (var s = 0; s < raw.length; ++s) {
+                if (raw[s] && !isMsrVolume(raw[s]))
+                    sorted.push(raw[s])
+            }
+            sorted.sort(function(a, b) {
+                return (Number(a.offsetBytes) || 0) - (Number(b.offsetBytes) || 0)
+            })
+            var cursor = 0
+            for (var k = 0; k < sorted.length; ++k) {
+                var vol = sorted[k]
+                var off = Number(vol.offsetBytes) || 0
+                var cap = Number(vol.capacityBytes) || 0
+                if (off > cursor)
+                    pushUnalloc(off - cursor)
+                pushVolume(vol, false)
+                var end = off + cap
+                if (end > cursor)
+                    cursor = end
+            }
+            if (diskTotal > cursor)
+                pushUnalloc(diskTotal - cursor)
+        } else {
+            var sumBytes = 0
+            for (var j = 0; j < raw.length; ++j) {
+                if (!raw[j] || isMsrVolume(raw[j]))
+                    continue
+                pushVolume(raw[j], false)
+                sumBytes += Number(raw[j].capacityBytes) || 0
+            }
+            if (diskTotal <= 0 && sumBytes > 0)
+                diskTotal = sumBytes
+            if (diskTotal > 0 && sumBytes > 0)
+                pushUnalloc(diskTotal - sumBytes)
+        }
+
+        var sum = 0
+        for (var t = 0; t < list.length; ++t)
+            sum += list[t].totalBytes || 0
+        var basis = sum > 0 ? sum : diskTotal
+        for (var r = 0; r < list.length; ++r) {
+            var ratio = basis > 0 ? (list[r].totalBytes / basis)
+                                  : (1.0 / Math.max(1, list.length))
+            list[r].ratio = ratio > 0 ? ratio : 0.04
+        }
         return list
+    }
+
+    /// Same floor + redistribute rules as RestorePage (EFI stays readable).
+    function partitionBarWidths(volumes, rowWidth, spacing) {
+        var n = volumes ? volumes.length : 0
+        if (n <= 0)
+            return []
+        var gap = Math.max(0, n - 1) * (spacing || 0)
+        var avail = Math.max(0, Math.floor(rowWidth) - gap)
+        if (avail <= 0) {
+            var zeros = []
+            for (var z = 0; z < n; ++z)
+                zeros.push(0)
+            return zeros
+        }
+
+        var minAlloc = Math.min(56, Math.max(20, Math.floor(avail / Math.max(1, n + 1))))
+        var minUnalloc = Math.min(16, minAlloc)
+
+        var mins = []
+        var weights = []
+        var weightSum = 0
+        var minTotal = 0
+        for (var i = 0; i < n; ++i) {
+            var v = volumes[i]
+            var un = v && v.unallocated === true
+            var mn = un ? minUnalloc : minAlloc
+            mins.push(mn)
+            minTotal += mn
+            var w = v && v.ratio > 0 ? Number(v.ratio) : 0
+            if (w <= 0)
+                w = 1.0 / n
+            weights.push(w)
+            weightSum += w
+        }
+        if (weightSum <= 0)
+            weightSum = n
+
+        var widths = []
+        if (minTotal >= avail) {
+            var scale = avail / minTotal
+            var usedScale = 0
+            for (var s = 0; s < n; ++s) {
+                var sw = (s === n - 1) ? (avail - usedScale)
+                                       : Math.floor(mins[s] * scale)
+                widths.push(Math.max(1, sw))
+                usedScale += widths[s]
+            }
+            return widths
+        }
+
+        var rest = avail - minTotal
+        var usedExtra = 0
+        for (var e = 0; e < n; ++e) {
+            var extra = (e === n - 1) ? (rest - usedExtra)
+                                      : Math.floor(rest * (weights[e] / weightSum))
+            if (extra < 0)
+                extra = 0
+            widths.push(mins[e] + extra)
+            usedExtra += (e === n - 1) ? 0 : extra
+        }
+        return widths
+    }
+
+    /// Partition chip title — Explorer style "本地磁盘 (C:)" / "新加卷 (E:)".
+    function partitionBarTitle(volumeData) {
+        if (!volumeData)
+            return ""
+        if (volumeData.unallocated === true)
+            return volumeData.name || ""
+        if (volumeData.title && String(volumeData.title).length > 0)
+            return volumeData.title
+        var letter = (volumeData.letter || "").trim()
+        if (letter.length === 1)
+            letter = letter + ":"
+        var name = (volumeData.name || "").trim()
+        if (letter.length > 0 && name.length > 0)
+            return name + " (" + letter + ")"
+        if (letter.length > 0)
+            return letter
+        return name
     }
 
     function imageLabelForSession(item) {
@@ -542,6 +704,10 @@ Item {
                     anchors.fill: parent
                     anchors.margins: 1
                     spacing: 1
+                    property var segmentWidths: root.partitionBarWidths(
+                                                    rowRoot.displayVolumes,
+                                                    partsRow.width,
+                                                    partsRow.spacing)
 
                     Repeater {
                         model: rowRoot.displayVolumes
@@ -551,13 +717,10 @@ Item {
                             property bool isUnalloc: modelData && modelData.unallocated === true
                             height: partsRow.height
                             width: {
-                                var n = rowRoot.displayVolumes.length
-                                var gap = Math.max(0, n - 1) * partsRow.spacing
-                                var avail = Math.max(0, partsRow.width - gap)
-                                var r = modelData && modelData.ratio ? modelData.ratio : 0
-                                if (r <= 0)
-                                    r = 0.04
-                                return Math.max(isUnalloc ? 8 : 12, Math.floor(avail * r))
+                                var widths = partsRow.segmentWidths
+                                if (widths && index >= 0 && index < widths.length)
+                                    return widths[index]
+                                return isUnalloc ? 12 : 56
                             }
                             radius: 2
                             color: isUnalloc ? Theme.colorUnallocated
@@ -601,15 +764,20 @@ Item {
                                     if (!modelData)
                                         return ""
                                     if (isUnalloc) {
-                                        var label = modelData.name || ""
+                                        //% "Unallocated"
+                                        var uName = modelData.name
+                                                    || qsTrId("aegra.restore.unallocated")
+                                        var uSz = modelData.size || ""
                                         if (parent.width < 48)
                                             return "\u2026"
-                                        return label
+                                        if (parent.width < 72 || uSz.length === 0)
+                                            return uName
+                                        return uName + "\n" + uSz
                                     }
-                                    var title = modelData.letter || modelData.name || ""
+                                    var title = root.partitionBarTitle(modelData)
                                     var sz = modelData.size || ""
                                     var fs = modelData.fileSystem || ""
-                                    if (parent.width < 50)
+                                    if (parent.width < 56)
                                         return title
                                     return title + "\n" + sz + (fs ? (" " + fs) : "")
                                 }

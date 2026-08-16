@@ -553,9 +553,9 @@
 
 **成功 payload：** 通用列表页。
 
-**`SourceInventoryItem`（16 字段）：**
+**`SourceInventoryItem`（17 字段；current wire 在 V4）：**
 
-`source_id`, `display_name`, `kind`, `availability`, `capacity_bytes`, `free_bytes`, `disk_capacity_bytes`, `is_system`, `is_read_only`, `is_selectable`, `disk_number`, `mount_letter`, `volume_label`, `health_status`, `partition_style`, `media_type`
+`source_id`, `display_name`, `kind`, `availability`, `capacity_bytes`, `free_bytes`, `disk_capacity_bytes`, `is_system`, `is_read_only`, `is_selectable`, `disk_number`, `offset_bytes`, `mount_letter`, `volume_label`, `health_status`, `partition_style`, `media_type`
 
 **示例请求：**
 

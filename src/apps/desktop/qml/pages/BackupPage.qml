@@ -3179,16 +3179,21 @@ Item {
                                                                     Layout.fillWidth: true
                                                                     spacing: 8
                                                                     Text {
-                                                                        readonly property string letter:
-                                                                            (volumeDelegate.modelData.letter
-                                                                             || "").trim()
                                                                         text: {
-                                                                            var name =
-                                                                                volumeDelegate.modelData.name
-                                                                                || ""
-                                                                            if (letter.length > 0)
+                                                                            var d = volumeDelegate.modelData
+                                                                            if (d && d.title)
+                                                                                return d.title
+                                                                            var letter =
+                                                                                (d && d.letter
+                                                                                 ? d.letter : "").trim()
+                                                                            var name = (d && d.name)
+                                                                                       ? d.name : ""
+                                                                            if (letter.length > 0
+                                                                                    && name.length > 0)
                                                                                 return name + " ("
                                                                                        + letter + ")"
+                                                                            if (letter.length > 0)
+                                                                                return letter
                                                                             return name
                                                                         }
                                                                         color: Theme.colorTextWhite

@@ -11,6 +11,16 @@
 #include <utility>
 
 namespace aegra::desktop {
+namespace {
+
+// Desktop display filter only — Service inventory still includes MSR volumes.
+[[nodiscard]] bool is_msr_inventory_label(const QString& volume_label, const QString& display_name) {
+    const auto label = (volume_label + QLatin1Char(' ') + display_name).toLower();
+    return label.contains(QStringLiteral("microsoft reserved")) ||
+           label.contains(QStringLiteral("msr partition")) || label.trimmed() == QStringLiteral("msr");
+}
+
+} // namespace
 
 SourceInventoryModel::SourceInventoryModel(QObject* parent) : QAbstractListModel(parent) {}
 
@@ -116,7 +126,7 @@ QVariant SourceInventoryModel::data(const QModelIndex& index, const int role) co
     case SourceIdRole:
         return row.source_id;
     case DisplayNameRole:
-        return row.display_name;
+        return localized_volume_label(row.display_name);
     case CapacityBytesRole:
         return static_cast<qint64>(row.capacity_bytes);
     case CapacityTextRole:
@@ -136,7 +146,7 @@ QVariant SourceInventoryModel::data(const QModelIndex& index, const int role) co
     case MountLetterRole:
         return row.mount_letter;
     case VolumeLabelRole:
-        return row.volume_label;
+        return localized_volume_label(row.volume_label);
     case HealthStatusRole:
         return row.health_status;
     case PartitionStyleRole:
@@ -217,6 +227,10 @@ QVariantList SourceInventoryModel::disksTree() const {
         if (row.source_id.startsWith(QStringLiteral("disk."))) {
             continue;
         }
+        // Desktop-only: omit MSR from disksTree / partition bars (Service still returns it).
+        if (is_msr_inventory_label(row.volume_label, row.display_name)) {
+            continue;
+        }
         const auto volume_capacity = static_cast<std::uint64_t>(row.capacity_bytes);
         const auto volume_free =
             static_cast<std::uint64_t>((std::max)(std::int64_t{0}, row.free_bytes));
@@ -228,16 +242,19 @@ QVariantList SourceInventoryModel::disksTree() const {
             format_ != nullptr ? format_->format_bytes(row.capacity_bytes) : QString{};
         const QString free_text =
             format_ != nullptr ? format_->format_bytes(row.free_bytes) : QString{};
-        const QString label =
+        const QString raw_label =
             !row.volume_label.isEmpty()
                 ? row.volume_label
-                : (!row.display_name.isEmpty() ? row.display_name : row.mount_letter);
+                : (!row.display_name.isEmpty() ? row.display_name : QString{});
+        const QString label = localized_volume_label(raw_label);
         disk.volumes.push_back(QVariantMap{
             {QStringLiteral("sourceId"), row.source_id},
             {QStringLiteral("name"), label},
+            {QStringLiteral("title"), volume_display_title(raw_label, row.mount_letter)},
             {QStringLiteral("letter"), row.mount_letter},
             {QStringLiteral("capacityBytes"), static_cast<qint64>(row.capacity_bytes)},
             {QStringLiteral("freeBytes"), static_cast<qint64>(row.free_bytes)},
+            {QStringLiteral("offsetBytes"), static_cast<qint64>(row.offset_bytes)},
             {QStringLiteral("size"), size_text},
             {QStringLiteral("free"), free_text},
             {QStringLiteral("status"),
@@ -250,6 +267,13 @@ QVariantList SourceInventoryModel::disksTree() const {
 
     std::sort(disks.begin(), disks.end(),
               [](const DiskAcc& left, const DiskAcc& right) { return left.number < right.number; });
+    for (auto& disk : disks) {
+        std::sort(disk.volumes.begin(), disk.volumes.end(),
+                  [](const QVariant& left, const QVariant& right) {
+                      return left.toMap().value(QStringLiteral("offsetBytes")).toLongLong() <
+                             right.toMap().value(QStringLiteral("offsetBytes")).toLongLong();
+                  });
+    }
 
     QVariantList out;
     out.reserve(disks.size());
@@ -341,11 +365,16 @@ QVector<SourceInventoryRow> sources_from_variant_list(const QVariantList& items)
         row.is_read_only = map.value(QStringLiteral("isReadOnly")).toBool();
         row.is_selectable = map.value(QStringLiteral("isSelectable")).toBool();
         row.disk_number = static_cast<std::uint32_t>(map.value(QStringLiteral("diskNumber")).toUInt());
+        row.offset_bytes = map.value(QStringLiteral("offsetBytes")).toLongLong();
         row.mount_letter = map.value(QStringLiteral("mountLetter")).toString();
         row.volume_label = map.value(QStringLiteral("volumeLabel")).toString();
         row.health_status = map.value(QStringLiteral("healthStatus")).toString();
         row.partition_style = map.value(QStringLiteral("partitionStyle")).toString();
         row.media_type = map.value(QStringLiteral("mediaType")).toString();
+        // Desktop UI never offers MSR as a backup/restore target volume.
+        if (is_msr_inventory_label(row.volume_label, row.display_name)) {
+            row.is_selectable = false;
+        }
         rows.push_back(std::move(row));
     }
     return rows;

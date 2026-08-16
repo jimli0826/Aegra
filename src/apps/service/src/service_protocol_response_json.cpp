@@ -174,6 +174,7 @@ parse_repository_connection(const Json& payload) {
                 {"is_read_only", item.is_read_only},
                 {"is_selectable", item.is_selectable},
                 {"disk_number", item.disk_number},
+                {"offset_bytes", item.offset_bytes},
                 {"mount_letter", item.mount_letter},
                 {"volume_label", item.volume_label},
                 {"health_status", item.health_status},
@@ -182,11 +183,11 @@ parse_repository_connection(const Json& payload) {
 }
 
 [[nodiscard]] contracts::SourceInventoryItem parse_source(const Json& payload) {
-    constexpr std::array<std::string_view, 16> keys{
-        "source_id",   "display_name",        "kind",         "availability",  "capacity_bytes",
-        "free_bytes",  "disk_capacity_bytes", "is_system",    "is_read_only",  "is_selectable",
-        "disk_number", "mount_letter",        "volume_label", "health_status", "partition_style",
-        "media_type"};
+    constexpr std::array<std::string_view, 17> keys{
+        "source_id",   "display_name",        "kind",          "availability",  "capacity_bytes",
+        "free_bytes",  "disk_capacity_bytes", "is_system",     "is_read_only",  "is_selectable",
+        "disk_number", "offset_bytes",        "mount_letter",  "volume_label",  "health_status",
+        "partition_style", "media_type"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("source inventory fields are invalid");
     }
@@ -203,6 +204,7 @@ parse_repository_connection(const Json& payload) {
     item.is_read_only = payload.at("is_read_only").get<bool>();
     item.is_selectable = payload.at("is_selectable").get<bool>();
     item.disk_number = unsigned_value<std::uint32_t>(payload, "disk_number");
+    item.offset_bytes = unsigned_value<std::uint64_t>(payload, "offset_bytes");
     item.mount_letter = payload.at("mount_letter").get<std::string>();
     item.volume_label = payload.at("volume_label").get<std::string>();
     item.health_status = payload.at("health_status").get<std::string>();

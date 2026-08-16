@@ -10,6 +10,7 @@
 #include <QUuid>
 
 #include <algorithm>
+#include <vector>
 
 namespace aegra::desktop {
 namespace {
@@ -95,17 +96,18 @@ constexpr qsizetype kMaximumRecoveryPoints = 10'000;
     return QStringLiteral("RAW");
 }
 
-/// Old volumesForSourceDisk: partitions (order) + volumes via extents for letter/label/fs/size.
-[[nodiscard]] QVariantList volumes_for_source_disk(const int disk_number,
-                                                   const QVariantList& partitions,
-                                                   const QVariantList& all_volumes,
-                                                   const qint64 disk_total,
-                                                   const LocaleFormat& format) {
-    QHash<int, QString> letter_by_part;
-    QHash<int, QString> label_by_part;
-    QHash<int, QString> fs_by_part;
-    QHash<int, qint64> size_by_part;
-    QHash<int, int> volume_index_by_part;
+/// Volume metadata keyed by partition number (letter/label/fs from Manifest extents).
+struct PartitionVolumeMeta final {
+    QString letter;
+    QString label;
+    QString filesystem;
+    qint64 size_bytes{0};
+    int volume_index{-1};
+};
+
+[[nodiscard]] QHash<int, PartitionVolumeMeta>
+volume_meta_by_partition(const int disk_number, const QVariantList& all_volumes) {
+    QHash<int, PartitionVolumeMeta> by_part;
     for (const auto& item : all_volumes) {
         const auto volume = item.toMap();
         int part_num = -1;
@@ -119,63 +121,143 @@ constexpr qsizetype kMaximumRecoveryPoints = 10'000;
         if (part_num < 0) {
             continue;
         }
+        auto& meta = by_part[part_num];
         const auto letter = volume.value(QStringLiteral("letter")).toString();
         if (!letter.isEmpty()) {
-            letter_by_part.insert(part_num, letter);
+            meta.letter = letter;
         }
         const auto label = volume.value(QStringLiteral("label")).toString().trimmed();
         if (!label.isEmpty()) {
-            label_by_part.insert(part_num, label);
+            meta.label = label;
         }
         const auto fs = volume.value(QStringLiteral("filesystem")).toString().trimmed();
         if (!fs.isEmpty()) {
-            fs_by_part.insert(part_num, fs);
+            meta.filesystem = fs;
         }
         const auto size = volume.value(QStringLiteral("totalSizeBytes")).toLongLong();
         if (size > 0) {
-            size_by_part.insert(part_num, size);
+            meta.size_bytes = size;
         }
-        volume_index_by_part.insert(part_num, volume.value(QStringLiteral("volumeIndex")).toInt());
+        meta.volume_index = volume.value(QStringLiteral("volumeIndex")).toInt();
     }
+    return by_part;
+}
 
-    QVariantList ui_volumes;
+struct LayoutPartition final {
+    qint64 offset_bytes{0};
+    qint64 size_bytes{0};
+    int partition_number{0};
+    bool reserved{false};
+    QString letter;
+    QString name;
+    QString filesystem;
+    int volume_index{-1};
+};
+
+/// Gaps at or below this size are GPT alignment / MSR / padding (not shown as Unallocated).
+/// Matches Desktop bar rules and Windows Disk Management (tiny leading free is omitted).
+constexpr qint64 kUnallocatedGapThresholdBytes = 128LL * 1024LL * 1024LL;
+
+void append_unallocated_segment(QVariantList& ui_volumes, const qint64 bytes,
+                                const LocaleFormat& format) {
+    if (bytes <= kUnallocatedGapThresholdBytes) {
+        return;
+    }
+    // name is filled by QML (localized "Unallocated"); size is shown on the bar.
+    ui_volumes.push_back(QVariantMap{
+        {QStringLiteral("letter"), QString{}},
+        {QStringLiteral("name"), QString{}},
+        {QStringLiteral("size"), format.format_bytes(bytes)},
+        {QStringLiteral("capacityBytes"), bytes},
+        {QStringLiteral("fileSystem"), QString{}},
+        {QStringLiteral("fs"), QString{}},
+        {QStringLiteral("offsetBytes"), static_cast<qint64>(-1)},
+        {QStringLiteral("partitionNumber"), -1},
+        {QStringLiteral("volumeIndex"), -1},
+        {QStringLiteral("unallocated"), true},
+    });
+}
+
+/// Source disk bar segments in physical order: data volumes + unallocated gaps.
+/// Reserved partitions (EFI/MSR/…) occupy space without a visible segment so free
+/// regions keep their true offset (not forced to the trailing end).
+[[nodiscard]] QVariantList volumes_for_source_disk(const int disk_number,
+                                                   const QVariantList& partitions,
+                                                   const QVariantList& all_volumes,
+                                                   const qint64 disk_total,
+                                                   const LocaleFormat& format) {
+    const auto meta_by_part = volume_meta_by_partition(disk_number, all_volumes);
+
+    std::vector<LayoutPartition> layout;
+    layout.reserve(static_cast<std::size_t>(partitions.size()));
     for (const auto& item : partitions) {
         const auto partition = item.toMap();
-        if (is_reserved_partition(partition)) {
-            continue;
-        }
         const int part_num = partition.value(QStringLiteral("partitionNumber")).toInt();
-        auto size = size_by_part.value(part_num, 0);
+        const auto meta = meta_by_part.value(part_num);
+        // Physical partition length drives layout geometry; volume size is fallback only.
+        auto size = partition.value(QStringLiteral("sizeBytes")).toLongLong();
         if (size <= 0) {
-            size = partition.value(QStringLiteral("sizeBytes")).toLongLong();
+            size = meta.size_bytes;
         }
         if (size <= 0) {
             continue;
         }
-        const auto letter = letter_by_part.value(part_num);
-        auto name = label_by_part.value(part_num);
-        if (name.isEmpty()) {
-            name = partition.value(QStringLiteral("volumeLabel")).toString().trimmed();
+        LayoutPartition entry;
+        entry.offset_bytes = partition.value(QStringLiteral("offsetBytes")).toLongLong();
+        entry.size_bytes = size;
+        entry.partition_number = part_num;
+        entry.reserved = is_reserved_partition(partition);
+        entry.letter = meta.letter;
+        entry.name = meta.label;
+        if (entry.name.isEmpty()) {
+            entry.name = partition.value(QStringLiteral("volumeLabel")).toString().trimmed();
         }
-        if (name.isEmpty()) {
-            name = QStringLiteral("New Volume");
+        entry.name = localized_volume_label(entry.name);
+        entry.filesystem = meta.filesystem;
+        if (entry.filesystem.isEmpty()) {
+            entry.filesystem = partition.value(QStringLiteral("filesystem")).toString();
         }
-        auto fs = fs_by_part.value(part_num);
-        if (fs.isEmpty()) {
-            fs = partition.value(QStringLiteral("filesystem")).toString();
+        entry.volume_index = meta.volume_index;
+        layout.push_back(std::move(entry));
+    }
+    std::sort(layout.begin(), layout.end(),
+              [](const LayoutPartition& left, const LayoutPartition& right) {
+                  if (left.offset_bytes != right.offset_bytes) {
+                      return left.offset_bytes < right.offset_bytes;
+                  }
+                  return left.partition_number < right.partition_number;
+              });
+
+    QVariantList ui_volumes;
+    qint64 cursor = 0;
+    for (const auto& part : layout) {
+        if (part.offset_bytes > cursor) {
+            append_unallocated_segment(ui_volumes, part.offset_bytes - cursor, format);
+        }
+        const auto end = part.offset_bytes + part.size_bytes;
+        if (end > cursor) {
+            cursor = end;
+        }
+        if (part.reserved) {
+            continue;
         }
         ui_volumes.push_back(QVariantMap{
-            {QStringLiteral("letter"), letter},
-            {QStringLiteral("name"), name},
-            {QStringLiteral("size"), format.format_bytes(size)},
-            {QStringLiteral("capacityBytes"), size},
-            {QStringLiteral("fileSystem"), fs},
-            {QStringLiteral("fs"), fs},
-            {QStringLiteral("partitionNumber"), part_num},
-            {QStringLiteral("volumeIndex"), volume_index_by_part.value(part_num, -1)},
+            {QStringLiteral("letter"), part.letter},
+            {QStringLiteral("name"), part.name},
+            {QStringLiteral("title"), volume_display_title(part.name, part.letter)},
+            {QStringLiteral("size"), format.format_bytes(part.size_bytes)},
+            {QStringLiteral("capacityBytes"), part.size_bytes},
+            {QStringLiteral("fileSystem"), part.filesystem},
+            {QStringLiteral("fs"), part.filesystem},
+            {QStringLiteral("offsetBytes"), part.offset_bytes},
+            {QStringLiteral("partitionNumber"), part.partition_number},
+            {QStringLiteral("volumeIndex"), part.volume_index},
+            {QStringLiteral("unallocated"), false},
         });
     }
-    Q_UNUSED(disk_total);
+    if (disk_total > cursor) {
+        append_unallocated_segment(ui_volumes, disk_total - cursor, format);
+    }
     return ui_volumes;
 }
 
@@ -200,20 +282,13 @@ constexpr qsizetype kMaximumRecoveryPoints = 10'000;
             continue;
         }
         const auto letter = volume.value(QStringLiteral("letter")).toString().trimmed();
-        auto name = volume.value(QStringLiteral("label")).toString().trimmed();
-        if (name.isEmpty()) {
-            name = QStringLiteral("New Volume");
-        }
+        const auto name = localized_volume_label(volume.value(QStringLiteral("label")).toString());
         const auto fs = volume.value(QStringLiteral("filesystem")).toString().trimmed();
-        QString title = name;
-        if (!letter.isEmpty()) {
-            title = letter + QStringLiteral(": ") + name;
-        }
         out.push_back(QVariantMap{
             {QStringLiteral("volumeIndex"), volume_index},
             {QStringLiteral("letter"), letter},
             {QStringLiteral("name"), name},
-            {QStringLiteral("title"), title},
+            {QStringLiteral("title"), volume_display_title(name, letter)},
             {QStringLiteral("size"), format.format_bytes(size)},
             {QStringLiteral("capacityBytes"), size},
             {QStringLiteral("fileSystem"), fs},

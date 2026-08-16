@@ -90,6 +90,9 @@ struct SourceInventoryItem final {
     bool is_selectable{false};
     // Physical disk index for Backup wizard disk/volume tree (old GUI disksTree).
     std::uint32_t disk_number{0};
+    // Primary extent start on the physical disk (bytes). 0 when unknown or disk shell.
+    // Used by Desktop partition bars to place free space at the correct offset.
+    std::uint64_t offset_bytes{0};
     // Mount letter like "C:" or empty when none.
     std::string mount_letter;
     // Volume label / friendly name (may equal display_name).

@@ -376,10 +376,8 @@
         <translation>無法連線到備份伺服器</translation>
     </message>
     <message id="aegra.splash.error.detail">
-        <source>Please ensure Aegra Service is running and try again.
-Server: %1</source>
-        <translation>請確認 Aegra Service 已啟動後再試。
-伺服器: %1</translation>
+        <source>Please ensure Aegra Service is running and try again.</source>
+        <translation>請確認 Aegra Service 已啟動後再試。</translation>
     </message>
     <message id="aegra.home.refresh_tasks">
         <source>Refresh tasks</source>

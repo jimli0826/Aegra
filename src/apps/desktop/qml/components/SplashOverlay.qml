@@ -24,11 +24,10 @@ Rectangle {
     readonly property bool hasError: !windowAppReady
                                      && !serviceClient.splashBusy
                                      && serviceClient.splashErrorText.length > 0
-    readonly property string serviceEndpoint: "\\\\.\\pipe\\aegra-service-control"
 
-    /// Preferred size of the splash window (host resizes to this) — same as old SplashScreen.
-    readonly property int preferredWidth: hasError ? 680 : 600
-    readonly property int preferredHeight: hasError ? 560 : 440
+    /// Preferred size of the splash window (host resizes to this) — unified stable dimensions.
+    readonly property int preferredWidth: 600
+    readonly property int preferredHeight: 460
 
     signal sizeHintChanged()
     signal finished()
@@ -72,8 +71,8 @@ Rectangle {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 40
-        spacing: 24
+        anchors.margins: 36
+        spacing: 18
 
         Item { Layout.fillHeight: true }
 
@@ -191,19 +190,13 @@ Rectangle {
             wrapMode: Text.WordWrap
         }
 
-        // Error detail block (old: ensure service + server + reason)
+        // Error detail block
         Text {
             Layout.fillWidth: true
             horizontalAlignment: Text.AlignHCenter
             visible: root.hasError
-            text: {
-                //% "Please ensure Aegra Service is running and try again.\nServer: %1"
-                var base = qsTrId("aegra.splash.error.detail").arg(root.serviceEndpoint)
-                var detail = serviceClient.splashErrorText || ""
-                if (detail.length > 0)
-                    return base + "\n" + detail
-                return base
-            }
+            //% "Please ensure Aegra Service is running and try again."
+            text: qsTrId("aegra.splash.error.detail")
             color: Theme.colorTextGrey
             font.pixelSize: 13
             font.family: Theme.fontFamily
@@ -217,7 +210,7 @@ Rectangle {
             Layout.preferredWidth: 240
             Layout.preferredHeight: 6
             radius: 3
-            color: "#333"
+            color: Theme.colorProgressTrack
             visible: !root.hasError
             clip: true
 
@@ -247,43 +240,60 @@ Rectangle {
             visible: root.hasError
 
             Button {
+                id: retryBtn
                 //% "Retry"
                 text: qsTrId("aegra.common.retry")
-                Layout.preferredWidth: 160
-                Layout.preferredHeight: 44
+                Layout.preferredWidth: 140
+                Layout.preferredHeight: 40
                 background: Rectangle {
-                    color: parent.hovered ? Theme.colorButtonHover : Theme.colorButton
-                    radius: 6
+                    color: retryBtn.down
+                           ? Theme.colorMenuActiveEnd
+                           : (retryBtn.hovered ? Theme.colorLinkHover : Theme.colorAccentBlue)
+                    radius: Theme.radiusButton
                 }
                 contentItem: Text {
-                    text: parent.text
-                    color: Theme.colorTextWhite
-                    font.pixelSize: 15
+                    text: retryBtn.text
+                    color: Theme.colorOnAccent
+                    font.pixelSize: 14
+                    font.bold: true
                     font.family: Theme.fontFamily
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.NoButton
+                    cursorShape: Qt.PointingHandCursor
                 }
                 onClicked: serviceClient.reconnect()
             }
 
             Button {
+                id: quitBtn
                 //% "Quit"
                 text: qsTrId("aegra.common.quit")
-                Layout.preferredWidth: 128
-                Layout.preferredHeight: 44
+                Layout.preferredWidth: 140
+                Layout.preferredHeight: 40
                 background: Rectangle {
-                    color: parent.hovered ? "#444" : "#3a3a3a"
-                    radius: 6
+                    color: quitBtn.down
+                           ? Theme.colorButtonDisabled
+                           : (quitBtn.hovered ? Theme.colorButtonHover : Theme.colorButton)
+                    radius: Theme.radiusButton
                     border.width: 1
                     border.color: Theme.colorBorder
                 }
                 contentItem: Text {
-                    text: parent.text
+                    text: quitBtn.text
                     color: Theme.colorTextWhite
-                    font.pixelSize: 15
+                    font.pixelSize: 14
                     font.family: Theme.fontFamily
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.NoButton
+                    cursorShape: Qt.PointingHandCursor
                 }
                 onClicked: root.quitRequested()
             }

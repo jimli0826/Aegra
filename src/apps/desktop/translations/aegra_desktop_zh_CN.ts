@@ -376,10 +376,8 @@
         <translation>无法连接到备份服务器</translation>
     </message>
     <message id="aegra.splash.error.detail">
-        <source>Please ensure Aegra Service is running and try again.
-Server: %1</source>
-        <translation>请确认 Aegra Service 已启动后重试。
-服务器: %1</translation>
+        <source>Please ensure Aegra Service is running and try again.</source>
+        <translation>请确认 Aegra Service 已启动后重试。</translation>
     </message>
     <message id="aegra.home.refresh_tasks">
         <source>Refresh tasks</source>

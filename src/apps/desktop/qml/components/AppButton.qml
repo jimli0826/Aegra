@@ -9,6 +9,7 @@ Button {
     property bool danger: false
     property bool borderVisible: true
 
+    focusPolicy: Qt.TabFocus
     implicitHeight: 32
     implicitWidth: Math.max(90, contentItem.implicitWidth + 24)
     padding: 12
@@ -33,24 +34,24 @@ Button {
 
     background: Rectangle {
         radius: Theme.radiusButton
-        border.width: (root.visualFocus || root.activeFocus) ? 2 : ((root.primary || root.danger || !root.borderVisible) ? 0 : 1)
+        border.width: root.visualFocus ? 2 : ((root.primary || root.danger || !root.borderVisible) ? 0 : 1)
         border.color: {
             if (!root.enabled)
                 return Theme.colorBorder
-            if (root.visualFocus || root.activeFocus)
+            if (root.visualFocus)
                 return Theme.colorAccentBlue
             if (root.danger)
-                return root.hovered ? "#aa2222" : "#882222"
+                return (root.hovered || root.down) ? "#aa2222" : "#882222"
             return Theme.colorBorder
         }
         color: {
             if (!root.enabled)
                 return Theme.colorButtonDisabled
             if (root.danger)
-                return root.hovered ? "#e03333" : "#cc3333"
+                return root.down ? "#b02525" : (root.hovered ? "#e03333" : "#cc3333")
             if (root.primary)
-                return (root.hovered || root.visualFocus || root.activeFocus) ? Theme.colorLinkHover : Theme.colorAccentBlue
-            return (root.hovered || root.visualFocus || root.activeFocus) ? Theme.colorButtonHover : Theme.colorButton
+                return root.down ? Theme.colorMenuActiveEnd : (root.hovered ? Theme.colorLinkHover : Theme.colorAccentBlue)
+            return root.down ? Theme.colorButtonDisabled : (root.hovered ? Theme.colorButtonHover : Theme.colorButton)
         }
         opacity: root.enabled ? 1.0 : 0.55
 

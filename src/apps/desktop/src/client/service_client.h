@@ -572,6 +572,7 @@ class ServiceClient final : public QObject {
     void show_toast(const QString& text, bool is_error = false);
     void finish_restore_preflight_failure(const QString& message_code);
     void update_splash_for_state();
+    void on_splash_connect_timeout();
 
     LocaleController* locale_controller_{nullptr};
     LocaleFormat format_;
@@ -764,6 +765,8 @@ class ServiceClient final : public QObject {
     bool splash_error_{false};
     bool toast_visible_{false};
     bool jobs_baseline_seeded_{false};
+    QTimer* splash_connect_timer_{nullptr};
+    QString pending_splash_error_code_;
     QTimer* reconnect_watchdog_{nullptr};
 };
 

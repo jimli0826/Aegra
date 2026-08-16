@@ -7,12 +7,12 @@ import "components"
 import "pages"
 
 // Shell chrome aligned with backup/src/gui Main.qml (title bar, sidebar, page fade).
-// Starts as compact splash window (600×440), then expands to main UI (1080×720).
+// Starts as compact splash window (600×460), then expands to main UI (1080×720).
 Window {
     id: window
     // Start as splash window only (compact card; not full main UI frame)
     width: 600
-    height: 440
+    height: 460
     visible: true
     // Keep the native caption empty. Branding is drawn by SidebarMenu and the
     // application name still identifies the process in the taskbar.
@@ -72,10 +72,12 @@ Window {
         if (window.appReady)
             return
         var w = splash.preferredWidth || 600
-        var h = splash.preferredHeight || 440
-        window.width = w
-        window.height = h
-        centerOnScreen()
+        var h = splash.preferredHeight || 460
+        if (window.width !== w || window.height !== h) {
+            window.width = w
+            window.height = h
+            centerOnScreen()
+        }
     }
 
     function applyMainSize() {

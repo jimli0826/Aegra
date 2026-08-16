@@ -376,10 +376,8 @@
         <translation>Verbindung zum Sicherungsserver nicht möglich</translation>
     </message>
     <message id="aegra.splash.error.detail">
-        <source>Please ensure Aegra Service is running and try again.
-Server: %1</source>
-        <translation>Stellen Sie sicher, dass Aegra Service läuft, und versuchen Sie es erneut.
-Server: %1</translation>
+        <source>Please ensure Aegra Service is running and try again.</source>
+        <translation>Stellen Sie sicher, dass Aegra Service läuft, und versuchen Sie es erneut.</translation>
     </message>
     <message id="aegra.home.refresh_tasks">
         <source>Refresh tasks</source>

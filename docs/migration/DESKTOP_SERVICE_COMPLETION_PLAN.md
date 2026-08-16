@@ -10,12 +10,13 @@
 本文把旧项目 `backup/src/gui` 中仍有价值的 Desktop 体验迁移到 Aegra，并收敛个人版 Service 剩余控制面工作。
 它是后续 agent 领取任务、确定文件所有权和验收合并的执行依据。
 
-当前基线为阶段 13C + D0/D1/S0-S4：Desktop 已能通过 schema 3 Named Pipe 与 Service 握手、自动重连并分页
-查询个人版 Recovery Point；Repository 页面、无边框窗口、折叠侧栏和 `blueExtra` 主题已迁移。Service 已接入
-SQLite 控制面、Inventory、Repository connection/query API 和单任务 Worker Supervisor；计划触发、完整事件查询、
-Verify/Restore/Mount Service 编排与对应 Desktop 页面仍待后续工作包完成。
+当前基线已完成 D0-D3 与 S0-S4，并继续落地 Schedule trigger、Verify、Restore/Mount/file_set 等纵向切片。
+Desktop 已能通过 schema 4 Named Pipe 与 Service 握手、自动重连并分页查询个人版 Recovery Point；Repository 页面、
+无边框窗口、折叠侧栏和 `blueExtra` 主题已迁移。Service 已接入 SQLite 控制面、Inventory、Repository
+connection/query API、Worker Supervisor 与 `recovery_point.verify`；Recovery Point chain/delete、完整 Event/Audit
+runtime 及对应 Desktop 深度操作仍受 capability gate 或工作包验收约束。
 
-工作包状态最后更新于 2026-08-04。状态定义如下：
+工作包状态最后更新于 2026-08-15。状态定义如下：
 
 - `已完成`：满足本工作包 Definition of Done，并已同步实现、验证和文档；
 - `进行中`：已有 owner 领取并产生实现工作，尚未完成全部验收；
@@ -161,14 +162,14 @@ Makefile、`release/` 生成物和 `.bak` 文件全部禁止迁移。
 | S4  | 已完成  | P1   | Inventory 与 Repository API | source inventory、connection/test、recovery point queries | S0, S2         |
 | D2  | 已完成  | P1   | Home 与全局任务体验               | Home、Splash、toast、task model、旧 UI 视觉返工                  | D0, D1, S0     |
 | D3  | 已完成  | P1   | Backup 页面                  | source/target/options、启动/取消/进度                          | D0, D1, S3, S4 |
-| S5  | 进行中  | P2   | Archive 深度操作               | authenticate、verify、显式链解析、删除计划                          | S2, S3, S4     |
-| S6  | 等待前置 | P2   | Restore 编排                 | preflight、目标检查、任务监督、结果查询                                | S3, S5         |
+| S5  | 进行中  | P2   | Archive 深度操作               | Verify 已开放；chain/delete 已实现但仍受门禁；认证映射待完成               | S2, S3, S4     |
+| S6  | 进行中  | P2   | Restore 编排                 | volume/disk preflight、start 与 Worker 已开放；安全验收待完成             | S3, S5         |
 | D4  | 等待前置 | P2   | Restore 页面                 | recovery point、链、目标、确认、进度                               | D0, D1, S6     |
 | D5  | 等待前置 | P2   | Repository 管理              | add/import/test/default/delete/verify actions           | D0, D1, S4, S5 |
 | S7  | 进行中   | P3   | Mount Host 编排              | mounted session、unmount、崩溃清理                            | S3, S5         |
 | D6  | 进行中   | P3   | Mount 页面                   | mount/unmount/session table                             | D0, D1, S7     |
-| S8  | 进行中   | P3   | Schedule 与 Event/Audit     | trigger engine（已落地）、history、paged queries             | S2, S3         |
-| D7  | 等待前置 | P3   | Event Log 页面               | filter、分页、详情、导出入口                                       | D0, D1, S8     |
+| S8  | 进行中   | P3   | Schedule 与 Event/Audit     | trigger engine 已完成；Event/Audit runtime 接线待完成          | S2, S3         |
+| D7  | 进行中   | P3   | Event Log 页面               | terminal Task Log 已落地；Audit 详情与导出待完成                    | D0, D1, S8     |
 | D8  | 可开始  | P3   | Settings 页面                | language、theme、service/repository settings              | D0, D1, S1, S4 |
 | R0  | 等待前置 | Gate | 发布工程                       | installer、upgrade/uninstall、recovery、diagnostics、E2E    | 全部发布范围         |
 
@@ -396,10 +397,24 @@ schedule 看起来可用但没有 Service 能力；或留下可点击但无效�
 
 ### S5：Archive 深度扫描、Verify 与删除计划
 
-**状态：进行中。** Review P1 已修复：删除 tombstone 权威续跑、command intent 先于副作用、tombstone
-内容冲突校验、Archive member generation 条件删除、pre-launch queued Job 启动收敛、Verify 不复用无映射
-连接凭据，以及未完成 S5 capability 的 dispatch gate。仍缺：真实 Verify Worker E2E、per-file Archive
-Credential 持久化映射表和 Local Storage 故障恢复门禁；完成前 capability 继续关闭。
+**状态：进行中。** `recovery_point.verify` 已进入 Runtime capability 并接通真实
+Service → `WorkerJobService` → `WorkerSupervisor` → `aegra_personal_worker` → SQLite Job 路径；
+`recovery_point.chain` 与 `recovery_point.delete` 的 Contracts、codec、Host handler、Application 和 Repository
+实现已存在，但 capability 仍关闭。S5 尚未满足完整认证、逐 Archive Credential 映射和故障恢复人工门禁，不能标记完成。
+
+**当前实现对照：**
+
+| 能力 | 已落地代码 | Runtime 状态 | 完成前剩余项 |
+| --- | --- | --- | --- |
+| Verify | `StartVerifyCommand` 使用 connection + recovery point；Service 可信解析 locator/key；volume/file Worker Verify；幂等 Job 与 terminal 持久化 | `recovery_point.verify` 已开放 | 真实进程人工 E2E、错误 credential/损坏/取消/重启矩阵；加密 Archive 映射闭环 |
+| 显式链解析 | `RecoveryPointGraph`、base-first layers、结构/链状态及稳定 message code | `recovery_point.chain` 关闭 | 当前 authentication state 仍为 `kNotAttempted`；需完成逐层认证和 restore/mount eligibility 收敛 |
+| 删除计划 | 后代优先目标、member generation、30 分钟 plan token、Repository 内持久化 plan document、执行前严格重扫 | `recovery_point.delete` 关闭 | Local Storage publish/delete 故障恢复人工门禁及 capability 开放决策 |
+| 删除执行 | command intent 先于副作用；Tombstone 权威续跑；内容冲突校验；条件删除；不存在幂等；`kOutcomeUnknown` 对账 | `recovery_point.delete` 关闭 | partial failure / Service restart 聚焦人工验证；Desktop capability gate 验收 |
+| Credential / Audit | connection 仅在声明 `archive.default_credential` 时可作为 Archive credential；Job/Command durable | 部分可用 | per-file/per-layer Archive Credential 持久化映射；导入加密 Archive 的明确映射；Verify/Delete Audit append 随 Event/Audit runtime 收口 |
+
+已修复的删除安全问题包括：Tombstone 权威续跑、command intent 先于副作用、Tombstone 内容冲突校验、
+Archive member generation 条件删除、pre-launch queued Job 启动收敛，以及未完成 chain/delete capability 的
+dispatch gate。Verify 不会无条件复用 Repository connection credential。
 
 **必须完成的范围：**
 
@@ -451,16 +466,32 @@ composition/capability；或只跑 Debug/单个测试。
 
 ### S6：Restore 编排
 
-**状态：等待前置 S5，详细设计已确定。** 当前已有 Restore V3 DTO、durable preflight record/store、
-`RestorePreflightService` 编排边界、Restore Worker/Pipeline、`WindowsBlockSink` 和 S3 Supervisor。仍缺生产可用的
-S5 链认证/逐层 Credential 映射、可信 Archive/目标解析、Start 编排、TOCTOU 重验证和 composition/capability。
-这些能力全部闭环前，`restore.preflight` / `restore.start` capability 必须保持关闭。
+**状态：进行中。** `restore.preflight` 与 `restore.start` 已进入 Runtime capability，并接通
+Desktop → Service Host → `WorkerJobService` → `WorkerSupervisor` → `aegra_personal_worker` → SQLite Job 的真实路径。
+当前同时支持非系统 Volume 与非系统 PhysicalDisk 目标；durable preflight、Start 重验证、幂等提交和 Worker 数据面
+均已落地。S6 尚未满足逐层 Credential/完整链认证、Application 编排边界、完整 TOCTOU 绑定、Audit/partial-target
+投影及隔离 VHD 人工门禁，不能标记完成。
 
-**任务目标：** 完成非系统 Windows Volume 的在线 Restore 控制面闭环：Desktop 只提交受信任的
+**任务目标：** 完成非系统 Windows Volume 与数据盘的在线 Restore 控制面闭环：Desktop 只提交受信任的
 `repository_connection_id + recovery_point_id + target_source_id`，Service 生成短期 preflight，用户显式确认后
-启动一个 durable Restore Job，真实 Worker 使用完整 base-first Archive 链写入目标卷。S6 不恢复系统卷、不创建或
-修改分区、不支持 PhysicalDrive、不实现 WinPE/裸机恢复，也不允许 Desktop 提交 Archive path、Repository key、
-Volume GUID、链数组、SecretRef 或任意设备路径。
+启动一个 durable Restore Job，真实 Worker 使用完整 base-first Archive 链写入目标卷或重建目标数据盘。在线路径
+不恢复系统卷/系统盘，也不实现 WinPE/裸机恢复；Desktop 不得提交 Archive path、Repository key、Volume GUID、
+链数组、SecretRef 或任意设备路径。
+
+**当前实现对照：**
+
+| 能力 | 已落地代码 | Runtime 状态 | 完成前剩余项 |
+| --- | --- | --- | --- |
+| Contract / Host | `PrepareRestore` kind 9、`StartRestore` kind 40、确认字段、幂等 key、协议 codec/validator、独立 capability gate | `restore.preflight`、`restore.start` 已开放 | 当前请求仍携带 `archive_password`；需改为受控的逐层 Credential 映射并完成秘密扫描 |
+| Durable preflight | Inventory 解析 `vol.*` / `disk.N`；系统/只读/可用性/容量检查；Catalog base-first 链；5 分钟 SQLite token；链 key/UUID/源大小指纹 | Service 真实执行 | Prepare 当前仅用同一口令打开 tip；需认证完整链并绑定逐层 credential、Repository generation/UUID 与目标 stable identity |
+| Start / TOCTOU | 校验 token 过期；重扫链并比对 key/UUID/深度；重查目标安全与容量；重读 tip 大小；可信解析 Archive 绝对路径、Volume GUID 或 `PhysicalDriveN` | Service 真实执行 | 补齐 Repository UUID/generation、目标 availability/stable identity/容量快照等严格不变性比较；业务逻辑从 `WorkerJobService` 收敛到 Application 用例 |
+| 幂等 / Job | `jobs.preflight_token` 与 `idempotency_key` 唯一索引；queued intent 在 launch 前持久化；replay/conflict；重启收敛 interrupted | Supervisor / SQLite 已接通 | 完成人工并发 Start、launch failure、Worker crash、Service restart 与显式取消矩阵 |
+| Worker 数据面 | Volume GUID 写入；非系统 PhysicalDisk 清布局、按 raw layout 重建、可选签名策略/末分区扩容；Full + Incremental chain；真实进度与 terminal Job | 生产 Worker 已接通 | 验证首写前/后失败语义、`restore.target_may_be_partial` 投影，以及隔离 VHD 上的 Full/Incremental 成功路径 |
+| Desktop | Restore 页已接 recovery point layout、Disk/Volume 映射、危险选项、Prepare→Start、批量逐 Job 提交及 Job 进度 | capability 驱动可用 | 完成破坏性操作人工 UI 验收；逐层凭据交互随 Credential 模型收口 |
+| Audit | Job 状态与 Worker result 已持久化 | Audit runtime 未接线 | accepted/rejected/running/terminal/partial-target Audit append 随 S8 收口 |
+
+当前 capability 的开放只代表生产调用链已可达，不等于 S6 Definition of Done 已满足。若上述安全不变量在后续实现中
+不能由现有路径保证，应重新关闭对应 capability，而不是以 Desktop 禁用代替 Service 门禁。
 
 **开始前必须完成：**
 
@@ -526,10 +557,9 @@ Volume GUID、链数组、SecretRef 或任意设备路径。
   running、succeeded、failed、cancelled、interrupted 和 target-may-be-partial；日志、message arguments、Job、Audit
   和协议响应不得包含密码、密钥、Credential、SecretRef、Authorization、Cookie、令牌或其他认证材料。日志可记录
   诊断所需的 Archive path、Volume GUID 和其他用户数据；协议响应仍只返回受信任资源 ID 和稳定 message code。
-- 必须接入 Service Host query/command handler、runtime composition、CMake、capability gate 和模块文档。
-  `PrepareRestore` 与 `StartRestore` 要分别检查 capability，handler 未满足全部门禁时必须在调用前返回
-  `service.capability_unavailable` 且零副作用；只有本节全部生产功能与人工安全验证完成后才能同时开放
-  `restore.preflight` 与 `restore.start`。
+- Service Host query/command handler、runtime composition、CMake 与独立 capability gate 已接入，
+  `restore.preflight` / `restore.start` 当前已开放。完成前必须补齐本节剩余安全门禁与人工验证；若运行条件不满足，
+  handler 必须在调用前返回 `service.capability_unavailable` 且零副作用，不能仅依赖 Desktop 隐藏入口。
 
 **必须完成的生产验证：**
 
@@ -549,10 +579,9 @@ Restore Service handler。公共 Contracts/codec、`service_main.cpp`、Service/
 registry 由 integration owner 统一接线；不得修改 Desktop QML，也不得覆盖 D2/D3/S5 的
 并行改动。
 
-**实施顺序是强制的：** entry gate/S5 验收 -> contract/ADR -> preflight port + SQLite -> Application preflight ->
-Start 幂等与 queued intent -> trusted path/target resolution -> Supervisor/Worker 接线 ->
-故障/重启恢复 -> 隔离 VHD 人工门禁 -> Debug/Release 全量验证 -> 文档/capability。禁止先开放 capability，
-禁止先写 Host 大分支再补 Application，禁止用 fake success 代替真实 terminal Job。
+**剩余实施顺序：** Credential/完整链认证 -> Application 边界收敛 -> TOCTOU identity/generation 补强 ->
+Audit 与 partial-target 投影 -> 故障/重启矩阵 -> 隔离 VHD 人工门禁 -> Debug/Release 全量验证 -> 文档复核。
+禁止用 fake success 代替真实 terminal Job；任一破坏性安全门禁无法保证时必须先关闭 capability。
 
 **以下情况一律不算完成：** 只返回 preflight token；token 仅存在内存；Start 不显式确认；Desktop 可传路径、key、
 链或 SecretRef；只在 Service 检查系统卷而 Worker 不复查；同 token 可创建多个 Job；accepted 后没有 durable queued
@@ -592,17 +621,28 @@ composition/capability；未完成 Release 构建或隔离非系统卷人工 Res
 
 ### S8 / D7：Schedule 与 Event Log
 
-**状态：S8 进行中（Schedule trigger engine 已落地；Event/Audit 查询与 D7 仍待）；D7 等待前置 S8 Event 部分。**
+**状态：S8 进行中（Schedule trigger engine 已完成；Event/Audit runtime 尚未接线）；D7 进行中
+（基于 terminal Job 的 Task Log 已落地，原生 Audit Event 详情与导出仍待）。**
 
-- **已完成 — Schedule engine**：`ScheduleEngine` 15s 轮询 enabled 且 `next_run_utc_ms <= now` 的计划，经
-  `WorkerJobService::start_backup` 启动 Incremental（缺父 demote Full）；幂等键
-  `schedule-fire|<schedule_id>|<due_next_run_utc_ms>`；Accepted/Replayed 后 CAS 推进 next_run；
-  missed run = 该 due 槽只跑一次并跳到下一未来候选；Conflict/容量满不推进、下轮重试。见
+- **已完成 — Schedule engine**：`ScheduleEngine` 在完整 Runtime 装配后启动，15s 轮询 enabled 且
+  `next_run_utc_ms <= now` 的计划；经 `WorkerJobService::start_scheduled_backup` 重新校验 enabled、精确 due slot
+  与当前时间，然后启动 Incremental（缺父 demote Full）。幂等键为
+  `schedule-fire|<schedule_id>|<due_next_run_utc_ms>`；Accepted/Replayed 后以原 due slot 做 CAS，并用推进时
+  重新读取的当前时钟计算下一未来候选。`ScheduleExecutionCoordinator` 串行化 Upsert/Delete 与 fire，锁等待
+  每 100ms 检查 request deadline 或 Service stop 取消；容量满返回 `kDeferredCapacity` 并保留 due slot。
+  Daily/Weekly 使用 UTC 日网格，Monthly 使用 `year_month_day` 并跳过无效日期。见
   [service_host.md](../modules/service_host.md#schedule-触发引擎s8)。
 - **未完成 — timezone 精细化**：当前与 Upsert 一致使用 UTC 日网格解释 `local_minutes_of_day`；
   完整 IANA timezone 解释仍可后续加强。
-- Event/Audit 使用稳定类型、severity、message code、参数和 correlation ID，支持过滤与 cursor 分页。
-- Event Log 页面不展示原始异常、SecretRef 或敏感路径；详情和导出遵循脱敏策略。
+- **已完成 — Event/Audit 基础**：Contracts、validator、JSON codec 与 SQLite `AuditEventStore` 已具备稳定
+  severity、message code、参数、correlation ID、过滤和 cursor 分页模型。
+- **未完成 — Event/Audit runtime**：生产路径尚未向 Audit Store append 事件；Service Host 对 `kListEvents`、
+  `kSubscribeTaskEvents`、`kAcknowledgeEvents` 仍返回 capability unavailable，composition/runtime capability
+  尚未开放。
+- **已完成 — D7 Task Log MVP**：Desktop `EventLogPage` 已通过 `ListJobs(scope=terminal)` 展示终态 Job，支持
+  时间、operation、state 过滤和 continuation 分页；该页面当前是 Task Log，不冒充 Audit Event 查询。
+- **未完成 — D7 Audit 体验**：待 S8 runtime 开放后接入原生 Audit Event model、详情与导出入口；页面不得展示
+  原始异常、SecretRef、Archive path 或敏感路径，详情与导出继续遵循脱敏策略。
 
 ### D8：Settings
 
@@ -621,7 +661,7 @@ composition/capability；未完成 Release 构建或隔离非系统卷人工 Res
 | Restore    | recovery points、chain/preflight、targets        | start/cancel restore、task events      | 禁止 Start                     |
 | Mount      | mountable points、mounted sessions              | mount/unmount、session events          | 隐藏或禁用页面                      |
 | Repository | connections、recovery points、delete plan        | add/import/test/default/verify/delete | 每项按 capability 禁用            |
-| Event Log  | paged events、filters                           | export request（后续）                    | 显示空状态，不伪造事件                  |
+| Event Log  | terminal `job.list`；paged audit events（待接）     | Audit 详情/导出（后续）                      | 保留真实 Task Log；Audit 不可用时不伪造事件     |
 | Settings   | service config、repository defaults             | update service settings               | UI-only 设置仍可用                |
 
 ## 11. Agent 分工与文件所有权

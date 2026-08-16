@@ -376,10 +376,8 @@
         <translation>Unable to connect to the backup server</translation>
     </message>
     <message id="aegra.splash.error.detail">
-        <source>Please ensure Aegra Service is running and try again.
-Server: %1</source>
-        <translation>Please ensure Aegra Service is running and try again.
-Server: %1</translation>
+        <source>Please ensure Aegra Service is running and try again.</source>
+        <translation>Please ensure Aegra Service is running and try again.</translation>
     </message>
     <message id="aegra.home.refresh_tasks">
         <source>Refresh tasks</source>

@@ -376,10 +376,8 @@
         <translation>バックアップサーバーに接続できません</translation>
     </message>
     <message id="aegra.splash.error.detail">
-        <source>Please ensure Aegra Service is running and try again.
-Server: %1</source>
-        <translation>Aegra Service が起動していることを確認して、再試行してください。
-サーバー: %1</translation>
+        <source>Please ensure Aegra Service is running and try again.</source>
+        <translation>Aegra Service が起動していることを確認して、再試行してください。</translation>
     </message>
     <message id="aegra.home.refresh_tasks">
         <source>Refresh tasks</source>

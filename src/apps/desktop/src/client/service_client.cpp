@@ -35,7 +35,11 @@ ServiceClient::ServiceClient(QObject* parent)
       transport_(std::make_unique<IpcFrameTransport>(QLatin1String(kServicePipeName))),
       coordinator_(std::make_unique<ServiceRequestCoordinator>(*transport_)),
       job_poll_timer_(new QTimer(this)), toast_timer_(new QTimer(this)),
+      splash_connect_timer_(new QTimer(this)),
       reconnect_watchdog_(new QTimer(this)) {
+    splash_connect_timer_->setSingleShot(true);
+    connect(splash_connect_timer_, &QTimer::timeout, this,
+            &ServiceClient::on_splash_connect_timeout);
     recovery_points_.set_locale_format(&format_);
     jobs_.set_locale_format(&format_);
     task_log_.set_locale_format(&format_);
@@ -300,7 +304,10 @@ bool ServiceClient::activeBackupCancellable() const noexcept { return active_bac
 
 bool ServiceClient::splashVisible() const noexcept { return !first_ready_seen_; }
 bool ServiceClient::splashBusy() const noexcept {
-    return !first_ready_seen_ && state_ == State::kConnecting && !splash_error_;
+    return !first_ready_seen_ &&
+           (state_ == State::kConnecting ||
+            (splash_connect_timer_ != nullptr && splash_connect_timer_->isActive())) &&
+           !splash_error_;
 }
 
 QString ServiceClient::splashStatusText() const {
@@ -339,11 +346,14 @@ bool ServiceClient::hasCapability(const QString& capability) const {
 
 void ServiceClient::reconnect() {
     splash_error_ = false;
-    // Pre-ready splash: one attempt (no 2s Loading/Error flicker). After the session has
-    // been Ready once, keep auto-reconnect on so a failed manual retry is not permanent offline.
+    pending_splash_error_code_.clear();
     if (!first_ready_seen_) {
-        transport_->set_auto_reconnect_enabled(false);
+        transport_->set_reconnect_delay_milliseconds(600);
+        transport_->set_auto_reconnect_enabled(true);
+        splash_connect_timer_->start(3'000);
     } else {
+        transport_->set_reconnect_delay_milliseconds(
+            IpcFrameTransport::kDefaultReconnectDelayMilliseconds);
         transport_->set_auto_reconnect_enabled(true);
     }
     set_state(State::kConnecting);
@@ -415,6 +425,10 @@ void ServiceClient::dismissToast() {
 }
 
 void ServiceClient::on_transport_connected() {
+    if (splash_connect_timer_ != nullptr) {
+        splash_connect_timer_->stop();
+    }
+    pending_splash_error_code_.clear();
     handshake_complete_ = false;
     splash_error_ = false;
     if (state_ != State::kConnecting) {
@@ -429,10 +443,20 @@ void ServiceClient::on_transport_disconnected() {
     if (state_ == State::kDisconnected) {
         return;
     }
+    if (!first_ready_seen_ && splash_connect_timer_ != nullptr &&
+        splash_connect_timer_->isActive()) {
+        pending_splash_error_code_ = QStringLiteral("service.disconnected");
+        return;
+    }
     set_state(State::kDisconnected, QStringLiteral("service.disconnected"));
 }
 
 void ServiceClient::on_transport_error(const QString& message_code) {
+    if (!first_ready_seen_ && splash_connect_timer_ != nullptr &&
+        splash_connect_timer_->isActive()) {
+        pending_splash_error_code_ = message_code;
+        return;
+    }
     set_state(State::kDisconnected, message_code);
 }
 
@@ -443,6 +467,11 @@ void ServiceClient::on_request_failed(const QString& message_code) {
                                  message_code == QLatin1String("service.send_failed") ||
                                  message_code == QLatin1String("service.disconnected");
     if (!handshake_complete_ || transport_level) {
+        if (!first_ready_seen_ && splash_connect_timer_ != nullptr &&
+            splash_connect_timer_->isActive()) {
+            pending_splash_error_code_ = message_code;
+            return;
+        }
         // After Ready, soft-fail in-flight domain queries instead of IPC reconnect storms.
         // A request timeout is correlated by ServiceRequestCoordinator and never reaches this
         // transport-level path. Protocol-invalid domain responses keep the live pipe.
@@ -1079,9 +1108,11 @@ void ServiceClient::set_state(const State state, QString error_code) {
     const bool same_error = (error_code_ == error_code);
     if (same_state && same_error) {
         if (!first_ready_seen_ && state == State::kDisconnected && !splash_error_) {
-            splash_error_ = true;
-            transport_->set_auto_reconnect_enabled(false);
-            update_splash_for_state();
+            if (splash_connect_timer_ == nullptr || !splash_connect_timer_->isActive()) {
+                splash_error_ = true;
+                transport_->set_auto_reconnect_enabled(false);
+                update_splash_for_state();
+            }
         } else if (first_ready_seen_ && state == State::kDisconnected) {
             // Keep trying after main UI is up (Service may start later).
             transport_->ensure_reconnect_scheduled();
@@ -1129,10 +1160,12 @@ void ServiceClient::set_state(const State state, QString error_code) {
             capabilities_.clear();
         }
         if (!first_ready_seen_ && state == State::kDisconnected) {
-            splash_error_ = true;
-            // Hold splash on error until Retry (matches old AegraImage; stops Loading/Error
-            // flicker).
-            transport_->set_auto_reconnect_enabled(false);
+            if (splash_connect_timer_ == nullptr || !splash_connect_timer_->isActive()) {
+                splash_error_ = true;
+                // Hold splash on error until Retry (matches old AegraImage; stops Loading/Error
+                // flicker).
+                transport_->set_auto_reconnect_enabled(false);
+            }
         } else if (first_ready_seen_ && state == State::kDisconnected) {
             transport_->ensure_reconnect_scheduled();
         }
@@ -1231,6 +1264,19 @@ QString ServiceClient::firstSelectableSourceId() const {
         }
     }
     return {};
+}
+
+void ServiceClient::on_splash_connect_timeout() {
+    if (first_ready_seen_ || state_ == State::kReady) {
+        return;
+    }
+    transport_->set_auto_reconnect_enabled(false);
+    splash_error_ = true;
+    const auto err = pending_splash_error_code_.isEmpty()
+                         ? QStringLiteral("service.connect_failed")
+                         : pending_splash_error_code_;
+    set_state(State::kDisconnected, err);
+    update_splash_for_state();
 }
 
 void ServiceClient::update_splash_for_state() { emit splashChanged(); }

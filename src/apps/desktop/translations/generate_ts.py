@@ -419,11 +419,11 @@ entries = [
     ),
     (
         "aegra.splash.error.detail",
-        "Please ensure Aegra Service is running and try again.\nServer: %1",
-        "请确认 Aegra Service 已启动后重试。\n服务器: %1",
-        "請確認 Aegra Service 已啟動後再試。\n伺服器: %1",
-        "Aegra Service が起動していることを確認して、再試行してください。\nサーバー: %1",
-        "Stellen Sie sicher, dass Aegra Service läuft, und versuchen Sie es erneut.\nServer: %1",
+        "Please ensure Aegra Service is running and try again.",
+        "请确认 Aegra Service 已启动后重试。",
+        "請確認 Aegra Service 已啟動後再試。",
+        "Aegra Service が起動していることを確認して、再試行してください。",
+        "Stellen Sie sicher, dass Aegra Service läuft, und versuchen Sie es erneut.",
     ),
     (
         "aegra.home.refresh_tasks",

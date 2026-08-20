@@ -1476,8 +1476,8 @@
         <translation>來源磁碟</translation>
     </message>
     <message id="aegra.restore.source_hint">
-        <source>(drag onto a target disk, or use Restore to)</source>
-        <translation>（拖到目標磁碟，或使用「還原到」）</translation>
+        <source>(drag the disk onto a target disk)</source>
+        <translation>（拖動磁碟到目標磁碟；不可拖分割區）</translation>
     </message>
     <message id="aegra.restore.restore_to">
         <source>Restore to</source>
@@ -1500,8 +1500,8 @@
         <translation>請先選擇檢查點</translation>
     </message>
     <message id="aegra.restore.map_required">
-        <source>Choose “Restore to” on a source disk</source>
-        <translation>請在來源磁碟上選擇「還原到」</translation>
+        <source>Drag a source disk onto a target disk</source>
+        <translation>請將來源磁碟拖到目標磁碟</translation>
     </message>
     <message id="aegra.restore.no_repository">
         <source>No repository connection is available</source>
@@ -1526,6 +1526,18 @@
     <message id="aegra.restore.system_target_blocked">
         <source>System disk restore requires PE (not available online)</source>
         <translation>系統磁碟還原需要 PE（線上不可用）</translation>
+    </message>
+    <message id="aegra.restore.archive_on_target_disk">
+        <source>Backup archive is on this disk; choose another target</source>
+        <translation>備份封存在此磁碟上，請選擇其他目標</translation>
+    </message>
+    <message id="aegra.restore.archive_on_target_volume">
+        <source>Backup archive is on this volume; choose another target</source>
+        <translation>備份封存在此磁碟區上，請選擇其他目標</translation>
+    </message>
+    <message id="aegra.restore.archive_here_tag">
+        <source>— archive here</source>
+        <translation>— 封存在此</translation>
     </message>
     <message id="aegra.restore.system_tag">
         <source>[System]</source>
@@ -1603,17 +1615,17 @@
         <source>Keep MBR signature / GPT DiskId (recommended for bootable disks). Uncheck only when cloning a data disk while the source remains online.</source>
         <translation>保留 MBR 簽章 / GPT DiskId（可開機磁碟建議）。僅在來源仍在線且複製資料磁碟時取消勾選。</translation>
     </message>
-    <message id="aegra.restore.auto_extend">
-        <source>Auto expand last partition</source>
-        <translation>自動延伸最後一個磁碟分割區</translation>
-    </message>
-    <message id="aegra.restore.auto_extend_hint">
-        <source>When the target disk is larger than the source, grow the last data partition (and filesystem) into free space so no large unallocated region remains. Uncheck to leave free space unallocated. Note: FAT/FAT32 volumes cannot be auto-expanded (Windows does not support online extend); free space stays unallocated.</source>
-        <translation>目標磁碟大於來源時，將最後一個資料分割區（及檔案系統）延伸到可用空間，避免大片未配置區域。取消勾選則保留未配置空間。注意：FAT/FAT32 無法線上延伸。</translation>
+    <message id="aegra.restore.target_resize_hint">
+        <source>When the target disk is larger than the source, free space stays unallocated. Drag the edges of a data partition on the Target bar to grow or shrink it into adjacent unallocated space before restore (NTFS/ReFS only).</source>
+        <translation>目標磁碟大於來源時，多餘容量保持未配置。請在 Target 分割列上拖曳資料分割邊緣，向相鄰未配置區域延伸或縮小（僅 NTFS/ReFS）。</translation>
     </message>
     <message id="aegra.restore.unallocated">
         <source>Unallocated</source>
         <translation>未配置</translation>
+    </message>
+    <message id="aegra.restore.not_backed_up">
+        <source>Not backed up</source>
+        <translation>未備份</translation>
     </message>
     <message id="aegra.volume.local_disk">
         <source>Local Disk</source>
@@ -1660,8 +1672,8 @@
         <translation>來源磁碟區</translation>
     </message>
     <message id="aegra.restore.source_volume_hint">
-        <source>(drag onto a target volume, or use Restore to)</source>
-        <translation>（拖放到目標磁碟區，或使用「還原到」）</translation>
+        <source>(drag onto a target volume)</source>
+        <translation>（拖到目標磁碟區）</translation>
     </message>
     <message id="aegra.restore.target_volumes">
         <source>Target Volumes</source>
@@ -1680,8 +1692,8 @@
         <translation>選擇檢查點以檢視來源磁碟區</translation>
     </message>
     <message id="aegra.restore.volume_map_required">
-        <source>Choose “Restore to” on a source volume</source>
-        <translation>請在來源磁碟區上選擇「還原到」</translation>
+        <source>Drag a source volume onto a target volume</source>
+        <translation>請將來源磁碟區拖到目標磁碟區</translation>
     </message>
     <message id="aegra.restore.volume_target_too_small">
         <source>Target volume is smaller than the source volume</source>

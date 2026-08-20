@@ -60,9 +60,22 @@ resolve_volume(const std::filesystem::path& volume_guid_path) {
 
 PreparedVolumeMetadata make_metadata(const windows_disk::WindowsVolumeInfo& volume,
                                      const bool vss_used) {
-    PreparedVolumeMetadata metadata{
-        volume.volume_guid_path, volume.mount_points,       volume.filesystem, volume.label,
-        volume.total_size_bytes, volume.cluster_size_bytes, vss_used,          {}};
+    PreparedVolumeMetadata metadata;
+    metadata.volume_guid_path = volume.volume_guid_path;
+    metadata.mount_points = volume.mount_points;
+    metadata.filesystem = volume.filesystem;
+    metadata.label = volume.label;
+    metadata.logical_size_bytes = volume.total_size_bytes;
+    metadata.free_size_known = volume.filesystem_metadata_available;
+    if (metadata.free_size_known) {
+        metadata.free_size_bytes = volume.free_size_bytes > volume.total_size_bytes
+                                       ? volume.total_size_bytes
+                                       : volume.free_size_bytes;
+    } else {
+        metadata.free_size_bytes = 0;
+    }
+    metadata.cluster_size_bytes = volume.cluster_size_bytes;
+    metadata.vss_used = vss_used;
     metadata.disk_extents = volume.extents;
     return metadata;
 }

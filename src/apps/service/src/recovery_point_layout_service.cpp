@@ -196,6 +196,11 @@ load_recovery_point_layout(ports::IControlPlaneDatabase& control_plane,
         item.label = volume.label;
         item.filesystem = volume.filesystem;
         item.total_size_bytes = volume.total_size;
+        item.free_size_bytes = volume.free_size_known
+                                   ? (volume.free_size > volume.total_size ? volume.total_size
+                                                                          : volume.free_size)
+                                   : 0;
+        item.free_size_known = volume.free_size_known;
         item.extents.reserve(volume.extents.size());
         for (const auto& extent : volume.extents) {
             contracts::RecoveryPointSourceExtent mapped;

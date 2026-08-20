@@ -61,6 +61,19 @@ struct BackupOptions final {
     std::optional<IncrementalDowngradeReason> service_full_reason;
 };
 
+/// Maximum partition_layout_edits entries (wire + Worker). GPT entry array is 128.
+inline constexpr std::size_t kMaximumPartitionLayoutEdits = 128;
+
+/// Target-bar layout for one data partition: source geometry → target geometry.
+/// Treated as *hints* only; Worker/Adapter resolve against reserved partitions and
+/// reject sizes smaller than the volume payload. Restore writes at the resolved
+/// `target_start_offset_bytes` after building the partition table.
+struct RestorePartitionLayoutEdit final {
+    std::uint64_t source_start_offset_bytes{0};
+    std::uint64_t target_start_offset_bytes{0};
+    std::uint64_t size_bytes{0};
+};
+
 /// Volume/disk restore options (content_kind = volume_set).
 struct RestoreOptions final {
     bool disk_restore{false};
@@ -69,6 +82,8 @@ struct RestoreOptions final {
     bool bring_target_online{true};
     bool preserve_disk_signature{true};
     bool auto_expand_last_partition{true};
+    /// Desktop Target layout (empty = keep source starts/sizes for data volumes).
+    std::vector<RestorePartitionLayoutEdit> partition_layout_edits;
 };
 
 /// Schema 4 Worker Job envelope.

@@ -193,12 +193,11 @@ encode_prepare_restore_request(const QString& request_id, const QString& connect
                                const QString& recovery_point_id, const QString& target_source_id,
                                int source_disk_number, int source_volume_index = 0,
                                const QString& archive_password = {});
-[[nodiscard]] QByteArray encode_start_restore_request(const QString& request_id,
-                                                      const QString& idempotency_key,
-                                                      const QString& preflight_token,
-                                                      const QString& archive_password = {},
-                                                      bool preserve_disk_signature = true,
-                                                      bool auto_expand_last_partition = true);
+[[nodiscard]] QByteArray encode_start_restore_request(
+    const QString& request_id, const QString& idempotency_key, const QString& preflight_token,
+    const QString& archive_password = {}, bool preserve_disk_signature = true,
+    bool auto_expand_last_partition = false,
+    const QVariantList& partition_layout_edits = {});
 [[nodiscard]] QByteArray encode_cancel_job_request(const QString& request_id,
                                                    const QString& idempotency_key,
                                                    const QString& job_id);

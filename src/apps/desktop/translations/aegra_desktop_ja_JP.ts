@@ -1476,8 +1476,8 @@
         <translation>ソースディスク</translation>
     </message>
     <message id="aegra.restore.source_hint">
-        <source>(drag onto a target disk, or use Restore to)</source>
-        <translation>（ターゲットディスクへドラッグ、または「復元先」を使用）</translation>
+        <source>(drag the disk onto a target disk)</source>
+        <translation>（ディスクをターゲットへドラッグ；パーティションは不可）</translation>
     </message>
     <message id="aegra.restore.restore_to">
         <source>Restore to</source>
@@ -1500,8 +1500,8 @@
         <translation>先にチェックポイントを選択してください</translation>
     </message>
     <message id="aegra.restore.map_required">
-        <source>Choose “Restore to” on a source disk</source>
-        <translation>ソースディスクで「復元先」を選択してください</translation>
+        <source>Drag a source disk onto a target disk</source>
+        <translation>ソースディスクをターゲットディスクへドラッグしてください</translation>
     </message>
     <message id="aegra.restore.no_repository">
         <source>No repository connection is available</source>
@@ -1526,6 +1526,18 @@
     <message id="aegra.restore.system_target_blocked">
         <source>System disk restore requires PE (not available online)</source>
         <translation>システムディスクの復元には PE が必要です（オンライン不可）</translation>
+    </message>
+    <message id="aegra.restore.archive_on_target_disk">
+        <source>Backup archive is on this disk; choose another target</source>
+        <translation>バックアップアーカイブがこのディスク上にあります。別のターゲットを選択してください</translation>
+    </message>
+    <message id="aegra.restore.archive_on_target_volume">
+        <source>Backup archive is on this volume; choose another target</source>
+        <translation>バックアップアーカイブがこのボリューム上にあります。別のターゲットを選択してください</translation>
+    </message>
+    <message id="aegra.restore.archive_here_tag">
+        <source>— archive here</source>
+        <translation>— アーカイブあり</translation>
     </message>
     <message id="aegra.restore.system_tag">
         <source>[System]</source>
@@ -1603,17 +1615,17 @@
         <source>Keep MBR signature / GPT DiskId (recommended for bootable disks). Uncheck only when cloning a data disk while the source remains online.</source>
         <translation>MBR 署名 / GPT DiskId を保持（ブート可能ディスクで推奨）。ソースがオンラインのままデータディスクを複製する場合のみオフ。</translation>
     </message>
-    <message id="aegra.restore.auto_extend">
-        <source>Auto expand last partition</source>
-        <translation>最後のパーティションを自動拡張</translation>
-    </message>
-    <message id="aegra.restore.auto_extend_hint">
-        <source>When the target disk is larger than the source, grow the last data partition (and filesystem) into free space so no large unallocated region remains. Uncheck to leave free space unallocated. Note: FAT/FAT32 volumes cannot be auto-expanded (Windows does not support online extend); free space stays unallocated.</source>
-        <translation>ターゲットがソースより大きい場合、最後のデータパーティション（とファイルシステム）を空き領域まで拡張します。オフにすると未割り当て領域が残ります。FAT/FAT32 はオンライン拡張不可。</translation>
+    <message id="aegra.restore.target_resize_hint">
+        <source>When the target disk is larger than the source, free space stays unallocated. Drag the edges of a data partition on the Target bar to grow or shrink it into adjacent unallocated space before restore (NTFS/ReFS only).</source>
+        <translation>ターゲットがソースより大きい場合、余剰領域は未割り当てのままです。復元前に Target のバーでデータパーティション端をドラッグし、隣接する未割り当てへ拡大/縮小してください（NTFS/ReFS のみ）。</translation>
     </message>
     <message id="aegra.restore.unallocated">
         <source>Unallocated</source>
         <translation>未割り当て</translation>
+    </message>
+    <message id="aegra.restore.not_backed_up">
+        <source>Not backed up</source>
+        <translation>未バックアップ</translation>
     </message>
     <message id="aegra.volume.local_disk">
         <source>Local Disk</source>
@@ -1660,8 +1672,8 @@
         <translation>ソースボリューム</translation>
     </message>
     <message id="aegra.restore.source_volume_hint">
-        <source>(drag onto a target volume, or use Restore to)</source>
-        <translation>（ターゲットボリュームへドラッグ、または「復元先」）</translation>
+        <source>(drag onto a target volume)</source>
+        <translation>（ターゲットボリュームへドラッグ）</translation>
     </message>
     <message id="aegra.restore.target_volumes">
         <source>Target Volumes</source>
@@ -1680,8 +1692,8 @@
         <translation>チェックポイントを選択してソースボリュームを表示</translation>
     </message>
     <message id="aegra.restore.volume_map_required">
-        <source>Choose “Restore to” on a source volume</source>
-        <translation>ソースボリュームで「復元先」を選択してください</translation>
+        <source>Drag a source volume onto a target volume</source>
+        <translation>ソースボリュームをターゲットボリュームへドラッグしてください</translation>
     </message>
     <message id="aegra.restore.volume_target_too_small">
         <source>Target volume is smaller than the source volume</source>

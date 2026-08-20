@@ -22,7 +22,9 @@ Volume，按 extent 物理偏移写入目标 `\\.\PhysicalDriveN`，并用 tip A
 
 Service / Desktop 控制面：PrepareRestore（kind 9）+ StartRestore（kind 40）支持非系统盘
 `disk.N` 目标；tip 可为 Full 或 Incremental。Desktop Restore 页提供源→目标映射、
-**Preserve disk signature**、**Auto expand last partition** 与启动。
+**Preserve disk signature**、Target 分区条边缘拖动调整大小，与启动。无 Auto expand
+选项：多余目标容量默认为未分配，由用户在 Target 上先拖边调整（Desktop 固定传
+`auto_expand_last_partition=false`）。
 
 ## 依赖边界
 
@@ -57,30 +59,42 @@ Worker 数据面（Phase A）、Service Prepare/Start（Phase B）与 Desktop �
 指纹 `volc|…`，Start 解析 Inventory `stable_key` 为 Volume GUID Path。
 
 Desktop Restore 页提供 **Disk / Volume** 模式切换：
-- Disk：源磁盘 → 目标 `disk.N`（Preserve signature / Auto expand 可用）；
+- Disk：源磁盘 → 目标 `disk.N`（Preserve signature；Target 条拖边调整大小）；
 - Volume：源 Manifest 卷 → 目标 Inventory `vol.*`（拖放或 “Restore to”；多卷可排队
   逐个 StartRestore）。
 
 ## 整盘恢复流程
 
 ```text
-Validate restore.disk_restore + base-first source_refs + PhysicalDrive target
+Validate restore options required + disk_restore + base-first source_refs + PhysicalDrive target
 -> Resolve credentials (one SecretRef per layer; empty = unencrypted)
 -> Open PersonalArchiveChainReader (Full base + Incremental overlays)
 -> Locate Manifest.disks[source_disk_number] on tip and require raw_layout
 -> Plan volumes with extents on that disk (single extent, same disk only)
--> Reject system target disk; reject any chain Archive living on target disk
--> prepare_target_disk_for_raw_restore (delete layout, capacity/sector check)
--> Open PhysicalDrive BlockSink
--> For each volume (offset order):
-     Volume-scoped reader over the chain view (source_index rewritten to 0)
-     -> OffsetBlockSink(physical_offset)
-     -> RestorePipeline (FREE ranges skipped, no disk write)
--> Flush disk sink and close handle
--> apply_disk_signature_policy (preserve=true keeps source MBR/GPT DiskId; false randomizes)
--> rebuild_partition_table_from_raw_layout
--> Optional bring_target_disk_online
--> Optional expand_last_data_partition_on_disk (target larger + NTFS/ReFS only)
+-> Phase 1 (reversible; failures leave target layout intact):
+     validate_target_disk_for_raw_restore (system / capacity / sector; read-only)
+     Open PhysicalDrive BlockSink briefly → reject Archive on target disk; read capacity
+     prepare_target_partition_table (in memory only):
+       apply_disk_signature_policy
+       remove_unbacked_basic_data_partitions (keep EFI/MSR/Recovery + backed data)
+       validate_raw_disk_layout_for_restore (even with empty edits):
+         GPT: MBR+primary/backup headers+entry arrays; EFI PART; header/entry CRC;
+              primary↔backup geometry; final intervals
+         MBR: 0x55AA; reject extended/logical 0x05/0x0F; intervals/capacity
+       resolve + apply partition_layout_edits (UI hints; always re-validate intervals;
+         rewrite primary/backup GPT header LBAs for target size)
+-> Phase 2 (irreversible):
+     set_target_disk_offline fail-closed (verify DISK_ATTRIBUTE_OFFLINE)
+     delete_target_disk_drive_layout
+     rebuild_partition_table_from_raw_layout (complete GPT required; no partial write)
+     Remap volume offsets to *resolved* starts
+     Open PhysicalDrive BlockSink → RestorePipeline per volume (FREE skipped)
+     Flush / close
+     If bring_target_online:
+       bring_target_disk_online (fail if OFFLINE remains)
+       extend_filesystem_to_partition for each *resolved* layout edit (NTFS/ReFS)
+         or auto_expand_last when no layout edits
+     Else: leave offline; skip FS extend / auto_expand (no mounted volumes)
 ```
 
 Service Prepare/Start：
@@ -112,7 +126,7 @@ resolve_chain(tip) → base-first Catalog entries
 - `source_refs` 按 base-first 顺序包含完整 `.bkf` 链（至少 1 个 Full；tip 可为 Incremental）；
 - `target_ref` 是 canonical Volume GUID Path：
   `\\?\Volume{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}\`（UTF-8）；
-- `restore` 推荐显式给出（Service 贯通后必填）：
+- `restore` 对象**必填**（contracts / Worker 拒绝缺失；无“省略即卷 0”回退）：
 
 ```json
 {
@@ -125,7 +139,7 @@ resolve_chain(tip) → base-first Catalog entries
 }
 ```
 
-- `source_volume_index`：tip Manifest `volumes[].volume_index`；省略 `restore` 时 Worker 按 `0` 处理。
+- `source_volume_index`：tip Manifest `volumes[].volume_index`（必须由 `restore` 显式给出）。
 - `bring_target_online` / `preserve_disk_signature` / `auto_expand_last_partition` 在卷模式由
   Worker **忽略**（仅整盘路径使用）。
 - 多卷 Archive 必须用 `PersonalArchiveVolumeReader` 限定单卷；不得把整链多 `source_index`
@@ -144,12 +158,21 @@ resolve_chain(tip) → base-first Catalog entries
   "source_disk_number": 0,
   "bring_target_online": true,
   "preserve_disk_signature": true,
-  "auto_expand_last_partition": true
+  "auto_expand_last_partition": false
 }
 ```
 
 - `preserve_disk_signature`：默认 true，保留源盘 MBR signature / GPT DiskId；false 时随机化（克隆数据盘且源盘仍在线时取消勾选）。
-- `auto_expand_last_partition`：默认 true，目标大于源时扩展最后一个数据分区并在线扩展 NTFS/ReFS；FAT/FAT32/exFAT 不扩（剩余空间保持未分配）。
+- `bring_target_online=false`：分区表与卷数据写完后保持离线；**不**执行
+  `extend_filesystem_to_partition` / `auto_expand_last_partition`（二者依赖已挂载卷）。
+  分区表几何仍按 layout edits 写好；文件系统填充分区需稍后联机再扩展。
+- `auto_expand_last_partition`：协议字段仍存在；Desktop 磁盘恢复固定传 false。
+- `partition_layout_edits`：`[{source_start_offset_bytes, target_start_offset_bytes, size_bytes}, …]`，
+  来自 Target 条左右拖边，**仅作布局意图参考**。Desktop 预览会保留固定 reserved 段
+  （EFI/MSR/Recovery）以免把系统分区空间当成 Unallocated。Worker 自行
+  `resolve_partition_layout_edits`：保留系统分区不动，按数据分区源顺序把 UI 期望
+  尺寸/起点钳制到空闲区间，再建表、按解析后的 `target_start` 写卷并扩展文件系统。
+  未编辑则保持源数据分区起止（仍会重写 GPT 主/备头几何以匹配目标盘容量）。
 
 - `credential_refs` 与 `source_refs` 一一对应：加密归档为 DPAPI SecretRef；未加密为
   **空** `SecretRef`（`value` 为空表示无密码，合法，不得被 Job 校验拒绝）。Desktop 当前对整条链
@@ -167,6 +190,11 @@ resolve_chain(tip) → base-first Catalog entries
 - Catalog 断链 / 环 / 超深度在 Prepare 与 Start 重验证时拒绝；
 - 在线禁止写系统卷 / 系统物理盘；
 - 链上任一 Archive 不得位于目标卷或目标物理盘；
+- Desktop Restore 拖放/下拉映射在选择目标时即拒绝系统盘/系统卷，以及默认
+  Repository locator 所在物理盘/卷，并在拖放 ghost 上显示原因（Worker 仍做最终校验）；
+- 整盘恢复在第一个不可逆磁盘操作（offline / delete layout）之前完成源保护与
+  最终布局校验；用户输入或 Archive 结构错误必须在此之前被拒绝；
+- 当前版本拒绝含扩展/逻辑分区（MBR 0x05/0x0F）的整盘恢复（不持久化 EBR 链）；
 - 写入开始后取消或 I/O 失败会留下部分恢复的目标；
 - 整盘成功以分区表重建完成（以及可选 online）为界；数据 flush 在关 Sink 前完成；
 - Worker 结果不输出口令、SecretRef 或底层 Win32 文本。

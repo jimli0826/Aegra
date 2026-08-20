@@ -89,6 +89,10 @@ struct Volume final {
     std::string filesystem;
     std::string label;
     std::uint64_t total_size{0};
+    /// Free bytes at backup when `free_size_known` (GetDiskFreeSpaceEx); else 0.
+    std::uint64_t free_size{0};
+    /// False when volume free-space metadata could not be queried; UI must not draw used ratio.
+    bool free_size_known{false};
     std::uint32_t cluster_size{0};
     bool vss_required{false};
     bool vss_used{false};

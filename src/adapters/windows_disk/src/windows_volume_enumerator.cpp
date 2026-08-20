@@ -155,9 +155,19 @@ void apply_filesystem_capacity_fallback(WindowsVolumeInfo& info) {
     }
 }
 
+enum class PhysicalPartitionKind : std::uint8_t {
+    kUnknown = 0,
+    kEfi = 1,
+    kMsr = 2,
+    kRecovery = 3,
+    kBasicData = 4,
+    kOther = 5,
+};
+
 struct PhysicalPartitionRange final {
     std::uint64_t offset_bytes{0};
     std::uint64_t size_bytes{0};
+    PhysicalPartitionKind kind{PhysicalPartitionKind::kUnknown};
 };
 
 struct PhysicalDiskInfo final {
@@ -169,12 +179,34 @@ struct PhysicalDiskInfo final {
     std::vector<PhysicalPartitionRange> partitions;
 };
 
-// GPT Microsoft Reserved Partition type (E3C9E316-0B5C-4DB8-817D-F92DF00215AE).
+// GPT type GUIDs (Windows mixed-endian on-disk layout).
 inline constexpr GUID kMicrosoftReservedPartitionGuid = {
     0xE3C9E316, 0x0B5C, 0x4DB8, {0x81, 0x7D, 0xF9, 0x2D, 0xF0, 0x02, 0x15, 0xAE}};
+inline constexpr GUID kEfiSystemPartitionGuid = {
+    0xC12A7328, 0xF81F, 0x11D2, {0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B}};
+inline constexpr GUID kWindowsRecoveryPartitionGuid = {
+    0xDE94BBA4, 0x06D1, 0x4D40, {0xA1, 0x6A, 0xBF, 0xD5, 0x01, 0x79, 0xD6, 0xAC}};
+inline constexpr GUID kBasicDataPartitionGuid = {
+    0xEBD0A0A2, 0xB9E5, 0x4433, {0x87, 0xC0, 0x68, 0xB6, 0xB7, 0x26, 0x99, 0xC7}};
 
 [[nodiscard]] bool guid_equal(const GUID& left, const GUID& right) noexcept {
     return std::memcmp(&left, &right, sizeof(GUID)) == 0;
+}
+
+[[nodiscard]] PhysicalPartitionKind gpt_partition_kind(const GUID& type) noexcept {
+    if (guid_equal(type, kEfiSystemPartitionGuid)) {
+        return PhysicalPartitionKind::kEfi;
+    }
+    if (guid_equal(type, kMicrosoftReservedPartitionGuid)) {
+        return PhysicalPartitionKind::kMsr;
+    }
+    if (guid_equal(type, kWindowsRecoveryPartitionGuid)) {
+        return PhysicalPartitionKind::kRecovery;
+    }
+    if (guid_equal(type, kBasicDataPartitionGuid)) {
+        return PhysicalPartitionKind::kBasicData;
+    }
+    return PhysicalPartitionKind::kOther;
 }
 
 [[nodiscard]] detail::UniqueHandle open_physical_drive(const std::uint32_t disk_number) {
@@ -250,9 +282,17 @@ inline constexpr GUID kMicrosoftReservedPartitionGuid = {
             if (part.PartitionStyle == PARTITION_STYLE_MBR && part.Mbr.PartitionType == 0) {
                 continue;
             }
+            PhysicalPartitionKind kind = PhysicalPartitionKind::kUnknown;
+            if (part.PartitionStyle == PARTITION_STYLE_GPT) {
+                kind = gpt_partition_kind(part.Gpt.PartitionType);
+            } else if (part.PartitionStyle == PARTITION_STYLE_MBR) {
+                kind = part.Mbr.PartitionType == 0xEF ? PhysicalPartitionKind::kEfi
+                                                     : PhysicalPartitionKind::kBasicData;
+            }
             info.partitions.push_back(PhysicalPartitionRange{
                 static_cast<std::uint64_t>(part.StartingOffset.QuadPart),
                 static_cast<std::uint64_t>(part.PartitionLength.QuadPart),
+                kind,
             });
         }
     }
@@ -486,23 +526,19 @@ void load_partition_identity(const wchar_t* volume_name, WindowsVolumeInfo& info
     if (!info.label.empty() || !info.mount_points.empty()) {
         return;
     }
-    // GPT partition type GUIDs (same as old storage_manager.cpp).
-    static constexpr GUID kEfiSystemPartition = {
-        0xC12A7328, 0xF81F, 0x11D2, {0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B}};
-    static constexpr GUID kWindowsRecovery = {
-        0xDE94BBA4, 0x06D1, 0x4D40, {0xA1, 0x6A, 0xBF, 0xD5, 0x01, 0x79, 0xD6, 0xAC}};
     if (part.PartitionStyle == PARTITION_STYLE_GPT) {
-        if (guid_equal(part.Gpt.PartitionType, kEfiSystemPartition)) {
+        const auto kind = gpt_partition_kind(part.Gpt.PartitionType);
+        if (kind == PhysicalPartitionKind::kEfi) {
             info.label = "EFI System Partition";
             if (info.filesystem.empty()) {
                 info.filesystem = "FAT32";
             }
-        } else if (guid_equal(part.Gpt.PartitionType, kMicrosoftReservedPartitionGuid)) {
+        } else if (kind == PhysicalPartitionKind::kMsr) {
             info.label = "Microsoft Reserved Partition";
             if (info.filesystem.empty()) {
                 info.filesystem = "RAW";
             }
-        } else if (guid_equal(part.Gpt.PartitionType, kWindowsRecovery)) {
+        } else if (kind == PhysicalPartitionKind::kRecovery) {
             info.label = "Recovery Partition";
             if (info.filesystem.empty()) {
                 info.filesystem = "NTFS";
@@ -641,6 +677,72 @@ bool supports_vss_snapshot(const WindowsVolumeInfo& volume) noexcept {
     // Keep fixed + removable (USB data disks). Drop remote/CD/RAM/unknown cloud roots.
     return drive_type == DRIVE_FIXED || drive_type == DRIVE_REMOVABLE ||
            drive_type == DRIVE_NO_ROOT_DIR;
+}
+
+[[nodiscard]] bool partition_covered_by_volume_records(
+    const PhysicalPartitionRange& part, const std::vector<ports::SourceInventoryRecord>& records,
+    const std::uint32_t disk_number) {
+    constexpr std::uint64_t kTol = 1024ULL * 1024ULL;
+    for (const auto& row : records) {
+        if (row.disk_number != disk_number || row.source_id.starts_with("disk.") ||
+            row.source_id.starts_with("part.")) {
+            continue;
+        }
+        const auto delta = row.offset_bytes >= part.offset_bytes
+                               ? row.offset_bytes - part.offset_bytes
+                               : part.offset_bytes - row.offset_bytes;
+        if (delta <= kTol) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// Drive-layout partitions that have no volume GUID (common for EFI) still need bar chips.
+[[nodiscard]] ports::SourceInventoryRecord
+make_partition_shell_record(const PhysicalDiskInfo& disk, const PhysicalPartitionRange& part,
+                            const std::uint32_t part_index) {
+    std::string name = "Hidden Partition";
+    std::string health = "Healthy (Hidden)";
+    switch (part.kind) {
+    case PhysicalPartitionKind::kEfi:
+        name = "EFI System Partition";
+        health = "Healthy (EFI)";
+        break;
+    case PhysicalPartitionKind::kMsr:
+        name = "Microsoft Reserved Partition";
+        health = "Healthy (MSR)";
+        break;
+    case PhysicalPartitionKind::kRecovery:
+        name = "Recovery Partition";
+        health = "Healthy (Recovery)";
+        break;
+    case PhysicalPartitionKind::kBasicData:
+        name = "Hidden Partition";
+        break;
+    default:
+        break;
+    }
+    return ports::SourceInventoryRecord{
+        .source_id = "part." + std::to_string(disk.disk_number) + "." + std::to_string(part_index),
+        .stable_key = std::string(R"(\\.\PhysicalDrive)") + std::to_string(disk.disk_number) +
+                      "@" + std::to_string(part.offset_bytes),
+        .display_name = name,
+        .kind = contracts::SourceKind::kVolume,
+        .availability = contracts::SourceAvailability::kAvailable,
+        .capacity_bytes = part.size_bytes,
+        .free_bytes = 0,
+        .disk_capacity_bytes = disk.capacity_bytes,
+        .is_system = false,
+        .is_read_only = true,
+        .disk_number = disk.disk_number,
+        .offset_bytes = part.offset_bytes,
+        .mount_letter = {},
+        .volume_label = name,
+        .health_status = std::move(health),
+        .partition_style = disk.partition_style,
+        .media_type = disk.media_type.empty() ? "Unknown" : disk.media_type,
+    };
 }
 
 [[nodiscard]] ports::SourceInventoryRecord
@@ -796,6 +898,22 @@ WindowsSourceInventory::list_sources(const base::CancellationToken cancellation)
             system_by_disk[disk_number] = true;
         }
         records.push_back(std::move(record).value());
+    }
+
+    // Publish drive-layout partitions that lack a volume GUID (EFI is a common case) so the
+    // Desktop bar shows a named system chip instead of a tiny Unallocated gap.
+    for (const auto& disk : disks) {
+        std::uint32_t part_index = 0;
+        for (const auto& part : disk.partitions) {
+            const auto index = part_index++;
+            if (part.size_bytes == 0) {
+                continue;
+            }
+            if (partition_covered_by_volume_records(part, records, disk.disk_number)) {
+                continue;
+            }
+            records.push_back(make_partition_shell_record(disk, part, index));
+        }
     }
 
     // Always publish disk.N shells for every PhysicalDrive:

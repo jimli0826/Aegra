@@ -210,17 +210,29 @@ Item {
             var tb = Number(v.capacityBytes) || 0
             if (isUnalloc && tb <= minUnallocBytes)
                 return
+            var notBackedUp = !isUnalloc && v.notBackedUp === true
             var sz = v.size || ""
-            if (isUnalloc && sz.length === 0)
+            if ((isUnalloc || notBackedUp) && sz.length === 0)
                 sz = formatUnallocSize(tb)
+            var freeB = -1
+            if (!isUnalloc && !notBackedUp) {
+                var rawFree = Number(v.freeBytes)
+                if (!isNaN(rawFree) && rawFree >= 0)
+                    freeB = rawFree
+            }
             list.push({
-                letter: isUnalloc ? "" : (v.letter || ""),
+                letter: (isUnalloc || notBackedUp) ? "" : (v.letter || ""),
                 //% "Unallocated"
-                name: isUnalloc ? qsTrId("aegra.restore.unallocated") : (v.name || ""),
+                name: isUnalloc ? qsTrId("aegra.restore.unallocated")
+                      //% "Not backed up"
+                      : (notBackedUp ? qsTrId("aegra.restore.not_backed_up")
+                                     : (v.name || "")),
                 size: sz,
-                fileSystem: isUnalloc ? "" : (v.fs || v.fileSystem || ""),
+                fileSystem: (isUnalloc || notBackedUp) ? "" : (v.fs || v.fileSystem || ""),
                 totalBytes: tb,
-                unallocated: isUnalloc
+                freeBytes: freeB,
+                unallocated: isUnalloc,
+                notBackedUp: notBackedUp
             })
         }
 
@@ -293,8 +305,27 @@ Item {
             return zeros
         }
 
+        // Hatch chips (Unallocated / Not backed up) share one floor so Source and
+        // mapped Target bars keep matching segment widths.
         var minAlloc = Math.min(56, Math.max(20, Math.floor(avail / Math.max(1, n + 1))))
-        var minUnalloc = Math.min(16, minAlloc)
+        var minSystem = Math.min(140, Math.max(minAlloc, Math.floor(avail / Math.max(2, n + 1))))
+        var minHatch = Math.min(100, Math.max(minAlloc, Math.floor(avail / Math.max(3, n + 2))))
+
+        function isSystemChip(v) {
+            if (!v || v.unallocated === true || v.notBackedUp === true)
+                return false
+            var letter = (v.letter || "").trim()
+            if (letter.length > 0)
+                return false
+            var n = ((v.name || "") + " " + (v.title || "")).toLowerCase()
+            return n.indexOf("efi") >= 0 || n.indexOf("recovery") >= 0
+                   || n.indexOf("hidden") >= 0 || n.indexOf("system") >= 0
+                   || n.indexOf("msr") >= 0 || n.indexOf("reserved") >= 0
+        }
+
+        function isHatchChip(v) {
+            return v && (v.unallocated === true || v.notBackedUp === true)
+        }
 
         var mins = []
         var weights = []
@@ -302,8 +333,8 @@ Item {
         var minTotal = 0
         for (var i = 0; i < n; ++i) {
             var v = volumes[i]
-            var un = v && v.unallocated === true
-            var mn = un ? minUnalloc : minAlloc
+            var mn = isHatchChip(v) ? minHatch
+                     : (isSystemChip(v) ? minSystem : minAlloc)
             mins.push(mn)
             minTotal += mn
             var w = v && v.ratio > 0 ? Number(v.ratio) : 0
@@ -703,7 +734,7 @@ Item {
                     id: partsRow
                     anchors.fill: parent
                     anchors.margins: 1
-                    spacing: 1
+                    spacing: 0
                     property var segmentWidths: root.partitionBarWidths(
                                                     rowRoot.displayVolumes,
                                                     partsRow.width,
@@ -715,24 +746,56 @@ Item {
                             required property var modelData
                             required property int index
                             property bool isUnalloc: modelData && modelData.unallocated === true
+                            property bool isNotBackedUp: modelData
+                                                         && modelData.notBackedUp === true
+                            property bool isHatchStyle: isUnalloc || isNotBackedUp
+                            property color volumeBaseColor: Theme.volumeColor(index)
+                            property real usedRatio: {
+                                if (isHatchStyle || !modelData)
+                                    return -1
+                                var cap = Number(modelData.totalBytes) || 0
+                                var free = Number(modelData.freeBytes)
+                                if (cap <= 0 || isNaN(free) || free < 0)
+                                    return -1
+                                var used = cap - free
+                                if (used < 0)
+                                    used = 0
+                                if (used > cap)
+                                    used = cap
+                                return used / cap
+                            }
                             height: partsRow.height
                             width: {
                                 var widths = partsRow.segmentWidths
                                 if (widths && index >= 0 && index < widths.length)
                                     return widths[index]
-                                return isUnalloc ? 12 : 56
+                                return isHatchStyle ? 12 : 56
                             }
                             radius: 2
-                            color: isUnalloc ? Theme.colorUnallocated
-                                             : Theme.volumeColor(index)
+                            color: {
+                                if (isHatchStyle)
+                                    return Theme.colorUnallocated
+                                var c = volumeBaseColor
+                                var a = usedRatio >= 0 ? 0.35 : 0.92
+                                return Qt.rgba(c.r, c.g, c.b, a)
+                            }
                             border.width: 1
                             border.color: Theme.colorBorder
-                            opacity: isUnalloc ? 1.0 : 0.92
                             clip: true
+
+                            Rectangle {
+                                visible: !isHatchStyle && usedRatio > 0
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                width: Math.round(parent.width * Math.min(1, usedRatio))
+                                color: volumeBaseColor
+                                z: 0
+                            }
 
                             Canvas {
                                 anchors.fill: parent
-                                visible: isUnalloc
+                                visible: isHatchStyle
                                 onPaint: {
                                     var ctx = getContext("2d")
                                     var w = width
@@ -756,38 +819,51 @@ Item {
                             }
 
                             Text {
-                                anchors.centerIn: parent
-                                width: parent.width - 4
-                                horizontalAlignment: Text.AlignHCenter
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 6
+                                horizontalAlignment: Text.AlignLeft
                                 z: 1
                                 text: {
                                     if (!modelData)
                                         return ""
-                                    if (isUnalloc) {
-                                        //% "Unallocated"
-                                        var uName = modelData.name
-                                                    || qsTrId("aegra.restore.unallocated")
+                                    if (isUnalloc || isNotBackedUp) {
+                                        var uName = modelData.name || ""
+                                        if (uName.length === 0) {
+                                            uName = isNotBackedUp
+                                                //% "Not backed up"
+                                                ? qsTrId("aegra.restore.not_backed_up")
+                                                //% "Unallocated"
+                                                : qsTrId("aegra.restore.unallocated")
+                                        }
                                         var uSz = modelData.size || ""
-                                        if (parent.width < 48)
-                                            return "\u2026"
-                                        if (parent.width < 72 || uSz.length === 0)
+                                        if (uSz.length === 0)
                                             return uName
                                         return uName + "\n" + uSz
                                     }
                                     var title = root.partitionBarTitle(modelData)
                                     var sz = modelData.size || ""
                                     var fs = modelData.fileSystem || ""
+                                    var letter = (modelData.letter || "").trim()
+                                    if (letter.length === 0) {
+                                        if (sz.length === 0)
+                                            return title
+                                        return title + "\n" + sz
+                                    }
                                     if (parent.width < 56)
                                         return title
                                     return title + "\n" + sz + (fs ? (" " + fs) : "")
                                 }
-                                color: isUnalloc ? Theme.colorUnallocatedText
-                                                 : Theme.colorVolumeText
-                                font.pixelSize: parent.width < 60 ? 9 : 10
+                                color: isHatchStyle ? Theme.colorUnallocatedText
+                                                    : Theme.colorVolumeText
+                                font.pixelSize: parent.width < 90 ? 9 : 10
                                 font.bold: true
                                 font.family: Theme.fontFamily
                                 wrapMode: Text.WordWrap
                                 elide: Text.ElideRight
+                                maximumLineCount: 3
                             }
                         }
                     }
@@ -1218,6 +1294,7 @@ Item {
                                 boundsBehavior: Flickable.StopAtBounds
                                 readonly property bool needsScroll: contentHeight > height + 1
                                 ScrollBar.vertical: ScrollBar {
+                                    id: mountedListScrollBar
                                     policy: mountedList.needsScroll ? ScrollBar.AlwaysOn
                                                                     : ScrollBar.AlwaysOff
                                     width: 8
@@ -1226,8 +1303,8 @@ Item {
                                         implicitWidth: 6
                                         radius: 3
                                         color: Theme.colorBorder
-                                        opacity: parent.pressed ? 1.0
-                                                 : (parent.hovered ? 0.9 : 0.65)
+                                        opacity: mountedListScrollBar.pressed ? 1.0
+                                                 : (mountedListScrollBar.hovered ? 0.9 : 0.65)
                                     }
                                     background: Item {}
                                 }

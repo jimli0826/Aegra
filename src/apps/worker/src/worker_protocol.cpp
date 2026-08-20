@@ -7,6 +7,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -192,6 +193,48 @@ std::optional<contracts::RestoreOptions> optional_restore(const Json& root) {
             "worker request restore.auto_expand_last_partition is required");
     }
     result.auto_expand_last_partition = auto_expand->get<bool>();
+    const auto edits = iterator->find("partition_layout_edits");
+    if (edits == iterator->end() || !edits->is_array()) {
+        throw std::invalid_argument(
+            "worker request restore.partition_layout_edits is required");
+    }
+    if (edits->size() > contracts::kMaximumPartitionLayoutEdits) {
+        throw std::invalid_argument(
+            "worker request restore.partition_layout_edits exceeds maximum entry count");
+    }
+    std::vector<std::uint64_t> source_starts;
+    source_starts.reserve(edits->size());
+    for (const auto& item : *edits) {
+        if (!item.is_object() || item.size() != 3 || !item.contains("source_start_offset_bytes") ||
+            !item.contains("target_start_offset_bytes") || !item.contains("size_bytes")) {
+            throw std::invalid_argument(
+                "worker request restore.partition_layout_edits entry is invalid");
+        }
+        contracts::RestorePartitionLayoutEdit edit;
+        edit.source_start_offset_bytes =
+            item.at("source_start_offset_bytes").get<std::uint64_t>();
+        edit.target_start_offset_bytes =
+            item.at("target_start_offset_bytes").get<std::uint64_t>();
+        edit.size_bytes = item.at("size_bytes").get<std::uint64_t>();
+        if (edit.size_bytes == 0) {
+            throw std::invalid_argument(
+                "worker request restore.partition_layout_edits size_bytes is zero");
+        }
+        if (edit.target_start_offset_bytes >
+            (std::numeric_limits<std::uint64_t>::max)() - edit.size_bytes) {
+            throw std::invalid_argument(
+                "worker request restore.partition_layout_edits target range overflows");
+        }
+        source_starts.push_back(edit.source_start_offset_bytes);
+        result.partition_layout_edits.push_back(edit);
+    }
+    std::sort(source_starts.begin(), source_starts.end());
+    for (std::size_t i = 1; i < source_starts.size(); ++i) {
+        if (source_starts[i] == source_starts[i - 1]) {
+            throw std::invalid_argument(
+                "worker request restore.partition_layout_edits has duplicate source_start");
+        }
+    }
     return result;
 }
 

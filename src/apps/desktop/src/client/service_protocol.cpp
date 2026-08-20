@@ -475,18 +475,23 @@ namespace {
 
 [[nodiscard]] bool parse_layout_volume(const QJsonObject& object, QVariantMap& result) {
     if (!has_exact_keys(object, {"volume_index", "letter", "label", "filesystem",
-                                 "total_size_bytes", "extents"}) ||
+                                 "total_size_bytes", "free_size_bytes", "free_size_known",
+                                 "extents"}) ||
         !object.value(QStringLiteral("extents")).isArray() ||
         !object.value(QStringLiteral("letter")).isString() ||
         !object.value(QStringLiteral("label")).isString() ||
-        !object.value(QStringLiteral("filesystem")).isString()) {
+        !object.value(QStringLiteral("filesystem")).isString() ||
+        !object.value(QStringLiteral("free_size_known")).isBool()) {
         return false;
     }
     qint64 volume_index = 0;
     qint64 total_size = 0;
+    qint64 free_size = 0;
     if (!integer_in_range(object.value(QStringLiteral("volume_index")), 0, 1000, volume_index) ||
         !integer_in_range(object.value(QStringLiteral("total_size_bytes")), 1,
-                          (std::numeric_limits<qint64>::max)(), total_size)) {
+                          (std::numeric_limits<qint64>::max)(), total_size) ||
+        !integer_in_range(object.value(QStringLiteral("free_size_bytes")), 0, total_size,
+                          free_size)) {
         return false;
     }
     QVariantList extents;
@@ -503,11 +508,14 @@ namespace {
     if (extents.isEmpty()) {
         return false;
     }
+    const bool free_known = object.value(QStringLiteral("free_size_known")).toBool();
     result = {{QStringLiteral("volumeIndex"), volume_index},
               {QStringLiteral("letter"), object.value(QStringLiteral("letter")).toString()},
               {QStringLiteral("label"), object.value(QStringLiteral("label")).toString()},
               {QStringLiteral("filesystem"), object.value(QStringLiteral("filesystem")).toString()},
               {QStringLiteral("totalSizeBytes"), total_size},
+              {QStringLiteral("freeSizeBytes"), free_size},
+              {QStringLiteral("freeSizeKnown"), free_known},
               {QStringLiteral("extents"), extents}};
     return true;
 }

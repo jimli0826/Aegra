@@ -1476,8 +1476,8 @@
         <translation>Quelldatenträger</translation>
     </message>
     <message id="aegra.restore.source_hint">
-        <source>(drag onto a target disk, or use Restore to)</source>
-        <translation>(auf Zieldatenträger ziehen oder „Wiederherstellen nach“)</translation>
+        <source>(drag the disk onto a target disk)</source>
+        <translation>(Datenträger auf Ziel ziehen; keine Partitionen)</translation>
     </message>
     <message id="aegra.restore.restore_to">
         <source>Restore to</source>
@@ -1500,8 +1500,8 @@
         <translation>Zuerst einen Prüfpunkt wählen</translation>
     </message>
     <message id="aegra.restore.map_required">
-        <source>Choose “Restore to” on a source disk</source>
-        <translation>„Wiederherstellen nach“ auf einem Quelldatenträger wählen</translation>
+        <source>Drag a source disk onto a target disk</source>
+        <translation>Quelldatenträger auf Zieldatenträger ziehen</translation>
     </message>
     <message id="aegra.restore.no_repository">
         <source>No repository connection is available</source>
@@ -1526,6 +1526,18 @@
     <message id="aegra.restore.system_target_blocked">
         <source>System disk restore requires PE (not available online)</source>
         <translation>Systemdatenträger-Wiederherstellung erfordert PE (online nicht verfügbar)</translation>
+    </message>
+    <message id="aegra.restore.archive_on_target_disk">
+        <source>Backup archive is on this disk; choose another target</source>
+        <translation>Das Backup-Archiv liegt auf diesem Datenträger; wählen Sie ein anderes Ziel</translation>
+    </message>
+    <message id="aegra.restore.archive_on_target_volume">
+        <source>Backup archive is on this volume; choose another target</source>
+        <translation>Das Backup-Archiv liegt auf diesem Volume; wählen Sie ein anderes Ziel</translation>
+    </message>
+    <message id="aegra.restore.archive_here_tag">
+        <source>— archive here</source>
+        <translation>— Archiv hier</translation>
     </message>
     <message id="aegra.restore.system_tag">
         <source>[System]</source>
@@ -1603,17 +1615,17 @@
         <source>Keep MBR signature / GPT DiskId (recommended for bootable disks). Uncheck only when cloning a data disk while the source remains online.</source>
         <translation>MBR-Signatur / GPT-DiskId behalten (für bootfähige Datenträger empfohlen). Nur abwählen beim Klonen einer Datenplatte bei online bleibender Quelle.</translation>
     </message>
-    <message id="aegra.restore.auto_extend">
-        <source>Auto expand last partition</source>
-        <translation>Letzte Partition automatisch erweitern</translation>
-    </message>
-    <message id="aegra.restore.auto_extend_hint">
-        <source>When the target disk is larger than the source, grow the last data partition (and filesystem) into free space so no large unallocated region remains. Uncheck to leave free space unallocated. Note: FAT/FAT32 volumes cannot be auto-expanded (Windows does not support online extend); free space stays unallocated.</source>
-        <translation>Ist die Zieldisk größer als die Quelle, wird die letzte Datenpartition (und das Dateisystem) in den freien Speicher vergrößert. Abwählen belässt freien Speicher unzugeordnet. Hinweis: FAT/FAT32 lassen sich online nicht erweitern.</translation>
+    <message id="aegra.restore.target_resize_hint">
+        <source>When the target disk is larger than the source, free space stays unallocated. Drag the edges of a data partition on the Target bar to grow or shrink it into adjacent unallocated space before restore (NTFS/ReFS only).</source>
+        <translation>Ist die Zieldisk größer als die Quelle, bleibt freier Speicher unzugeordnet. Ziehen Sie vor der Wiederherstellung die Kanten einer Datenpartition auf der Target-Leiste in angrenzenden freien Speicher (nur NTFS/ReFS).</translation>
     </message>
     <message id="aegra.restore.unallocated">
         <source>Unallocated</source>
         <translation>Nicht zugeordnet</translation>
+    </message>
+    <message id="aegra.restore.not_backed_up">
+        <source>Not backed up</source>
+        <translation>Nicht gesichert</translation>
     </message>
     <message id="aegra.volume.local_disk">
         <source>Local Disk</source>
@@ -1660,8 +1672,8 @@
         <translation>Quellvolumes</translation>
     </message>
     <message id="aegra.restore.source_volume_hint">
-        <source>(drag onto a target volume, or use Restore to)</source>
-        <translation>(auf Zielvolume ziehen oder „Wiederherstellen nach“)</translation>
+        <source>(drag onto a target volume)</source>
+        <translation>(auf Zielvolume ziehen)</translation>
     </message>
     <message id="aegra.restore.target_volumes">
         <source>Target Volumes</source>
@@ -1680,8 +1692,8 @@
         <translation>Prüfpunkt wählen, um Quellvolumes anzuzeigen</translation>
     </message>
     <message id="aegra.restore.volume_map_required">
-        <source>Choose “Restore to” on a source volume</source>
-        <translation>„Wiederherstellen nach“ auf einem Quellvolume wählen</translation>
+        <source>Drag a source volume onto a target volume</source>
+        <translation>Quellvolume auf Zielvolume ziehen</translation>
     </message>
     <message id="aegra.restore.volume_target_too_small">
         <source>Target volume is smaller than the source volume</source>

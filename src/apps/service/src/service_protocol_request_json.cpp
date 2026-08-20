@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -329,24 +330,61 @@ parse_restore_preflight_request(const Json& payload) {
 }
 
 [[nodiscard]] Json encode_start_restore(const contracts::StartRestoreCommand& command) {
+    Json edits = Json::array();
+    for (const auto& edit : command.partition_layout_edits) {
+        edits.push_back(Json{{"source_start_offset_bytes", edit.source_start_offset_bytes},
+                             {"target_start_offset_bytes", edit.target_start_offset_bytes},
+                             {"size_bytes", edit.size_bytes}});
+    }
     return Json{{"preflight_token", command.preflight_token},
                 {"confirmed", command.confirmed},
                 {"archive_password", command.archive_password},
                 {"preserve_disk_signature", command.preserve_disk_signature},
-                {"auto_expand_last_partition", command.auto_expand_last_partition}};
+                {"auto_expand_last_partition", command.auto_expand_last_partition},
+                {"partition_layout_edits", std::move(edits)}};
 }
 
 [[nodiscard]] contracts::StartRestoreCommand parse_start_restore(const Json& payload) {
-    constexpr std::array<std::string_view, 5> keys{"preflight_token", "confirmed",
-                                                   "archive_password", "preserve_disk_signature",
-                                                   "auto_expand_last_partition"};
-    if (!exact_keys(payload, keys)) {
+    constexpr std::array<std::string_view, 6> keys{
+        "preflight_token",            "confirmed",
+        "archive_password",           "preserve_disk_signature",
+        "auto_expand_last_partition", "partition_layout_edits"};
+    if (!exact_keys(payload, keys) || !payload.at("partition_layout_edits").is_array()) {
         throw std::invalid_argument("start restore fields are invalid");
     }
-    return {payload.at("preflight_token").get<std::string>(), payload.at("confirmed").get<bool>(),
-            payload.at("archive_password").get<std::string>(),
-            payload.at("preserve_disk_signature").get<bool>(),
-            payload.at("auto_expand_last_partition").get<bool>()};
+    contracts::StartRestoreCommand command{
+        payload.at("preflight_token").get<std::string>(),
+        payload.at("confirmed").get<bool>(),
+        payload.at("archive_password").get<std::string>(),
+        payload.at("preserve_disk_signature").get<bool>(),
+        payload.at("auto_expand_last_partition").get<bool>(),
+        {}};
+    const auto& edits_json = payload.at("partition_layout_edits");
+    if (edits_json.size() > contracts::kMaximumPartitionLayoutEdits) {
+        throw std::invalid_argument("partition_layout_edits exceeds maximum entry count");
+    }
+    constexpr std::array<std::string_view, 3> edit_keys{
+        "source_start_offset_bytes", "target_start_offset_bytes", "size_bytes"};
+    for (const auto& item : edits_json) {
+        if (!item.is_object() || !exact_keys(item, edit_keys)) {
+            throw std::invalid_argument("partition_layout_edits entry is invalid");
+        }
+        contracts::RestorePartitionLayoutEdit edit;
+        edit.source_start_offset_bytes =
+            item.at("source_start_offset_bytes").get<std::uint64_t>();
+        edit.target_start_offset_bytes =
+            item.at("target_start_offset_bytes").get<std::uint64_t>();
+        edit.size_bytes = item.at("size_bytes").get<std::uint64_t>();
+        if (edit.size_bytes == 0) {
+            throw std::invalid_argument("partition_layout_edits size_bytes is zero");
+        }
+        if (edit.target_start_offset_bytes >
+            (std::numeric_limits<std::uint64_t>::max)() - edit.size_bytes) {
+            throw std::invalid_argument("partition_layout_edits target range overflows");
+        }
+        command.partition_layout_edits.push_back(edit);
+    }
+    return command;
 }
 
 [[nodiscard]] Json

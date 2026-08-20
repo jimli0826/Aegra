@@ -1,8 +1,11 @@
 #include "aegra/contracts/job.h"
 
 #include "aegra/base/uuid.h"
+#include "aegra/contracts/file_set.h"
 
 #include <algorithm>
+#include <limits>
+#include <set>
 #include <utility>
 
 namespace aegra::contracts {
@@ -134,6 +137,38 @@ base::Result<void> validate_backup_options(const JobRequest& request) {
     return base::Result<void>::success();
 }
 
+base::Result<void> validate_restore_options(const RestoreOptions& options) {
+    if (options.partition_layout_edits.size() > kMaximumPartitionLayoutEdits) {
+        return invalid("partition_layout_edits exceeds maximum entry count");
+    }
+    if (!options.disk_restore && !options.partition_layout_edits.empty()) {
+        return invalid("partition_layout_edits require disk_restore");
+    }
+    // Explicit layout is the size authority; auto-expand must not also apply.
+    if (!options.partition_layout_edits.empty() && options.auto_expand_last_partition) {
+        return invalid("auto_expand_last_partition cannot be used with partition_layout_edits");
+    }
+    std::set<std::uint64_t> source_starts;
+    for (const auto& edit : options.partition_layout_edits) {
+        if (edit.size_bytes == 0) {
+            return invalid("partition_layout_edits size_bytes is zero");
+        }
+        if (edit.source_start_offset_bytes > kMaximumWireInteger ||
+            edit.target_start_offset_bytes > kMaximumWireInteger ||
+            edit.size_bytes > kMaximumWireInteger) {
+            return invalid("partition_layout_edits wire integer is out of range");
+        }
+        if (edit.target_start_offset_bytes >
+            (std::numeric_limits<std::uint64_t>::max)() - edit.size_bytes) {
+            return invalid("partition_layout_edits target range overflows");
+        }
+        if (!source_starts.insert(edit.source_start_offset_bytes).second) {
+            return invalid("partition_layout_edits has duplicate source_start");
+        }
+    }
+    return base::Result<void>::success();
+}
+
 base::Result<void> validate_volume_sources(const JobRequest& request) {
     if (!request.file_source_refs.empty() || request.file_restore_target) {
         return invalid("volume_set job cannot carry file payloads");
@@ -149,14 +184,14 @@ base::Result<void> validate_volume_sources(const JobRequest& request) {
     if (request.target_ref.empty()) {
         return invalid("target_ref is required");
     }
-    if (request.operation == JobOperation::kRestore && request.restore) {
-        return base::Result<void>::success();
-    }
-    if (request.operation == JobOperation::kRestore && !request.restore) {
-        return base::Result<void>::success();
-    }
     if (request.operation != JobOperation::kRestore && request.restore) {
         return invalid("restore options require a restore operation");
+    }
+    if (request.operation == JobOperation::kRestore) {
+        if (!request.restore) {
+            return invalid("volume_set restore requires restore options");
+        }
+        return validate_restore_options(*request.restore);
     }
     return base::Result<void>::success();
 }

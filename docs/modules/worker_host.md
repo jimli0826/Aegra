@@ -56,7 +56,7 @@ task log 与 Service 分级日志（`logs/trace.log` 等）同树。
 | `target_ref` | string | Backup/Restore/Export 必填；Verify 为空；file_set restore 为空 |
 | `credential_refs` | string array | 只允许 `SecretRef` 定位符 |
 | `backup` | object | Backup 必填；含 `type`、`deduplication_enabled`；volume 增量含父引用；file_set 含 `selection_fingerprint`，Incremental 可含 `candidate_parent_uuid` |
-| `restore` | object | volume_set Restore 选项：`disk_restore`、`source_disk_number`、`source_volume_index`、`bring_target_online`、`preserve_disk_signature`、`auto_expand_last_partition` |
+| `restore` | object | volume_set Restore **必填**：`disk_restore`、`source_disk_number`、`source_volume_index`、`bring_target_online`、`preserve_disk_signature`、`auto_expand_last_partition` |
 | `trace_id` | string | 必填、非空 |
 | `deadline_utc_ms` | signed integer | 可选；`0` 表示无 deadline |
 
@@ -105,9 +105,11 @@ Verify Job 的 `operation` 为 `3`，`source_refs` 恰好一个 `.bkf`，`target
 认证每个 Chunk，不创建目标文件。成功结果使用 `verify.completed`，错误使用脱敏的 `verify.*` code。
 
 Restore Job 的 `operation` 为 `2`，`credential_refs` 必须与 `source_refs` 同长度且逐层对应
-（未加密层为空字符串）。卷恢复：`source_refs` 为 base-first 链，`target_ref` 为 canonical Volume
-GUID Path，且**不**携带 `restore` 对象。整盘恢复：`source_refs` 为 base-first 完整链
-（Full，以及可选 Incremental 层），`target_ref` 为 `\\.\PhysicalDriveN`，且必须带：
+（未加密层为空字符串）。volume_set Restore **必须**携带 `restore` 对象（contracts / Worker
+拒绝缺失；无隐式卷 0 回退）。卷恢复：`source_refs` 为 base-first 链，`target_ref` 为
+canonical Volume GUID Path，`disk_restore=false` 且显式 `source_volume_index`。整盘恢复：
+`source_refs` 为 base-first 完整链（Full，以及可选 Incremental 层），`target_ref` 为
+`\\.\PhysicalDriveN`，`disk_restore=true`：
 
 ```json
 {"restore":{"disk_restore":true,"source_disk_number":0,"source_volume_index":0,"bring_target_online":true,"preserve_disk_signature":true,"auto_expand_last_partition":true}}
@@ -115,8 +117,7 @@ GUID Path，且**不**携带 `restore` 对象。整盘恢复：`source_refs` 为
 ```
 
 Worker 用 `PersonalArchiveChainReader` 合成 tip 视图，再按卷写入 PhysicalDrive。Service→Worker
-编码（`encode_supervisor_job_request`）必须序列化 `restore`；省略时 Worker 按卷恢复处理，
-PhysicalDrive 目标会以 `restore.invalid_request` 失败。安全边界见
+编码（`encode_supervisor_job_request`）必须序列化 `restore`。安全边界见
 [ADR-0009](../adr/0009-windows-volume-restore-safety.md) 与
 [windows_personal_restore.md](windows_personal_restore.md)。
 

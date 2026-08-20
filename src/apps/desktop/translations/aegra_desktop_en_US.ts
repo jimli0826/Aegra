@@ -1476,8 +1476,8 @@
         <translation>Source Disks</translation>
     </message>
     <message id="aegra.restore.source_hint">
-        <source>(drag onto a target disk, or use Restore to)</source>
-        <translation>(drag onto a target disk, or use Restore to)</translation>
+        <source>(drag the disk onto a target disk)</source>
+        <translation>(drag the disk onto a target disk)</translation>
     </message>
     <message id="aegra.restore.restore_to">
         <source>Restore to</source>
@@ -1500,8 +1500,8 @@
         <translation>Select a checkpoint first</translation>
     </message>
     <message id="aegra.restore.map_required">
-        <source>Choose “Restore to” on a source disk</source>
-        <translation>Choose “Restore to” on a source disk</translation>
+        <source>Drag a source disk onto a target disk</source>
+        <translation>Drag a source disk onto a target disk</translation>
     </message>
     <message id="aegra.restore.no_repository">
         <source>No repository connection is available</source>
@@ -1526,6 +1526,18 @@
     <message id="aegra.restore.system_target_blocked">
         <source>System disk restore requires PE (not available online)</source>
         <translation>System disk restore requires PE (not available online)</translation>
+    </message>
+    <message id="aegra.restore.archive_on_target_disk">
+        <source>Backup archive is on this disk; choose another target</source>
+        <translation>Backup archive is on this disk; choose another target</translation>
+    </message>
+    <message id="aegra.restore.archive_on_target_volume">
+        <source>Backup archive is on this volume; choose another target</source>
+        <translation>Backup archive is on this volume; choose another target</translation>
+    </message>
+    <message id="aegra.restore.archive_here_tag">
+        <source>— archive here</source>
+        <translation>— archive here</translation>
     </message>
     <message id="aegra.restore.system_tag">
         <source>[System]</source>
@@ -1603,17 +1615,17 @@
         <source>Keep MBR signature / GPT DiskId (recommended for bootable disks). Uncheck only when cloning a data disk while the source remains online.</source>
         <translation>Keep MBR signature / GPT DiskId (recommended for bootable disks). Uncheck only when cloning a data disk while the source remains online.</translation>
     </message>
-    <message id="aegra.restore.auto_extend">
-        <source>Auto expand last partition</source>
-        <translation>Auto expand last partition</translation>
-    </message>
-    <message id="aegra.restore.auto_extend_hint">
-        <source>When the target disk is larger than the source, grow the last data partition (and filesystem) into free space so no large unallocated region remains. Uncheck to leave free space unallocated. Note: FAT/FAT32 volumes cannot be auto-expanded (Windows does not support online extend); free space stays unallocated.</source>
-        <translation>When the target disk is larger than the source, grow the last data partition (and filesystem) into free space so no large unallocated region remains. Uncheck to leave free space unallocated. Note: FAT/FAT32 volumes cannot be auto-expanded (Windows does not support online extend); free space stays unallocated.</translation>
+    <message id="aegra.restore.target_resize_hint">
+        <source>When the target disk is larger than the source, free space stays unallocated. Drag the edges of a data partition on the Target bar to grow or shrink it into adjacent unallocated space before restore (NTFS/ReFS only).</source>
+        <translation>When the target disk is larger than the source, free space stays unallocated. Drag the edges of a data partition on the Target bar to grow or shrink it into adjacent unallocated space before restore (NTFS/ReFS only).</translation>
     </message>
     <message id="aegra.restore.unallocated">
         <source>Unallocated</source>
         <translation>Unallocated</translation>
+    </message>
+    <message id="aegra.restore.not_backed_up">
+        <source>Not backed up</source>
+        <translation>Not backed up</translation>
     </message>
     <message id="aegra.volume.local_disk">
         <source>Local Disk</source>
@@ -1660,8 +1672,8 @@
         <translation>Source Volumes</translation>
     </message>
     <message id="aegra.restore.source_volume_hint">
-        <source>(drag onto a target volume, or use Restore to)</source>
-        <translation>(drag onto a target volume, or use Restore to)</translation>
+        <source>(drag onto a target volume)</source>
+        <translation>(drag onto a target volume)</translation>
     </message>
     <message id="aegra.restore.target_volumes">
         <source>Target Volumes</source>
@@ -1680,8 +1692,8 @@
         <translation>Select a checkpoint to view source volumes</translation>
     </message>
     <message id="aegra.restore.volume_map_required">
-        <source>Choose “Restore to” on a source volume</source>
-        <translation>Choose “Restore to” on a source volume</translation>
+        <source>Drag a source volume onto a target volume</source>
+        <translation>Drag a source volume onto a target volume</translation>
     </message>
     <message id="aegra.restore.volume_target_too_small">
         <source>Target volume is smaller than the source volume</source>

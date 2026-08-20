@@ -78,7 +78,6 @@ Item {
     readonly property int optionsCollapsedWidth: 36
     property bool checkpointPanelOpen: false
     property bool preserveSignature: true
-    property bool autoExtend: true
     /// Vertical split Source / Target (0.2 … 0.8)
     property real sourceTargetRatio: 0.45
     /// Options width share when expanded (0.18 … 0.45)
@@ -157,10 +156,21 @@ Item {
     property var volumeMappings: ({})
     /// Bumped on every mapping change so ComboBox/model bindings refresh.
     property int mappingEpoch: 0
+    /// target disk_number → manual layout edit { sourceDisk, targetBytes, segments: [...] }.
+    /// Size changes are only via Target partition-bar edge drag (no auto-expand option).
+    property var targetLayoutEdits: ({})
+    /// Bumped when a mapped target partition edge is resized.
+    property int layoutEditEpoch: 0
     /// True while a source-disk drag hovers a target that fails restore checks.
     property bool mappingDropBlocked: false
     /// Localized block reason shown after the ban icon on the drag ghost.
     property string mappingDropBlockReason: ""
+    /// True while a source disk/volume is being dragged — freezes list scrolling.
+    property bool mappingDragActive: false
+    /// Avoid double inventory refresh after one restore session completes.
+    property bool restoreTargetsRefreshed: false
+    /// True while resizing a mapped-target partition edge (freeze target ListView).
+    property bool layoutResizeActive: false
 
     function setMappingDropFeedback(blocked, reason) {
         root.mappingDropBlocked = blocked
@@ -170,6 +180,16 @@ Item {
     function clearMappingDropBlocked() {
         root.mappingDropBlocked = false
         root.mappingDropBlockReason = ""
+    }
+
+    function beginMappingDrag() {
+        root.mappingDragActive = true
+        root.clearMappingDropBlocked()
+    }
+
+    function endMappingDrag() {
+        root.mappingDragActive = false
+        root.clearMappingDropBlocked()
     }
 
     function resetFileRestoreOptions() {
@@ -701,9 +721,9 @@ Item {
             return qsTrId("aegra.restore.loading_source")
         if (!root.hasMapping)
             return root.isVolumeMode
-                   //% "Choose “Restore to” on a source volume"
+                   //% "Drag a source volume onto a target volume"
                    ? qsTrId("aegra.restore.volume_map_required")
-                   //% "Choose “Restore to” on a source disk"
+                   //% "Drag a source disk onto a target disk"
                    : qsTrId("aegra.restore.map_required")
         return ""
     }
@@ -720,7 +740,186 @@ Item {
 
     function clearDiskMappings() {
         root.diskMappings = ({})
+        root.targetLayoutEdits = ({})
+        root.layoutEditEpoch++
         root.mappingEpoch++
+    }
+
+    function clearTargetLayoutEdit(targetNum) {
+        if (targetNum === undefined || targetNum === null || Number(targetNum) < 0)
+            return
+        var key = String(targetNum)
+        if (!root.targetLayoutEdits || root.targetLayoutEdits[key] === undefined)
+            return
+        var next = Object.assign({}, root.targetLayoutEdits)
+        delete next[key]
+        root.targetLayoutEdits = next
+        root.layoutEditEpoch++
+    }
+
+    function volumeSupportsEnlarge(seg) {
+        if (!seg || seg.unallocated === true || seg.notBackedUp === true
+                || seg.reserved === true)
+            return false
+        var fs = String(seg.fileSystem || seg.fs || "").toUpperCase()
+        // Worker online-extend supports NTFS/ReFS; FAT/exFAT cannot grow.
+        if (fs.indexOf("FAT") >= 0 || fs.indexOf("EXFAT") >= 0)
+            return false
+        return true
+    }
+
+    function annotateResizableSegments(segments) {
+        var out = []
+        var n = segments ? segments.length : 0
+        for (var i = 0; i < n; ++i) {
+            var s = Object.assign({}, segments[i])
+            // Reserved (EFI/MSR/Recovery) are fixed anchors — never resizable.
+            if (s.reserved === true) {
+                s.canResizeLeft = false
+                s.canResizeRight = false
+                s.resizable = false
+                s.minBytes = Number(s.totalBytes) || 0
+                out.push(s)
+                continue
+            }
+            var enlarge = root.volumeSupportsEnlarge(s)
+            var leftUn = i > 0 && segments[i - 1] && segments[i - 1].unallocated === true
+            var rightUn = i + 1 < n && segments[i + 1] && segments[i + 1].unallocated === true
+            s.canResizeLeft = enlarge && leftUn
+            s.canResizeRight = enlarge && rightUn
+            s.resizable = s.canResizeLeft || s.canResizeRight
+            if (s.minBytes === undefined || s.minBytes === null)
+                s.minBytes = Number(s.totalBytes) || 0
+            out.push(s)
+        }
+        return out
+    }
+
+    function finalizePreviewRatios(segments, targetTotal) {
+        var total = 0
+        for (var t = 0; t < segments.length; ++t)
+            total += Number(segments[t].totalBytes) || 0
+        var basis = targetTotal > 0 ? targetTotal : total
+        for (var r = 0; r < segments.length; ++r) {
+            var ratio = basis > 0 ? ((Number(segments[r].totalBytes) || 0) / basis)
+                                  : (1.0 / Math.max(1, segments.length))
+            segments[r].ratio = ratio > 0 ? ratio : 0.04
+            if (!segments[r].unallocated)
+                segments[r].size = root.formatBarBytes(segments[r].totalBytes)
+            else
+                segments[r].size = root.formatBarBytes(segments[r].totalBytes)
+        }
+        return root.annotateResizableSegments(segments)
+    }
+
+    /// PhysicalDrive / GPT: 512-byte sector. UI resize snaps to 1 MiB (also sector-aligned).
+    readonly property int layoutSectorBytes: 512
+    readonly property int layoutStepBytes: 1024 * 1024
+
+    function alignDownBytes(n, step) {
+        var s = step > 0 ? step : root.layoutSectorBytes
+        n = Number(n) || 0
+        if (n <= 0)
+            return 0
+        return Math.floor(n / s) * s
+    }
+
+    function alignRoundBytes(n, step) {
+        var s = step > 0 ? step : root.layoutStepBytes
+        n = Number(n) || 0
+        if (n <= 0)
+            return 0
+        return Math.round(n / s) * s
+    }
+
+    /// Grow/shrink a data volume at `index` into an adjacent Unallocated neighbor.
+    /// edge: "left" | "right". deltaBytes > 0 grows the volume toward that edge.
+    /// Sizes snap to whole MiB (no fractional MB labels while dragging).
+    /// Returns the (possibly shifted) volume index after apply, or -1 if unchanged.
+    function resizeMappedTargetSegment(targetNum, index, edge, deltaBytes) {
+        var key = String(targetNum)
+        var edit = root.targetLayoutEdits ? root.targetLayoutEdits[key] : null
+        if (!edit || !edit.segments || index < 0 || index >= edit.segments.length)
+            return -1
+        var segs = []
+        for (var c = 0; c < edit.segments.length; ++c)
+            segs.push(Object.assign({}, edit.segments[c]))
+
+        var vol = segs[index]
+        if (!vol || vol.unallocated || vol.reserved === true || vol.notBackedUp === true)
+            return -1
+        var step = root.layoutStepBytes
+        var minB = Number(vol.minBytes) || 0
+        var cur = Number(vol.totalBytes) || 0
+        var neighIdx = edge === "left" ? index - 1 : index + 1
+        if (neighIdx < 0 || neighIdx >= segs.length)
+            return -1
+        var neigh = segs[neighIdx]
+        // Only true free space is consumable; reserved anchors stay fixed.
+        if (!neigh || neigh.unallocated !== true || neigh.reserved === true)
+            return -1
+        if (edge === "left" && !vol.canResizeLeft
+                && !(root.volumeSupportsEnlarge(vol) && neigh.unallocated))
+            return -1
+        if (edge === "right" && !vol.canResizeRight
+                && !(root.volumeSupportsEnlarge(vol) && neigh.unallocated))
+            return -1
+
+        var maxGrow = Number(neigh.totalBytes) || 0
+        var maxSize = cur + maxGrow
+        // Snap to 1 MiB; ignore sub-MiB drag noise.
+        var want = root.alignRoundBytes(cur + Number(deltaBytes), step)
+        if (want < minB)
+            want = minB
+        if (want > maxSize)
+            want = root.alignDownBytes(maxSize, step)
+        if (want < minB)
+            want = minB
+        // Require at least one full MiB change when leaving min size (or any change).
+        if (want !== minB && want !== cur) {
+            var diff = Math.abs(want - cur)
+            if (diff > 0 && diff < step) {
+                if (Number(deltaBytes) > 0)
+                    want = Math.min(maxSize, cur + step)
+                else
+                    want = Math.max(minB, cur - step)
+                want = root.alignRoundBytes(want, step)
+                if (want < minB)
+                    want = minB
+                if (want > maxSize)
+                    want = root.alignDownBytes(maxSize, step)
+            }
+        }
+        var actual = want - cur
+        if (actual === 0)
+            return index
+        vol.totalBytes = want
+        neigh.totalBytes = maxGrow - actual
+        // Snap neighbor to whole MiB when possible; keep residual on trailing free.
+        if (neigh.totalBytes > 0)
+            neigh.totalBytes = root.alignDownBytes(neigh.totalBytes, step)
+        // Drop zero-sized unallocated chips.
+        if ((Number(neigh.totalBytes) || 0) <= 0) {
+            segs.splice(neighIdx, 1)
+            // index of vol may shift if neighbor was on the left
+            if (neighIdx < index)
+                index -= 1
+        }
+        var origin = (edit.layoutOriginBytes !== undefined) ? edit.layoutOriginBytes : null
+        segs = root.recomputeSegmentOffsets(segs, origin)
+        var targetTotal = Number(edit.targetBytes) || 0
+        segs = root.finalizePreviewRatios(segs, targetTotal)
+        segs = root.recomputeSegmentOffsets(segs, origin)
+        var next = Object.assign({}, root.targetLayoutEdits)
+        next[key] = {
+            sourceDisk: edit.sourceDisk,
+            targetBytes: edit.targetBytes,
+            layoutOriginBytes: root.layoutOriginBytes(segs, origin),
+            segments: segs
+        }
+        root.targetLayoutEdits = next
+        root.layoutEditEpoch++
+        return index
     }
 
     function clearVolumeMappings() {
@@ -770,15 +969,29 @@ Item {
     }
 
     function isDiskMappedAsTarget(diskNum) {
+        return root.sourceDiskNumberMappedToTarget(diskNum) >= 0
+    }
+
+    /// Source disk_number mapped onto this target, or -1 when none.
+    function sourceDiskNumberMappedToTarget(targetNum) {
         var _e = root.mappingEpoch
-        if (diskNum === undefined || diskNum === null)
-            return false
+        if (targetNum === undefined || targetNum === null || Number(targetNum) < 0)
+            return -1
         var map = root.diskMappings || {}
         for (var k in map) {
-            if (Number(map[k]) === Number(diskNum))
-                return true
+            if (Number(map[k]) === Number(targetNum))
+                return Number(k)
         }
-        return false
+        return -1
+    }
+
+    function sourceDiskDataByNumber(diskNum) {
+        var sources = root.sourceDisks || []
+        for (var i = 0; i < sources.length; ++i) {
+            if (Number(sources[i].diskNumber) === Number(diskNum))
+                return sources[i]
+        }
+        return null
     }
 
     function isVolumeMappedAsTarget(sourceId) {
@@ -856,6 +1069,11 @@ Item {
                 //% "System disk restore requires PE (not available online)"
                 return qsTrId("aegra.restore.system_target_blocked")
         }
+        // Archive (.bkf) on the target PhysicalDrive — Worker would reject after layout delete.
+        var hostDisk = serviceClient.defaultRepositoryHostDiskNumber()
+        if (hostDisk >= 0 && Number(targetNum) === Number(hostDisk))
+            //% "Backup archive is on this disk; choose another target"
+            return qsTrId("aegra.restore.archive_on_target_disk")
         return ""
     }
 
@@ -880,6 +1098,10 @@ Item {
                 return qsTrId("aegra.restore.volume_target_read_only")
             break
         }
+        var hostVol = serviceClient.defaultRepositoryHostVolumeSourceId()
+        if (hostVol && hostVol.length > 0 && String(targetSourceId) === String(hostVol))
+            //% "Backup archive is on this volume; choose another target"
+            return qsTrId("aegra.restore.archive_on_target_volume")
         return ""
     }
 
@@ -889,6 +1111,11 @@ Item {
         // Invalid targets are rejected silently; drag ghost already shows the reason.
         if (targetNum >= 0 && root.mappingBlockReason(sourceNum, targetNum).length > 0)
             return
+        var prev = root.mappedTarget(sourceNum)
+        if (prev >= 0 && prev !== Number(targetNum))
+            root.clearTargetLayoutEdit(prev)
+        if (targetNum >= 0)
+            root.clearTargetLayoutEdit(targetNum)
         var map = Object.assign({}, root.diskMappings || {})
         map[String(sourceNum)] = targetNum
         root.diskMappings = map
@@ -922,6 +1149,7 @@ Item {
             isSystem: false,
             enabled: true
         })
+        var hostDisk = serviceClient.defaultRepositoryHostDiskNumber()
         var targets = root.targetDisks || []
         for (var i = 0; i < targets.length; ++i) {
             var d = targets[i]
@@ -930,6 +1158,7 @@ Item {
             if (d.size)
                 lab += "  (" + d.size + ")"
             var isSystem = d.isSystemDisk === true
+            var hasArchive = hostDisk >= 0 && Number(num) === Number(hostDisk)
             if (isSystem)
                 //% "[System]"
                 lab += "  " + qsTrId("aegra.restore.system_tag")
@@ -944,19 +1173,23 @@ Item {
             else if (isSystem)
                 //% "— PE only"
                 lab += "  " + qsTrId("aegra.restore.pe_only_tag")
+            else if (hasArchive)
+                //% "— archive here"
+                lab += "  " + qsTrId("aegra.restore.archive_here_tag")
             out.push({
                 label: lab,
                 value: num,
                 tooSmall: tooSmall,
                 inUse: inUse,
                 isSystem: isSystem,
-                enabled: !tooSmall && !inUse && !isSystem
+                hasArchive: hasArchive,
+                enabled: !tooSmall && !inUse && !isSystem && !hasArchive
             })
         }
         return out
     }
 
-    /// Default every source to Not mapped; user maps via ComboBox or drag-drop.
+    /// Default every source unmapped; user maps by dragging onto a target.
     function initDefaultMappings() {
         var map = ({})
         var sources = root.sourceDisks || []
@@ -1023,6 +1256,7 @@ Item {
             isReadOnly: false,
             enabled: true
         })
+        var hostVol = serviceClient.defaultRepositoryHostVolumeSourceId() || ""
         var targets = root.targetVolumes || []
         for (var i = 0; i < targets.length; ++i) {
             var v = targets[i]
@@ -1035,6 +1269,7 @@ Item {
                 lab += "  (" + v.size + ")"
             var isSystem = v.isSystem === true
             var isReadOnly = v.isReadOnly === true
+            var hasArchive = hostVol.length > 0 && String(sid) === String(hostVol)
             if (isSystem)
                 //% "[System]"
                 lab += "  " + qsTrId("aegra.restore.system_tag")
@@ -1049,6 +1284,9 @@ Item {
             else if (isSystem)
                 //% "— PE only"
                 lab += "  " + qsTrId("aegra.restore.pe_only_tag")
+            else if (hasArchive)
+                //% "— archive here"
+                lab += "  " + qsTrId("aegra.restore.archive_here_tag")
             else if (isReadOnly)
                 //% "— read-only"
                 lab += "  " + qsTrId("aegra.restore.read_only_tag")
@@ -1059,7 +1297,8 @@ Item {
                 inUse: inUse,
                 isSystem: isSystem,
                 isReadOnly: isReadOnly,
-                enabled: !tooSmall && !inUse && !isSystem && !isReadOnly
+                hasArchive: hasArchive,
+                enabled: !tooSmall && !inUse && !isSystem && !isReadOnly && !hasArchive
             })
         }
         return out
@@ -1071,8 +1310,129 @@ Item {
         root.restoreSessionFailed = false
         root.restoreSessionErrorText = ""
         root.filePreflightPending = false
+        root.restoreTargetsRefreshed = false
         if (root.restoreStep !== 2)
                 root.restoreStep = 2
+    }
+
+    /// After disk/volume restore finishes, drop mapping preview and re-query live inventory
+    /// so Target Disks match Disk Management (not the pre-restore layout / edit overlay).
+    function refreshTargetsAfterRestore() {
+        if (root.restoreTargetsRefreshed)
+            return
+        root.restoreTargetsRefreshed = true
+        root.clearDiskMappings()
+        root.clearVolumeMappings()
+        if (typeof serviceClient !== "undefined" && serviceClient
+                && typeof serviceClient.refreshInventory === "function")
+            serviceClient.refreshInventory()
+    }
+
+    onRestoreSessionCompleteChanged: {
+        if (!root.restoreSessionComplete || root.restoreTargetsRefreshed)
+            return
+        // Brief delay: volumes may still be mounting after Worker bring_online.
+        restoreTargetRefreshTimer.restart()
+    }
+
+    Timer {
+        id: restoreTargetRefreshTimer
+        interval: 1200
+        repeat: false
+        onTriggered: root.refreshTargetsAfterRestore()
+    }
+
+    /// Absolute byte offset of the first visible chip on the physical disk.
+    /// Must NOT use a data volume's sourceOffset alone (that is the volume start, not
+    /// the bar origin — using it shifted H right and left free became ~1.5GB).
+    /// Prefer: hint → first segment absolute offset → firstData.sourceOffset − preceding sizes.
+    function layoutOriginBytes(segments, hintOrigin) {
+        if (hintOrigin !== undefined && hintOrigin !== null && Number(hintOrigin) >= 0)
+            return Number(hintOrigin)
+        if (!segments || segments.length === 0)
+            return 0
+        // First chip already has an absolute offset (e.g. leading unalloc after GPT).
+        var firstOff = Number(segments[0] && segments[0].offsetBytes)
+        if (!isNaN(firstOff) && firstOff >= 0)
+            return firstOff
+        // Infer from first data volume's source start minus sizes before it.
+        var before = 0
+        for (var i = 0; i < segments.length; ++i) {
+            var s = segments[i]
+            if (!s)
+                continue
+            if (s.unallocated !== true && s.notBackedUp !== true) {
+                var src = Number(s.sourceOffsetBytes)
+                if (!isNaN(src) && src >= 0) {
+                    var origin = src - before
+                    return origin > 0 ? origin : 0
+                }
+            }
+            before += Number(s.totalBytes) || 0
+        }
+        return 0
+    }
+
+    /// Recompute absolute offsets from sizes, preserving disk origin (not bar-relative 0).
+    function recomputeSegmentOffsets(segments, hintOrigin) {
+        var cursor = root.layoutOriginBytes(segments, hintOrigin)
+        for (var i = 0; i < segments.length; ++i) {
+            if (!segments[i])
+                continue
+            segments[i].offsetBytes = cursor
+            cursor += Number(segments[i].totalBytes) || 0
+        }
+        return segments
+    }
+
+    /// Target-bar layout for disk restore: source start → target start + size (left-drag OK).
+    function partitionLayoutEditsForTarget(targetNum) {
+        var key = String(targetNum)
+        var edit = root.targetLayoutEdits ? root.targetLayoutEdits[key] : null
+        if (!edit || !edit.segments || edit.segments.length === 0)
+            return []
+        var origin = (edit.layoutOriginBytes !== undefined) ? edit.layoutOriginBytes : null
+        var segs = root.recomputeSegmentOffsets(edit.segments.slice(), origin)
+        // Usable end: leave 1 MiB for GPT backup header region (matches Worker clamp).
+        var diskCap = Number(edit.targetBytes) || 0
+        var maxEnd = diskCap
+        if (diskCap > root.layoutStepBytes)
+            maxEnd = root.alignDownBytes(diskCap - root.layoutStepBytes, root.layoutSectorBytes)
+        var out = []
+        for (var i = 0; i < segs.length; ++i) {
+            var s = segs[i]
+            // Reserved/unallocated are anchors only — Worker resolves final table.
+            if (!s || s.unallocated === true || s.notBackedUp === true
+                    || s.reserved === true)
+                continue
+            var srcOff = Number(s.sourceOffsetBytes)
+            var tgtOff = Number(s.offsetBytes)
+            var size = Number(s.totalBytes) || 0
+            var minB = Number(s.minBytes) || 0
+            if (isNaN(srcOff) || srcOff < 0 || isNaN(tgtOff) || tgtOff < 0 || size <= 0)
+                continue
+            // Sector-align; Worker still re-clamps against reserved ranges.
+            var sector = root.layoutSectorBytes
+            srcOff = root.alignDownBytes(srcOff, sector)
+            tgtOff = root.alignDownBytes(tgtOff, sector)
+            size = root.alignDownBytes(size, sector)
+            if (size < minB)
+                size = root.alignDownBytes(minB, sector)
+            if (maxEnd > 0 && tgtOff + size > maxEnd) {
+                if (tgtOff >= maxEnd)
+                    continue
+                size = root.alignDownBytes(maxEnd - tgtOff, sector)
+            }
+            if (size <= 0)
+                continue
+            // Hints only: Worker places data partitions without overlapping reserved.
+            out.push({
+                sourceStartOffsetBytes: srcOff,
+                targetStartOffsetBytes: tgtOff,
+                sizeBytes: size
+            })
+        }
+        return out
     }
 
     function startNextQueuedRestore() {
@@ -1093,11 +1453,14 @@ Item {
                                                   root.selectedCheckpointId,
                                                   root.pendingLayoutPassword)
         } else {
-            ok = serviceClient.startDiskRestore(pair.source, pair.target,
-                                               root.selectedCheckpointId,
-                                               root.pendingLayoutPassword,
-                                               root.preserveSignature,
-                                               root.autoExtend)
+            // auto_expand_last_partition always false: grow only via Target bar edge drag.
+            ok = serviceClient.startDiskRestore(
+                    pair.source, pair.target,
+                    root.selectedCheckpointId,
+                    root.pendingLayoutPassword,
+                    root.preserveSignature,
+                    false,
+                    root.partitionLayoutEditsForTarget(pair.target))
         }
         if (!ok) {
             root.pendingRestoreQueue = []
@@ -1133,9 +1496,9 @@ Item {
                                       : root.allMappedPairs()
         if (pairs.length === 0) {
             serviceClient.showToast(root.isVolumeMode
-                //% "Choose “Restore to” on a source volume"
+                //% "Drag a source volume onto a target volume"
                 ? qsTrId("aegra.restore.volume_map_required")
-                //% "Choose “Restore to” on a source disk"
+                //% "Drag a source disk onto a target disk"
                 : qsTrId("aegra.restore.map_required"), true)
             root.restoreJobsSubmitted = true
             root.restoreSessionFailed = true
@@ -1336,7 +1699,10 @@ Item {
     /// Volumes for bar (ratio by capacityBytes).
     /// Prefers offset-ordered segments; free gaps are drawn only when larger than GPT/MSR
     /// padding so the bar matches Windows Disk Management (tiny leading free is omitted).
-    function displayVolumesForDisk(diskData) {
+    /// includeReserved: Target restore model keeps EFI/MSR/Recovery as fixed chips so
+    /// resize cannot collapse their space into Unallocated (Source bars omit them).
+    function displayVolumesForDisk(diskData, includeReserved) {
+        var keepReserved = includeReserved === true
         var raw = (diskData && diskData.volumes) ? diskData.volumes : []
         var diskTotal = diskData ? (Number(diskData.capacityBytes) || 0) : 0
         var list = []
@@ -1363,6 +1729,10 @@ Item {
                    || n === "msr" || n.indexOf("msr partition") >= 0
         }
 
+        function isReservedVolume(v) {
+            return v && (v.reserved === true || isMsrVolume(v))
+        }
+
         function formatUnallocSize(bytes) {
             var n = Number(bytes) || 0
             if (n <= 0)
@@ -1373,9 +1743,11 @@ Item {
             return ""
         }
 
-        function pushUnalloc(bytes) {
+        function pushUnalloc(bytes, startOffset) {
             if (bytes <= minUnallocBytes)
                 return
+            var off = (startOffset !== undefined && startOffset !== null
+                       && !isNaN(Number(startOffset))) ? Number(startOffset) : -1
             list.push({
                 letter: "",
                 //% "Unallocated"
@@ -1383,27 +1755,57 @@ Item {
                 size: formatUnallocSize(bytes),
                 fileSystem: "",
                 totalBytes: bytes,
-                unallocated: true
+                offsetBytes: off,
+                sourceOffsetBytes: -1,
+                unallocated: true,
+                reserved: false
             })
         }
 
-        function pushVolume(v, isUnalloc) {
-            if (!isUnalloc && isMsrVolume(v))
+        function pushVolume(v, isUnalloc, offsetHint) {
+            if (!isUnalloc && isReservedVolume(v) && !keepReserved)
                 return
             var tb = Number(v.capacityBytes) || 0
             if (isUnalloc && tb <= minUnallocBytes)
                 return
+            var reserved = !isUnalloc && (v.reserved === true || isMsrVolume(v))
+            var notBackedUp = !isUnalloc && !reserved && v.notBackedUp === true
             var sz = v.size || ""
-            if (isUnalloc && sz.length === 0)
+            if ((isUnalloc || notBackedUp) && sz.length === 0)
                 sz = formatUnallocSize(tb)
+            // freeBytes ≥ 0 when inventory reports free space; -1 = unknown (no used fill).
+            var freeB = -1
+            if (!isUnalloc && !notBackedUp && !reserved) {
+                var rawFree = Number(v.freeBytes)
+                if (!isNaN(rawFree) && rawFree >= 0)
+                    freeB = rawFree
+            }
+            var off = -1
+            if (offsetHint !== undefined && offsetHint !== null && !isNaN(Number(offsetHint)))
+                off = Number(offsetHint)
+            else if (v.offsetBytes !== undefined && v.offsetBytes !== null
+                     && v.offsetBytes !== "")
+                off = Number(v.offsetBytes)
+            // sourceOffsetBytes: fixed restore match key (partition start in archive).
+            // Reserved keep absolute offset so packing preserves their gap.
+            var srcOff = (!isUnalloc && !notBackedUp && off >= 0) ? off : -1
             list.push({
-                letter: isUnalloc ? "" : (v.letter || ""),
+                letter: (isUnalloc || notBackedUp || reserved) ? "" : (v.letter || ""),
                 //% "Unallocated"
-                name: isUnalloc ? qsTrId("aegra.restore.unallocated") : (v.name || ""),
+                name: isUnalloc ? qsTrId("aegra.restore.unallocated")
+                      //% "Not backed up"
+                      : (notBackedUp ? qsTrId("aegra.restore.not_backed_up")
+                                     : (v.name || "")),
                 size: sz,
-                fileSystem: isUnalloc ? "" : (v.fs || v.fileSystem || ""),
+                fileSystem: (isUnalloc || notBackedUp || reserved)
+                            ? "" : (v.fs || v.fileSystem || ""),
                 totalBytes: tb,
-                unallocated: isUnalloc
+                freeBytes: freeB,
+                offsetBytes: off,
+                sourceOffsetBytes: srcOff,
+                unallocated: isUnalloc,
+                notBackedUp: notBackedUp,
+                reserved: reserved
             })
         }
 
@@ -1411,12 +1813,17 @@ Item {
             for (var p = 0; p < raw.length; ++p) {
                 if (!raw[p])
                     continue
+                if (!keepReserved && isReservedVolume(raw[p])
+                        && raw[p].unallocated !== true) {
+                    // Source bar: hide reserved but advance geometry via offsets path only.
+                    continue
+                }
                 pushVolume(raw[p], raw[p].unallocated === true)
             }
         } else if (hasOffsets) {
             var sorted = []
             for (var s = 0; s < raw.length; ++s) {
-                if (raw[s] && !isMsrVolume(raw[s]))
+                if (raw[s])
                     sorted.push(raw[s])
             }
             sorted.sort(function(a, b) {
@@ -1427,19 +1834,27 @@ Item {
                 var vol = sorted[k]
                 var off = Number(vol.offsetBytes) || 0
                 var cap = Number(vol.capacityBytes) || 0
-                if (off > cursor)
-                    pushUnalloc(off - cursor)
-                pushVolume(vol, false)
                 var end = off + cap
+                if (!keepReserved && isReservedVolume(vol)) {
+                    // Occupy space without a chip (Source bar style).
+                    if (end > cursor)
+                        cursor = end
+                    continue
+                }
+                if (off > cursor)
+                    pushUnalloc(off - cursor, cursor)
+                pushVolume(vol, false, off)
                 if (end > cursor)
                     cursor = end
             }
             if (diskTotal > cursor)
-                pushUnalloc(diskTotal - cursor)
+                pushUnalloc(diskTotal - cursor, cursor)
         } else {
             var sumBytes = 0
             for (var j = 0; j < raw.length; ++j) {
-                if (!raw[j] || isMsrVolume(raw[j]))
+                if (!raw[j])
+                    continue
+                if (!keepReserved && isReservedVolume(raw[j]))
                     continue
                 pushVolume(raw[j], false)
                 sumBytes += Number(raw[j].capacityBytes) || 0
@@ -1464,6 +1879,225 @@ Item {
         return list
     }
 
+    /// Partition-bar labels: whole MB/GB only (no decimals while resizing).
+    function formatBarBytes(bytes) {
+        var n = Number(bytes) || 0
+        if (n <= 0)
+            return ""
+        var mib = 1024 * 1024
+        var gib = mib * 1024
+        if (n >= gib) {
+            var g = Math.round(n / gib)
+            if (g < 1)
+                g = 1
+            // Prefer GB when at least ~1 GiB; otherwise whole MB.
+            if (n >= gib || g >= 1)
+                return String(g) + " GB"
+        }
+        var m = Math.round(n / mib)
+        if (m < 1)
+            m = 1
+        return String(m) + " MB"
+    }
+
+    /// Post-restore preview for a mapped target:
+    /// - reserved (EFI/MSR/Recovery) stay as fixed, non-resizable segments
+    /// - not-backed-up partitions → Unallocated
+    /// - when target is larger than source, trailing free is Unallocated
+    ///   (grow only by dragging edges on the Target bar; no auto-expand option)
+    /// UI sizes/starts are visual hints only; Worker resolves final table.
+    function displayVolumesForRestorePreview(sourceDisk, targetDiskData) {
+        // Keep reserved chips so contiguous packing cannot steal their space.
+        var list = root.displayVolumesForDisk(sourceDisk, true)
+        var out = []
+        for (var i = 0; i < list.length; ++i) {
+            var v = list[i]
+            if (!v)
+                continue
+            if (v.reserved === true) {
+                var rOff = (v.offsetBytes !== undefined && v.offsetBytes !== null)
+                           ? Number(v.offsetBytes) : -1
+                var rBytes = Number(v.totalBytes) || 0
+                out.push({
+                    letter: "",
+                    name: v.name || "",
+                    title: v.title || v.name || "",
+                    size: v.size || root.formatBarBytes(rBytes),
+                    fileSystem: "",
+                    totalBytes: rBytes,
+                    freeBytes: -1,
+                    offsetBytes: rOff,
+                    sourceOffsetBytes: rOff,
+                    unallocated: false,
+                    notBackedUp: false,
+                    reserved: true,
+                    minBytes: rBytes
+                })
+                continue
+            }
+            if (v.notBackedUp === true) {
+                var bytes = Number(v.totalBytes) || 0
+                if (out.length > 0 && out[out.length - 1].unallocated === true) {
+                    var prev = out[out.length - 1]
+                    prev.totalBytes = (Number(prev.totalBytes) || 0) + bytes
+                    prev.size = root.formatBarBytes(prev.totalBytes)
+                    continue
+                }
+                out.push({
+                    letter: "",
+                    //% "Unallocated"
+                    name: qsTrId("aegra.restore.unallocated"),
+                    size: root.formatBarBytes(bytes),
+                    fileSystem: "",
+                    totalBytes: bytes,
+                    freeBytes: -1,
+                    offsetBytes: -1,
+                    sourceOffsetBytes: -1,
+                    unallocated: true,
+                    notBackedUp: false,
+                    reserved: false
+                })
+                continue
+            }
+            var srcOff = (v.sourceOffsetBytes !== undefined && v.sourceOffsetBytes !== null)
+                         ? Number(v.sourceOffsetBytes)
+                         : ((v.offsetBytes !== undefined && v.offsetBytes !== null)
+                            ? Number(v.offsetBytes) : -1)
+            out.push({
+                letter: v.letter || "",
+                name: v.name || "",
+                title: v.title || "",
+                size: v.size || "",
+                fileSystem: v.fileSystem || "",
+                totalBytes: Number(v.totalBytes) || 0,
+                freeBytes: (v.freeBytes !== undefined && v.freeBytes !== null)
+                           ? Number(v.freeBytes) : -1,
+                offsetBytes: (v.offsetBytes !== undefined && v.offsetBytes !== null)
+                             ? Number(v.offsetBytes) : srcOff,
+                sourceOffsetBytes: srcOff,
+                unallocated: v.unallocated === true,
+                notBackedUp: false,
+                reserved: false
+            })
+        }
+
+        var sourceTotal = Number(sourceDisk && sourceDisk.capacityBytes) || 0
+        var targetTotal = Number(targetDiskData && targetDiskData.capacityBytes) || 0
+        if (targetTotal <= 0)
+            targetTotal = sourceTotal
+
+        var sum = 0
+        for (var s = 0; s < out.length; ++s)
+            sum += Number(out[s].totalBytes) || 0
+        // Prefer source disk size as geometry base; fall back to segment sum.
+        // With reserved included, undershoot is true free (tiny alignment), not Recovery.
+        var baseSize = sourceTotal > 0 ? sourceTotal : sum
+        if (baseSize > 0 && sum > 0 && sum < baseSize) {
+            var pad = baseSize - sum
+            if (out.length > 0 && out[out.length - 1].unallocated === true) {
+                out[out.length - 1].totalBytes += pad
+                out[out.length - 1].size = root.formatBarBytes(out[out.length - 1].totalBytes)
+            } else {
+                out.push({
+                    letter: "",
+                    //% "Unallocated"
+                    name: qsTrId("aegra.restore.unallocated"),
+                    size: root.formatBarBytes(pad),
+                    fileSystem: "",
+                    totalBytes: pad,
+                    unallocated: true,
+                    notBackedUp: false,
+                    reserved: false
+                })
+            }
+            sum = baseSize
+        }
+
+        // Min size = source geometry; reserved min == size (locked).
+        for (var m = 0; m < out.length; ++m) {
+            if (out[m].unallocated)
+                continue
+            var locked = Number(out[m].totalBytes) || 0
+            out[m].minBytes = locked
+            if (out[m].reserved === true)
+                out[m].minBytes = locked
+        }
+
+        // Larger target: free space stays Unallocated until the user drags edges.
+        var extra = targetTotal > baseSize ? (targetTotal - baseSize) : 0
+        if (extra > 0) {
+            if (out.length > 0 && out[out.length - 1].unallocated === true) {
+                out[out.length - 1].totalBytes =
+                    (Number(out[out.length - 1].totalBytes) || 0) + extra
+                out[out.length - 1].size =
+                    root.formatBarBytes(out[out.length - 1].totalBytes)
+            } else {
+                out.push({
+                    letter: "",
+                    //% "Unallocated"
+                    name: qsTrId("aegra.restore.unallocated"),
+                    size: root.formatBarBytes(extra),
+                    fileSystem: "",
+                    totalBytes: extra,
+                    unallocated: true,
+                    notBackedUp: false,
+                    reserved: false
+                })
+            }
+        }
+
+        out = root.finalizePreviewRatios(out, targetTotal)
+        // Contiguous pack is safe: reserved segments occupy their size in the chain.
+        return root.recomputeSegmentOffsets(out, root.layoutOriginBytes(out, null))
+    }
+
+    /// Create/refresh mutable layout edit for a mapped target (call from resize press, not bindings).
+    function ensureTargetLayoutEdit(sourceDisk, targetDiskData) {
+        var tgtNum = targetDiskData && targetDiskData.diskNumber !== undefined
+                     ? Number(targetDiskData.diskNumber) : -1
+        var srcNum = sourceDisk && sourceDisk.diskNumber !== undefined
+                     ? Number(sourceDisk.diskNumber) : -1
+        if (tgtNum < 0 || srcNum < 0)
+            return null
+        var key = String(tgtNum)
+        var edit = root.targetLayoutEdits ? root.targetLayoutEdits[key] : null
+        if (edit && Number(edit.sourceDisk) === srcNum
+                && edit.segments && edit.segments.length > 0)
+            return edit
+        var base = root.displayVolumesForRestorePreview(sourceDisk, targetDiskData)
+        var segs = []
+        for (var i = 0; i < base.length; ++i)
+            segs.push(Object.assign({}, base[i]))
+        var origin = root.layoutOriginBytes(segs, null)
+        segs = root.recomputeSegmentOffsets(segs, origin)
+        var next = Object.assign({}, root.targetLayoutEdits || {})
+        next[key] = {
+            sourceDisk: srcNum,
+            targetBytes: Number(targetDiskData.capacityBytes) || 0,
+            layoutOriginBytes: origin,
+            segments: segs
+        }
+        root.targetLayoutEdits = next
+        root.layoutEditEpoch++
+        return next[key]
+    }
+
+    /// Mapped-target bar layout: default preview, or user-resized edit when still valid.
+    function displayVolumesForMappedTarget(sourceDisk, targetDiskData) {
+        var tgtNum = targetDiskData && targetDiskData.diskNumber !== undefined
+                     ? Number(targetDiskData.diskNumber) : -1
+        var srcNum = sourceDisk && sourceDisk.diskNumber !== undefined
+                     ? Number(sourceDisk.diskNumber) : -1
+        var key = String(tgtNum)
+        var edit = root.targetLayoutEdits ? root.targetLayoutEdits[key] : null
+        var _le = root.layoutEditEpoch
+        if (edit && Number(edit.sourceDisk) === srcNum
+                && edit.segments && edit.segments.length > 0) {
+            return root.annotateResizableSegments(edit.segments)
+        }
+        return root.displayVolumesForRestorePreview(sourceDisk, targetDiskData)
+    }
+
     /// Pixel widths for partition bar segments: proportional capacity with a floor so
     /// small system partitions (EFI ~100–300 MiB) stay readable. Extra width is taken
     /// from larger segments so the row still fills `rowWidth`.
@@ -1480,9 +2114,31 @@ Item {
             return zeros
         }
 
-        // Prefer ~56px so "EFI" fits; shrink floor when many segments share a narrow bar.
+        // Named data volumes: ~56px. Letter-less system chips (EFI / Recovery) and
+        // hatch chips (Unallocated / Not backed up) need room for full text.
+        // Use the same floor for both hatch kinds so Source ("Not backed up") and
+        // mapped Target ("Unallocated") keep matching segment widths.
         var minAlloc = Math.min(56, Math.max(20, Math.floor(avail / Math.max(1, n + 1))))
-        var minUnalloc = Math.min(16, minAlloc)
+        var minSystem = Math.min(140, Math.max(minAlloc, Math.floor(avail / Math.max(2, n + 1))))
+        var minHatch = Math.min(100, Math.max(minAlloc, Math.floor(avail / Math.max(3, n + 2))))
+
+        function isSystemChip(v) {
+            if (!v || v.unallocated === true || v.notBackedUp === true)
+                return false
+            if (v.reserved === true)
+                return true
+            var letter = (v.letter || "").trim()
+            if (letter.length > 0)
+                return false
+            var n = ((v.name || "") + " " + (v.title || "")).toLowerCase()
+            return n.indexOf("efi") >= 0 || n.indexOf("recovery") >= 0
+                   || n.indexOf("hidden") >= 0 || n.indexOf("system") >= 0
+                   || n.indexOf("msr") >= 0 || n.indexOf("reserved") >= 0
+        }
+
+        function isHatchChip(v) {
+            return v && (v.unallocated === true || v.notBackedUp === true)
+        }
 
         var mins = []
         var weights = []
@@ -1490,8 +2146,8 @@ Item {
         var minTotal = 0
         for (var i = 0; i < n; ++i) {
             var v = volumes[i]
-            var un = v && v.unallocated === true
-            var mn = un ? minUnalloc : minAlloc
+            var mn = isHatchChip(v) ? minHatch
+                     : (isSystemChip(v) ? minSystem : minAlloc)
             mins.push(mn)
             minTotal += mn
             var w = v && v.ratio > 0 ? Number(v.ratio) : 0
@@ -1548,9 +2204,8 @@ Item {
         return name
     }
 
-    // Shared disk row — icon + name + proportional partition bar (old DiskRow).
-    // Source rows: drag body onto a Target row, or use "Restore to" ComboBox.
-    // Target rows: DropArea accepts source-disk drags.
+    // Shared disk row — icon + name + proportional partition bar.
+    // Source rows: drag onto a Target row. Target rows: DropArea accepts source drags.
     component DiskRow: Rectangle {
         id: rowRoot
         property var diskData: ({})
@@ -1563,7 +2218,7 @@ Item {
         property bool dropHover: false
         property bool dropAccepted: false
         width: parent ? parent.width : 100
-        height: showMapping ? 96 : 68
+        height: 68
         radius: 6
         color: Theme.colorListItem
         border.width: {
@@ -1577,41 +2232,23 @@ Item {
             return "transparent"
         }
 
-        property var displayVolumes: root.displayVolumesForDisk(diskData)
-
-        // Drag a source disk onto a target (ComboBox remains available below).
-        MouseArea {
-            id: sourceDragMouse
-            anchors.fill: parent
-            anchors.margins: 2
-            anchors.bottomMargin: rowRoot.showMapping ? 34 : 2
-            z: 20
-            enabled: rowRoot.showMapping && rowRoot.diskNumber >= 0
-            hoverEnabled: true
-            cursorShape: {
-                if (!enabled)
-                    return Qt.ArrowCursor
-                return pressed || drag.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+        /// Partition bar: source disks show backup layout (incl. "Not backed up");
+        /// mapped targets preview post-restore layout (capacity padding + manual edge resize).
+        readonly property bool isMappedTargetPreview: !rowRoot.showMapping
+                && root.sourceDiskNumberMappedToTarget(rowRoot.diskNumber) >= 0
+        property var displayVolumes: {
+            var _e = root.mappingEpoch
+            var _le = root.layoutEditEpoch
+            var _src = root.sourceDisks
+            if (!rowRoot.showMapping) {
+                var srcNum = root.sourceDiskNumberMappedToTarget(rowRoot.diskNumber)
+                if (srcNum >= 0) {
+                    var srcDisk = root.sourceDiskDataByNumber(srcNum)
+                    if (srcDisk)
+                        return root.displayVolumesForMappedTarget(srcDisk, diskData)
+                }
             }
-            drag.target: dragProxy
-            drag.threshold: 6
-            drag.axis: Drag.XAndYAxis
-            onPressed: function(mouse) {
-                root.clearMappingDropBlocked()
-                var overlay = Overlay.overlay
-                if (!overlay)
-                    return
-                dragProxy.parent = overlay
-                var g = mapToItem(overlay, mouse.x, mouse.y)
-                dragProxy.x = g.x - dragProxy.Drag.hotSpot.x
-                dragProxy.y = g.y - dragProxy.Drag.hotSpot.y
-            }
-            onReleased: {
-                if (dragProxy.Drag.active)
-                    dragProxy.Drag.drop()
-                root.clearMappingDropBlocked()
-            }
-            onCanceled: root.clearMappingDropBlocked()
+            return root.displayVolumesForDisk(diskData)
         }
 
         // Ghost follows the cursor while dragging (reparented to Overlay on press).
@@ -1686,13 +2323,16 @@ Item {
             }
         }
 
-        // Target drop zone: map source_disk → this disk.
+        // Target drop zone: map source_disk → this disk (whole row).
+        // Only active while a source disk drag is in progress so edge-resize
+        // MouseAreas on the partition bar keep receiving normal mouse input.
         DropArea {
             id: targetDrop
             anchors.fill: parent
             z: 15
             keys: ["aegra.restore.sourceDisk"]
             enabled: !rowRoot.showMapping && rowRoot.diskNumber >= 0
+                     && root.mappingDragActive
             onEntered: function(drag) {
                 var src = -1
                 if (drag.source && drag.source.sourceDiskNumber !== undefined)
@@ -1748,47 +2388,103 @@ Item {
                 Layout.fillHeight: true
                 spacing: 10
 
-                DiskIcon {
+                // Disk identity only — drag the whole source disk (not partition volumes).
+                Item {
+                    id: diskIdentity
+                    Layout.preferredWidth: 138
+                    Layout.minimumWidth: 120
+                    Layout.fillHeight: true
                     Layout.alignment: Qt.AlignVCenter
-                    size: 28
-                    variant: (rowRoot.diskData && rowRoot.diskData.isSystemDisk) ? "system" : "hdd"
-                }
 
-                Column {
-                    Layout.preferredWidth: 100
-                    Layout.alignment: Qt.AlignVCenter
-                    spacing: 1
-                    Text {
-                        text: (rowRoot.diskData && rowRoot.diskData.name)
-                              ? rowRoot.diskData.name : ""
-                        color: Theme.colorTextWhite
-                        font.pixelSize: 12
-                        font.bold: true
-                        font.family: Theme.fontFamily
-                    }
-                    Text {
-                        text: {
-                            if (!rowRoot.diskData)
-                                return ""
-                            var style = rowRoot.diskData.partitionStyle
-                                        || rowRoot.diskData.type || ""
-                            if (style.indexOf("GPT") >= 0 || style.indexOf("MBR") >= 0)
-                                return "Basic (" + (style.indexOf("GPT") >= 0 ? "GPT" : "MBR") + ")"
-                            return style.length > 0 ? style : "Basic (GPT)"
+                    RowLayout {
+                        anchors.fill: parent
+                        spacing: 10
+                        DiskIcon {
+                            Layout.alignment: Qt.AlignVCenter
+                            size: 28
+                            variant: (rowRoot.diskData && rowRoot.diskData.isSystemDisk)
+                                     ? "system" : "hdd"
                         }
-                        color: Theme.colorTextGrey
-                        font.pixelSize: 10
-                        font.family: Theme.fontFamily
+                        Column {
+                            Layout.fillWidth: true
+                            Layout.alignment: Qt.AlignVCenter
+                            spacing: 1
+                            Text {
+                                width: parent.width
+                                elide: Text.ElideRight
+                                text: (rowRoot.diskData && rowRoot.diskData.name)
+                                      ? rowRoot.diskData.name : ""
+                                color: Theme.colorTextWhite
+                                font.pixelSize: 12
+                                font.bold: true
+                                font.family: Theme.fontFamily
+                            }
+                            Text {
+                                width: parent.width
+                                elide: Text.ElideRight
+                                text: {
+                                    if (!rowRoot.diskData)
+                                        return ""
+                                    var style = rowRoot.diskData.partitionStyle
+                                                || rowRoot.diskData.type || ""
+                                    if (style.indexOf("GPT") >= 0 || style.indexOf("MBR") >= 0)
+                                        return "Basic ("
+                                               + (style.indexOf("GPT") >= 0 ? "GPT" : "MBR") + ")"
+                                    return style.length > 0 ? style : "Basic (GPT)"
+                                }
+                                color: Theme.colorTextGrey
+                                font.pixelSize: 10
+                                font.family: Theme.fontFamily
+                            }
+                            Text {
+                                width: parent.width
+                                elide: Text.ElideRight
+                                text: (rowRoot.diskData && rowRoot.diskData.size)
+                                      ? rowRoot.diskData.size : ""
+                                color: Theme.colorTextGrey
+                                font.pixelSize: 10
+                                font.family: Theme.fontFamily
+                            }
+                        }
                     }
-                    Text {
-                        text: (rowRoot.diskData && rowRoot.diskData.size)
-                              ? rowRoot.diskData.size : ""
-                        color: Theme.colorTextGrey
-                        font.pixelSize: 10
-                        font.family: Theme.fontFamily
+
+                    MouseArea {
+                        id: sourceDragMouse
+                        anchors.fill: parent
+                        z: 20
+                        // Disk restore: drag only the disk handle, never partition chips.
+                        enabled: rowRoot.showMapping && rowRoot.diskNumber >= 0
+                        hoverEnabled: true
+                        preventStealing: true
+                        cursorShape: {
+                            if (!enabled)
+                                return Qt.ArrowCursor
+                            return pressed || drag.active ? Qt.ClosedHandCursor
+                                                          : Qt.OpenHandCursor
+                        }
+                        drag.target: dragProxy
+                        drag.threshold: 6
+                        drag.axis: Drag.XAndYAxis
+                        onPressed: function(mouse) {
+                            root.beginMappingDrag()
+                            var overlay = Overlay.overlay
+                            if (!overlay)
+                                return
+                            dragProxy.parent = overlay
+                            var g = mapToItem(overlay, mouse.x, mouse.y)
+                            dragProxy.x = g.x - dragProxy.Drag.hotSpot.x
+                            dragProxy.y = g.y - dragProxy.Drag.hotSpot.y
+                        }
+                        onReleased: {
+                            if (dragProxy.Drag.active)
+                                dragProxy.Drag.drop()
+                            root.endMappingDrag()
+                        }
+                        onCanceled: root.endMappingDrag()
                     }
                 }
 
+                // Partition bar: source = display only; mapped target = resizable edges into Unallocated.
                 Rectangle {
                     id: barBg
                     Layout.fillWidth: true
@@ -1798,18 +2494,80 @@ Item {
                     color: Theme.colorInput
                     border.width: 1
                     border.color: Theme.colorBorder
-                    clip: true
+                    clip: !rowRoot.isMappedTargetPreview
+                    // Edge-resize drag lives on barBg (not inside Repeater). Updating
+                    // layoutEditEpoch rebuilds segment delegates; this MouseArea survives.
+                    property int resizeIndex: -1
+                    property string resizeEdge: ""
+                    property real resizeLastX: 0
+                    property int resizeHoverIndex: -1
+                    property string resizeHoverEdge: ""
+
+                    // Hit near the data volume's outer edges (into the volume and a little
+                    // into the adjacent Unallocated) so grips sit on the volume boundary.
+                    function resizeHitAt(x) {
+                        if (!rowRoot.isMappedTargetPreview)
+                            return null
+                        var vols = rowRoot.displayVolumes
+                        var widths = partsRow.segmentWidths
+                        if (!vols || !widths)
+                            return null
+                        var zoneIn = 12   // px inside the data volume
+                        var zoneOut = 10  // px into adjacent unallocated
+                        var cx = 0
+                        var spacing = partsRow.spacing
+                        var best = null
+                        var bestDist = 1e9
+                        for (var i = 0; i < vols.length; ++i) {
+                            var w = (i < widths.length) ? Number(widths[i]) : 0
+                            if (w <= 0)
+                                continue
+                            var left = cx
+                            var right = cx + w
+                            var canL = vols[i] && vols[i].canResizeLeft === true
+                            var canR = vols[i] && vols[i].canResizeRight === true
+                            if (canL) {
+                                var l0 = left - zoneOut
+                                var l1 = left + zoneIn
+                                if (x >= l0 && x <= l1) {
+                                    var dl = Math.abs(x - left)
+                                    if (dl < bestDist) {
+                                        bestDist = dl
+                                        best = { index: i, edge: "left" }
+                                    }
+                                }
+                            }
+                            if (canR) {
+                                var r0 = right - zoneIn
+                                var r1 = right + zoneOut
+                                if (x >= r0 && x <= r1) {
+                                    var dr = Math.abs(x - right)
+                                    if (dr < bestDist) {
+                                        bestDist = dr
+                                        best = { index: i, edge: "right" }
+                                    }
+                                }
+                            }
+                            cx = right + spacing
+                        }
+                        return best
+                    }
 
                     Row {
                         id: partsRow
                         anchors.fill: parent
                         anchors.margins: 1
-                        spacing: 1
+                        spacing: 0
                         // Recomputed when the bar resizes or volumes change.
                         property var segmentWidths: root.partitionBarWidths(
                                                         rowRoot.displayVolumes,
                                                         partsRow.width,
                                                         partsRow.spacing)
+                        property real bytesPerPixel: {
+                            var cap = Number(rowRoot.diskData && rowRoot.diskData.capacityBytes) || 0
+                            var w = Math.max(1, partsRow.width)
+                            return cap > 0 ? (cap / w) : 0
+                        }
 
                         Repeater {
                             model: rowRoot.displayVolumes
@@ -1817,23 +2575,78 @@ Item {
                                 required property var modelData
                                 required property int index
                                 property bool isUnalloc: modelData && modelData.unallocated === true
+                                property bool isNotBackedUp: modelData
+                                                             && modelData.notBackedUp === true
+                                property bool isHatchStyle: isUnalloc || isNotBackedUp
+                                property bool canResizeLeft: rowRoot.isMappedTargetPreview
+                                        && modelData && modelData.canResizeLeft === true
+                                property bool canResizeRight: rowRoot.isMappedTargetPreview
+                                        && modelData && modelData.canResizeRight === true
+                                property bool edgeActiveLeft: canResizeLeft
+                                        && ((barBg.resizeIndex === index
+                                             && barBg.resizeEdge === "left")
+                                            || (barBg.resizeHoverIndex === index
+                                                && barBg.resizeHoverEdge === "left"))
+                                property bool edgeActiveRight: canResizeRight
+                                        && ((barBg.resizeIndex === index
+                                             && barBg.resizeEdge === "right")
+                                            || (barBg.resizeHoverIndex === index
+                                                && barBg.resizeHoverEdge === "right"))
+                                // usedRatio: 0–1 when freeBytes known; -1 = unknown (uniform fill).
+                                property real usedRatio: {
+                                    if (isHatchStyle || !modelData)
+                                        return -1
+                                    var cap = Number(modelData.totalBytes) || 0
+                                    var free = Number(modelData.freeBytes)
+                                    if (cap <= 0 || isNaN(free) || free < 0)
+                                        return -1
+                                    var used = cap - free
+                                    if (used < 0)
+                                        used = 0
+                                    if (used > cap)
+                                        used = cap
+                                    return used / cap
+                                }
                                 height: partsRow.height
                                 width: {
                                     var widths = partsRow.segmentWidths
                                     if (widths && index >= 0 && index < widths.length)
                                         return widths[index]
-                                    return isUnalloc ? 12 : 56
+                                    return isHatchStyle ? 12 : 56
                                 }
                                 radius: 2
-                                color: isUnalloc ? Theme.colorUnallocated
-                                                 : Theme.colorAccentBlue
+                                // Free band (or full chip when used is unknown / hatch).
+                                color: {
+                                    if (isHatchStyle)
+                                        return Theme.colorUnallocated
+                                    var c = Theme.colorAccentBlue
+                                    // Known free: light free background; unknown: medium solid.
+                                    var a = usedRatio >= 0 ? 0.20 : 0.45
+                                    return Qt.rgba(c.r, c.g, c.b, a)
+                                }
                                 border.width: 0
-                                opacity: isUnalloc ? 1.0 : 0.45
-                                clip: true
+                                // Keep used-fill clipped; edge grips sit on the outer boundary.
+                                clip: false
+
+                                // Used space: stronger fill from the left (inventory freeBytes).
+                                Rectangle {
+                                    visible: !isHatchStyle && usedRatio > 0
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                    anchors.bottom: parent.bottom
+                                    width: Math.round(parent.width * Math.min(1, usedRatio))
+                                    clip: true
+                                    color: {
+                                        var c = Theme.colorAccentBlue
+                                        return Qt.rgba(c.r, c.g, c.b, 0.72)
+                                    }
+                                    z: 0
+                                }
 
                                 Canvas {
                                     anchors.fill: parent
-                                    visible: isUnalloc
+                                    visible: isHatchStyle
+                                    z: 0
                                     onPaint: {
                                         var ctx = getContext("2d")
                                         var w = width
@@ -1857,40 +2670,175 @@ Item {
                                 }
 
                                 Text {
-                                    anchors.centerIn: parent
-                                    width: parent.width - 4
-                                    horizontalAlignment: Text.AlignHCenter
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.leftMargin: 8
+                                    anchors.rightMargin: 6
+                                    width: parent.width - 14
+                                    horizontalAlignment: Text.AlignLeft
                                     z: 1
                                     text: {
                                         if (!modelData)
                                             return ""
-                                        if (isUnalloc) {
-                                            //% "Unallocated"
-                                            var uName = modelData.name
-                                                        || qsTrId("aegra.restore.unallocated")
+                                        if (isUnalloc || isNotBackedUp) {
+                                            var uName = modelData.name || ""
+                                            if (uName.length === 0) {
+                                                //% "Unallocated"
+                                                uName = isNotBackedUp
+                                                    //% "Not backed up"
+                                                    ? qsTrId("aegra.restore.not_backed_up")
+                                                    : qsTrId("aegra.restore.unallocated")
+                                            }
                                             var uSz = modelData.size || ""
-                                            if (parent.width < 48)
-                                                return "…"
-                                            if (parent.width < 72 || uSz.length === 0)
+                                            if (parent.width < 40)
+                                                return uName
+                                            if (uSz.length === 0)
                                                 return uName
                                             return uName + "\n" + uSz
                                         }
                                         var title = root.partitionBarTitle(modelData)
                                         var sz = modelData.size || ""
                                         var fs = modelData.fileSystem || ""
+                                        var letter = (modelData.letter || "").trim()
+                                        if (letter.length === 0) {
+                                            if (sz.length === 0)
+                                                return title
+                                            return title + "\n" + sz
+                                        }
                                         if (parent.width < 56)
                                             return title
                                         return title + "\n" + sz + (fs ? (" " + fs) : "")
                                     }
-                                    color: isUnalloc ? Theme.colorUnallocatedText
-                                                     : Theme.colorVolumeText
-                                    font.pixelSize: parent.width < 60 ? 9 : 10
+                                    color: isHatchStyle ? Theme.colorUnallocatedText
+                                                        : Theme.colorVolumeText
+                                    font.pixelSize: parent.width < 90 ? 9 : 10
                                     font.bold: true
                                     font.family: Theme.fontFamily
                                     wrapMode: Text.WordWrap
                                     elide: Text.ElideRight
+                                    maximumLineCount: 3
+                                }
+
+                                // Grips fully inside the volume, flush to its left/right edges.
+                                // Do not straddle into the next segment — Row siblings paint
+                                // later and would cover any overflow on the right.
+                                Item {
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                    anchors.bottom: parent.bottom
+                                    width: 10
+                                    z: 6
+                                    visible: canResizeLeft
+                                    Rectangle {
+                                        width: 4
+                                        height: parent.height - 6
+                                        radius: 2
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: 1
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        color: Theme.colorTextWhite
+                                        border.width: 1
+                                        border.color: Theme.colorAccentBlue
+                                        opacity: edgeActiveLeft ? 1.0 : 0.85
+                                    }
+                                }
+
+                                Item {
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    anchors.bottom: parent.bottom
+                                    width: 10
+                                    z: 6
+                                    visible: canResizeRight
+                                    Rectangle {
+                                        width: 4
+                                        height: parent.height - 6
+                                        radius: 2
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: 1
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        color: Theme.colorTextWhite
+                                        border.width: 1
+                                        border.color: Theme.colorAccentBlue
+                                        opacity: edgeActiveRight ? 1.0 : 0.85
+                                    }
                                 }
                             }
+                        }
+                    }
+
+                    // Survives layoutEditEpoch / Repeater rebuild during drag.
+                    MouseArea {
+                        id: barResizeMouse
+                        anchors.fill: partsRow
+                        z: 30
+                        enabled: rowRoot.isMappedTargetPreview
+                        hoverEnabled: true
+                        preventStealing: true
+                        acceptedButtons: Qt.LeftButton
+                        cursorShape: (barBg.resizeIndex >= 0
+                                      || barBg.resizeHoverIndex >= 0)
+                                     ? Qt.SizeHorCursor : Qt.ArrowCursor
+
+                        function clearHover() {
+                            barBg.resizeHoverIndex = -1
+                            barBg.resizeHoverEdge = ""
+                        }
+
+                        function endResize() {
+                            barBg.resizeIndex = -1
+                            barBg.resizeEdge = ""
+                            root.layoutResizeActive = false
+                        }
+
+                        onPressed: function(mouse) {
+                            var hit = barBg.resizeHitAt(mouse.x)
+                            if (!hit) {
+                                mouse.accepted = false
+                                return
+                            }
+                            var srcNum = root.sourceDiskNumberMappedToTarget(rowRoot.diskNumber)
+                            var srcDisk = root.sourceDiskDataByNumber(srcNum)
+                            if (srcDisk)
+                                root.ensureTargetLayoutEdit(srcDisk, rowRoot.diskData)
+                            barBg.resizeIndex = hit.index
+                            barBg.resizeEdge = hit.edge
+                            barBg.resizeLastX = mouse.x
+                            root.layoutResizeActive = true
+                        }
+                        onPositionChanged: function(mouse) {
+                            if (barBg.resizeIndex < 0) {
+                                var hit = barBg.resizeHitAt(mouse.x)
+                                if (hit) {
+                                    barBg.resizeHoverIndex = hit.index
+                                    barBg.resizeHoverEdge = hit.edge
+                                } else {
+                                    clearHover()
+                                }
+                                return
+                            }
+                            var dx = mouse.x - barBg.resizeLastX
+                            barBg.resizeLastX = mouse.x
+                            var bpp = partsRow.bytesPerPixel
+                            if (bpp <= 0 || dx === 0)
+                                return
+                            // left edge: drag left grows; right edge: drag right grows
+                            var deltaBytes = Math.round(
+                                (barBg.resizeEdge === "left" ? -dx : dx) * bpp)
+                            if (deltaBytes === 0)
+                                return
+                            var newIdx = root.resizeMappedTargetSegment(
+                                rowRoot.diskNumber, barBg.resizeIndex,
+                                barBg.resizeEdge, deltaBytes)
+                            if (newIdx >= 0)
+                                barBg.resizeIndex = newIdx
+                        }
+                        onReleased: endResize()
+                        onCanceled: endResize()
+                        onExited: {
+                            if (barBg.resizeIndex < 0)
+                                clearHover()
                         }
                     }
 
@@ -1905,129 +2853,11 @@ Item {
                     }
                 }
             }
-
-            // Source → Target mapping row (old RestorePage "Restore to" ComboBox).
-            RowLayout {
-                Layout.fillWidth: true
-                visible: rowRoot.showMapping
-                spacing: 8
-
-                Text {
-                    //% "Restore to"
-                    text: qsTrId("aegra.restore.restore_to")
-                    color: Theme.colorTextGrey
-                    font.pixelSize: 11
-                    font.family: Theme.fontFamily
-                }
-
-                ComboBox {
-                    id: mapCombo
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 28
-                    property int sourceNum: rowRoot.diskData && rowRoot.diskData.diskNumber !== undefined
-                                            ? Number(rowRoot.diskData.diskNumber) : -1
-                    model: {
-                        var _e = root.mappingEpoch
-                        var _t = root.targetDisks
-                        return root.targetDiskOptions(mapCombo.sourceNum)
-                    }
-                    textRole: "label"
-
-                    function syncIndex() {
-                        var want = root.mappedTarget(mapCombo.sourceNum)
-                        if (!model)
-                            return
-                        for (var i = 0; i < model.length; ++i) {
-                            if (Number(model[i].value) === Number(want)) {
-                                currentIndex = i
-                                return
-                            }
-                        }
-                        currentIndex = 0
-                    }
-
-                    Component.onCompleted: syncIndex()
-                    onModelChanged: Qt.callLater(syncIndex)
-
-                    onActivated: function(index) {
-                        if (index < 0 || !model || index >= model.length) {
-                            syncIndex()
-                            return
-                        }
-                        var item = model[index]
-                        if (!item || item.enabled === false
-                                || item.tooSmall || item.inUse || item.isSystem) {
-                            syncIndex()
-                            return
-                        }
-                        var val = Number(item.value)
-                        root.setDiskMapping(mapCombo.sourceNum, val)
-                        Qt.callLater(syncIndex)
-                    }
-
-                    background: Rectangle {
-                        color: Theme.colorInput
-                        radius: 8
-                        border.width: 1
-                        border.color: Theme.colorBorder
-                    }
-                    indicator: ComboBoxIndicator { combo: mapCombo }
-                    contentItem: Text {
-                        leftPadding: 8
-                        rightPadding: mapCombo.indicator ? mapCombo.indicator.width + 12 : 8
-                        text: mapCombo.displayText
-                        color: Theme.colorTextWhite
-                        font.pixelSize: 11
-                        font.family: Theme.fontFamily
-                        verticalAlignment: Text.AlignVCenter
-                        elide: Text.ElideRight
-                    }
-                    popup: Popup {
-                        y: mapCombo.height
-                        width: mapCombo.width
-                        implicitHeight: Math.min(contentItem.implicitHeight + 4, 220)
-                        padding: 2
-                        contentItem: ListView {
-                            clip: true
-                            implicitHeight: contentHeight
-                            model: mapCombo.popup.visible ? mapCombo.delegateModel : null
-                            currentIndex: mapCombo.highlightedIndex
-                            ScrollIndicator.vertical: ScrollIndicator { }
-                        }
-                        background: Rectangle {
-                            color: Theme.colorPopup
-                            radius: 8
-                            border.width: 1
-                            border.color: Theme.colorBorder
-                        }
-                    }
-                    delegate: ItemDelegate {
-                        id: mapItemDel
-                        width: mapCombo.width
-                        height: 28
-                        hoverEnabled: true
-                        enabled: modelData && modelData.enabled !== false
-                        highlighted: mapCombo.highlightedIndex === index
-                        contentItem: Text {
-                            text: modelData ? modelData.label : ""
-                            color: parent.enabled ? Theme.colorTextWhite : Theme.colorTextGrey
-                            font.pixelSize: 11
-                            font.family: Theme.fontFamily
-                            elide: Text.ElideRight
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            radius: 4
-                            color: (mapItemDel.hovered || mapItemDel.highlighted) ? Theme.colorHover : "transparent"
-                        }
-                    }
-                }
-            }
         }
     }
 
 
-    // Volume row — source (map + drag) or target (drop).
+    // Volume row — source (drag) or target (drop).
     component VolumeRow: Rectangle {
         id: volRoot
         property var volumeData: ({})
@@ -2040,7 +2870,7 @@ Item {
         property bool dropHover: false
         property bool dropAccepted: false
         width: parent ? parent.width : 100
-        height: showMapping ? 72 : 52
+        height: 52
         radius: 6
         color: Theme.colorListItem
         border.width: {
@@ -2076,10 +2906,10 @@ Item {
             id: volDragMouse
             anchors.fill: parent
             anchors.margins: 2
-            anchors.bottomMargin: volRoot.showMapping ? 30 : 2
             z: 20
             enabled: volRoot.showMapping && volRoot.volumeIndex >= 0
             hoverEnabled: true
+            preventStealing: true
             cursorShape: {
                 if (!enabled)
                     return Qt.ArrowCursor
@@ -2089,7 +2919,7 @@ Item {
             drag.threshold: 6
             drag.axis: Drag.XAndYAxis
             onPressed: function(mouse) {
-                root.clearMappingDropBlocked()
+                root.beginMappingDrag()
                 var overlay = Overlay.overlay
                 if (!overlay)
                     return
@@ -2101,9 +2931,9 @@ Item {
             onReleased: {
                 if (volDragProxy.Drag.active)
                     volDragProxy.Drag.drop()
-                root.clearMappingDropBlocked()
+                root.endMappingDrag()
             }
-            onCanceled: root.clearMappingDropBlocked()
+            onCanceled: root.endMappingDrag()
         }
 
         Rectangle {
@@ -2285,116 +3115,6 @@ Item {
                         color: Theme.colorTextGrey
                         font.pixelSize: 10
                         font.family: Theme.fontFamily
-                    }
-                }
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                visible: volRoot.showMapping
-                spacing: 8
-                Text {
-                    //% "Restore to"
-                    text: qsTrId("aegra.restore.restore_to")
-                    color: Theme.colorTextGrey
-                    font.pixelSize: 11
-                    font.family: Theme.fontFamily
-                }
-                ComboBox {
-                    id: volMapCombo
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 28
-                    property int sourceVol: volRoot.volumeIndex
-                    model: {
-                        var _e = root.mappingEpoch
-                        var _t = root.targetVolumes
-                        return root.targetVolumeOptions(volMapCombo.sourceVol)
-                    }
-                    textRole: "label"
-                    function syncIndex() {
-                        var want = root.mappedTargetVolume(volMapCombo.sourceVol)
-                        if (!model)
-                            return
-                        for (var i = 0; i < model.length; ++i) {
-                            if (String(model[i].value || "") === String(want)) {
-                                currentIndex = i
-                                return
-                            }
-                        }
-                        currentIndex = 0
-                    }
-                    Component.onCompleted: syncIndex()
-                    onModelChanged: Qt.callLater(syncIndex)
-                    onActivated: function(index) {
-                        if (index < 0 || !model || index >= model.length) {
-                            syncIndex()
-                            return
-                        }
-                        var item = model[index]
-                        if (!item || item.enabled === false
-                                || item.tooSmall || item.inUse
-                                || item.isSystem || item.isReadOnly) {
-                            syncIndex()
-                            return
-                        }
-                        root.setVolumeMapping(volMapCombo.sourceVol, String(item.value || ""))
-                        Qt.callLater(syncIndex)
-                    }
-                    background: Rectangle {
-                        color: Theme.colorInput
-                        radius: 8
-                        border.width: 1
-                        border.color: Theme.colorBorder
-                    }
-                    indicator: ComboBoxIndicator { combo: volMapCombo }
-                    contentItem: Text {
-                        leftPadding: 8
-                        rightPadding: volMapCombo.indicator ? volMapCombo.indicator.width + 12 : 8
-                        text: volMapCombo.displayText
-                        color: Theme.colorTextWhite
-                        font.pixelSize: 11
-                        font.family: Theme.fontFamily
-                        verticalAlignment: Text.AlignVCenter
-                        elide: Text.ElideRight
-                    }
-                    popup: Popup {
-                        y: volMapCombo.height
-                        width: volMapCombo.width
-                        implicitHeight: Math.min(contentItem.implicitHeight + 4, 220)
-                        padding: 2
-                        contentItem: ListView {
-                            clip: true
-                            implicitHeight: contentHeight
-                            model: volMapCombo.popup.visible ? volMapCombo.delegateModel : null
-                            currentIndex: volMapCombo.highlightedIndex
-                            ScrollIndicator.vertical: ScrollIndicator { }
-                        }
-                        background: Rectangle {
-                            color: Theme.colorPopup
-                            radius: 8
-                            border.width: 1
-                            border.color: Theme.colorBorder
-                        }
-                    }
-                    delegate: ItemDelegate {
-                        id: volMapItemDel
-                        width: volMapCombo.width
-                        height: 28
-                        hoverEnabled: true
-                        enabled: modelData && modelData.enabled !== false
-                        highlighted: volMapCombo.highlightedIndex === index
-                        contentItem: Text {
-                            text: modelData ? modelData.label : ""
-                            color: parent.enabled ? Theme.colorTextWhite : Theme.colorTextGrey
-                            font.pixelSize: 11
-                            font.family: Theme.fontFamily
-                            elide: Text.ElideRight
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            radius: 4
-                            color: (volMapItemDel.hovered || volMapItemDel.highlighted) ? Theme.colorHover : "transparent"
-                        }
                     }
                 }
             }
@@ -3038,9 +3758,9 @@ Item {
                                       //% "(expand folders and check items to restore)"
                                       ? qsTrId("aegra.restore.file.source_hint")
                                       : (root.isVolumeMode
-                                         //% "(drag onto a target volume, or use Restore to)"
+                                         //% "(drag onto a target volume)"
                                          ? qsTrId("aegra.restore.source_volume_hint")
-                                         //% "(drag onto a target disk, or use Restore to)"
+                                         //% "(drag the disk onto a target disk)"
                                          : qsTrId("aegra.restore.source_hint"))
                                 color: Theme.colorTextGrey
                                 font.pixelSize: 11
@@ -3222,6 +3942,9 @@ Item {
                             clip: true
                             spacing: 10
                             visible: !root.isVolumeMode && !root.isFileMode
+                            // Freeze scroll while a mapping drag is in progress.
+                            interactive: !root.mappingDragActive
+                            boundsBehavior: Flickable.StopAtBounds
                             model: root.sourceDisks
                             delegate: DiskRow {
                                 required property var modelData
@@ -3261,6 +3984,8 @@ Item {
                             clip: true
                             spacing: 8
                             visible: root.isVolumeMode && !root.isFileMode
+                            interactive: !root.mappingDragActive
+                            boundsBehavior: Flickable.StopAtBounds
                             model: root.sourceVolumes
                             delegate: VolumeRow {
                                 required property var modelData
@@ -3524,6 +4249,7 @@ Item {
                             clip: true
                             spacing: 10
                             visible: !root.isVolumeMode && !root.isFileMode
+                            interactive: !root.mappingDragActive && !root.layoutResizeActive
                             boundsBehavior: Flickable.StopAtBounds
                             readonly property bool needsScroll: contentHeight > height + 1
                             model: root.targetDisks
@@ -3560,6 +4286,7 @@ Item {
                             clip: true
                             spacing: 8
                             visible: root.isVolumeMode && !root.isFileMode
+                            interactive: !root.mappingDragActive
                             boundsBehavior: Flickable.StopAtBounds
                             readonly property bool needsScroll: contentHeight > height + 1
                             model: root.targetVolumes
@@ -3795,50 +4522,12 @@ Item {
                         font.family: Theme.fontFamily
                         wrapMode: Text.WordWrap
                     }
-
-                    CheckBox {
-                        id: extendBox
+                    Text {
                         Layout.fillWidth: true
                         Layout.topMargin: 8
                         visible: !root.isVolumeMode && !root.isFileMode
-                        //% "Auto expand last partition"
-                        text: qsTrId("aegra.restore.auto_extend")
-                        checked: root.autoExtend
-                        onToggled: root.autoExtend = checked
-                        font.pixelSize: 12
-                        font.family: Theme.fontFamily
-                        spacing: 10
-                        indicator: Rectangle {
-                            implicitWidth: 18
-                            implicitHeight: 18
-                            x: extendBox.leftPadding
-                            y: parent.height / 2 - height / 2
-                            radius: 3
-                            color: extendBox.checked ? Theme.colorAccentBlue : Theme.colorInput
-                            border.width: 1
-                            border.color: Theme.colorBorder
-                            Text {
-                                anchors.centerIn: parent
-                                text: extendBox.checked ? "\u2713" : ""
-                                color: Theme.colorTextWhite
-                                font.pixelSize: 12
-                                font.bold: true
-                            }
-                        }
-                        contentItem: Text {
-                            text: extendBox.text
-                            color: Theme.colorTextWhite
-                            font: extendBox.font
-                            leftPadding: extendBox.indicator.width + extendBox.spacing
-                            wrapMode: Text.WordWrap
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                    }
-                    Text {
-                        Layout.fillWidth: true
-                        visible: !root.isVolumeMode && !root.isFileMode
-                        //% "When the target disk is larger than the source, grow the last data partition (and filesystem) into free space so no large unallocated region remains. Uncheck to leave free space unallocated. Note: FAT/FAT32 volumes cannot be auto-expanded (Windows does not support online extend); free space stays unallocated."
-                        text: qsTrId("aegra.restore.auto_extend_hint")
+                        //% "When the target disk is larger than the source, free space stays unallocated. Drag the edges of a data partition on the Target bar to grow or shrink it into adjacent unallocated space before restore (NTFS/ReFS only)."
+                        text: qsTrId("aegra.restore.target_resize_hint")
                         color: Theme.colorTextGrey
                         font.pixelSize: 11
                         font.family: Theme.fontFamily
@@ -4221,27 +4910,6 @@ Item {
                                 font.family: Theme.fontFamily
                             }
                         }
-                        RowLayout {
-                            Layout.fillWidth: true
-                            visible: !root.isFileMode && !root.isVolumeMode
-                            Text {
-                                //% "Auto-extend last partition"
-                                text: qsTrId("aegra.restore.auto_extend")
-                                color: Theme.colorTextGrey
-                                font.pixelSize: 12
-                                font.family: Theme.fontFamily
-                                Layout.preferredWidth: 200
-                                Layout.fillWidth: true
-                                elide: Text.ElideRight
-                            }
-                            Text {
-                                text: root.optionOnOff(root.autoExtend)
-                                color: Theme.colorTextWhite
-                                font.pixelSize: 13
-                                font.family: Theme.fontFamily
-                            }
-                        }
-
                         // Volume mode: no extra disk options — show a short note
                         Text {
                             Layout.fillWidth: true

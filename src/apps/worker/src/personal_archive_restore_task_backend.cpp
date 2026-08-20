@@ -12,6 +12,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -58,8 +59,12 @@ class OffsetBlockSink final : public ports::IBlockSink {
 
 struct DiskVolumeTarget final {
     std::uint32_t volume_index{0};
+    /// Where volume data is written on the target (after layout edits).
     std::uint64_t physical_offset{0};
+    /// Logical size of backed-up volume data (source).
     std::uint64_t volume_size{0};
+    /// Partition size on target (may be larger than volume_size after resize).
+    std::uint64_t partition_size{0};
 };
 
 [[nodiscard]] std::string partition_style_name(const format::PartitionStyle style) {
@@ -171,7 +176,8 @@ plan_disk_volumes(const format::Manifest& manifest, const std::uint32_t source_d
                      "disk restore step-1 rejects multi-disk volumes"});
             }
         }
-        targets.push_back({volume.volume_index, physical_offset.value(), volume.total_size});
+        targets.push_back({volume.volume_index, physical_offset.value(), volume.total_size,
+                           volume.total_size});
     }
     if (targets.empty()) {
         return base::Result<std::vector<DiskVolumeTarget>>::failure(
@@ -193,6 +199,69 @@ to_windows_raw_layout(const format::RawDiskLayout& layout) {
     result.gpt_backup_header = layout.gpt_backup_header;
     result.gpt_backup_entries = layout.gpt_backup_entries;
     return result;
+}
+
+/// EFI / MSR / Recovery / similar — always kept when rebuilding the table.
+[[nodiscard]] bool is_reserved_manifest_partition(const format::Partition& partition) {
+    auto gpt = partition.gpt_type_guid;
+    for (char& ch : gpt) {
+        if (ch >= 'A' && ch <= 'Z') {
+            ch = static_cast<char>(ch - 'A' + 'a');
+        }
+    }
+    static constexpr std::string_view k_reserved[] = {
+        "c12a7328-f81f-11d2-ba4b-00a0c93ec93b", // EFI
+        "e3c9e316-0b5c-4db8-817d-f92df00215ae", // MSR
+        "de94bba4-06d1-4d40-a16a-bfd50179d6ac", // Recovery
+        "5808c8aa-7e8f-42e0-85d2-e1e90434cfb3", // LDM metadata
+        "af9b60a0-1431-4f62-bc68-3311714a69ad", // LDM data
+    };
+    for (const auto id : k_reserved) {
+        if (gpt == id) {
+            return true;
+        }
+    }
+    switch (partition.mbr_type) {
+    case 0x00:
+    case 0x05:
+    case 0x0F:
+    case 0x12:
+    case 0x27:
+    case 0xEE:
+    case 0xEF:
+    case 0xDE:
+        return partition.gpt_type_guid.empty();
+    default:
+        break;
+    }
+    return false;
+}
+
+/// Partition start offsets that must remain after disk restore (reserved + backed-up).
+[[nodiscard]] std::vector<std::uint64_t>
+keep_partition_offsets_for_disk_restore(const format::Disk& source_disk,
+                                        const std::vector<DiskVolumeTarget>& targets) {
+    std::set<std::uint64_t> keep;
+    for (const auto& partition : source_disk.partitions) {
+        if (is_reserved_manifest_partition(partition)) {
+            keep.insert(partition.offset);
+        }
+    }
+    for (const auto& target : targets) {
+        for (const auto& partition : source_disk.partitions) {
+            if (partition.size == 0) {
+                continue;
+            }
+            const auto end = partition.offset + partition.size;
+            if (target.physical_offset >= partition.offset && target.physical_offset < end) {
+                keep.insert(partition.offset);
+                break;
+            }
+        }
+        // Fallback: keep the extent start even if partition match fails.
+        keep.insert(target.physical_offset);
+    }
+    return std::vector<std::uint64_t>(keep.begin(), keep.end());
 }
 
 [[nodiscard]] adapters::personal_archive::ArchiveChainOpenRequest
@@ -301,17 +370,27 @@ open_disk_sink_stage(const PersonalArchiveRestoreBackendRequest& request,
     return opened;
 }
 
+struct RestoreDiskVolumesArgs final {
+    ports::IRecoveryPointReader* reader{nullptr};
+    const format::Manifest* manifest{nullptr};
+    ports::IBlockSink* disk_sink{nullptr};
+    const std::vector<DiskVolumeTarget>* targets{nullptr};
+    const PersonalArchiveRestoreBackendRequest* request{nullptr};
+    const base::CancellationToken* cancellation{nullptr};
+};
+
 [[nodiscard]] base::Result<pipeline::RestoreSummary>
-restore_disk_volumes_stage(ports::IRecoveryPointReader& reader, const format::Manifest& manifest,
-                           ports::IBlockSink& disk_sink,
-                           const std::vector<DiskVolumeTarget>& targets,
-                           const PersonalArchiveRestoreBackendRequest& request,
-                           const base::CancellationToken& cancellation) {
+restore_disk_volumes_stage(const RestoreDiskVolumesArgs& args) {
+    if (args.reader == nullptr || args.manifest == nullptr || args.disk_sink == nullptr ||
+        args.targets == nullptr || args.request == nullptr || args.cancellation == nullptr) {
+        return base::Result<pipeline::RestoreSummary>::failure(
+            {base::ErrorCode::kInvalidArgument, "disk volume restore arguments are incomplete"});
+    }
     ScopedStage stage(WorkerTaskLog::active(), "restore_pipeline");
-    stage.note_u64("volume_count", targets.size());
+    stage.note_u64("volume_count", args.targets->size());
     pipeline::RestoreSummary summary;
-    for (const auto& target : targets) {
-        if (cancellation.stop_requested()) {
+    for (const auto& target : *args.targets) {
+        if (args.cancellation->stop_requested()) {
             return fail_restore(stage, {base::ErrorCode::kCancelled, "disk restore cancelled"},
                                 "cancel");
         }
@@ -321,13 +400,14 @@ restore_disk_volumes_stage(ports::IRecoveryPointReader& reader, const format::Ma
             log->field_u64("physical_offset", target.physical_offset);
         }
         auto volume_reader = adapters::personal_archive::PersonalArchiveVolumeReader::open(
-            reader, manifest, target.volume_index);
+            *args.reader, *args.manifest, target.volume_index);
         if (!volume_reader) {
             return fail_restore(stage, volume_reader.error(), "open_volume_reader");
         }
-        OffsetBlockSink offset_sink(disk_sink, target.physical_offset, target.volume_size);
-        pipeline::RestorePipeline restore(*volume_reader.value(), offset_sink, request.progress);
-        auto volume_summary = restore.run(request.plan, cancellation);
+        OffsetBlockSink offset_sink(*args.disk_sink, target.physical_offset, target.volume_size);
+        pipeline::RestorePipeline restore(*volume_reader.value(), offset_sink,
+                                          args.request->progress);
+        auto volume_summary = restore.run(args.request->plan, *args.cancellation);
         if (!volume_summary) {
             return fail_restore(stage, volume_summary.error(), "pipeline_volume");
         }
@@ -339,7 +419,7 @@ restore_disk_volumes_stage(ports::IRecoveryPointReader& reader, const format::Ma
         summary.peak_buffered_bytes =
             (std::max)(summary.peak_buffered_bytes, volume_summary.value().peak_buffered_bytes);
     }
-    auto flushed = disk_sink.flush(cancellation);
+    auto flushed = args.disk_sink->flush(*args.cancellation);
     if (!flushed) {
         return fail_restore(stage, flushed.error(), "flush");
     }
@@ -351,34 +431,236 @@ restore_disk_volumes_stage(ports::IRecoveryPointReader& reader, const format::Ma
     return base::Result<pipeline::RestoreSummary>::success(summary);
 }
 
+[[nodiscard]] std::uint64_t align_down_bytes(const std::uint64_t value,
+                                             const std::uint32_t sector) noexcept {
+    const auto s = sector == 0 ? 512U : sector;
+    return (value / s) * static_cast<std::uint64_t>(s);
+}
+
+[[nodiscard]] std::uint64_t align_up_bytes(const std::uint64_t value,
+                                           const std::uint32_t sector) noexcept {
+    const auto s = sector == 0 ? 512U : sector;
+    if (value == 0) {
+        return 0;
+    }
+    return ((value + s - 1U) / s) * static_cast<std::uint64_t>(s);
+}
+
+/// Same edit list feeds the partition table and volume writes — never diverge sizes.
 [[nodiscard]] base::Result<void>
-rebuild_partition_table_stage(const PersonalArchiveRestoreBackendRequest& request,
-                              const format::Disk& source_disk, const std::uint32_t target_disk) {
-    ScopedStage stage(WorkerTaskLog::active(), "rebuild_partition_table");
+ensure_layout_covers_volume_payloads(
+    const std::vector<contracts::RestorePartitionLayoutEdit>& edits,
+    const std::vector<DiskVolumeTarget>& targets, const std::uint32_t sector) {
+    if (edits.empty()) {
+        return base::Result<void>::success();
+    }
+    if (edits.size() > contracts::kMaximumPartitionLayoutEdits) {
+        return base::Result<void>::failure(
+            {base::ErrorCode::kInvalidArgument, "partition layout edit count exceeds limit"});
+    }
+    const auto tol = sector == 0 ? 512U : sector;
+    for (const auto& target : targets) {
+        for (const auto& edit : edits) {
+            const auto delta = target.physical_offset >= edit.source_start_offset_bytes
+                                   ? target.physical_offset - edit.source_start_offset_bytes
+                                   : edit.source_start_offset_bytes - target.physical_offset;
+            if (delta > tol) {
+                continue;
+            }
+            const auto part_size = align_down_bytes(edit.size_bytes, sector);
+            if (part_size < target.volume_size) {
+                return base::Result<void>::failure(
+                    {base::ErrorCode::kInvalidArgument,
+                     "partition layout size is smaller than volume payload"});
+            }
+            break;
+        }
+    }
+    return base::Result<void>::success();
+}
+
+/// Remap planned write offsets from *resolved* layout (same sizes as the table).
+void apply_layout_edits_to_volume_targets(
+    std::vector<DiskVolumeTarget>& targets,
+    const std::vector<contracts::RestorePartitionLayoutEdit>& edits,
+    const std::uint32_t sector) {
+    if (edits.empty()) {
+        return;
+    }
+    const auto tol = sector == 0 ? 512U : sector;
+    for (auto& target : targets) {
+        for (const auto& edit : edits) {
+            const auto delta = target.physical_offset >= edit.source_start_offset_bytes
+                                   ? target.physical_offset - edit.source_start_offset_bytes
+                                   : edit.source_start_offset_bytes - target.physical_offset;
+            if (delta > tol) {
+                continue;
+            }
+            target.physical_offset = align_down_bytes(edit.target_start_offset_bytes, sector);
+            target.partition_size = align_down_bytes(edit.size_bytes, sector);
+            break;
+        }
+    }
+}
+
+[[nodiscard]] base::Result<std::vector<adapters::windows_disk::PartitionLayoutEdit>>
+to_adapter_layout_edits(const std::vector<contracts::RestorePartitionLayoutEdit>& edits,
+                        const std::uint32_t sector) {
+    if (edits.size() > contracts::kMaximumPartitionLayoutEdits) {
+        return base::Result<std::vector<adapters::windows_disk::PartitionLayoutEdit>>::failure(
+            {base::ErrorCode::kInvalidArgument, "partition layout edit count exceeds limit"});
+    }
+    std::vector<adapters::windows_disk::PartitionLayoutEdit> out;
+    out.reserve(edits.size());
+    for (const auto& edit : edits) {
+        auto start = align_down_bytes(edit.target_start_offset_bytes, sector);
+        auto size = align_down_bytes(edit.size_bytes, sector);
+        if (size == 0) {
+            return base::Result<std::vector<adapters::windows_disk::PartitionLayoutEdit>>::failure(
+                {base::ErrorCode::kInvalidArgument, "partition layout size is zero"});
+        }
+        out.push_back({edit.source_start_offset_bytes, start, size});
+    }
+    return base::Result<std::vector<adapters::windows_disk::PartitionLayoutEdit>>::success(
+        std::move(out));
+}
+
+struct PreparedTargetPartitionTable final {
+    std::vector<contracts::RestorePartitionLayoutEdit> resolved_edits;
+    adapters::windows_disk::WindowsRawDiskLayout layout;
+    std::string partition_style;
+};
+
+struct PrepareTargetPartitionTableArgs final {
+    const PersonalArchiveRestoreBackendRequest* request{nullptr};
+    const format::Disk* source_disk{nullptr};
+    const std::vector<DiskVolumeTarget>* targets{nullptr};
+    std::uint64_t target_disk_size_bytes{0};
+};
+
+/// In-memory Target layout only (signature / filter / validate / resolve / apply).
+/// No disk mutation — callers delete layout and write after offline.
+[[nodiscard]] base::Result<PreparedTargetPartitionTable>
+prepare_target_partition_table_stage(const PrepareTargetPartitionTableArgs& args) {
+    using Prepared = PreparedTargetPartitionTable;
+    if (args.request == nullptr || args.source_disk == nullptr || args.targets == nullptr) {
+        return base::Result<Prepared>::failure(
+            {base::ErrorCode::kInvalidArgument, "partition table prepare arguments are incomplete"});
+    }
+    const auto& request = *args.request;
+    const auto& source_disk = *args.source_disk;
+    const auto& targets = *args.targets;
+    ScopedStage stage(WorkerTaskLog::active(), "prepare_target_partition_table");
     const auto style = partition_style_name(source_disk.partition_style);
     stage.note("partition_style", style);
     stage.note("preserve_disk_signature", request.preserve_disk_signature ? "true" : "false");
+    stage.note_u64("layout_edits", request.partition_layout_edits.size());
     auto layout = adapters::windows_disk::apply_disk_signature_policy(
         to_windows_raw_layout(source_disk.raw_layout), request.preserve_disk_signature, style);
     if (!layout) {
         stage.fail(layout.error(), "signature_policy", stage_hint(layout.error()));
-        return base::Result<void>::failure(layout.error());
+        return base::Result<Prepared>::failure(layout.error());
     }
-    auto rebuilt = adapters::windows_disk::rebuild_partition_table_from_raw_layout(
-        target_disk, source_disk.bytes_per_sector, source_disk.disk_size, layout.value(), style);
-    if (!rebuilt) {
-        stage.fail(rebuilt.error(), "write_mbr_gpt", stage_hint(rebuilt.error()));
-        return base::Result<void>::failure(rebuilt.error());
+    const auto keep_offsets = keep_partition_offsets_for_disk_restore(source_disk, targets);
+    stage.note_u64("keep_partition_count", keep_offsets.size());
+    auto filtered = adapters::windows_disk::remove_unbacked_basic_data_partitions(
+        std::move(layout).value(), style, source_disk.bytes_per_sector, keep_offsets);
+    if (!filtered) {
+        stage.fail(filtered.error(), "filter_unbacked_partitions", stage_hint(filtered.error()));
+        return base::Result<Prepared>::failure(filtered.error());
     }
-    if (request.bring_target_online) {
-        auto online = adapters::windows_disk::bring_target_disk_online(target_disk);
-        if (!online) {
-            stage.fail(online.error(), "bring_online", stage_hint(online.error()));
-            return base::Result<void>::failure(online.error());
+    adapters::windows_disk::PartitionLayoutRequest preflight{
+        &filtered.value(), style, source_disk.bytes_per_sector, args.target_disk_size_bytes, {}};
+    auto preflight_ok = adapters::windows_disk::validate_raw_disk_layout_for_restore(preflight);
+    if (!preflight_ok) {
+        stage.fail(preflight_ok.error(), "validate_raw_layout", stage_hint(preflight_ok.error()));
+        return base::Result<Prepared>::failure(preflight_ok.error());
+    }
+    auto covers = ensure_layout_covers_volume_payloads(request.partition_layout_edits, targets,
+                                                       source_disk.bytes_per_sector);
+    if (!covers) {
+        stage.fail(covers.error(), "layout_vs_payload", stage_hint(covers.error()));
+        return base::Result<Prepared>::failure(covers.error());
+    }
+    auto adapter_edits =
+        to_adapter_layout_edits(request.partition_layout_edits, source_disk.bytes_per_sector);
+    if (!adapter_edits) {
+        stage.fail(adapter_edits.error(), "adapter_layout_edits",
+                   stage_hint(adapter_edits.error()));
+        return base::Result<Prepared>::failure(adapter_edits.error());
+    }
+    adapters::windows_disk::PartitionLayoutRequest resolve_request{
+        &filtered.value(), style, source_disk.bytes_per_sector, args.target_disk_size_bytes,
+        adapter_edits.value()};
+    auto resolved = adapters::windows_disk::resolve_partition_layout_edits(resolve_request);
+    if (!resolved) {
+        stage.fail(resolved.error(), "resolve_target_layout", stage_hint(resolved.error()));
+        return base::Result<Prepared>::failure(resolved.error());
+    }
+    std::vector<contracts::RestorePartitionLayoutEdit> contracts_edits;
+    contracts_edits.reserve(resolved.value().size());
+    for (const auto& e : resolved.value()) {
+        contracts_edits.push_back(
+            {e.source_start_offset_bytes, e.target_start_offset_bytes, e.size_bytes});
+    }
+    auto resolved_covers =
+        ensure_layout_covers_volume_payloads(contracts_edits, targets, source_disk.bytes_per_sector);
+    if (!resolved_covers) {
+        stage.fail(resolved_covers.error(), "resolved_layout_vs_payload",
+                   stage_hint(resolved_covers.error()));
+        return base::Result<Prepared>::failure(resolved_covers.error());
+    }
+    stage.note_u64("resolved_layout_edits", contracts_edits.size());
+    adapters::windows_disk::PartitionLayoutRequest apply_request{
+        nullptr, style, source_disk.bytes_per_sector, args.target_disk_size_bytes,
+        resolved.value()};
+    auto laid_out = adapters::windows_disk::apply_partition_layout_edits(
+        std::move(filtered).value(), apply_request);
+    if (!laid_out) {
+        stage.fail(laid_out.error(), "apply_target_layout", stage_hint(laid_out.error()));
+        return base::Result<Prepared>::failure(laid_out.error());
+    }
+    stage.note("partition_table", "prepared_in_memory");
+    return base::Result<Prepared>::success(
+        Prepared{std::move(contracts_edits), std::move(laid_out).value(), std::string(style)});
+}
+
+[[nodiscard]] base::Result<void>
+finalize_target_disk_stage(
+    const PersonalArchiveRestoreBackendRequest& request, const format::Disk& source_disk,
+    const std::uint32_t target_disk,
+    const std::vector<contracts::RestorePartitionLayoutEdit>& resolved_layout_edits) {
+    ScopedStage stage(WorkerTaskLog::active(), "finalize_target_disk");
+    const auto style = partition_style_name(source_disk.partition_style);
+    if (!request.bring_target_online) {
+        // Partition table / payload already written. FSCTL_EXTEND_VOLUME needs mounted
+        // volumes, so skip filesystem fill when the caller leaves the disk offline.
+        stage.note("bring_online", "skipped");
+        if (!resolved_layout_edits.empty()) {
+            stage.note("extend_filesystem", "skipped_offline");
+        } else if (request.auto_expand_last_partition) {
+            stage.note("auto_expand", "skipped_offline");
         }
-        stage.note("bring_online", "ok");
+        return base::Result<void>::success();
     }
-    if (request.auto_expand_last_partition) {
+    auto online = adapters::windows_disk::bring_target_disk_online(target_disk);
+    if (!online) {
+        stage.fail(online.error(), "bring_online", stage_hint(online.error()));
+        return base::Result<void>::failure(online.error());
+    }
+    stage.note("bring_online", "ok");
+    // FS fill at resolved partition starts (not raw UI hints); requires online volumes.
+    if (!resolved_layout_edits.empty()) {
+        for (const auto& edit : resolved_layout_edits) {
+            auto extended = adapters::windows_disk::extend_filesystem_to_partition(
+                target_disk, edit.target_start_offset_bytes);
+            if (!extended) {
+                stage.fail(extended.error(), "extend_filesystem", stage_hint(extended.error()));
+                return base::Result<void>::failure(extended.error());
+            }
+        }
+        stage.note("extend_filesystem", "ok");
+    } else if (request.auto_expand_last_partition) {
         auto expanded = adapters::windows_disk::expand_last_data_partition_on_disk(
             target_disk, source_disk.disk_size, source_disk.bytes_per_sector, style);
         if (!expanded) {
@@ -496,34 +778,81 @@ class PersonalArchiveRestoreTaskBackend final : public IPersonalArchiveRestoreTa
             return base::Result<pipeline::RestoreSummary>::failure(
                 {base::ErrorCode::kInvalidArgument, "disk restore target must be PhysicalDrive"});
         }
+        // Phase 1 (reversible): geometry + protected sources + in-memory final layout.
         {
-            ScopedStage stage(WorkerTaskLog::active(), "prepare_target_disk");
+            ScopedStage stage(WorkerTaskLog::active(), "validate_target_disk");
             stage.note("target", path_display(request.target));
             stage.note_u64("physical_drive", target_disk.value());
-            auto prepared = adapters::windows_disk::prepare_target_disk_for_raw_restore(
+            adapters::windows_disk::TargetDiskGeometryCheck check{
                 target_disk.value(), plan.value().source_disk->disk_size,
-                plan.value().source_disk->bytes_per_sector);
-            if (!prepared) {
-                return fail_restore(stage, prepared.error(), "delete_layout_or_capacity");
+                plan.value().source_disk->bytes_per_sector};
+            auto validated = adapters::windows_disk::validate_target_disk_for_raw_restore(check);
+            if (!validated) {
+                return fail_restore(stage, validated.error(), "geometry_or_system");
             }
         }
+        const auto protected_for_sink = protected_sources;
         auto disk_sink =
             open_disk_sink_stage(request, *plan.value().source_disk, std::move(protected_sources));
         if (!disk_sink) {
             return base::Result<pipeline::RestoreSummary>::failure(disk_sink.error());
         }
-        auto summary = restore_disk_volumes_stage(
-            *reader.value(), reader.value()->manifest(), *disk_sink.value(), plan.value().targets,
-            request, cancellation);
+        const auto target_size = disk_sink.value()->capacity_bytes();
+        disk_sink.value().reset();
+        auto table = prepare_target_partition_table_stage(
+            PrepareTargetPartitionTableArgs{&request, plan.value().source_disk,
+                                            &plan.value().targets, target_size});
+        if (!table) {
+            return base::Result<pipeline::RestoreSummary>::failure(table.error());
+        }
+        const auto& resolved_edits = table.value().resolved_edits;
+        // Phase 2 (irreversible): offline → delete layout → write table → volume data → online.
+        {
+            ScopedStage stage(WorkerTaskLog::active(), "set_target_disk_offline");
+            auto offline = adapters::windows_disk::set_target_disk_offline(target_disk.value());
+            if (!offline) {
+                return fail_restore(stage, offline.error(), "set_offline");
+            }
+            stage.note("offline", "ok");
+        }
+        {
+            ScopedStage stage(WorkerTaskLog::active(), "delete_target_layout");
+            auto deleted =
+                adapters::windows_disk::delete_target_disk_drive_layout(target_disk.value());
+            if (!deleted) {
+                return fail_restore(stage, deleted.error(), "delete_layout");
+            }
+        }
+        {
+            ScopedStage stage(WorkerTaskLog::active(), "write_target_partition_table");
+            adapters::windows_disk::RebuildPartitionTableRequest rebuild{
+                target_disk.value(), plan.value().source_disk->bytes_per_sector,
+                plan.value().source_disk->disk_size, &table.value().layout,
+                table.value().partition_style};
+            auto written = adapters::windows_disk::rebuild_partition_table_from_raw_layout(rebuild);
+            if (!written) {
+                return fail_restore(stage, written.error(), "write_mbr_gpt");
+            }
+            stage.note("partition_table", "written");
+        }
+        apply_layout_edits_to_volume_targets(plan.value().targets, resolved_edits,
+                                             plan.value().source_disk->bytes_per_sector);
+        disk_sink =
+            open_disk_sink_stage(request, *plan.value().source_disk, protected_for_sink);
+        if (!disk_sink) {
+            return base::Result<pipeline::RestoreSummary>::failure(disk_sink.error());
+        }
+        auto summary = restore_disk_volumes_stage(RestoreDiskVolumesArgs{
+            reader.value().get(), &reader.value()->manifest(), disk_sink.value().get(),
+            &plan.value().targets, &request, &cancellation});
         if (!summary) {
             return summary;
         }
-        // Close data handle before rewriting partition table.
         disk_sink.value().reset();
-        auto rebuilt =
-            rebuild_partition_table_stage(request, *plan.value().source_disk, target_disk.value());
-        if (!rebuilt) {
-            return base::Result<pipeline::RestoreSummary>::failure(rebuilt.error());
+        auto finalized = finalize_target_disk_stage(request, *plan.value().source_disk,
+                                                    target_disk.value(), resolved_edits);
+        if (!finalized) {
+            return base::Result<pipeline::RestoreSummary>::failure(finalized.error());
         }
         return summary;
     }

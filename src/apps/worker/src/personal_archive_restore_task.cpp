@@ -33,6 +33,9 @@ base::Result<void> validate_task(const contracts::JobRequest& job,
         job.target_ref.empty() || job.credential_refs.size() != job.source_refs.size()) {
         return invalid("personal restore task requires matching sources and credentials");
     }
+    if (!job.restore) {
+        return invalid("personal restore task requires restore options");
+    }
     if (options.memory_budget_bytes == 0 || options.chunk_size_bytes == 0 ||
         options.memory_budget_bytes < options.chunk_size_bytes ||
         options.maximum_restore_chain_depth == 0 ||
@@ -199,13 +202,15 @@ make_backend_request(const contracts::JobRequest& job,
     request.maximum_chunk_size = options.memory_budget_bytes;
     request.maximum_chain_depth = options.maximum_restore_chain_depth;
     request.progress = context.progress;
-    if (job.restore && job.restore->disk_restore) {
+    // Caller (validate_task / contracts) requires restore; no implicit volume-0 fallback.
+    if (job.restore->disk_restore) {
         request.disk_restore = true;
         request.source_disk_number = job.restore->source_disk_number;
         request.bring_target_online = job.restore->bring_target_online;
         request.preserve_disk_signature = job.restore->preserve_disk_signature;
         request.auto_expand_last_partition = job.restore->auto_expand_last_partition;
-    } else if (job.restore) {
+        request.partition_layout_edits = job.restore->partition_layout_edits;
+    } else {
         request.source_volume_index = job.restore->source_volume_index;
     }
     return request;
@@ -228,10 +233,10 @@ void log_restore_request(WorkerTaskLog* log, const contracts::JobRequest& job,
         log->field_u64("source_disk_number", job.restore->source_disk_number);
         log->field_bool("preserve_disk_signature", job.restore->preserve_disk_signature);
         log->field_bool("auto_expand_last_partition", job.restore->auto_expand_last_partition);
+        log->field_u64("partition_layout_edits", job.restore->partition_layout_edits.size());
         log->field_bool("bring_target_online", job.restore->bring_target_online);
-    } else {
-        const auto volume_index = job.restore ? job.restore->source_volume_index : std::uint32_t{0};
-        log->field_u64("source_volume_index", volume_index);
+    } else if (job.restore) {
+        log->field_u64("source_volume_index", job.restore->source_volume_index);
     }
     log->field("target", job.target_ref);
     log->field_bytes("memory_budget", options.memory_budget_bytes);

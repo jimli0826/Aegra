@@ -21,6 +21,9 @@ struct PreparedVolumeMetadata final {
     std::string filesystem;
     std::string label;
     std::uint64_t logical_size_bytes{0};
+    std::uint64_t free_size_bytes{0};
+    /// From WindowsVolumeInfo::filesystem_metadata_available (not assumed true).
+    bool free_size_known{false};
     std::uint32_t cluster_size_bytes{0};
     bool vss_used{false};
     /// Live volume→disk extents (IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS) for Manifest mapping.

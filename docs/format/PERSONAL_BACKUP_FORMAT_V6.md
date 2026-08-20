@@ -531,6 +531,8 @@ volume = {
   "filesystem": filesystem,
   "label": label,
   "total_size": total_size,
+  "free_size": free_size,                      // required; 0 when free_size_known=false
+  "free_size_known": free_size_known,          // required bool; false → do not draw used-space UI
   "cluster_size": cluster_size,
 
   "source_state": source_state,                // 0=none, 1=selected

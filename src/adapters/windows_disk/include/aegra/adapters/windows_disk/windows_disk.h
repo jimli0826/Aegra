@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -245,24 +246,55 @@ inspect_physical_disk_layout(std::uint32_t disk_number);
 /// True when disk_number hosts the Windows system volume.
 [[nodiscard]] base::Result<bool> is_system_physical_disk(std::uint32_t disk_number);
 
-/// Deletes existing partition layout and validates capacity/sector size for raw disk restore.
+/// Geometry check inputs for raw disk restore (system / capacity / sector).
+struct TargetDiskGeometryCheck final {
+    std::uint32_t disk_number{0};
+    std::uint64_t source_disk_size_bytes{0};
+    std::uint32_t source_bytes_per_sector{0};
+};
+
+/// Read-only: reject system disk and undersized / mismatched-sector targets. No layout mutation.
+[[nodiscard]] base::Result<void>
+validate_target_disk_for_raw_restore(const TargetDiskGeometryCheck& check);
+
+/// Destructive: `IOCTL_DISK_DELETE_DRIVE_LAYOUT` only. Call after validate + in-memory layout OK.
+[[nodiscard]] base::Result<void> delete_target_disk_drive_layout(std::uint32_t disk_number);
+
+/// validate_target_disk_for_raw_restore then delete_target_disk_drive_layout.
 [[nodiscard]] base::Result<void>
 prepare_target_disk_for_raw_restore(std::uint32_t disk_number, std::uint64_t source_disk_size_bytes,
                                     std::uint32_t source_bytes_per_sector);
 
+/// Inputs for writing a previously validated raw MBR/GPT layout to the target disk.
+struct RebuildPartitionTableRequest final {
+    std::uint32_t disk_number{0};
+    std::uint32_t source_bytes_per_sector{0};
+    std::uint64_t source_disk_size_bytes{0};
+    const WindowsRawDiskLayout* raw_layout{nullptr};
+    std::string_view partition_style;
+};
+
 /// Writes captured MBR/GPT raw_layout onto the target physical disk.
 [[nodiscard]] base::Result<void>
-rebuild_partition_table_from_raw_layout(std::uint32_t disk_number,
-                                        std::uint32_t source_bytes_per_sector,
-                                        std::uint64_t source_disk_size_bytes,
-                                        const WindowsRawDiskLayout& raw_layout,
-                                        const std::string& partition_style);
+rebuild_partition_table_from_raw_layout(const RebuildPartitionTableRequest& request);
 
 /// When `preserve_disk_signature` is false, randomize MBR signature and/or GPT DiskId (and
 /// recompute GPT header CRCs). When true, returns `layout` unchanged.
 [[nodiscard]] base::Result<WindowsRawDiskLayout>
 apply_disk_signature_policy(WindowsRawDiskLayout layout, bool preserve_disk_signature,
                             const std::string& partition_style);
+
+/// Zero GPT/MBR data partition records whose start offset is not in
+/// `keep_partition_start_offsets` (typically reserved + backed-up partitions only).
+/// Recomputes GPT partition-array and header CRCs. Leaves EFI/MSR/Recovery and other
+/// non-data entries untouched. MBR: structure/system types (extended, protective,
+/// EFI, WinRE, OEM utility) stay; unbacked data — including hidden 0x17/0x1B/0x1C —
+/// is zeroed (expand-only reserved lists are not reused here).
+[[nodiscard]] base::Result<WindowsRawDiskLayout>
+remove_unbacked_basic_data_partitions(WindowsRawDiskLayout layout,
+                                      const std::string& partition_style,
+                                      std::uint32_t bytes_per_sector,
+                                      std::span<const std::uint64_t> keep_partition_start_offsets);
 
 /// After layout rebuild + online: grow the last data partition into free space when the target
 /// is larger than `source_disk_size_bytes`, then extend NTFS/ReFS. FAT/exFAT leave free space
@@ -273,8 +305,61 @@ expand_last_data_partition_on_disk(std::uint32_t disk_number,
                                    std::uint32_t bytes_per_sector,
                                    const std::string& partition_style);
 
+/// Grow a data partition whose start matches `start_offset_bytes` up to `target_size_bytes`
+/// (not beyond free space after it), then online-extend NTFS/ReFS. No-op when target ≤ current
+/// or filesystem cannot extend. Used for Desktop Target-bar size edits on restore.
+[[nodiscard]] base::Result<void>
+expand_data_partition_to_size(std::uint32_t disk_number, std::uint64_t start_offset_bytes,
+                              std::uint64_t target_size_bytes);
+
+/// One data partition relocation/resize for target layout (from Desktop Target bar).
+struct PartitionLayoutEdit final {
+    std::uint64_t source_start_offset_bytes{0};
+    std::uint64_t target_start_offset_bytes{0};
+    std::uint64_t size_bytes{0};
+};
+
+/// Shared inputs for resolve/apply/validate of archive raw_layout on a target disk.
+struct PartitionLayoutRequest final {
+    const WindowsRawDiskLayout* layout{nullptr};
+    std::string_view partition_style;
+    std::uint32_t bytes_per_sector{0};
+    std::uint64_t target_disk_size_bytes{0};
+    std::span<const PartitionLayoutEdit> edits;
+};
+
+/// Fail-closed preflight for Archive raw_layout before any irreversible target mutation.
+/// GPT: requires MBR + primary/backup headers + entry arrays; verifies signature, header size,
+/// header/entry CRCs, primary↔backup geometry agreement, and final intervals.
+/// MBR: requires signature; rejects extended/logical containers (0x05/0x0F); validates intervals.
+[[nodiscard]] base::Result<void>
+validate_raw_disk_layout_for_restore(const PartitionLayoutRequest& request);
+
+/// Desktop Target-bar sizes/starts are *hints only*. Resolve them against reserved
+/// partitions (EFI/MSR/Recovery/…) and usable GPT/MBR geometry so final placement
+/// never overlaps system ranges. Empty input returns empty (caller still rewrites
+/// GPT header geometry via apply_partition_layout_edits).
+[[nodiscard]] base::Result<std::vector<PartitionLayoutEdit>>
+resolve_partition_layout_edits(const PartitionLayoutRequest& request);
+
+/// Rewrite basic-data GPT/MBR entries from source starts to target starts/sizes; recompute CRCs.
+/// Reserved partitions (EFI/MSR/…) stay fixed. Callers should pass edits already resolved
+/// via resolve_partition_layout_edits. `target_disk_size_bytes` updates primary/backup GPT
+/// LBA geometry when the target differs from the source.
+[[nodiscard]] base::Result<WindowsRawDiskLayout>
+apply_partition_layout_edits(WindowsRawDiskLayout layout, const PartitionLayoutRequest& request);
+
+/// After layout + volume data + online: extend NTFS/ReFS to fill the partition at
+/// `start_offset_bytes` (partition may already be full size from the table).
+[[nodiscard]] base::Result<void>
+extend_filesystem_to_partition(std::uint32_t disk_number, std::uint64_t start_offset_bytes);
+
 /// Clears OFFLINE/READ_ONLY attributes so restored volumes can mount (data-disk path).
 [[nodiscard]] base::Result<void> bring_target_disk_online(std::uint32_t disk_number);
+
+/// Set disk OFFLINE so raw PhysicalDrive writes are not blocked by auto-mounted volumes
+/// after GPT/MBR is rewritten (required before volume payload restore).
+[[nodiscard]] base::Result<void> set_target_disk_offline(std::uint32_t disk_number);
 
 /// Resolves which physical disk hosts a file path (for archive-on-target rejection).
 [[nodiscard]] base::Result<std::uint32_t>

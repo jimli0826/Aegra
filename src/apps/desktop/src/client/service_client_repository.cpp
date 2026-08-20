@@ -102,6 +102,7 @@ struct PartitionVolumeMeta final {
     QString label;
     QString filesystem;
     qint64 size_bytes{0};
+    qint64 free_bytes{-1};
     int volume_index{-1};
 };
 
@@ -138,6 +139,16 @@ volume_meta_by_partition(const int disk_number, const QVariantList& all_volumes)
         if (size > 0) {
             meta.size_bytes = size;
         }
+        if (volume.value(QStringLiteral("freeSizeKnown")).toBool()) {
+            auto free = volume.value(QStringLiteral("freeSizeBytes")).toLongLong();
+            if (free < 0) {
+                free = 0;
+            }
+            if (size > 0 && free > size) {
+                free = size;
+            }
+            meta.free_bytes = free;
+        }
         meta.volume_index = volume.value(QStringLiteral("volumeIndex")).toInt();
     }
     return by_part;
@@ -148,9 +159,12 @@ struct LayoutPartition final {
     qint64 size_bytes{0};
     int partition_number{0};
     bool reserved{false};
+    /// True when a Manifest volume extent covers this partition (selected in backup).
+    bool backed_up{false};
     QString letter;
     QString name;
     QString filesystem;
+    qint64 free_bytes{-1};
     int volume_index{-1};
 };
 
@@ -175,12 +189,13 @@ void append_unallocated_segment(QVariantList& ui_volumes, const qint64 bytes,
         {QStringLiteral("partitionNumber"), -1},
         {QStringLiteral("volumeIndex"), -1},
         {QStringLiteral("unallocated"), true},
+        {QStringLiteral("notBackedUp"), false},
     });
 }
 
-/// Source disk bar segments in physical order: data volumes + unallocated gaps.
-/// Reserved partitions (EFI/MSR/…) occupy space without a visible segment so free
-/// regions keep their true offset (not forced to the trailing end).
+/// Source disk bar segments in physical order: data + reserved + unallocated gaps.
+/// Reserved (EFI/MSR/Recovery/…) are emitted with reserved=true so Target preview
+/// keeps fixed gaps; Source bars may hide them in QML without collapsing geometry.
 [[nodiscard]] QVariantList volumes_for_source_disk(const int disk_number,
                                                    const QVariantList& partitions,
                                                    const QVariantList& all_volumes,
@@ -207,17 +222,28 @@ void append_unallocated_segment(QVariantList& ui_volumes, const qint64 bytes,
         entry.size_bytes = size;
         entry.partition_number = part_num;
         entry.reserved = is_reserved_partition(partition);
-        entry.letter = meta.letter;
-        entry.name = meta.label;
-        if (entry.name.isEmpty()) {
-            entry.name = partition.value(QStringLiteral("volumeLabel")).toString().trimmed();
+        // Only partitions with a Manifest volume extent were selected for backup.
+        entry.backed_up = meta_by_part.contains(part_num);
+        if (entry.reserved) {
+            auto name = partition.value(QStringLiteral("gptName")).toString().trimmed();
+            if (name.isEmpty()) {
+                name = partition.value(QStringLiteral("volumeLabel")).toString().trimmed();
+            }
+            entry.name = localized_volume_label(name);
+        } else if (entry.backed_up) {
+            entry.letter = meta.letter;
+            entry.name = meta.label;
+            if (entry.name.isEmpty()) {
+                entry.name = partition.value(QStringLiteral("volumeLabel")).toString().trimmed();
+            }
+            entry.name = localized_volume_label(entry.name);
+            entry.filesystem = meta.filesystem;
+            if (entry.filesystem.isEmpty()) {
+                entry.filesystem = partition.value(QStringLiteral("filesystem")).toString();
+            }
+            entry.free_bytes = meta.free_bytes;
+            entry.volume_index = meta.volume_index;
         }
-        entry.name = localized_volume_label(entry.name);
-        entry.filesystem = meta.filesystem;
-        if (entry.filesystem.isEmpty()) {
-            entry.filesystem = partition.value(QStringLiteral("filesystem")).toString();
-        }
-        entry.volume_index = meta.volume_index;
         layout.push_back(std::move(entry));
     }
     std::sort(layout.begin(), layout.end(),
@@ -239,21 +265,59 @@ void append_unallocated_segment(QVariantList& ui_volumes, const qint64 bytes,
             cursor = end;
         }
         if (part.reserved) {
+            // Keep geometry for Target restore preview: fixed, non-resizable chips.
+            // Source bars may hide these; space must not collapse into Unallocated.
+            ui_volumes.push_back(QVariantMap{
+                {QStringLiteral("letter"), QString{}},
+                {QStringLiteral("name"), part.name},
+                {QStringLiteral("title"), part.name},
+                {QStringLiteral("size"), format.format_bytes(part.size_bytes)},
+                {QStringLiteral("capacityBytes"), part.size_bytes},
+                {QStringLiteral("fileSystem"), QString{}},
+                {QStringLiteral("fs"), QString{}},
+                {QStringLiteral("offsetBytes"), part.offset_bytes},
+                {QStringLiteral("partitionNumber"), part.partition_number},
+                {QStringLiteral("volumeIndex"), -1},
+                {QStringLiteral("unallocated"), false},
+                {QStringLiteral("notBackedUp"), false},
+                {QStringLiteral("reserved"), true},
+            });
             continue;
         }
-        ui_volumes.push_back(QVariantMap{
-            {QStringLiteral("letter"), part.letter},
-            {QStringLiteral("name"), part.name},
-            {QStringLiteral("title"), volume_display_title(part.name, part.letter)},
-            {QStringLiteral("size"), format.format_bytes(part.size_bytes)},
-            {QStringLiteral("capacityBytes"), part.size_bytes},
-            {QStringLiteral("fileSystem"), part.filesystem},
-            {QStringLiteral("fs"), part.filesystem},
-            {QStringLiteral("offsetBytes"), part.offset_bytes},
-            {QStringLiteral("partitionNumber"), part.partition_number},
-            {QStringLiteral("volumeIndex"), part.volume_index},
-            {QStringLiteral("unallocated"), false},
-        });
+        if (!part.backed_up) {
+            // Present on disk layout but not selected into this recovery point.
+            ui_volumes.push_back(QVariantMap{
+                {QStringLiteral("letter"), QString{}},
+                {QStringLiteral("name"), QString{}},
+                {QStringLiteral("title"), QString{}},
+                {QStringLiteral("size"), format.format_bytes(part.size_bytes)},
+                {QStringLiteral("capacityBytes"), part.size_bytes},
+                {QStringLiteral("fileSystem"), QString{}},
+                {QStringLiteral("fs"), QString{}},
+                {QStringLiteral("offsetBytes"), part.offset_bytes},
+                {QStringLiteral("partitionNumber"), part.partition_number},
+                {QStringLiteral("volumeIndex"), -1},
+                {QStringLiteral("unallocated"), false},
+                {QStringLiteral("notBackedUp"), true},
+            });
+            continue;
+        }
+        QVariantMap row{{QStringLiteral("letter"), part.letter},
+                        {QStringLiteral("name"), part.name},
+                        {QStringLiteral("title"), volume_display_title(part.name, part.letter)},
+                        {QStringLiteral("size"), format.format_bytes(part.size_bytes)},
+                        {QStringLiteral("capacityBytes"), part.size_bytes},
+                        {QStringLiteral("fileSystem"), part.filesystem},
+                        {QStringLiteral("fs"), part.filesystem},
+                        {QStringLiteral("offsetBytes"), part.offset_bytes},
+                        {QStringLiteral("partitionNumber"), part.partition_number},
+                        {QStringLiteral("volumeIndex"), part.volume_index},
+                        {QStringLiteral("unallocated"), false},
+                        {QStringLiteral("notBackedUp"), false}};
+        if (part.free_bytes >= 0) {
+            row.insert(QStringLiteral("freeBytes"), part.free_bytes);
+        }
+        ui_volumes.push_back(std::move(row));
     }
     if (disk_total > cursor) {
         append_unallocated_segment(ui_volumes, disk_total - cursor, format);
@@ -284,16 +348,25 @@ void append_unallocated_segment(QVariantList& ui_volumes, const qint64 bytes,
         const auto letter = volume.value(QStringLiteral("letter")).toString().trimmed();
         const auto name = localized_volume_label(volume.value(QStringLiteral("label")).toString());
         const auto fs = volume.value(QStringLiteral("filesystem")).toString().trimmed();
-        out.push_back(QVariantMap{
-            {QStringLiteral("volumeIndex"), volume_index},
-            {QStringLiteral("letter"), letter},
-            {QStringLiteral("name"), name},
-            {QStringLiteral("title"), volume_display_title(name, letter)},
-            {QStringLiteral("size"), format.format_bytes(size)},
-            {QStringLiteral("capacityBytes"), size},
-            {QStringLiteral("fileSystem"), fs},
-            {QStringLiteral("fs"), fs},
-        });
+        QVariantMap row{{QStringLiteral("volumeIndex"), volume_index},
+                        {QStringLiteral("letter"), letter},
+                        {QStringLiteral("name"), name},
+                        {QStringLiteral("title"), volume_display_title(name, letter)},
+                        {QStringLiteral("size"), format.format_bytes(size)},
+                        {QStringLiteral("capacityBytes"), size},
+                        {QStringLiteral("fileSystem"), fs},
+                        {QStringLiteral("fs"), fs}};
+        if (volume.value(QStringLiteral("freeSizeKnown")).toBool()) {
+            auto free = volume.value(QStringLiteral("freeSizeBytes")).toLongLong();
+            if (free < 0) {
+                free = 0;
+            }
+            if (free > size) {
+                free = size;
+            }
+            row.insert(QStringLiteral("freeBytes"), free);
+        }
+        out.push_back(std::move(row));
     }
     return out;
 }
@@ -1120,19 +1193,35 @@ namespace {
     }
     const auto wanted = trimmed.left(1).toUpper();
     for (const auto& disk_value : sources.disksTree()) {
-        const auto volumes = disk_value.toMap().value(QStringLiteral("volumes")).toList();
+        const auto disk = disk_value.toMap();
+        const auto volumes = disk.value(QStringLiteral("volumes")).toList();
         for (const auto& volume_value : volumes) {
-            const auto volume = volume_value.toMap();
+            auto volume = volume_value.toMap();
             auto letter = volume.value(QStringLiteral("letter")).toString();
             if (letter.isEmpty()) {
                 letter = volume.value(QStringLiteral("mountLetter")).toString();
             }
             if (letter.left(1).compare(wanted, Qt::CaseInsensitive) == 0) {
+                // Parent disk number for restore drag-drop (archive-on-target) checks.
+                volume.insert(QStringLiteral("diskNumber"),
+                              disk.value(QStringLiteral("diskNumber")));
                 return volume;
             }
         }
     }
     return {};
+}
+
+[[nodiscard]] QString default_repository_locator(const RepositoryConnectionModel& connections) {
+    const auto connection_id = connections.default_connection_id();
+    if (connection_id.isEmpty()) {
+        return {};
+    }
+    const auto row = connections.find(connection_id);
+    if (!row) {
+        return {};
+    }
+    return row->locator.trimmed();
 }
 
 } // namespace
@@ -1193,6 +1282,28 @@ QString ServiceClient::freeSpaceTextForLocator(const QString& locator) const {
         return QStringLiteral("—");
     }
     return format_.format_bytes(freeBytesForLocator(locator));
+}
+
+int ServiceClient::defaultRepositoryHostDiskNumber() const {
+    const auto locator = default_repository_locator(connections_);
+    if (locator.isEmpty() || is_unc_path(locator)) {
+        return -1;
+    }
+    const auto volume = inventory_volume(sources_, locator);
+    if (volume.isEmpty() || !volume.contains(QStringLiteral("diskNumber"))) {
+        return -1;
+    }
+    bool ok = false;
+    const auto disk_number = volume.value(QStringLiteral("diskNumber")).toInt(&ok);
+    return ok && disk_number >= 0 ? disk_number : -1;
+}
+
+QString ServiceClient::defaultRepositoryHostVolumeSourceId() const {
+    const auto locator = default_repository_locator(connections_);
+    if (locator.isEmpty() || is_unc_path(locator)) {
+        return {};
+    }
+    return inventory_volume(sources_, locator).value(QStringLiteral("sourceId")).toString();
 }
 
 } // namespace aegra::desktop

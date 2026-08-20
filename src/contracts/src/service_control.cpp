@@ -530,6 +530,29 @@ base::Result<void> validate_start_restore_command(const StartRestoreCommand& com
     if (!valid_token(token) || !command.confirmed || command.archive_password.size() > 32) {
         return invalid("start restore command is invalid");
     }
+    // Wire-level layout edit checks only. Reserved-partition collisions need full raw_layout
+    // in Worker/Adapter after the recovery point is opened.
+    if (command.partition_layout_edits.size() > kMaximumPartitionLayoutEdits) {
+        return invalid("partition_layout_edits exceeds maximum entry count");
+    }
+    if (!command.partition_layout_edits.empty() && command.auto_expand_last_partition) {
+        return invalid("auto_expand_last_partition cannot be used with partition_layout_edits");
+    }
+    std::set<std::uint64_t> source_starts;
+    for (const auto& edit : command.partition_layout_edits) {
+        if (edit.size_bytes == 0 || !valid_wire_integer(edit.source_start_offset_bytes) ||
+            !valid_wire_integer(edit.target_start_offset_bytes) ||
+            !valid_wire_integer(edit.size_bytes)) {
+            return invalid("partition_layout_edits entry is invalid");
+        }
+        if (edit.target_start_offset_bytes >
+            (std::numeric_limits<std::uint64_t>::max)() - edit.size_bytes) {
+            return invalid("partition_layout_edits target range overflows");
+        }
+        if (!source_starts.insert(edit.source_start_offset_bytes).second) {
+            return invalid("partition_layout_edits has duplicate source_start");
+        }
+    }
     return base::Result<void>::success();
 }
 
@@ -680,8 +703,9 @@ base::Result<void> validate_recovery_point_layout(const RecoveryPointLayout& lay
     std::set<std::uint32_t> seen_index;
     for (const auto& volume : layout.volumes) {
         if (!seen_index.insert(volume.volume_index).second || volume.total_size_bytes == 0 ||
-            volume.letter.size() > 16 || volume.label.size() > 256 ||
-            volume.filesystem.size() > 64 || volume.extents.empty() || volume.extents.size() > 32) {
+            volume.free_size_bytes > volume.total_size_bytes || volume.letter.size() > 16 ||
+            volume.label.size() > 256 || volume.filesystem.size() > 64 || volume.extents.empty() ||
+            volume.extents.size() > 32) {
             return invalid("recovery point source volume is invalid");
         }
         for (const auto& extent : volume.extents) {

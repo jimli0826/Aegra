@@ -360,13 +360,28 @@ QByteArray encode_start_restore_request(const QString& request_id, const QString
                                         const QString& preflight_token,
                                         const QString& archive_password,
                                         const bool preserve_disk_signature,
-                                        const bool auto_expand_last_partition) {
+                                        const bool auto_expand_last_partition,
+                                        const QVariantList& partition_layout_edits) {
+    QJsonArray edits;
+    for (const auto& item : partition_layout_edits) {
+        const auto map = item.toMap();
+        edits.push_back(QJsonObject{
+            {QStringLiteral("source_start_offset_bytes"),
+             static_cast<qint64>(
+                 map.value(QStringLiteral("sourceStartOffsetBytes")).toULongLong())},
+            {QStringLiteral("target_start_offset_bytes"),
+             static_cast<qint64>(
+                 map.value(QStringLiteral("targetStartOffsetBytes")).toULongLong())},
+            {QStringLiteral("size_bytes"),
+             static_cast<qint64>(map.value(QStringLiteral("sizeBytes")).toULongLong())}});
+    }
     const QJsonObject payload{
         {QStringLiteral("preflight_token"), preflight_token},
         {QStringLiteral("confirmed"), true},
         {QStringLiteral("archive_password"), archive_password},
         {QStringLiteral("preserve_disk_signature"), preserve_disk_signature},
-        {QStringLiteral("auto_expand_last_partition"), auto_expand_last_partition}};
+        {QStringLiteral("auto_expand_last_partition"), auto_expand_last_partition},
+        {QStringLiteral("partition_layout_edits"), edits}};
     return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
                                       static_cast<qint64>(kServiceSchemaVersion)},
                                      {QStringLiteral("message_type"), 1},

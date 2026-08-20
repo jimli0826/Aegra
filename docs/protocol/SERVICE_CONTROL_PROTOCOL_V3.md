@@ -837,9 +837,10 @@ Start 时 `target_ref` 为 Inventory `stable_key`（canonical Volume GUID Path�
 
 `partition_number`, `offset_bytes`, `size_bytes`, `is_active`, `mbr_type`, `gpt_type_guid`, `gpt_name`, `volume_label`, `filesystem`
 
-**`RecoveryPointSourceVolume`（6 字段）：**
+**`RecoveryPointSourceVolume`（8 字段）：**
 
-`volume_index`, `letter`, `label`, `filesystem`, `total_size_bytes`, `extents`[]
+`volume_index`, `letter`, `label`, `filesystem`, `total_size_bytes`, `free_size_bytes`,
+`free_size_known`, `extents`[]
 
 **`RecoveryPointSourceExtent`（5 字段）：**
 
@@ -1028,22 +1029,26 @@ Service 展开：`source_ids`、`repository_connection_id`、`exclude_page_and_h
 
 ### 6.9 kind 40 — StartRestore
 
+> **权威协议为 V4。** 本节仅作历史对照；实现与 Desktop 使用 `schema_version = 4`，
+> 见 `SERVICE_CONTROL_PROTOCOL_V4.md` §7.4。
+
 **用途：** 在用户确认后，用预检 token 启动 Restore Job。
 
-**请求 payload（5 字段）：**
+**请求 payload（6 字段，与 V4 对齐）：**
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `preflight_token` | string | 来自 kind 9 |
 | `confirmed` | bool | 必须为 `true` |
 | `archive_password` | string | 与预检一致；加密 Archive 必填；未加密 `""`；不记日志 |
-| `preserve_disk_signature` | bool | 保留源盘 MBR signature / GPT DiskId（默认 true） |
-| `auto_expand_last_partition` | bool | 目标更大时扩展末数据分区 + NTFS/ReFS（默认 true） |
+| `preserve_disk_signature` | bool | 保留源盘 MBR signature / GPT DiskId |
+| `auto_expand_last_partition` | bool | Desktop 整盘路径固定 false |
+| `partition_layout_edits` | array | 必需，可为空；元素含 `source_start_offset_bytes` / `target_start_offset_bytes` / `size_bytes` |
 
 - **整盘（指纹 `diskc|…`）：** 向 Worker 提交 `disk_restore=true` + `\\.\PhysicalDriveN`，并透传
-  `preserve_disk_signature` / `auto_expand_last_partition`。
+  `preserve_disk_signature` / `auto_expand_last_partition` / `partition_layout_edits`。
 - **卷（指纹 `volc|…`）：** 向 Worker 提交 `disk_restore=false` + `source_volume_index` +
-  Volume GUID Path `target_ref`；盘签名/扩容选项忽略。
+  Volume GUID Path `target_ref`；盘签名/扩容/布局选项忽略。
 
 ```json
 {
@@ -1057,7 +1062,8 @@ Service 展开：`source_ids`、`repository_connection_id`、`exclude_page_and_h
     "confirmed": true,
     "archive_password": "",
     "preserve_disk_signature": true,
-    "auto_expand_last_partition": true
+    "auto_expand_last_partition": false,
+    "partition_layout_edits": []
   }
 }
 ```

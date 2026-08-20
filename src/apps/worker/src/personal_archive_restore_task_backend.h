@@ -3,6 +3,7 @@
 #include "aegra/apps/worker/windows_personal_backup_task.h"
 #include "aegra/base/cancellation.h"
 #include "aegra/base/result.h"
+#include "aegra/contracts/job.h"
 #include "aegra/pipeline/restore_pipeline.h"
 
 #include <filesystem>
@@ -32,6 +33,7 @@ struct PersonalArchiveRestoreBackendRequest final {
     bool bring_target_online{true};
     bool preserve_disk_signature{true};
     bool auto_expand_last_partition{true};
+    std::vector<contracts::RestorePartitionLayoutEdit> partition_layout_edits;
 };
 
 class IPersonalArchiveRestoreTaskBackend {

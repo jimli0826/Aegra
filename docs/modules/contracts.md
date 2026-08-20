@@ -30,8 +30,8 @@
 `JobRequest` schema **4** 是当前 Worker 的版本化任务信封，拥有 job、tenant、operation、`content_kind`、
 source/target、`SecretRef`、trace 和 deadline。`content_kind` 为 `volume_set` 或 `file_set`，payload 互斥：
 
-- **volume_set**：`source_refs` / `target_ref` / 可选 `RestoreOptions`；`file_source_refs` 与
-  `file_restore_target` 必须为空。
+- **volume_set**：`source_refs` / `target_ref`；`kRestore` 时 **`RestoreOptions` 必填**；
+  `file_source_refs` 与 `file_restore_target` 必须为空。
 - **file_set backup**：`file_source_refs`（1..100）+ `target_ref`；`source_refs` 为空。
 - **file_set restore**：`source_refs`（archive 路径）+ `file_restore_target`；`target_ref` 为空。
 

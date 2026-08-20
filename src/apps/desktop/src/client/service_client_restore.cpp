@@ -48,7 +48,8 @@ bool ServiceClient::startDiskRestore(const int source_disk_number, const int tar
                                      const QString& recovery_point_id,
                                      const QString& archive_password,
                                      const bool preserve_disk_signature,
-                                     const bool auto_expand_last_partition) {
+                                     const bool auto_expand_last_partition,
+                                     const QVariantList& partition_layout_edits) {
     if (state_ != State::kReady) {
         //% "Service is not connected"
         show_toast(qtTrId("aegra.error.service.disconnected"), true);
@@ -83,6 +84,7 @@ bool ServiceClient::startDiskRestore(const int source_disk_number, const int tar
     restore_target_source_id_.clear();
     restore_preserve_disk_signature_ = preserve_disk_signature;
     restore_auto_expand_last_partition_ = auto_expand_last_partition;
+    restore_partition_layout_edits_ = partition_layout_edits;
     restore_recovery_point_id_ = recovery_point_id;
     restore_archive_password_ = archive_password;
     restore_preflight_token_.clear();
@@ -145,6 +147,7 @@ bool ServiceClient::startVolumeRestore(const int source_volume_index,
     restore_target_source_id_ = target_source_id;
     restore_preserve_disk_signature_ = true;
     restore_auto_expand_last_partition_ = true;
+    restore_partition_layout_edits_.clear();
     restore_recovery_point_id_ = recovery_point_id;
     restore_archive_password_ = archive_password;
     restore_preflight_token_.clear();
@@ -179,7 +182,7 @@ RequestDisposition ServiceClient::handle_prepare_restore_frame(const QByteArray&
     const auto start_body = encode_start_restore_request(
         request_id, restore_start_idempotency_key_, restore_preflight_token_,
         restore_archive_password_, restore_preserve_disk_signature_,
-        restore_auto_expand_last_partition_);
+        restore_auto_expand_last_partition_, restore_partition_layout_edits_);
     const auto started =
         coordinator_->begin_request(request_id, start_body, [this](const QByteArray& frame_body) {
             return handle_start_restore_frame(frame_body);

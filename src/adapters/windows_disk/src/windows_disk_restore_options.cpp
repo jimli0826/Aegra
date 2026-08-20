@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cwctype>
+#include <limits>
 #include <span>
 #include <string>
 #include <string_view>
@@ -89,6 +90,17 @@ void write_le32(std::vector<std::byte>& buffer, const std::size_t offset,
     buffer[offset + 3] = static_cast<std::byte>((value >> 24U) & 0xFFU);
 }
 
+void write_le64(std::vector<std::byte>& buffer, const std::size_t offset,
+                const std::uint64_t value) {
+    if (offset + 8 > buffer.size()) {
+        return;
+    }
+    for (int i = 0; i < 8; ++i) {
+        buffer[offset + static_cast<std::size_t>(i)] =
+            static_cast<std::byte>((value >> (8 * i)) & 0xFFU);
+    }
+}
+
 [[nodiscard]] base::Result<void> resignature_mbr(std::vector<std::byte>& mbr_sector) {
     // Disk signature at offset 0x1B8 (4 bytes).
     if (mbr_sector.size() < 0x1BC) {
@@ -133,17 +145,37 @@ constexpr GUID kGptBasicDataPartitionType{0xEBD0A0A2,
     return guid_equal(gpt.PartitionType, kGptBasicDataPartitionType);
 }
 
+// Expand-last-partition classifier: exclude types that must not be grown.
+// Includes hidden filesystem data (0x17/0x1B/0x1C) so auto-extend never targets them.
 [[nodiscard]] bool is_reserved_mbr_partition(const std::uint8_t type) noexcept {
     switch (type) {
     case 0x00: // unused
     case 0x05: // extended
     case 0x0F: // extended LBA
     case 0x12:
-    case 0x17:
-    case 0x1B:
-    case 0x1C:
+    case 0x17: // hidden NTFS (data — not expanded)
+    case 0x1B: // hidden FAT32 (data — not expanded)
+    case 0x1C: // hidden FAT32 LBA (data — not expanded)
     case 0x27:
     case 0xDE:
+    case 0xEE: // GPT protective
+    case 0xEF: // EFI system
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Volume-set disk restore: MBR types that stay even when not in keep_offsets.
+// Structural containers and firmware/OEM system slots only — not data partitions.
+// Hidden NTFS/FAT (0x17/0x1B/0x1C) are data: zeroed when unbacked (keep_offsets miss).
+[[nodiscard]] bool is_mbr_structure_or_system_type(const std::uint8_t type) noexcept {
+    switch (type) {
+    case 0x05: // extended
+    case 0x0F: // extended LBA
+    case 0x12: // OEM diagnostic / config
+    case 0x27: // Windows RE
+    case 0xDE: // Dell utility
     case 0xEE: // GPT protective
     case 0xEF: // EFI system
         return true;
@@ -325,9 +357,11 @@ enum class FilesystemExtendKind : std::uint8_t {
 }
 
 // Old PartitionManager::ExtendVolumeByPath: keep volume handle open across grow + FSCTL_EXTEND.
+// When max_grow_bytes > 0, grow by at most that many bytes (exact target-size path).
 [[nodiscard]] base::Result<void>
 extend_volume_by_open_path(const std::wstring& open_path, const std::uint32_t disk_number,
-                           const ExpandCandidate& candidate) {
+                           const ExpandCandidate& candidate,
+                           const std::uint64_t max_grow_bytes = 0) {
     detail::UniqueHandle volume(CreateFileW(open_path.c_str(), GENERIC_READ | GENERIC_WRITE,
                                             FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
                                             OPEN_EXISTING, 0, nullptr));
@@ -418,6 +452,9 @@ extend_volume_by_open_path(const std::wstring& open_path, const std::uint32_t di
             available -= kGptReserveBytes;
         }
     }
+    if (max_grow_bytes > 0 && available > max_grow_bytes) {
+        available = max_grow_bytes;
+    }
     available = (available / sector) * sector;
     if (available == 0) {
         return base::Result<void>::success();
@@ -481,6 +518,165 @@ apply_disk_signature_policy(WindowsRawDiskLayout layout, const bool preserve_dis
     return base::Result<WindowsRawDiskLayout>::success(std::move(layout));
 }
 
+namespace {
+
+[[nodiscard]] std::uint32_t read_le32(const std::byte* data) noexcept {
+    std::uint32_t value = 0;
+    std::memcpy(&value, data, sizeof(value));
+    return value;
+}
+
+[[nodiscard]] std::uint64_t read_le64(const std::byte* data) noexcept {
+    std::uint64_t value = 0;
+    std::memcpy(&value, data, sizeof(value));
+    return value;
+}
+
+[[nodiscard]] bool is_zero_guid_bytes(const std::byte* data) noexcept {
+    for (std::size_t i = 0; i < 16; ++i) {
+        if (data[i] != std::byte{0}) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] bool offset_is_kept(const std::uint64_t offset,
+                                  const std::span<const std::uint64_t> keep_offsets,
+                                  const std::uint32_t sector) noexcept {
+    const auto tol = sector == 0 ? 512U : sector;
+    for (const auto kept : keep_offsets) {
+        const auto delta = offset >= kept ? offset - kept : kept - offset;
+        if (delta <= tol) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// UEFI: PartitionEntryArrayCRC32 covers exactly NumberOfPartitionEntries ×
+// SizeOfPartitionEntry. Callers must pass that verified span — not the full
+// capture buffer (backup may store a fixed 16 KiB even when fewer entries exist).
+void recompute_gpt_header_crcs(std::vector<std::byte>& header,
+                               const std::span<const std::byte> partition_entry_array) {
+    if (header.size() < 92 || partition_entry_array.empty()) {
+        return;
+    }
+    // PartitionEntryArrayCRC32 @ 88.
+    write_le32(header, 88, crc32_ieee(partition_entry_array));
+    // HeaderCRC32 @ 16 (field must be zero while hashing).
+    write_le32(header, 16, 0);
+    std::uint32_t header_size = read_le32(header.data() + 12);
+    if (header_size < 92 || header_size > header.size()) {
+        header_size = 92;
+    }
+    const auto crc = crc32_ieee(
+        std::span<const std::byte>(header.data(), static_cast<std::size_t>(header_size)));
+    write_le32(header, 16, crc);
+}
+
+[[nodiscard]] base::Result<void>
+filter_gpt_partition_entries(std::vector<std::byte>& entries, std::vector<std::byte>& header,
+                             const std::uint32_t sector,
+                             const std::span<const std::uint64_t> keep_offsets) {
+    if (header.size() < 92 || entries.empty()) {
+        return base::Result<void>::success();
+    }
+    const auto entry_size = read_le32(header.data() + 84);
+    const auto entry_count = read_le32(header.data() + 80);
+    const auto array_bytes =
+        static_cast<std::uint64_t>(entry_size) * static_cast<std::uint64_t>(entry_count);
+    if (entry_size < 128 || entry_count == 0 || array_bytes > entries.size()) {
+        return base::Result<void>::failure(
+            {base::ErrorCode::kCorruptData, "GPT partition entry array is invalid"});
+    }
+    const auto array_span = std::span<const std::byte>(
+        entries.data(), static_cast<std::size_t>(array_bytes));
+    const auto sector_size = sector == 0 ? 512U : sector;
+    for (std::uint32_t i = 0; i < entry_count; ++i) {
+        auto* entry = entries.data() + static_cast<std::size_t>(i) * entry_size;
+        if (is_zero_guid_bytes(entry)) {
+            continue;
+        }
+        GUID type{};
+        std::memcpy(&type, entry, sizeof(type));
+        if (!guid_equal(type, kGptBasicDataPartitionType)) {
+            continue; // EFI / MSR / Recovery / other system types stay.
+        }
+        const auto first_lba = read_le64(entry + 32);
+        const auto start_offset = first_lba * static_cast<std::uint64_t>(sector_size);
+        if (offset_is_kept(start_offset, keep_offsets, sector_size)) {
+            continue;
+        }
+        // Drop unbacked basic data partition → becomes free space after restore.
+        std::memset(entry, 0, entry_size);
+    }
+    recompute_gpt_header_crcs(header, array_span);
+    return base::Result<void>::success();
+}
+
+[[nodiscard]] base::Result<void>
+filter_mbr_partition_entries(std::vector<std::byte>& mbr, const std::uint32_t sector,
+                             const std::span<const std::uint64_t> keep_offsets) {
+    // Four primary slots at 0x1BE, 16 bytes each.
+    constexpr std::size_t kTable = 0x1BE;
+    constexpr std::size_t kEntry = 16;
+    if (mbr.size() < kTable + kEntry * 4) {
+        return base::Result<void>::success();
+    }
+    const auto sector_size = sector == 0 ? 512U : sector;
+    for (std::size_t i = 0; i < 4; ++i) {
+        auto* entry = mbr.data() + kTable + i * kEntry;
+        const auto type = static_cast<std::uint8_t>(entry[4]);
+        // Empty slots and structure/system types stay; all data types (including
+        // hidden 0x17/0x1B/0x1C) are cleared unless their start is in keep_offsets.
+        if (type == 0 || is_mbr_structure_or_system_type(type)) {
+            continue;
+        }
+        const auto first_lba = static_cast<std::uint64_t>(read_le32(entry + 8));
+        const auto start_offset = first_lba * static_cast<std::uint64_t>(sector_size);
+        if (offset_is_kept(start_offset, keep_offsets, sector_size)) {
+            continue;
+        }
+        std::memset(entry, 0, kEntry);
+    }
+    return base::Result<void>::success();
+}
+
+} // namespace
+
+base::Result<WindowsRawDiskLayout>
+remove_unbacked_basic_data_partitions(WindowsRawDiskLayout layout,
+                                      const std::string& partition_style,
+                                      const std::uint32_t bytes_per_sector,
+                                      const std::span<const std::uint64_t> keep_partition_start_offsets) {
+    if (partition_style == "GPT") {
+        if (!layout.gpt_partition_entries.empty() && !layout.gpt_primary_header.empty()) {
+            auto primary = filter_gpt_partition_entries(layout.gpt_partition_entries,
+                                                        layout.gpt_primary_header, bytes_per_sector,
+                                                        keep_partition_start_offsets);
+            if (!primary) {
+                return base::Result<WindowsRawDiskLayout>::failure(primary.error());
+            }
+        }
+        if (!layout.gpt_backup_entries.empty() && !layout.gpt_backup_header.empty()) {
+            auto backup = filter_gpt_partition_entries(layout.gpt_backup_entries,
+                                                       layout.gpt_backup_header, bytes_per_sector,
+                                                       keep_partition_start_offsets);
+            if (!backup) {
+                return base::Result<WindowsRawDiskLayout>::failure(backup.error());
+            }
+        }
+    } else if (partition_style == "MBR" && !layout.mbr_sector.empty()) {
+        auto mbr = filter_mbr_partition_entries(layout.mbr_sector, bytes_per_sector,
+                                                keep_partition_start_offsets);
+        if (!mbr) {
+            return base::Result<WindowsRawDiskLayout>::failure(mbr.error());
+        }
+    }
+    return base::Result<WindowsRawDiskLayout>::success(std::move(layout));
+}
+
 base::Result<void>
 expand_last_data_partition_on_disk(const std::uint32_t disk_number,
                                    const std::uint64_t source_disk_size_bytes,
@@ -524,6 +720,140 @@ expand_last_data_partition_on_disk(const std::uint32_t disk_number,
         return base::Result<void>::success();
     }
     return extend_volume_by_open_path(volume_path.value(), disk_number, *candidate);
+}
+
+base::Result<void> expand_data_partition_to_size(const std::uint32_t disk_number,
+                                                 const std::uint64_t start_offset_bytes,
+                                                 const std::uint64_t target_size_bytes) {
+    if (target_size_bytes == 0) {
+        return base::Result<void>::success();
+    }
+    auto volume_path = find_volume_open_path_for_partition(disk_number, start_offset_bytes);
+    if (!volume_path) {
+        return base::Result<void>::failure(volume_path.error());
+    }
+    if (filesystem_extend_kind(volume_path.value()) == FilesystemExtendKind::kSkipFat) {
+        return base::Result<void>::success();
+    }
+
+    // Read current extent length to compute bytes to grow.
+    detail::UniqueHandle volume(CreateFileW(volume_path.value().c_str(), GENERIC_READ,
+                                            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                                            OPEN_EXISTING, 0, nullptr));
+    if (!volume.valid()) {
+        return base::Result<void>::failure(
+            detail::win32_error(GetLastError(), "CreateFileW volume for size probe"));
+    }
+    std::vector<std::byte> extent_buffer(sizeof(VOLUME_DISK_EXTENTS) + sizeof(DISK_EXTENT) * 16U);
+    DWORD returned = 0;
+    if (!DeviceIoControl(volume.get(), IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, nullptr, 0,
+                         extent_buffer.data(), static_cast<DWORD>(extent_buffer.size()), &returned,
+                         nullptr) ||
+        returned < sizeof(VOLUME_DISK_EXTENTS)) {
+        return base::Result<void>::failure(
+            detail::win32_error(GetLastError(), "IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS"));
+    }
+    const auto* extents = reinterpret_cast<const VOLUME_DISK_EXTENTS*>(extent_buffer.data());
+    if (extents->NumberOfDiskExtents == 0) {
+        return base::Result<void>::failure(
+            {base::ErrorCode::kIoFailure, "volume has no disk extents"});
+    }
+    const auto current =
+        static_cast<std::uint64_t>(extents->Extents[0].ExtentLength.QuadPart);
+    volume.reset();
+    if (target_size_bytes <= current) {
+        return base::Result<void>::success();
+    }
+    const auto grow = target_size_bytes - current;
+
+    auto disk = open_disk_read_write(disk_number);
+    if (!disk.valid()) {
+        return base::Result<void>::failure(
+            detail::win32_error(GetLastError(), "CreateFileW disk for expand-to-size"));
+    }
+    auto layout_buffer = read_drive_layout(disk.get());
+    if (!layout_buffer) {
+        return base::Result<void>::failure(layout_buffer.error());
+    }
+    const auto* layout =
+        reinterpret_cast<const DRIVE_LAYOUT_INFORMATION_EX*>(layout_buffer.value().data());
+    ExpandCandidate candidate;
+    candidate.starting_offset = start_offset_bytes;
+    candidate.partition_length = current;
+    candidate.free_after_bytes = grow;
+    candidate.is_gpt = layout->PartitionStyle == PARTITION_STYLE_GPT;
+    for (DWORD index = 0; index < layout->PartitionCount; ++index) {
+        const auto& part = layout->PartitionEntry[index];
+        if (static_cast<std::uint64_t>(part.StartingOffset.QuadPart) == start_offset_bytes) {
+            candidate.partition_number = part.PartitionNumber;
+            break;
+        }
+    }
+    disk.reset();
+    return extend_volume_by_open_path(volume_path.value(), disk_number, candidate, grow);
+}
+
+
+base::Result<void> extend_filesystem_to_partition(const std::uint32_t disk_number,
+                                                  const std::uint64_t start_offset_bytes) {
+    auto volume_path = find_volume_open_path_for_partition(disk_number, start_offset_bytes);
+    if (!volume_path) {
+        return base::Result<void>::failure(volume_path.error());
+    }
+    if (filesystem_extend_kind(volume_path.value()) == FilesystemExtendKind::kSkipFat) {
+        return base::Result<void>::success();
+    }
+    detail::UniqueHandle volume(CreateFileW(volume_path.value().c_str(), GENERIC_READ | GENERIC_WRITE,
+                                            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                                            OPEN_EXISTING, 0, nullptr));
+    if (!volume.valid()) {
+        return base::Result<void>::failure(
+            detail::win32_error(GetLastError(), "CreateFileW volume for FS extend"));
+    }
+    auto disk = open_disk_read_write(disk_number);
+    if (!disk.valid()) {
+        return base::Result<void>::failure(
+            detail::win32_error(GetLastError(), "CreateFileW disk for FS extend"));
+    }
+    DISK_GEOMETRY geometry{};
+    DWORD returned = 0;
+    if (!DeviceIoControl(disk.get(), IOCTL_DISK_GET_DRIVE_GEOMETRY, nullptr, 0, &geometry,
+                         sizeof(geometry), &returned, nullptr) ||
+        geometry.BytesPerSector == 0) {
+        return base::Result<void>::failure(
+            detail::win32_error(GetLastError(), "IOCTL_DISK_GET_DRIVE_GEOMETRY"));
+    }
+    const auto sector = static_cast<std::uint64_t>(geometry.BytesPerSector);
+    auto layout_buffer = read_drive_layout(disk.get());
+    if (!layout_buffer) {
+        return base::Result<void>::failure(layout_buffer.error());
+    }
+    const auto* layout =
+        reinterpret_cast<const DRIVE_LAYOUT_INFORMATION_EX*>(layout_buffer.value().data());
+    std::uint64_t partition_length = 0;
+    for (DWORD index = 0; index < layout->PartitionCount; ++index) {
+        const auto& part = layout->PartitionEntry[index];
+        if (static_cast<std::uint64_t>(part.StartingOffset.QuadPart) == start_offset_bytes) {
+            partition_length = static_cast<std::uint64_t>(part.PartitionLength.QuadPart);
+            break;
+        }
+    }
+    disk.reset();
+    if (partition_length < sector) {
+        return base::Result<void>::success();
+    }
+    LONGLONG new_total_sectors = static_cast<LONGLONG>(partition_length / sector);
+    if (!DeviceIoControl(volume.get(), FSCTL_EXTEND_VOLUME, &new_total_sectors,
+                         sizeof(new_total_sectors), nullptr, 0, &returned, nullptr)) {
+        // Already full size or FS reports no growth needed — not fatal for matching layout.
+        const auto err = GetLastError();
+        if (err == ERROR_INVALID_PARAMETER || err == ERROR_NOT_SUPPORTED) {
+            return base::Result<void>::success();
+        }
+        return base::Result<void>::failure(
+            detail::win32_error(err, "FSCTL_EXTEND_VOLUME to partition size"));
+    }
+    return base::Result<void>::success();
 }
 
 } // namespace aegra::adapters::windows_disk

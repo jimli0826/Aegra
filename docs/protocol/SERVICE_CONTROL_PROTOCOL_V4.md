@@ -629,9 +629,78 @@ payload 保持 repository/schedule/job 引用形状；若 Schedule 为 file_set�
 }
 ```
 
-### 7.4 其它命令 32–47、50
+### 7.4 kind 40 — StartRestore
 
-字段级形状与 V3 相同（版本号 4），除非 Contracts 在 F1 明确收紧。`StartRestore`（40）仅 volume。
+**用途：** 在用户确认后，用预检 token 启动 volume_set Restore Job（卷恢复或整盘恢复）。
+
+**请求 payload（exact 6 字段）：**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `preflight_token` | string | 来自 kind 9 PrepareRestore |
+| `confirmed` | bool | 必须为 `true` |
+| `archive_password` | string | 与预检一致；加密 Archive 必填；未加密 `""`；不记日志 |
+| `preserve_disk_signature` | bool | 保留源盘 MBR signature / GPT DiskId |
+| `auto_expand_last_partition` | bool | 仅当 `partition_layout_edits` 为空时允许 `true`；与非空布局互斥 |
+| `partition_layout_edits` | array | **必需**（可为空数组）。Target 条布局意图，见下表 |
+
+**`partition_layout_edits[]` 元素（exact 3 字段，拒绝额外 key）：**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `source_start_offset_bytes` | uint64 wire | 源盘数据分区起始（匹配 raw_layout） |
+| `target_start_offset_bytes` | uint64 wire | 期望目标起始（**hint only**） |
+| `size_bytes` | uint64 wire | 期望分区大小；必须 `> 0`，且不得小于对应卷 payload |
+
+约束：
+
+- 数组长度 `0..128`（`kMaximumPartitionLayoutEdits`）；
+- 全部整数须在 wire integer 范围（≤ int64 max）；
+- `target_start + size` 不得 uint64 溢出；
+- `source_start_offset_bytes` 在数组内唯一；
+- 空数组：保持源数据分区起止（Worker 仍重写 GPT 主/备头几何）；
+- 非空时 `auto_expand_last_partition` 必须为 `false`；
+- Desktop 值仅作参考；Worker/Adapter 解析后不得覆盖 EFI/MSR/Recovery，并校验最终区间无重叠；
+- MBR：数据分区不得从 LBA 0 开始，且须完整落在真实目标盘容量内（并受 32 位 LBA 上限约束）。
+
+**幂等指纹（Service）：** 含 `preflight_token`、`preserve_disk_signature`、
+`auto_expand_last_partition` 与有序 `partition_layout_edits`（三字段）；**不含**
+`archive_password`。相同 `idempotency_key` 但指纹不同 → Conflict。
+
+**指纹与目标：**
+
+- **整盘（指纹 `diskc|…`）：** `disk_restore=true`，`target_ref=\\.\PhysicalDriveN`，可带布局 edits。
+- **卷（指纹 `volc|…`）：** `disk_restore=false`，`source_volume_index` + Volume GUID Path；`preserve_disk_signature` / `auto_expand_last_partition` / 布局 edits 忽略。
+
+```json
+{
+  "schema_version": 4,
+  "message_type": 1,
+  "request_id": "…",
+  "kind": 40,
+  "idempotency_key": "idem-restore-1",
+  "payload": {
+    "preflight_token": "pft-…",
+    "confirmed": true,
+    "archive_password": "",
+    "preserve_disk_signature": true,
+    "auto_expand_last_partition": false,
+    "partition_layout_edits": [
+      {
+        "source_start_offset_bytes": 16777216,
+        "target_start_offset_bytes": 16777216,
+        "size_bytes": 107374182400
+      }
+    ]
+  }
+}
+```
+
+**Worker schema 4 `RestoreOptions`：** 与上表对应字段均为必需（`partition_layout_edits` 可为 `[]`）。Decoder 不得把 `partition_layout_edits` 当作缺省省略的可选字段。
+
+### 7.5 其它命令 32–39、41–47、50
+
+字段级形状与 V3 相同（版本号 4），除非 Contracts 明确收紧。`StartRestore` 见 §7.4（**不是**仅 volume）。
 
 Repository 网络命令失败使用以下稳定 `message_code`，不得返回 Win32 原始错误文本：
 

@@ -401,8 +401,31 @@ resolve_restore_chain_entries(ports::IControlPlaneDatabase& control_plane,
         std::move(chain).value());
 }
 
-[[nodiscard]] std::string restore_request_fingerprint(const std::string_view preflight_token) {
-    return "start-restore|" + std::string(preflight_token);
+/// Idempotency fingerprint for StartRestore. Includes layout options that change restore
+/// outcome; never includes archive_password.
+[[nodiscard]] std::string
+restore_request_fingerprint(const contracts::StartRestoreCommand& command) {
+    std::string out = "start-restore|token=";
+    out += command.preflight_token;
+    out += "|preserve=";
+    out += command.preserve_disk_signature ? "1" : "0";
+    out += "|auto_expand=";
+    out += command.auto_expand_last_partition ? "1" : "0";
+    out += "|edits=";
+    out += std::to_string(command.partition_layout_edits.size());
+    // Preserve wire order: order is part of the request identity.
+    for (std::size_t i = 0; i < command.partition_layout_edits.size(); ++i) {
+        const auto& e = command.partition_layout_edits[i];
+        out += "|e";
+        out += std::to_string(i);
+        out += ":src=";
+        out += std::to_string(e.source_start_offset_bytes);
+        out += ",tgt=";
+        out += std::to_string(e.target_start_offset_bytes);
+        out += ",sz=";
+        out += std::to_string(e.size_bytes);
+    }
+    return out;
 }
 
 struct PreparedRestoreChain final {
@@ -612,7 +635,7 @@ WorkerJobService::start_restore(const contracts::StartRestoreCommand& command,
     if (!existing) {
         return base::Result<contracts::CommandAcknowledgement>::failure(existing.error());
     }
-    const auto fingerprint = restore_request_fingerprint(command.preflight_token);
+    const auto fingerprint = restore_request_fingerprint(command);
     if (existing.value()) {
         if (existing.value()->operation != contracts::JobOperation::kRestore ||
             existing.value()->request_fingerprint != fingerprint) {
@@ -800,6 +823,7 @@ WorkerJobService::start_restore(const contracts::StartRestoreCommand& command,
         restore.bring_target_online = true;
         restore.preserve_disk_signature = command.preserve_disk_signature;
         restore.auto_expand_last_partition = command.auto_expand_last_partition;
+        restore.partition_layout_edits = command.partition_layout_edits;
     } else {
         restore.disk_restore = false;
         restore.source_volume_index = volume_chain.source_volume_index;

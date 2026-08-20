@@ -231,6 +231,14 @@ make_manifest(const WindowsPersonalBackupRequest& request,
         volume.filesystem = metadata.filesystem;
         volume.label = metadata.label;
         volume.total_size = metadata.logical_size_bytes;
+        volume.free_size_known = metadata.free_size_known;
+        if (volume.free_size_known) {
+            volume.free_size = metadata.free_size_bytes > metadata.logical_size_bytes
+                                   ? metadata.logical_size_bytes
+                                   : metadata.free_size_bytes;
+        } else {
+            volume.free_size = 0;
+        }
         volume.cluster_size = metadata.cluster_size_bytes;
         volume.vss_required = metadata.vss_used;
         volume.vss_used = metadata.vss_used;

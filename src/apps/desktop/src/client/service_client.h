@@ -334,7 +334,8 @@ class ServiceClient final : public QObject {
                                       const QString& recovery_point_id,
                                       const QString& archive_password = {},
                                       bool preserve_disk_signature = true,
-                                      bool auto_expand_last_partition = true);
+                                      bool auto_expand_last_partition = false,
+                                      const QVariantList& partition_layout_edits = {});
     /// Volume→volume restore: Manifest source_volume_index → inventory vol.* target_source_id.
     Q_INVOKABLE bool startVolumeRestore(int source_volume_index, const QString& target_source_id,
                                         const QString& recovery_point_id,
@@ -366,6 +367,10 @@ class ServiceClient final : public QObject {
     /// Free space on the local volume containing the locator; UNC returns unavailable.
     Q_INVOKABLE qint64 freeBytesForLocator(const QString& locator) const;
     Q_INVOKABLE QString freeSpaceTextForLocator(const QString& locator) const;
+    /// PhysicalDrive number hosting the default repository locator; -1 if UNC/unknown.
+    Q_INVOKABLE int defaultRepositoryHostDiskNumber() const;
+    /// Inventory vol.* id hosting the default repository locator; empty if UNC/unknown.
+    Q_INVOKABLE QString defaultRepositoryHostVolumeSourceId() const;
     Q_INVOKABLE void cancelActiveBackup();
     Q_INVOKABLE void dismissToast();
     /// Show a top toast. Pass isError=true for validation/command failures (red banner).
@@ -732,7 +737,8 @@ class ServiceClient final : public QObject {
     int restore_target_disk_number_{-1};
     int restore_source_volume_index_{-1};
     bool restore_preserve_disk_signature_{true};
-    bool restore_auto_expand_last_partition_{true};
+    bool restore_auto_expand_last_partition_{false};
+    QVariantList restore_partition_layout_edits_;
     QString restore_target_source_id_;
     QString restore_recovery_point_id_;
     QString restore_archive_password_;

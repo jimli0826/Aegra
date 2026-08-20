@@ -70,6 +70,10 @@ base::Result<std::string> make_random_uuid(ports::IRandomSource& random,
 }
 
 bool is_source_selectable(const ports::SourceInventoryRecord& record) noexcept {
+    // disk.* / part.* shells are layout identity and bar chips, not backup sources.
+    if (record.source_id.starts_with("disk.") || record.source_id.starts_with("part.")) {
+        return false;
+    }
     return record.availability == contracts::SourceAvailability::kAvailable &&
            record.capacity_bytes > 0 &&
            record.capacity_bytes <=

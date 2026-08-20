@@ -491,14 +491,18 @@ encode_recovery_point_source_volume(const contracts::RecoveryPointSourceVolume& 
                 {"label", volume.label},
                 {"filesystem", volume.filesystem},
                 {"total_size_bytes", volume.total_size_bytes},
+                {"free_size_bytes", volume.free_size_bytes},
+                {"free_size_known", volume.free_size_known},
                 {"extents", std::move(extents)}};
 }
 
 [[nodiscard]] contracts::RecoveryPointSourceVolume
 parse_recovery_point_source_volume(const Json& payload) {
-    constexpr std::array<std::string_view, 6> keys{"volume_index", "letter",           "label",
-                                                   "filesystem",   "total_size_bytes", "extents"};
-    if (!exact_keys(payload, keys) || !payload.at("extents").is_array()) {
+    constexpr std::array<std::string_view, 8> keys{
+        "volume_index",     "letter",           "label",           "filesystem",
+        "total_size_bytes", "free_size_bytes",  "free_size_known", "extents"};
+    if (!exact_keys(payload, keys) || !payload.at("extents").is_array() ||
+        !payload.at("free_size_known").is_boolean()) {
         throw std::invalid_argument("recovery point source volume fields are invalid");
     }
     contracts::RecoveryPointSourceVolume volume{
@@ -507,7 +511,12 @@ parse_recovery_point_source_volume(const Json& payload) {
         payload.at("label").get<std::string>(),
         payload.at("filesystem").get<std::string>(),
         unsigned_value<std::uint64_t>(payload, "total_size_bytes"),
+        unsigned_value<std::uint64_t>(payload, "free_size_bytes"),
+        payload.at("free_size_known").get<bool>(),
         {}};
+    if (volume.free_size_bytes > volume.total_size_bytes) {
+        volume.free_size_bytes = volume.total_size_bytes;
+    }
     for (const auto& item : payload.at("extents")) {
         volume.extents.push_back(parse_recovery_point_source_extent(item));
     }

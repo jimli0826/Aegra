@@ -154,6 +154,8 @@ using Json = nlohmann::json;
             {"filesystem", volume.filesystem},
             {"label", volume.label},
             {"total_size", volume.total_size},
+            {"free_size", volume.free_size},
+            {"free_size_known", volume.free_size_known},
             {"cluster_size", volume.cluster_size},
             {"vss_required", volume.vss_required},
             {"vss_used", volume.vss_used},
@@ -170,6 +172,15 @@ using Json = nlohmann::json;
     value.at("filesystem").get_to(result.filesystem);
     value.at("label").get_to(result.label);
     value.at("total_size").get_to(result.total_size);
+    value.at("free_size").get_to(result.free_size);
+    value.at("free_size_known").get_to(result.free_size_known);
+    if (result.free_size_known) {
+        if (result.free_size > result.total_size) {
+            throw std::invalid_argument("volume free_size exceeds total_size");
+        }
+    } else if (result.free_size != 0) {
+        throw std::invalid_argument("volume free_size must be 0 when free_size_known is false");
+    }
     value.at("cluster_size").get_to(result.cluster_size);
     value.at("vss_required").get_to(result.vss_required);
     value.at("vss_used").get_to(result.vss_used);

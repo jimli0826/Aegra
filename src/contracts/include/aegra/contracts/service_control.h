@@ -397,6 +397,10 @@ struct RecoveryPointSourceVolume final {
     std::string label;
     std::string filesystem;
     std::uint64_t total_size_bytes{0};
+    /// Free bytes at backup; equal to total_size_bytes when unknown (no used-space fill).
+    std::uint64_t free_size_bytes{0};
+    /// False when free was not recorded in the Manifest (skip used-space UI).
+    bool free_size_known{false};
     std::vector<RecoveryPointSourceExtent> extents;
 };
 
@@ -462,6 +466,8 @@ struct StartRestoreCommand final {
     bool preserve_disk_signature{true};
     /// Grow last data partition into free space when target is larger (default true).
     bool auto_expand_last_partition{true};
+    /// Optional Target-bar layout (source start → target start + size). Empty = source geometry.
+    std::vector<RestorePartitionLayoutEdit> partition_layout_edits;
 };
 
 struct MountRecoveryPointCommand final {

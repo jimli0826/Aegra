@@ -768,6 +768,49 @@ Item {
         return true
     }
 
+    /// Fully consumed Unallocated kept so the adjacent volume grip stays hittable.
+    function isPlaceholderUnallocated(seg) {
+        return !!(seg && seg.unallocated === true
+                  && (Number(seg.totalBytes) || 0) <= 0)
+    }
+
+    function placeholderUnallocatedSegment() {
+        return {
+            letter: "",
+            //% "Unallocated"
+            name: qsTrId("aegra.restore.unallocated"),
+            size: "",
+            fileSystem: "",
+            totalBytes: 0,
+            freeBytes: -1,
+            offsetBytes: -1,
+            sourceOffsetBytes: -1,
+            unallocated: true,
+            notBackedUp: false,
+            reserved: false,
+            ratio: 0
+        }
+    }
+
+    /// Insert a 0-byte Unallocated chip when shrinking at a disk edge with no neighbor.
+    /// Returns { index, neighIdx } or null if that edge cannot receive free space.
+    function attachUnallocatedForShrink(segs, index, edge) {
+        var neighIdx = edge === "left" ? index - 1 : index + 1
+        if (neighIdx >= 0 && neighIdx < segs.length && segs[neighIdx]
+                && segs[neighIdx].unallocated === true
+                && segs[neighIdx].reserved !== true)
+            return { index: index, neighIdx: neighIdx }
+        if (edge === "left" && index === 0) {
+            segs.splice(0, 0, root.placeholderUnallocatedSegment())
+            return { index: 1, neighIdx: 0 }
+        }
+        if (edge === "right" && index === segs.length - 1) {
+            segs.push(root.placeholderUnallocatedSegment())
+            return { index: index, neighIdx: segs.length - 1 }
+        }
+        return null
+    }
+
     function annotateResizableSegments(segments) {
         var out = []
         var n = segments ? segments.length : 0
@@ -782,14 +825,18 @@ Item {
                 out.push(s)
                 continue
             }
+            if (s.minBytes === undefined || s.minBytes === null)
+                s.minBytes = Number(s.totalBytes) || 0
             var enlarge = root.volumeSupportsEnlarge(s)
             var leftUn = i > 0 && segments[i - 1] && segments[i - 1].unallocated === true
             var rightUn = i + 1 < n && segments[i + 1] && segments[i + 1].unallocated === true
-            s.canResizeLeft = enlarge && leftUn
-            s.canResizeRight = enlarge && rightUn
+            var canShrink = enlarge && (Number(s.totalBytes) || 0) > (Number(s.minBytes) || 0)
+            // 0-byte Unallocated still counts as a neighbor. If it was dropped and the
+            // volume now fills the disk, both edges stay grippable so the user can pull back.
+            var fillsDisk = canShrink && n === 1
+            s.canResizeLeft = enlarge && (leftUn || (fillsDisk && i === 0))
+            s.canResizeRight = enlarge && (rightUn || (fillsDisk && i === 0))
             s.resizable = s.canResizeLeft || s.canResizeRight
-            if (s.minBytes === undefined || s.minBytes === null)
-                s.minBytes = Number(s.totalBytes) || 0
             out.push(s)
         }
         return out
@@ -801,13 +848,15 @@ Item {
             total += Number(segments[t].totalBytes) || 0
         var basis = targetTotal > 0 ? targetTotal : total
         for (var r = 0; r < segments.length; ++r) {
-            var ratio = basis > 0 ? ((Number(segments[r].totalBytes) || 0) / basis)
+            var tb = Number(segments[r].totalBytes) || 0
+            var ratio = basis > 0 ? (tb / basis)
                                   : (1.0 / Math.max(1, segments.length))
-            segments[r].ratio = ratio > 0 ? ratio : 0.04
-            if (!segments[r].unallocated)
-                segments[r].size = root.formatBarBytes(segments[r].totalBytes)
+            // 0-byte Unallocated must not steal a 4% floor (would hide the volume grip).
+            if (tb <= 0)
+                segments[r].ratio = 0
             else
-                segments[r].size = root.formatBarBytes(segments[r].totalBytes)
+                segments[r].ratio = ratio > 0 ? ratio : 0.04
+            segments[r].size = root.formatBarBytes(tb)
         }
         return root.annotateResizableSegments(segments)
     }
@@ -834,7 +883,7 @@ Item {
 
     /// Grow/shrink a data volume at `index` into an adjacent Unallocated neighbor.
     /// edge: "left" | "right". deltaBytes > 0 grows the volume toward that edge.
-    /// Sizes snap to whole MiB (no fractional MB labels while dragging).
+    /// Sizes snap to whole MiB; bar labels use LocaleFormat (GB: two decimals).
     /// Returns the (possibly shifted) volume index after apply, or -1 if unchanged.
     function resizeMappedTargetSegment(targetNum, index, edge, deltaBytes) {
         var key = String(targetNum)
@@ -852,17 +901,23 @@ Item {
         var minB = Number(vol.minBytes) || 0
         var cur = Number(vol.totalBytes) || 0
         var neighIdx = edge === "left" ? index - 1 : index + 1
-        if (neighIdx < 0 || neighIdx >= segs.length)
-            return -1
-        var neigh = segs[neighIdx]
-        // Only true free space is consumable; reserved anchors stay fixed.
-        if (!neigh || neigh.unallocated !== true || neigh.reserved === true)
-            return -1
+        var neigh = (neighIdx >= 0 && neighIdx < segs.length) ? segs[neighIdx] : null
+        if (!neigh || neigh.unallocated !== true || neigh.reserved === true) {
+            if (Number(deltaBytes) >= 0)
+                return -1
+            var attached = root.attachUnallocatedForShrink(segs, index, edge)
+            if (!attached)
+                return -1
+            index = attached.index
+            neighIdx = attached.neighIdx
+            vol = segs[index]
+            neigh = segs[neighIdx]
+        }
         if (edge === "left" && !vol.canResizeLeft
-                && !(root.volumeSupportsEnlarge(vol) && neigh.unallocated))
+                && !(root.volumeSupportsEnlarge(vol) && neigh && neigh.unallocated))
             return -1
         if (edge === "right" && !vol.canResizeRight
-                && !(root.volumeSupportsEnlarge(vol) && neigh.unallocated))
+                && !(root.volumeSupportsEnlarge(vol) && neigh && neigh.unallocated))
             return -1
 
         var maxGrow = Number(neigh.totalBytes) || 0
@@ -893,18 +948,26 @@ Item {
         var actual = want - cur
         if (actual === 0)
             return index
+        // Keep source used bytes fixed; growth/shrink only changes free space in the preview.
+        // Otherwise usedRatio = (total−free)/total climbs as the chip widens and the fill
+        // looks like "used data grew" when the user only enlarged the partition.
+        var freeB = Number(vol.freeBytes)
+        if (!isNaN(freeB) && freeB >= 0) {
+            var usedB = cur - freeB
+            if (usedB < 0)
+                usedB = 0
+            if (usedB > want)
+                usedB = want
+            vol.freeBytes = want - usedB
+        }
         vol.totalBytes = want
         neigh.totalBytes = maxGrow - actual
         // Snap neighbor to whole MiB when possible; keep residual on trailing free.
         if (neigh.totalBytes > 0)
             neigh.totalBytes = root.alignDownBytes(neigh.totalBytes, step)
-        // Drop zero-sized unallocated chips.
-        if ((Number(neigh.totalBytes) || 0) <= 0) {
-            segs.splice(neighIdx, 1)
-            // index of vol may shift if neighbor was on the left
-            if (neighIdx < index)
-                index -= 1
-        }
+        else
+            neigh.totalBytes = 0
+        // Keep a 0-byte Unallocated neighbor so the grip stays after a full grow.
         var origin = (edit.layoutOriginBytes !== undefined) ? edit.layoutOriginBytes : null
         segs = root.recomputeSegmentOffsets(segs, origin)
         var targetTotal = Number(edit.targetBytes) || 0
@@ -1699,10 +1762,10 @@ Item {
     /// Volumes for bar (ratio by capacityBytes).
     /// Prefers offset-ordered segments; free gaps are drawn only when larger than GPT/MSR
     /// padding so the bar matches Windows Disk Management (tiny leading free is omitted).
-    /// includeReserved: Target restore model keeps EFI/MSR/Recovery as fixed chips so
-    /// resize cannot collapse their space into Unallocated (Source bars omit them).
+    /// includeReserved: Target preview keeps EFI/Recovery as fixed chips.
+    /// MSR is always omitted on Source and Target bars (geometry advanced, no chip).
     function displayVolumesForDisk(diskData, includeReserved) {
-        var keepReserved = includeReserved === true
+        var keepOtherReserved = includeReserved === true
         var raw = (diskData && diskData.volumes) ? diskData.volumes : []
         var diskTotal = diskData ? (Number(diskData.capacityBytes) || 0) : 0
         var list = []
@@ -1724,13 +1787,33 @@ Item {
         function isMsrVolume(v) {
             if (!v)
                 return false
-            var n = ((v.name || "") + " " + (v.letter || "")).toLowerCase()
-            return n.indexOf("microsoft reserved") >= 0 || n.indexOf(" msr") >= 0
-                   || n === "msr" || n.indexOf("msr partition") >= 0
+            if (v.isMsr === true || v.isMsr === 1)
+                return true
+            var n = ((v.name || "") + " " + (v.title || "") + " " + (v.letter || ""))
+                    .toLowerCase().replace(/\s+/g, " ").trim()
+            if (n === "msr" || n.indexOf("microsoft reserved") >= 0
+                    || n.indexOf("msr partition") >= 0)
+                return true
+            // Word-boundary MSR (avoids false hits inside longer labels).
+            return /(^|[^a-z0-9])msr([^a-z0-9]|$)/.test(n)
         }
 
         function isReservedVolume(v) {
-            return v && (v.reserved === true || isMsrVolume(v))
+            if (!v)
+                return false
+            return v.reserved === true || v.reserved === 1 || isMsrVolume(v)
+        }
+
+        /// Always hide MSR. Source also hides nothing else; Target keeps EFI/Recovery.
+        function shouldOmitChip(v) {
+            if (!v || v.unallocated === true)
+                return false
+            if (isMsrVolume(v))
+                return true
+            if (keepOtherReserved)
+                return false
+            // Source: show EFI/Recovery; only MSR was omitted above.
+            return false
         }
 
         function formatUnallocSize(bytes) {
@@ -1763,12 +1846,12 @@ Item {
         }
 
         function pushVolume(v, isUnalloc, offsetHint) {
-            if (!isUnalloc && isReservedVolume(v) && !keepReserved)
+            if (!isUnalloc && shouldOmitChip(v))
                 return
             var tb = Number(v.capacityBytes) || 0
             if (isUnalloc && tb <= minUnallocBytes)
                 return
-            var reserved = !isUnalloc && (v.reserved === true || isMsrVolume(v))
+            var reserved = !isUnalloc && isReservedVolume(v)
             var notBackedUp = !isUnalloc && !reserved && v.notBackedUp === true
             var sz = v.size || ""
             if ((isUnalloc || notBackedUp) && sz.length === 0)
@@ -1805,7 +1888,8 @@ Item {
                 sourceOffsetBytes: srcOff,
                 unallocated: isUnalloc,
                 notBackedUp: notBackedUp,
-                reserved: reserved
+                reserved: reserved,
+                isMsr: !isUnalloc && isMsrVolume(v)
             })
         }
 
@@ -1813,9 +1897,8 @@ Item {
             for (var p = 0; p < raw.length; ++p) {
                 if (!raw[p])
                     continue
-                if (!keepReserved && isReservedVolume(raw[p])
-                        && raw[p].unallocated !== true) {
-                    // Source bar: hide reserved but advance geometry via offsets path only.
+                if (shouldOmitChip(raw[p])) {
+                    // Source bar: hide MSR; keep EFI/Recovery chips.
                     continue
                 }
                 pushVolume(raw[p], raw[p].unallocated === true)
@@ -1835,8 +1918,8 @@ Item {
                 var off = Number(vol.offsetBytes) || 0
                 var cap = Number(vol.capacityBytes) || 0
                 var end = off + cap
-                if (!keepReserved && isReservedVolume(vol)) {
-                    // Occupy space without a chip (Source bar style).
+                if (shouldOmitChip(vol)) {
+                    // Occupy MSR space without a chip (Source bar style).
                     if (end > cursor)
                         cursor = end
                     continue
@@ -1854,7 +1937,7 @@ Item {
             for (var j = 0; j < raw.length; ++j) {
                 if (!raw[j])
                     continue
-                if (!keepReserved && isReservedVolume(raw[j]))
+                if (shouldOmitChip(raw[j]))
                     continue
                 pushVolume(raw[j], false)
                 sumBytes += Number(raw[j].capacityBytes) || 0
@@ -1879,42 +1962,36 @@ Item {
         return list
     }
 
-    /// Partition-bar labels: whole MB/GB only (no decimals while resizing).
+    /// Partition-bar labels: same precision as inventory (GB/TB two decimals).
     function formatBarBytes(bytes) {
         var n = Number(bytes) || 0
         if (n <= 0)
             return ""
-        var mib = 1024 * 1024
-        var gib = mib * 1024
-        if (n >= gib) {
-            var g = Math.round(n / gib)
-            if (g < 1)
-                g = 1
-            // Prefer GB when at least ~1 GiB; otherwise whole MB.
-            if (n >= gib || g >= 1)
-                return String(g) + " GB"
-        }
-        var m = Math.round(n / mib)
-        if (m < 1)
-            m = 1
-        return String(m) + " MB"
+        if (typeof serviceClient !== "undefined" && serviceClient
+                && typeof serviceClient.formatBytes === "function")
+            return serviceClient.formatBytes(n)
+        return ""
     }
 
     /// Post-restore preview for a mapped target:
-    /// - reserved (EFI/MSR/Recovery) stay as fixed, non-resizable segments
+    /// - reserved EFI/Recovery stay as fixed, non-resizable segments (MSR omitted)
     /// - not-backed-up partitions → Unallocated
     /// - when target is larger than source, trailing free is Unallocated
     ///   (grow only by dragging edges on the Target bar; no auto-expand option)
     /// UI sizes/starts are visual hints only; Worker resolves final table.
     function displayVolumesForRestorePreview(sourceDisk, targetDiskData) {
-        // Keep reserved chips so contiguous packing cannot steal their space.
+        // Keep EFI/Recovery chips so contiguous packing cannot steal their space.
+        // displayVolumesForDisk(..., true) already omits MSR.
         var list = root.displayVolumesForDisk(sourceDisk, true)
         var out = []
         for (var i = 0; i < list.length; ++i) {
             var v = list[i]
             if (!v)
                 continue
-            if (v.reserved === true) {
+            if (v.isMsr === true || v.isMsr === 1)
+                continue
+            var reservedChip = (v.reserved === true || v.reserved === 1)
+            if (reservedChip) {
                 var rOff = (v.offsetBytes !== undefined && v.offsetBytes !== null)
                            ? Number(v.offsetBytes) : -1
                 var rBytes = Number(v.totalBytes) || 0
@@ -1931,6 +2008,7 @@ Item {
                     unallocated: false,
                     notBackedUp: false,
                     reserved: true,
+                    isMsr: false,
                     minBytes: rBytes
                 })
                 continue
@@ -2082,6 +2160,27 @@ Item {
         return next[key]
     }
 
+    /// Drop MSR chips from a segment list (Source/Target bars never show them).
+    function omitMsrSegments(segments) {
+        if (!segments || segments.length === 0)
+            return segments || []
+        var out = []
+        for (var i = 0; i < segments.length; ++i) {
+            var s = segments[i]
+            if (!s)
+                continue
+            if (s.isMsr === true || s.isMsr === 1)
+                continue
+            var n = ((s.name || "") + " " + (s.title || "")).toLowerCase().trim()
+            if (n === "msr" || n.indexOf("microsoft reserved") >= 0
+                    || n.indexOf("msr partition") >= 0
+                    || /(^|[^a-z0-9])msr([^a-z0-9]|$)/.test(n))
+                continue
+            out.push(s)
+        }
+        return out
+    }
+
     /// Mapped-target bar layout: default preview, or user-resized edit when still valid.
     function displayVolumesForMappedTarget(sourceDisk, targetDiskData) {
         var tgtNum = targetDiskData && targetDiskData.diskNumber !== undefined
@@ -2093,7 +2192,8 @@ Item {
         var _le = root.layoutEditEpoch
         if (edit && Number(edit.sourceDisk) === srcNum
                 && edit.segments && edit.segments.length > 0) {
-            return root.annotateResizableSegments(edit.segments)
+            // Stale edits from older builds may still carry an MSR chip — strip it.
+            return root.annotateResizableSegments(root.omitMsrSegments(edit.segments))
         }
         return root.displayVolumesForRestorePreview(sourceDisk, targetDiskData)
     }
@@ -2144,12 +2244,19 @@ Item {
         var weights = []
         var weightSum = 0
         var minTotal = 0
+        var lastDrawn = -1
         for (var i = 0; i < n; ++i) {
             var v = volumes[i]
+            if (root.isPlaceholderUnallocated(v)) {
+                mins.push(0)
+                weights.push(0)
+                continue
+            }
             var mn = isHatchChip(v) ? minHatch
                      : (isSystemChip(v) ? minSystem : minAlloc)
             mins.push(mn)
             minTotal += mn
+            lastDrawn = i
             var w = v && v.ratio > 0 ? Number(v.ratio) : 0
             if (w <= 0)
                 w = 1.0 / n
@@ -2157,15 +2264,19 @@ Item {
             weightSum += w
         }
         if (weightSum <= 0)
-            weightSum = n
+            weightSum = Math.max(1, lastDrawn + 1)
 
         var widths = []
         if (minTotal >= avail) {
-            var scale = avail / minTotal
+            var scale = minTotal > 0 ? (avail / minTotal) : 0
             var usedScale = 0
             for (var s = 0; s < n; ++s) {
-                var sw = (s === n - 1) ? (avail - usedScale)
-                                       : Math.floor(mins[s] * scale)
+                if (mins[s] <= 0) {
+                    widths.push(0)
+                    continue
+                }
+                var sw = (s === lastDrawn) ? (avail - usedScale)
+                                           : Math.floor(mins[s] * scale)
                 widths.push(Math.max(1, sw))
                 usedScale += widths[s]
             }
@@ -2175,12 +2286,17 @@ Item {
         var rest = avail - minTotal
         var usedExtra = 0
         for (var e = 0; e < n; ++e) {
-            var extra = (e === n - 1) ? (rest - usedExtra)
-                                      : Math.floor(rest * (weights[e] / weightSum))
+            if (mins[e] <= 0 && weights[e] <= 0) {
+                widths.push(0)
+                continue
+            }
+            var extra = (e === lastDrawn) ? (rest - usedExtra)
+                                          : Math.floor(rest * (weights[e] / weightSum))
             if (extra < 0)
                 extra = 0
             widths.push(mins[e] + extra)
-            usedExtra += (e === n - 1) ? 0 : extra
+            if (e !== lastDrawn)
+                usedExtra += extra
         }
         return widths
     }
@@ -2612,8 +2728,11 @@ Item {
                                     var widths = partsRow.segmentWidths
                                     if (widths && index >= 0 && index < widths.length)
                                         return widths[index]
+                                    if (root.isPlaceholderUnallocated(modelData))
+                                        return 0
                                     return isHatchStyle ? 12 : 56
                                 }
+                                visible: width > 0
                                 radius: 2
                                 // Free band (or full chip when used is unknown / hatch).
                                 color: {

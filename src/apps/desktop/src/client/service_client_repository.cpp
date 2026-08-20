@@ -32,12 +32,31 @@ constexpr qsizetype kMaximumRecoveryPoints = 10'000;
     return QStringLiteral("desktop-") + new_request_id();
 }
 
-/// Hide MSR/EFI/Recovery and other non-data partitions from Restore Source bars.
-/// GPT partitions leave mbr_type at 0 (unset); MBR-type reserved codes must not run on them.
-[[nodiscard]] bool is_reserved_partition(const QVariantMap& partition) {
+[[nodiscard]] QString normalized_gpt_type_guid(const QVariantMap& partition) {
     auto gpt = partition.value(QStringLiteral("gptTypeGuid")).toString().trimmed().toLower();
     gpt.remove(QLatin1Char('{'));
     gpt.remove(QLatin1Char('}'));
+    return gpt;
+}
+
+/// MSR only — Source partition bars omit these chips (EFI/Recovery stay visible).
+[[nodiscard]] bool is_msr_partition(const QVariantMap& partition) {
+    const auto gpt = normalized_gpt_type_guid(partition);
+    if (gpt == QLatin1String("e3c9e316-0b5c-4db8-817d-f92df00215ae")) {
+        return true;
+    }
+    const auto name = (partition.value(QStringLiteral("volumeLabel")).toString() + QLatin1Char(' ') +
+                       partition.value(QStringLiteral("gptName")).toString())
+                          .trimmed()
+                          .toLower();
+    return name == QLatin1String("msr") || name.contains(QLatin1String("microsoft reserved")) ||
+           name.contains(QLatin1String("msr partition"));
+}
+
+/// EFI/MSR/Recovery and other non-data partitions (Target preview anchors; Source may hide MSR).
+/// GPT partitions leave mbr_type at 0 (unset); MBR-type reserved codes must not run on them.
+[[nodiscard]] bool is_reserved_partition(const QVariantMap& partition) {
+    const auto gpt = normalized_gpt_type_guid(partition);
     const bool has_gpt_type = !gpt.isEmpty();
     static const char* k_reserved_gpt[] = {
         "c12a7328-f81f-11d2-ba4b-00a0c93ec93b", // EFI
@@ -159,6 +178,7 @@ struct LayoutPartition final {
     qint64 size_bytes{0};
     int partition_number{0};
     bool reserved{false};
+    bool is_msr{false};
     /// True when a Manifest volume extent covers this partition (selected in backup).
     bool backed_up{false};
     QString letter;
@@ -194,8 +214,8 @@ void append_unallocated_segment(QVariantList& ui_volumes, const qint64 bytes,
 }
 
 /// Source disk bar segments in physical order: data + reserved + unallocated gaps.
-/// Reserved (EFI/MSR/Recovery/…) are emitted with reserved=true so Target preview
-/// keeps fixed gaps; Source bars may hide them in QML without collapsing geometry.
+/// Reserved (EFI/MSR/Recovery/…) are emitted with reserved=true / isMsr so QML can
+/// keep EFI/Recovery as Target anchors while omitting MSR chips on Source and Target.
 [[nodiscard]] QVariantList volumes_for_source_disk(const int disk_number,
                                                    const QVariantList& partitions,
                                                    const QVariantList& all_volumes,
@@ -222,6 +242,7 @@ void append_unallocated_segment(QVariantList& ui_volumes, const qint64 bytes,
         entry.size_bytes = size;
         entry.partition_number = part_num;
         entry.reserved = is_reserved_partition(partition);
+        entry.is_msr = is_msr_partition(partition);
         // Only partitions with a Manifest volume extent were selected for backup.
         entry.backed_up = meta_by_part.contains(part_num);
         if (entry.reserved) {
@@ -266,7 +287,7 @@ void append_unallocated_segment(QVariantList& ui_volumes, const qint64 bytes,
         }
         if (part.reserved) {
             // Keep geometry for Target restore preview: fixed, non-resizable chips.
-            // Source bars may hide these; space must not collapse into Unallocated.
+            // Source bars hide MSR via isMsr; space must not collapse into Unallocated.
             ui_volumes.push_back(QVariantMap{
                 {QStringLiteral("letter"), QString{}},
                 {QStringLiteral("name"), part.name},
@@ -281,6 +302,7 @@ void append_unallocated_segment(QVariantList& ui_volumes, const qint64 bytes,
                 {QStringLiteral("unallocated"), false},
                 {QStringLiteral("notBackedUp"), false},
                 {QStringLiteral("reserved"), true},
+                {QStringLiteral("isMsr"), part.is_msr},
             });
             continue;
         }

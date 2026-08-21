@@ -16,6 +16,9 @@ struct RestorePlan final {
     std::string job_id;
     std::string trace_id;
     std::size_t memory_budget_bytes{0};
+    /// 0 = restore the full archive logical image (default).
+    /// Non-zero = write only [0, logical_write_limit_bytes); full descriptor validation still runs.
+    std::uint64_t logical_write_limit_bytes{0};
 };
 
 struct RestoreSummary final {

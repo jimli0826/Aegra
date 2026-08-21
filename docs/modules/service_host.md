@@ -58,6 +58,8 @@ src/apps/service/
     ├── worker_job_service.cpp
     ├── worker_job_service_file_restore.cpp  # PrepareFileRestore + StartFileRestore
     ├── worker_job_service_restore.cpp      # volume PrepareRestore + StartRestore
+    ├── worker_job_service_restore_shared.cpp  # shared chain/preflight helpers
+    ├── worker_job_service_shrink_analyze.cpp  # AnalyzeNtfsShrink (kind 18)
     └── worker_supervisor.cpp
 ```
 
@@ -66,6 +68,10 @@ src/apps/service/
 - `aegra_service.exe`：Composition Root，依赖 AppService、SQLite、Local Storage、Windows Disk、
   Windows Filesystem、Windows Process、Windows System 与 Windows IPC Adapter。
 - JSON、Win32、Qt、数据库类型不得进入 Contracts。
+
+`aegra_service` 在 Debug 与 Release 均宣告 `restore.ntfs_shrink.v1`。Analyze 和 Start 在两种配置中执行
+相同的精确预检、token、TOCTOU 校验与 fail-closed Worker 状态机。M01–M26 完成前 capability 仅代表功能
+可用于受控验证，不代表 Release 已取得对外发布资格。
 
 ## 生命周期
 
@@ -141,14 +147,26 @@ Pipe/framing/peer close、Service stop 或响应写失败才结束 session。请
   | `info.log` | `info` |
   | `warning.log` | `warning` |
   | `error.log` | `error`（含 `critical`） |
-  Logger 最低级别为 `trace`；日志仍携带稳定 `event` code，便于机器筛选。
-- `info/warning/error` 使用完整请求名称、自然语言结果、可读 response/error/message 名称，不输出裸
-  `kind_value`、`response_kind` 或 `error_code` 数字。Job 终态同样输出 `Succeeded/Failed/Cancelled` 等名称。
-- 每个 1 MiB 内的 Service IPC 请求和响应在编解码边界记录一条 `trace` JSON 到 `trace.log`，分别标记
-  `Inbound` 和 `Outbound`，用于关联 `request_id` 并检查实际交互字段。
-- trace JSON 在写盘前使用结构化解析递归脱敏：credential、password、secret、token、`*_key` 等认证、
-  授权或会话材料的值替换为 `[REDACTED]`。路径、locator、显示名、卷标签、主机名和 message arguments
-  等诊断所需用户数据允许保留。解析失败的 frame 不得原样记录，避免无法确认其中是否含认证信息。
+  Logger 最低级别为 `trace`；非交互日志仍携带稳定 `event` code，便于机器筛选。
+- `info.log` 记录 Service 内部工作流水，不记录 Desktop/Service 的 request received/completed 或成功 session
+  摘要。协议失败仍进入 `warning/error`；完整交互只在 `trace.log`。Job 终态使用
+  `Succeeded/Failed/Cancelled` 等可读名称。
+- `AnalyzeNtfsShrink` 的 `info.log` 采用与 Worker 备份 job log 相同的可读版式（`[Section]` /
+  `[Stage: …] begin|OK` / 对齐 `key : value`，容量用 GiB/MiB 人类可读形式）：
+  1. `[AnalyzeNtfsShrink]` 只写一次 recovery point / 源卷索引 / 目标 source id；
+  2. `[Stage: prepare_inputs]` 汇总源逻辑大小、链深度与目标容量/扇区几何；
+  3. `[SourceGeometry]` 写源 NTFS 几何与扇区匹配一次；
+  4. `[Candidate: target|upper_bound]` 汇总候选容量、簇数与可分配预算（二分搜索不逐轮输出）；
+  5. `[Result]` 记录可行性、最小容量、搜索次数与 relocation/scratch 上界。
+  MFT 成功读取不记日志，只有解析失败才写 `[MftRecord]`。这些行使用 `service.plain`，不附加
+  `[event=…]`。日志不记录 MFT payload、Archive 密码、preflight token、digest 或完整路径。
+- 每个 1 MiB 内的 Service IPC 请求和响应在编解码边界各记一条 `trace` 到 `trace.log`，格式为
+  `request: <kind 可读名> {json}` / `response: <kind 可读名> {json}`（不再输出
+  `Service interaction …` 前缀或 `[event=service.interaction.*]`）。
+- trace JSON 在写盘前结构化解析后递归省略：`request_id`，以及 credential、password、secret、token、
+  `*_key` 等认证/授权/会话材料字段（整键删除，不写 `[REDACTED]` 占位）。路径、locator、显示名、卷标签、
+  主机名和 message arguments 等诊断所需用户数据允许保留。解析失败的 frame 不得原样记录，避免无法确认
+  其中是否含认证信息。
 - 任何日志级别都不得记录密码、密钥、Secret、Credential、SecretRef、访问/刷新令牌、会话令牌、Cookie、
   Authorization 内容或可用于恢复、派生、重放认证状态的材料。用户数据日志遵循最小必要原则，并受日志
   文件 ACL、轮转和保留策略约束。

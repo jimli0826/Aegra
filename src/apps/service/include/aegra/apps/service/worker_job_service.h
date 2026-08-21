@@ -23,6 +23,7 @@ class IRepositoryStorageFactory;
 
 namespace aegra::apps::service {
 
+class IServiceLog;
 class WorkerSupervisor;
 
 class IWorkerJobService {
@@ -49,6 +50,10 @@ class IWorkerJobService {
     [[nodiscard]] virtual base::Result<contracts::RestorePreflight>
     prepare_restore(const contracts::RestorePreflightRequest& request,
                     base::CancellationToken cancellation) = 0;
+    /// Exact NTFS shrink preflight (Service process). Requires AllowNtfsRelocation.
+    [[nodiscard]] virtual base::Result<contracts::RestorePreflight>
+    analyze_ntfs_shrink(const contracts::RestorePreflightRequest& request,
+                        base::CancellationToken cancellation) = 0;
     [[nodiscard]] virtual base::Result<contracts::CommandAcknowledgement>
     start_restore(const contracts::StartRestoreCommand& command, std::string_view idempotency_key,
                   base::CancellationToken cancellation) = 0;
@@ -71,7 +76,8 @@ class WorkerJobService final : public IWorkerJobService {
                      ports::IRepositoryStorageFactory& storage_factory,
                      WorkerSupervisor& supervisor, ports::IClock& clock,
                      ports::IRandomSource& random,
-                     application::FileBrowseService* file_browse = nullptr) noexcept;
+                     application::FileBrowseService* file_browse = nullptr,
+                     IServiceLog* logger = nullptr) noexcept;
 
     [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
     start_backup(const contracts::StartBackupCommand& command, std::string_view idempotency_key,
@@ -86,6 +92,9 @@ class WorkerJobService final : public IWorkerJobService {
     [[nodiscard]] base::Result<contracts::RestorePreflight>
     prepare_restore(const contracts::RestorePreflightRequest& request,
                     base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<contracts::RestorePreflight>
+    analyze_ntfs_shrink(const contracts::RestorePreflightRequest& request,
+                        base::CancellationToken cancellation) override;
     [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
     start_restore(const contracts::StartRestoreCommand& command, std::string_view idempotency_key,
                   base::CancellationToken cancellation) override;
@@ -109,6 +118,7 @@ class WorkerJobService final : public IWorkerJobService {
     ports::IClock& clock_;
     ports::IRandomSource& random_;
     application::FileBrowseService* file_browse_;
+    IServiceLog* logger_;
 };
 
 } // namespace aegra::apps::service

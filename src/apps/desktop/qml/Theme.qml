@@ -177,7 +177,7 @@ QtObject {
             colorVolumeText: "#ffffff",
             colorUnallocated: "#24262d",
             colorUnallocatedHatch: "#363942",
-            colorUnallocatedText: "#9ba3af",
+            colorUnallocatedText: "#f1f3f7",
             radiusCard: 16,
             radiusControl: 8,
             radiusMenu: 10,

@@ -612,17 +612,31 @@ base::Result<void> validate_command_record(const ports::CommandRecord& record) {
 base::Result<void> validate_restore_preflight_record(const ports::RestorePreflightRecord& record) {
     // chain_fingerprint is an opaque binding string (disk/volume/file restore prefixes).
     // Validate as printable text, not a stable identifier.
+    const bool known_policy =
+        record.volume_size_policy == contracts::VolumeSizePolicy::kRequireSourceSize ||
+        record.volume_size_policy == contracts::VolumeSizePolicy::kAllowNtfsRelocation;
+    const bool known_feasibility =
+        record.feasibility == contracts::RestoreFeasibility::kIneligible ||
+        record.feasibility == contracts::RestoreFeasibility::kProvisional ||
+        record.feasibility == contracts::RestoreFeasibility::kEligible;
+    const bool capacity_ok =
+        record.volume_size_policy == contracts::VolumeSizePolicy::kAllowNtfsRelocation
+            ? record.target_capacity_bytes > 0
+            : record.target_capacity_bytes >= record.logical_size_bytes;
     if (!valid_text(record.preflight_token, kMaximumTokenBytes) ||
         !valid_stable_value(record.repository_connection_id, kMaximumIdentifierBytes) ||
         !valid_stable_value(record.repository_uuid, kMaximumIdentifierBytes) ||
         !valid_stable_value(record.recovery_point_id, kMaximumIdentifierBytes) ||
         !valid_stable_value(record.target_source_id, kMaximumIdentifierBytes) ||
         !valid_text(record.chain_fingerprint, kMaximumCommandFingerprintBytes) ||
-        !valid_wire_integer(record.logical_size_bytes) ||
-        record.target_capacity_bytes < record.logical_size_bytes ||
+        !valid_wire_integer(record.logical_size_bytes) || !capacity_ok ||
         !valid_wire_integer(record.target_capacity_bytes) || record.chain_depth == 0 ||
         !valid_wire_integer(record.created_utc_ms) || !valid_wire_integer(record.expires_utc_ms) ||
-        record.expires_utc_ms <= record.created_utc_ms) {
+        record.expires_utc_ms <= record.created_utc_ms || !known_policy || !known_feasibility ||
+        !valid_wire_integer(record.minimum_target_bytes) ||
+        !valid_wire_integer(record.relocation_bytes) ||
+        !valid_wire_integer(record.scratch_upper_bound_bytes) ||
+        record.shrink_plan_digest.size() > 128 || record.target_binding_digest.size() > 256) {
         return invalid("restore preflight record is invalid");
     }
     const bool is_file = record.chain_fingerprint.starts_with("filec|");
@@ -637,7 +651,13 @@ base::Result<void> validate_restore_preflight_record(const ports::RestorePreflig
                 return invalid("file restore preflight entry_ids are invalid");
             }
         }
-    } else if (!record.entry_ids.empty() || record.logical_size_bytes == 0) {
+        if (record.volume_size_policy != contracts::VolumeSizePolicy::kRequireSourceSize ||
+            record.feasibility != contracts::RestoreFeasibility::kEligible ||
+            !record.shrink_plan_digest.empty()) {
+            return invalid("file restore preflight record is invalid");
+        }
+    } else if (!record.entry_ids.empty() || record.logical_size_bytes == 0 ||
+               record.feasibility == contracts::RestoreFeasibility::kIneligible) {
         return invalid("volume restore preflight record is invalid");
     }
     return base::Result<void>::success();
@@ -885,18 +905,46 @@ base::Result<ports::RestorePreflightRecord> read_restore_preflight(sqlite3_stmt*
     record.chain_depth = static_cast<std::uint32_t>(chain_depth);
     record.created_utc_ms = column_uint64(stmt, 9);
     record.expires_utc_ms = column_uint64(stmt, 10);
+    const auto policy = column_uint64(stmt, 11);
+    const auto feasibility = column_uint64(stmt, 12);
+    if (policy > (std::numeric_limits<std::uint8_t>::max)() ||
+        feasibility > (std::numeric_limits<std::uint8_t>::max)()) {
+        return base::Result<ports::RestorePreflightRecord>::failure(
+            make_error(base::ErrorCode::kCorruptData, "restore preflight policy is corrupt"));
+    }
+    record.volume_size_policy = static_cast<contracts::VolumeSizePolicy>(policy);
+    record.feasibility = static_cast<contracts::RestoreFeasibility>(feasibility);
+    record.minimum_target_bytes = column_uint64(stmt, 13);
+    record.relocation_bytes = column_uint64(stmt, 14);
+    record.scratch_upper_bound_bytes = column_uint64(stmt, 15);
+    record.shrink_plan_digest = column_text_required(stmt, 16);
+    record.target_binding_digest = column_text_required(stmt, 17);
     // entry_ids are attached by the store after this read; validate base fields only here.
+    const bool known_policy =
+        record.volume_size_policy == contracts::VolumeSizePolicy::kRequireSourceSize ||
+        record.volume_size_policy == contracts::VolumeSizePolicy::kAllowNtfsRelocation;
+    const bool known_feasibility =
+        record.feasibility == contracts::RestoreFeasibility::kIneligible ||
+        record.feasibility == contracts::RestoreFeasibility::kProvisional ||
+        record.feasibility == contracts::RestoreFeasibility::kEligible;
+    const bool capacity_ok =
+        record.volume_size_policy == contracts::VolumeSizePolicy::kAllowNtfsRelocation
+            ? record.target_capacity_bytes > 0
+            : record.target_capacity_bytes >= record.logical_size_bytes;
     if (!valid_text(record.preflight_token, kMaximumTokenBytes) ||
         !valid_stable_value(record.repository_connection_id, kMaximumIdentifierBytes) ||
         !valid_stable_value(record.repository_uuid, kMaximumIdentifierBytes) ||
         !valid_stable_value(record.recovery_point_id, kMaximumIdentifierBytes) ||
         !valid_stable_value(record.target_source_id, kMaximumIdentifierBytes) ||
         !valid_text(record.chain_fingerprint, kMaximumCommandFingerprintBytes) ||
-        !valid_wire_integer(record.logical_size_bytes) ||
-        record.target_capacity_bytes < record.logical_size_bytes ||
+        !valid_wire_integer(record.logical_size_bytes) || !capacity_ok ||
         !valid_wire_integer(record.target_capacity_bytes) || record.chain_depth == 0 ||
         !valid_wire_integer(record.created_utc_ms) || !valid_wire_integer(record.expires_utc_ms) ||
-        record.expires_utc_ms <= record.created_utc_ms) {
+        record.expires_utc_ms <= record.created_utc_ms || !known_policy || !known_feasibility ||
+        !valid_wire_integer(record.minimum_target_bytes) ||
+        !valid_wire_integer(record.relocation_bytes) ||
+        !valid_wire_integer(record.scratch_upper_bound_bytes) ||
+        record.shrink_plan_digest.size() > 128 || record.target_binding_digest.size() > 256) {
         return base::Result<ports::RestorePreflightRecord>::failure(
             make_error(base::ErrorCode::kCorruptData, "restore preflight record is invalid"));
     }

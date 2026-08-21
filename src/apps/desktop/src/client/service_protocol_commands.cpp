@@ -339,13 +339,15 @@ QByteArray encode_prepare_restore_request(const QString& request_id, const QStri
                                           const QString& target_source_id,
                                           const int source_disk_number,
                                           const int source_volume_index,
-                                          const QString& archive_password) {
+                                          const QString& archive_password,
+                                          const int volume_size_policy) {
     const QJsonObject payload{{QStringLiteral("repository_connection_id"), connection_id},
                               {QStringLiteral("recovery_point_id"), recovery_point_id},
                               {QStringLiteral("target_source_id"), target_source_id},
                               {QStringLiteral("source_disk_number"), source_disk_number},
                               {QStringLiteral("source_volume_index"), source_volume_index},
-                              {QStringLiteral("archive_password"), archive_password}};
+                              {QStringLiteral("archive_password"), archive_password},
+                              {QStringLiteral("volume_size_policy"), volume_size_policy}};
     return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
                                       static_cast<qint64>(kServiceSchemaVersion)},
                                      {QStringLiteral("message_type"), 1},
@@ -354,6 +356,162 @@ QByteArray encode_prepare_restore_request(const QString& request_id, const QStri
                                      {QStringLiteral("idempotency_key"), QJsonValue(QJsonValue::Null)},
                                      {QStringLiteral("payload"), payload}})
         .toJson(QJsonDocument::Compact);
+}
+
+QByteArray encode_analyze_ntfs_shrink_request(const QString& request_id,
+                                              const QString& connection_id,
+                                              const QString& recovery_point_id,
+                                              const QString& target_source_id,
+                                              const int source_disk_number,
+                                              const int source_volume_index,
+                                              const QString& archive_password) {
+    const QJsonObject payload{
+        {QStringLiteral("repository_connection_id"), connection_id},
+        {QStringLiteral("recovery_point_id"), recovery_point_id},
+        {QStringLiteral("target_source_id"), target_source_id},
+        {QStringLiteral("source_disk_number"), source_disk_number},
+        {QStringLiteral("source_volume_index"), source_volume_index},
+        {QStringLiteral("archive_password"), archive_password},
+        {QStringLiteral("volume_size_policy"), kVolumeSizePolicyAllowNtfsRelocation}};
+    return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
+                                      static_cast<qint64>(kServiceSchemaVersion)},
+                                     {QStringLiteral("message_type"), 1},
+                                     {QStringLiteral("request_id"), request_id},
+                                     {QStringLiteral("kind"), kAnalyzeNtfsShrinkRequestKind},
+                                     {QStringLiteral("idempotency_key"), QJsonValue(QJsonValue::Null)},
+                                     {QStringLiteral("payload"), payload}})
+        .toJson(QJsonDocument::Compact);
+}
+
+namespace {
+
+[[nodiscard]] bool parse_stable_code_array(const QJsonValue& value, QStringList& result) {
+    if (!value.isArray()) {
+        return false;
+    }
+    const auto items = value.toArray();
+    if (items.size() > 64) {
+        return false;
+    }
+    QStringList codes;
+    codes.reserve(items.size());
+    for (const auto& item : items) {
+        if (!item.isString() || !stable_code(item.toString(), 128)) {
+            return false;
+        }
+        codes.push_back(item.toString());
+    }
+    result = std::move(codes);
+    return true;
+}
+
+[[nodiscard]] bool parse_restore_preflight_metrics(const QJsonObject& payload,
+                                                   RestorePreflightPage& result) {
+    qint64 logical_size = 0;
+    qint64 target_capacity = 0;
+    qint64 chain_depth = 0;
+    qint64 expires = 0;
+    qint64 volume_size_policy = 0;
+    qint64 feasibility = 0;
+    qint64 minimum_target = 0;
+    qint64 relocation = 0;
+    qint64 scratch_upper = 0;
+    if (!integer_in_range(payload.value(QStringLiteral("logical_size_bytes")), 0,
+                          (std::numeric_limits<qint64>::max)(), logical_size) ||
+        !integer_in_range(payload.value(QStringLiteral("target_capacity_bytes")), 0,
+                          (std::numeric_limits<qint64>::max)(), target_capacity) ||
+        !integer_in_range(payload.value(QStringLiteral("chain_depth")), 0, 1'000'000,
+                          chain_depth) ||
+        !integer_in_range(payload.value(QStringLiteral("expires_utc_ms")), 0,
+                          (std::numeric_limits<qint64>::max)(), expires) ||
+        !integer_in_range(payload.value(QStringLiteral("volume_size_policy")),
+                          kVolumeSizePolicyRequireSourceSize, kVolumeSizePolicyAllowNtfsRelocation,
+                          volume_size_policy) ||
+        !integer_in_range(payload.value(QStringLiteral("feasibility")),
+                          kRestoreFeasibilityIneligible, kRestoreFeasibilityEligible,
+                          feasibility) ||
+        !payload.value(QStringLiteral("restore_eligible")).isBool() ||
+        !integer_in_range(payload.value(QStringLiteral("minimum_target_bytes")), 0,
+                          (std::numeric_limits<qint64>::max)(), minimum_target) ||
+        !integer_in_range(payload.value(QStringLiteral("relocation_bytes")), 0,
+                          (std::numeric_limits<qint64>::max)(), relocation) ||
+        !integer_in_range(payload.value(QStringLiteral("scratch_upper_bound_bytes")), 0,
+                          (std::numeric_limits<qint64>::max)(), scratch_upper)) {
+        return false;
+    }
+    result.logical_size_bytes = static_cast<quint64>(logical_size);
+    result.target_capacity_bytes = static_cast<quint64>(target_capacity);
+    result.chain_depth = static_cast<quint32>(chain_depth);
+    result.expires_utc_ms = static_cast<quint64>(expires);
+    result.volume_size_policy = static_cast<int>(volume_size_policy);
+    result.feasibility = static_cast<int>(feasibility);
+    result.restore_eligible = payload.value(QStringLiteral("restore_eligible")).toBool();
+    result.minimum_target_bytes = static_cast<quint64>(minimum_target);
+    result.relocation_bytes = static_cast<quint64>(relocation);
+    result.scratch_upper_bound_bytes = static_cast<quint64>(scratch_upper);
+    return true;
+}
+
+[[nodiscard]] bool parse_restore_preflight_payload(const QJsonObject& payload,
+                                                   RestorePreflightPage& result) {
+    if (!has_exact_keys(payload, {"preflight_token", "repository_connection_id", "recovery_point_id",
+                                  "target_source_id", "logical_size_bytes", "target_capacity_bytes",
+                                  "chain_depth", "expires_utc_ms", "volume_size_policy",
+                                  "feasibility", "restore_eligible", "minimum_target_bytes",
+                                  "relocation_bytes", "scratch_upper_bound_bytes",
+                                  "shrink_plan_digest", "restriction_codes", "warning_codes",
+                                  "message_code"})) {
+        return false;
+    }
+    if (!payload.value(QStringLiteral("preflight_token")).isString() ||
+        !stable_code(payload.value(QStringLiteral("preflight_token")).toString(), 128) ||
+        !payload.value(QStringLiteral("repository_connection_id")).isString() ||
+        !payload.value(QStringLiteral("recovery_point_id")).isString() ||
+        !payload.value(QStringLiteral("target_source_id")).isString() ||
+        !payload.value(QStringLiteral("shrink_plan_digest")).isString() ||
+        !payload.value(QStringLiteral("message_code")).isString()) {
+        return false;
+    }
+    const auto digest = payload.value(QStringLiteral("shrink_plan_digest")).toString();
+    if (digest.size() > 128) {
+        return false;
+    }
+    QStringList restriction_codes;
+    QStringList warning_codes;
+    if (!parse_restore_preflight_metrics(payload, result) ||
+        !parse_stable_code_array(payload.value(QStringLiteral("restriction_codes")),
+                                 restriction_codes) ||
+        !parse_stable_code_array(payload.value(QStringLiteral("warning_codes")), warning_codes)) {
+        return false;
+    }
+    result.preflight_token = payload.value(QStringLiteral("preflight_token")).toString();
+    result.repository_connection_id =
+        payload.value(QStringLiteral("repository_connection_id")).toString();
+    result.recovery_point_id = payload.value(QStringLiteral("recovery_point_id")).toString();
+    result.target_source_id = payload.value(QStringLiteral("target_source_id")).toString();
+    result.shrink_plan_digest = digest;
+    result.restriction_codes = std::move(restriction_codes);
+    result.warning_codes = std::move(warning_codes);
+    result.message_code = payload.value(QStringLiteral("message_code")).toString();
+    return true;
+}
+
+} // namespace
+
+bool parse_restore_preflight_response(const QJsonObject& root, const int expected_kind,
+                                      RestorePreflightPage& result) {
+    qint64 kind = 0;
+    qint64 request_kind = 0;
+    qint64 error = 0;
+    if (!integer_in_range(root.value(QStringLiteral("kind")), 1, 1, kind) ||
+        !integer_in_range(root.value(QStringLiteral("request_kind")), expected_kind, expected_kind,
+                          request_kind) ||
+        !integer_in_range(root.value(QStringLiteral("boundary_error_code")), 0, 0, error) ||
+        !root.value(QStringLiteral("payload")).isObject()) {
+        return false;
+    }
+    return parse_restore_preflight_payload(root.value(QStringLiteral("payload")).toObject(),
+                                           result);
 }
 
 QByteArray encode_start_restore_request(const QString& request_id, const QString& idempotency_key,

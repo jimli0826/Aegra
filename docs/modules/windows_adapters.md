@@ -11,6 +11,19 @@ VSS Snapshot Set Session；阶段 8F 实现 Worker 使用的系统时钟、密�
 锁卷并卸载后才允许按 offset 写入，完成时 flush，析构时 best-effort 解锁。普通文件模式仅用于隔离验证。
 不可逆写入决策见 [ADR-0009](../adr/0009-windows-volume-restore-safety.md)。
 
+NTFS 小目标卷恢复（ADR-0025）使用 `WindowsRandomAccessBlockDevice`（`IRandomAccessBlockDevice`）：
+
+- 报告经 `IOCTL_DISK_GET_DRIVE_GEOMETRY` 与 `StorageAccessAlignmentProperty` 精确证明的
+  `BlockDeviceGeometry`（logical/physical sector + `capacity_bytes`）；查询失败即拒绝，不回退 512；
+- `read_at` 拒绝 short read；`write_at` 拒绝容量外与扇区未对齐范围；
+- 锁卷并卸载后请求 `FSCTL_ALLOW_EXTENDED_DASD_IO`；已被 Boot 失效的重试目标可能以 RAW 状态返回
+  `ERROR_INVALID_FUNCTION` / `ERROR_INVALID_PARAMETER`，此时只有成功读取设备容量末端的完整对齐块后才
+  允许继续，其它错误或末块证明失败均拒绝打开；
+- `write_at_verified`：写 → flush → readback 比较；
+- Volume 模式在打开时 `FSCTL_LOCK_VOLUME` + `FSCTL_DISMOUNT_VOLUME`，锁状态由 RAII 析构解锁；
+- Worker 在 Boot commit 后销毁复合设备与原始卷句柄，再运行 CHKDSK；CHKDSK 不与锁卷句柄重叠；
+- 现有 `WindowsBlockSink` 消费者保持兼容，不被迫携带几何/读回语义。
+
 个人版整盘恢复（Full 第一步）使用 `kPhysicalDisk` 模式：只接受 `\\.\PhysicalDriveN`，拒绝系统盘与
 Archive 所在盘；写入前由 `prepare_target_disk_for_raw_restore` 删除现有分区布局；写入后由
 `apply_disk_signature_policy`（可选随机化 MBR/GPT DiskId）、`rebuild_partition_table_from_raw_layout`
@@ -82,8 +95,8 @@ false。只有 Volume 枚举本身无法启动或异常终止时，整个调用�
 - `kRawVolume`：只接受 canonical Volume GUID Path，以只读共享 Handle 打开，并要求显式非零逻辑大小。
 
 Source 独占 Handle，可以并发调用 `read()`。每次读取使用独立重叠 I/O 状态；取消会中止本次 I/O，
-不会关闭 Source Handle。`size_bytes()` 在对象生命周期内稳定。`kVssSnapshot` / `kRawVolume` 对齐
-AipCopy 的源读取策略：句柄使用 `FILE_FLAG_NO_BUFFERING | FILE_FLAG_SEQUENTIAL_SCAN`，单次 `read()`
+不会关闭 Source Handle。`size_bytes()` 在对象生命周期内稳定。`kVssSnapshot` / `kRawVolume` 的
+源读取策略：句柄使用 `FILE_FLAG_NO_BUFFERING | FILE_FLAG_SEQUENTIAL_SCAN`，单次 `read()`
 内保持一个在途 IRP（QD1）；保留 `FILE_FLAG_OVERLAPPED` 仅用于显式 offset 和可取消等待，不增加同一
 调用的队列深度。
 
@@ -109,7 +122,7 @@ AipCopy 的源读取策略：句柄使用 `FILE_FLAG_NO_BUFFERING | FILE_FLAG_SE
 - `build_free_skip_plan(device_path, filesystem, total_size, cluster_size)` 对 VSS 快照设备或 raw
   Volume GUID 调用 `FSCTL_GET_VOLUME_BITMAP`；
 - **NTFS/ReFS**：线性 LCN；前 64 MiB 系统区永不视为空闲；
-- **FAT/FAT32**：解析 BPB 得到 data area 起点，按 AipCopy 方式把 bitmap 映射到数据区；保留区与 FAT
+- **FAT/FAT32**：解析 BPB 得到 data area 起点，按数据区偏移把 bitmap 映射到数据区；保留区与 FAT
   始终读取；
 - **exFAT/RAW/未知**：不启用，整卷读取；
 - bitmap 失败时 `applied=false`，调用方退回全量读取（宁可备份变大，不可漏数据）。
@@ -121,13 +134,13 @@ Composition Root 在包装前把 cluster extent 向内收缩到 Archive block �
 Archive block 按 DATA 读取和保存，防止把已用字节误标 FREE。卷末短 block 可在确认全部空闲时标 FREE。
 
 `merge_page_and_hibernation_exclusions`（Desktop Options「Exclude pagefile / hiberfil / swapfile」）：
-对齐 AipCopy `ExcludeJunkFiles` / `AddFileToExcludedClusters`。在与块读取**相同**的设备根上解析
-pagefile.sys / hiberfil.sys / swapfile.sys 的 LCN，并入 free-skip plan（标记 FREE 且不读盘）：
+在与块读取**相同**的设备根上解析 pagefile.sys / hiberfil.sys / swapfile.sys 的 LCN，并入
+free-skip plan（标记 FREE 且不读盘）：
 
 - **raw**：canonical Volume GUID 根；
 - **VSS**：`snapshot_device_path`（`\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopyN`）根，与
-  AipCopy `swStaticVolume` 同源；直接 `CreateFile` 失败时用临时 `DefineDosDevice(DDD_RAW_TARGET_PATH)`
-  映射后再取 extent（AipCopy MapDriveLetter 模式）；
+  块读取所用静态卷根同源；直接 `CreateFile` 失败时用临时 `DefineDosDevice(DDD_RAW_TARGET_PATH)`
+  映射后再取 extent；
 - 优先 `FSCTL_GET_RETRIEVAL_POINTERS`，失败再 MFT 回退；
 - **禁止**把 live Volume 上的 LCN 套到快照设备上（Composition Root 只传入当前读路径）。
 

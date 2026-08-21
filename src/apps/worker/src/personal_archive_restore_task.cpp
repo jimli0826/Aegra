@@ -113,16 +113,21 @@ const char* message_code_for(const base::ErrorCode code) noexcept {
     }
 }
 
-contracts::TaskResult failed_result(const contracts::JobRequest& job,
-                                    const base::ErrorCode code) {
-    const auto outcome = code == base::ErrorCode::kCancelled ? contracts::TaskOutcome::kCancelled
-                                                             : contracts::TaskOutcome::kFailed;
+contracts::TaskResult failed_result(const contracts::JobRequest& job, const base::Error& error) {
+    const auto outcome = error.code == base::ErrorCode::kCancelled
+                             ? contracts::TaskOutcome::kCancelled
+                             : contracts::TaskOutcome::kFailed;
     contracts::TaskResult result;
     result.job_id = job.job_id;
     result.trace_id = job.trace_id;
     result.outcome = outcome;
-    result.error_code = code;
-    result.message_code = message_code_for(code);
+    result.error_code = error.code;
+    // Preserve NTFS shrink stable codes carried in error.message by NtfsResize/Worker.
+    if (error.message.starts_with("restore.shrink_")) {
+        result.message_code = error.message;
+    } else {
+        result.message_code = message_code_for(error.code);
+    }
     return result;
 }
 
@@ -203,6 +208,10 @@ make_backend_request(const contracts::JobRequest& job,
     request.maximum_chain_depth = options.maximum_restore_chain_depth;
     request.progress = context.progress;
     // Caller (validate_task / contracts) requires restore; no implicit volume-0 fallback.
+    request.job_id = job.job_id;
+    request.volume_size_policy = job.restore->volume_size_policy;
+    request.shrink_plan_digest = job.restore->shrink_plan_digest;
+    request.source_chain_fingerprint = job.restore->source_chain_fingerprint;
     if (job.restore->disk_restore) {
         request.disk_restore = true;
         request.source_disk_number = job.restore->source_disk_number;
@@ -216,16 +225,31 @@ make_backend_request(const contracts::JobRequest& job,
     return request;
 }
 
+[[nodiscard]] std::string_view
+volume_size_policy_name(const contracts::VolumeSizePolicy policy) noexcept {
+    switch (policy) {
+    case contracts::VolumeSizePolicy::kRequireSourceSize:
+        return "require_source_size";
+    case contracts::VolumeSizePolicy::kAllowNtfsRelocation:
+        return "allow_ntfs_relocation";
+    }
+    return "unknown";
+}
+
 void log_restore_request(WorkerTaskLog* log, const contracts::JobRequest& job,
                          const WindowsPersonalBackupTaskOptions& options) {
     if (log == nullptr) {
         return;
     }
     const bool disk = job.restore && job.restore->disk_restore;
+    const bool shrink =
+        job.restore &&
+        job.restore->volume_size_policy == contracts::VolumeSizePolicy::kAllowNtfsRelocation &&
+        !job.restore->shrink_plan_digest.empty();
     log->section("Job");
     log->field("job_id", job.job_id);
     log->field("trace_id", job.trace_id);
-    log->field("mode", disk ? "disk" : "volume");
+    log->field("mode", disk ? "disk" : (shrink ? "volume_shrink" : "volume"));
     log->field_u64("layers", job.source_refs.size());
 
     log->section("Request");
@@ -237,6 +261,15 @@ void log_restore_request(WorkerTaskLog* log, const contracts::JobRequest& job,
         log->field_bool("bring_target_online", job.restore->bring_target_online);
     } else if (job.restore) {
         log->field_u64("source_volume_index", job.restore->source_volume_index);
+    }
+    if (job.restore) {
+        log->field("volume_size_policy", volume_size_policy_name(job.restore->volume_size_policy));
+        if (shrink) {
+            log->field("shrink_plan_digest", job.restore->shrink_plan_digest);
+            if (!job.restore->source_chain_fingerprint.empty()) {
+                log->field("source_chain_fingerprint", job.restore->source_chain_fingerprint);
+            }
+        }
     }
     log->field("target", job.target_ref);
     log->field_bytes("memory_budget", options.memory_budget_bytes);
@@ -261,7 +294,9 @@ void log_restore_failure(WorkerTaskLog* log, const base::Error& error,
     }
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - started);
-    const auto* message_code = message_code_for(error.code);
+    const auto message_code = error.message.starts_with("restore.shrink_")
+                                  ? std::string_view{error.message}
+                                  : std::string_view{message_code_for(error.code)};
     const auto hint = restore_hint_for(error.code, error.message);
     log->section("Result");
     log->field("outcome", error.code == base::ErrorCode::kCancelled ? "cancelled" : "failed");
@@ -321,10 +356,9 @@ run_accepted_task(const contracts::JobRequest& job,
     publish_preparing(job, context.progress);
     if (cancellation.stop_requested() ||
         (job.deadline_utc_ms > 0 && context.clock.now_utc_ms() >= job.deadline_utc_ms)) {
-        log_restore_failure(task_log.get(),
-                            {base::ErrorCode::kCancelled, "restore cancelled before start"},
-                            started);
-        return validated_result(failed_result(job, base::ErrorCode::kCancelled));
+        const base::Error cancelled{base::ErrorCode::kCancelled, "restore cancelled before start"};
+        log_restore_failure(task_log.get(), cancelled, started);
+        return validated_result(failed_result(job, cancelled));
     }
     ResolvedSecrets secrets;
     {
@@ -339,7 +373,7 @@ run_accepted_task(const contracts::JobRequest& job,
                                               : resolved.error().message};
             stage.fail(error, "resolve_secret", restore_hint_for(code, error.message));
             log_restore_failure(task_log.get(), error, started);
-            return validated_result(failed_result(job, code));
+            return validated_result(failed_result(job, error));
         }
         stage.note_u64("layers", resolved.value().size());
         secrets = std::move(resolved).value();
@@ -348,7 +382,7 @@ run_accepted_task(const contracts::JobRequest& job,
     auto restored = backend.run(request, cancellation);
     if (!restored) {
         log_restore_failure(task_log.get(), restored.error(), started);
-        return validated_result(failed_result(job, restored.error().code));
+        return validated_result(failed_result(job, restored.error()));
     }
     auto result = validated_result(completed_result(job, restored.value()));
     if (result) {

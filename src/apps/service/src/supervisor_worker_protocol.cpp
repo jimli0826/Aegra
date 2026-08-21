@@ -135,7 +135,11 @@ encode_supervisor_job_request(const contracts::JobRequest& request) {
                      {"bring_target_online", request.restore->bring_target_online},
                      {"preserve_disk_signature", request.restore->preserve_disk_signature},
                      {"auto_expand_last_partition", request.restore->auto_expand_last_partition},
-                     {"partition_layout_edits", std::move(edits)}};
+                     {"partition_layout_edits", std::move(edits)},
+                     {"volume_size_policy",
+                      static_cast<std::uint8_t>(request.restore->volume_size_policy)},
+                     {"shrink_plan_digest", request.restore->shrink_plan_digest},
+                     {"source_chain_fingerprint", request.restore->source_chain_fingerprint}};
         }
 
         return base::Result<std::string>::success(root.dump());

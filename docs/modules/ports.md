@@ -7,6 +7,9 @@
 ## 端口集合
 
 - 数据面：`IBlockSource`、`IBlockSink`、`ISequentialWriter`、`IRandomAccessReader`。
+- 块设备随机读写（ADR-0025）：`IRandomAccessBlockDevice`、`BlockDeviceGeometry`、
+  `RandomAccessBlockDeviceSink`（见 `random_access_block_device.h`）。与 `IBlockSink` 分离，避免给写接口附加平台几何语义；`capacity_bytes` 永远是真实可写容量。
+- Scratch（ADR-0025）：`IScratchStore` / `IScratchStoreFactory`（见 `scratch_store.h`）——有界配额、页面校验、close/discard；供 ShrinkPlan spool 与稀疏 Overlay 使用。
 - 文件数据面（F1/FI1/FI5，`file_*.h`）：`IFileTreeEnumerator`、`IFileStreamReader`、`IFileSourceBrowser`、
   `IFileBackupSession`、`IFileRecoveryPointReader`、`IFileStagedSink` 等；`IFileSnapshotView` 提供
   snapshot-consistent enumeration 和 stream 读取。ADR-0020 后 file_set Incremental 不再要求

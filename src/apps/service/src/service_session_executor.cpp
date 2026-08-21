@@ -89,6 +89,7 @@ struct RequestState final {
     case Kind::kGetRecoveryPointLayout:
     case Kind::kListRecoveryPointEntries:
     case Kind::kPrepareRestore:
+    case Kind::kAnalyzeNtfsShrink:
     case Kind::kPrepareFileRestore:
         return 1;
     case Kind::kBrowseFileSources:

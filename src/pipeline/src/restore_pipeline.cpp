@@ -32,6 +32,14 @@ base::Result<void> validate_plan(const RestorePlan& plan) {
     return base::Result<void>::success();
 }
 
+[[nodiscard]] std::uint64_t effective_write_limit(const RestorePlan& plan,
+                                                  const std::uint64_t logical_size) noexcept {
+    if (plan.logical_write_limit_bytes == 0) {
+        return logical_size;
+    }
+    return plan.logical_write_limit_bytes;
+}
+
 base::Result<void> validate_descriptor(const ports::ChunkDescriptor& descriptor,
                                        const std::uint64_t expected_index,
                                        const std::uint64_t expected_offset,
@@ -70,7 +78,15 @@ base::Result<void> validate_descriptor(const ports::ChunkDescriptor& descriptor,
 base::Result<void> preflight_restore(const RestorePlan& plan, ports::IRecoveryPointReader& reader,
                                      ports::IBlockSink& sink) {
     const auto logical_size = reader.logical_size_bytes();
-    if (logical_size > sink.capacity_bytes()) {
+    const auto write_limit = effective_write_limit(plan, logical_size);
+    if (plan.logical_write_limit_bytes != 0 &&
+        plan.logical_write_limit_bytes > logical_size) {
+        return base::Result<void>::failure(base::Error{
+            base::ErrorCode::kInvalidArgument,
+            "restore logical write limit exceeds source size",
+        });
+    }
+    if (write_limit > sink.capacity_bytes()) {
         return base::Result<void>::failure(base::Error{
             base::ErrorCode::kInsufficientSpace,
             "restore target capacity is insufficient",
@@ -185,29 +201,54 @@ void publish_progress(ports::IProgressSink* sink, const RestorePlan& plan,
                                                 restore_phase_message(phase)));
 }
 
-base::Result<void> write_allocated_ranges(RestoreConsumerContext& context,
-                                          const detail::QueuedChunk& chunk) {
+[[nodiscard]] base::Result<std::uint64_t>
+write_span_clipped(RestoreConsumerContext& context, const std::uint64_t absolute_offset,
+                   const std::span<const std::byte> payload) {
+    if (payload.empty()) {
+        return base::Result<std::uint64_t>::success(0);
+    }
+    const auto write_limit = effective_write_limit(context.plan, context.logical_size);
+    if (absolute_offset >= write_limit) {
+        return base::Result<std::uint64_t>::success(0);
+    }
+    const auto max_size = write_limit - absolute_offset;
+    const auto size =
+        payload.size() <= max_size ? payload.size() : static_cast<std::size_t>(max_size);
+    auto written =
+        context.sink.write(absolute_offset, payload.first(size), context.cancellation);
+    if (!written) {
+        return base::Result<std::uint64_t>::failure(written.error());
+    }
+    return base::Result<std::uint64_t>::success(size);
+}
+
+base::Result<std::uint64_t> write_allocated_ranges(RestoreConsumerContext& context,
+                                                   const detail::QueuedChunk& chunk) {
     const auto payload = chunk.payload.bytes();
     std::uint64_t position = 0;
+    std::uint64_t disk_written = 0;
     for (const auto& free : chunk.descriptor.free_ranges) {
         if (free.offset > position) {
             const auto size = free.offset - position;
-            auto written = context.sink.write(
-                chunk.descriptor.logical_offset + position,
-                payload.subspan(static_cast<std::size_t>(position), static_cast<std::size_t>(size)),
-                context.cancellation);
+            auto written = write_span_clipped(
+                context, chunk.descriptor.logical_offset + position,
+                payload.subspan(static_cast<std::size_t>(position), static_cast<std::size_t>(size)));
             if (!written) {
                 return written;
             }
+            disk_written += written.value();
         }
         position = free.offset + free.size;
     }
-    if (position == chunk.descriptor.logical_size) {
-        return base::Result<void>::success();
+    if (position != chunk.descriptor.logical_size) {
+        auto written = write_span_clipped(context, chunk.descriptor.logical_offset + position,
+                                          payload.subspan(static_cast<std::size_t>(position)));
+        if (!written) {
+            return written;
+        }
+        disk_written += written.value();
     }
-    return context.sink.write(chunk.descriptor.logical_offset + position,
-                              payload.subspan(static_cast<std::size_t>(position)),
-                              context.cancellation);
+    return base::Result<std::uint64_t>::success(disk_written);
 }
 
 base::Result<RestoreSummary> consume_chunks(RestoreConsumerContext& context) {
@@ -231,7 +272,7 @@ base::Result<RestoreSummary> consume_chunks(RestoreConsumerContext& context) {
             chunk_free_bytes += range.size;
         }
         summary.restored_bytes += chunk.descriptor.logical_size;
-        summary.disk_written_bytes += chunk.descriptor.logical_size - chunk_free_bytes;
+        summary.disk_written_bytes += written.value();
         summary.free_skipped_bytes += chunk_free_bytes;
         summary.free_range_count += static_cast<std::uint64_t>(chunk.descriptor.free_ranges.size());
         ++summary.chunk_count;

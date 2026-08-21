@@ -43,6 +43,8 @@ enum class ServiceRequestKind : std::uint8_t {
     /// Control-plane preferences (job retention, etc.).
     kGetServiceSettings = 16,
     kListRepositoryDirectories = 17,
+    /// Exact NTFS shrink preflight; returns RestorePreflight eligible+digest.
+    kAnalyzeNtfsShrink = 18,
     kAddRepositoryConnection = 32,
     kImportRepositoryConnection = 33,
     kTestRepositoryConnection = 34,

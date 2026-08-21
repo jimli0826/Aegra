@@ -39,7 +39,16 @@ Recovery Point Reader -> Manifest Validation -> Chunk Resolver
 Restore 预检验证每个 chunk 的 FREE 区间有序、不重叠且不越界。认证并展开 chunk 后，仅把 FREE 的补集
 写入 `IBlockSink`；FREE 区间直接跳过，不清零、不覆盖目标盘原内容。`RestoreSummary.restored_bytes`
 表示完成处理的逻辑字节，`disk_written_bytes` 表示实际提交给 Sink 的字节，`free_skipped_bytes` 和
-`free_range_count` 分别表示跳过的 FREE 字节与区间数；成功时后两个字节计数之和必须等于逻辑处理量。
+`free_range_count` 分别表示跳过的 FREE 字节与区间数。
+
+`RestorePlan.logical_write_limit_bytes`（ADR-0025）：
+
+- `0`（默认）：完整恢复；要求源逻辑大小 ≤ Sink 真实容量。
+- 非 0：前缀恢复；仍完整校验全部 descriptor / FREE / logical end，但只向 Sink 写入
+  `[0, logical_write_limit_bytes)`，且该上限必须 ≤ Sink 容量。不得用虚报容量的 Sink 绕过此字段。
+
+`ProtectedRangeBlockSink`：在真实 Sink 外包一层，跳过与受保护半开区间相交的写入（Primary/Backup Boot
+等），供缩容前缀恢复使用。
 
 ## 依赖
 

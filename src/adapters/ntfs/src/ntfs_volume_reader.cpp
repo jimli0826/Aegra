@@ -10,7 +10,6 @@
 namespace aegra::adapters::ntfs {
 namespace {
 
-using detail::apply_fixup;
 using detail::AttributeValue;
 using detail::build_file_layout;
 using detail::checked_add_u64;
@@ -20,15 +19,78 @@ using detail::encode_continuation;
 using detail::FileDataLayout;
 using detail::LruCache;
 using detail::make_error;
+using detail::parse_attribute_list;
 using detail::parse_boot_sector;
 using detail::parse_index_entries;
 using detail::parse_mft_record_bytes;
 using detail::ParsedMftRecord;
-using detail::read_from_layout;
+using detail::read_from_attribute;
 using detail::read_u16;
 using detail::read_u32;
-using detail::read_u64;
-using detail::unpack_file_reference;
+using detail::to_boot_geometry;
+using detail::to_volume_info;
+
+[[nodiscard]] base::Result<std::vector<std::byte>>
+load_index_bitmap(ports::IRandomAccessReader& reader, const NtfsVolumeInfo& info,
+                  const AttributeValue& bitmap_attr, const std::uint64_t buffer_count,
+                  const base::CancellationToken cancellation) {
+    if (bitmap_attr.compressed) {
+        return base::Result<std::vector<std::byte>>::failure(
+            make_error(base::ErrorCode::kUnsupportedVersion, "ntfs.compressed_unsupported"));
+    }
+    auto bitmap_ok =
+        ntfs_core::validate_bitmap_covers_bits(buffer_count, bitmap_attr.data_size.value);
+    if (!bitmap_ok) {
+        return base::Result<std::vector<std::byte>>::failure(bitmap_ok.error());
+    }
+    constexpr std::uint64_t kMaxIndexBitmapBytes = 16ULL * 1024ULL * 1024ULL;
+    if (bitmap_attr.data_size.value > kMaxIndexBitmapBytes) {
+        return base::Result<std::vector<std::byte>>::failure(
+            make_error(base::ErrorCode::kCorruptData, "ntfs.index_corrupt"));
+    }
+    std::vector<std::byte> bytes(static_cast<std::size_t>(bitmap_attr.data_size.value),
+                                 std::byte{0});
+    auto bitmap_read =
+        read_from_attribute(reader, to_boot_geometry(info), bitmap_attr, ntfs_core::ByteOffset{0},
+                            std::span<std::byte>(bytes), cancellation);
+    if (!bitmap_read) {
+        return base::Result<std::vector<std::byte>>::failure(bitmap_read.error());
+    }
+    if (bitmap_read.value() != bytes.size()) {
+        return base::Result<std::vector<std::byte>>::failure(
+            make_error(base::ErrorCode::kCorruptData, "ntfs.index_corrupt"));
+    }
+    return base::Result<std::vector<std::byte>>::success(std::move(bytes));
+}
+
+[[nodiscard]] base::Result<std::vector<NtfsEntry>>
+parse_indx_buffer(std::span<std::byte> record, const std::uint32_t bytes_per_sector) {
+    if (std::memcmp(record.data(), "INDX", 4) != 0) {
+        return base::Result<std::vector<NtfsEntry>>::failure(
+            make_error(base::ErrorCode::kCorruptData, "ntfs.index_corrupt"));
+    }
+    auto fix = detail::apply_fixup(record, bytes_per_sector,
+                                   read_u16(std::span<const std::byte>(record), 4),
+                                   read_u16(std::span<const std::byte>(record), 6));
+    if (!fix) {
+        return base::Result<std::vector<NtfsEntry>>::failure(fix.error());
+    }
+    constexpr std::size_t kIndexHeaderOffset = 0x18;
+    if (record.size() < kIndexHeaderOffset + 16) {
+        return base::Result<std::vector<NtfsEntry>>::failure(
+            make_error(base::ErrorCode::kCorruptData, "ntfs.index_corrupt"));
+    }
+    const auto first_entry = read_u32(std::span<const std::byte>(record), kIndexHeaderOffset);
+    const auto total_size = read_u32(std::span<const std::byte>(record), kIndexHeaderOffset + 4);
+    const auto entries_base = kIndexHeaderOffset + first_entry;
+    if (entries_base > record.size() || kIndexHeaderOffset + total_size > record.size() ||
+        first_entry > total_size) {
+        return base::Result<std::vector<NtfsEntry>>::failure(
+            make_error(base::ErrorCode::kCorruptData, "ntfs.index_corrupt"));
+    }
+    return parse_index_entries(
+        std::span<const std::byte>(record).subspan(entries_base, total_size - first_entry));
+}
 
 } // namespace
 
@@ -85,8 +147,9 @@ struct NtfsVolumeReader::Impl final {
         } else {
             const auto file_offset =
                 record_number * static_cast<std::uint64_t>(info.bytes_per_mft_record);
-            auto n = read_from_layout(*reader, info, mft_data, file_offset,
-                                      std::span<std::byte>(record), cancellation);
+            auto n = read_from_attribute(*reader, to_boot_geometry(info), mft_data,
+                                         ntfs_core::ByteOffset{file_offset},
+                                         std::span<std::byte>(record), cancellation);
             if (!n) {
                 return base::Result<ParsedMftRecord>::failure(n.error());
             }
@@ -111,38 +174,36 @@ struct NtfsVolumeReader::Impl final {
             if (!attr.non_resident) {
                 list_bytes = attr.resident_data;
             } else {
-                if (attr.data_size > kMaximumIndexRecordBytes) {
+                if (attr.data_size.value > kMaximumIndexRecordBytes) {
                     return base::Result<std::vector<std::uint64_t>>::failure(
                         make_error(base::ErrorCode::kCorruptData, "ntfs.attribute_out_of_bounds"));
                 }
-                list_bytes.resize(static_cast<std::size_t>(attr.data_size));
-                auto n = read_from_layout(*reader, info, attr, 0, std::span<std::byte>(list_bytes),
-                                          cancellation);
+                list_bytes.resize(static_cast<std::size_t>(attr.data_size.value));
+                auto n = read_from_attribute(*reader, to_boot_geometry(info), attr,
+                                             ntfs_core::ByteOffset{0},
+                                             std::span<std::byte>(list_bytes), cancellation);
                 if (!n) {
                     return base::Result<std::vector<std::uint64_t>>::failure(n.error());
                 }
                 list_bytes.resize(n.value());
             }
-            std::size_t offset = 0;
-            std::size_t depth_guard = 0;
-            while (offset + 26 <= list_bytes.size()) {
-                const auto entry_length =
-                    read_u16(std::span<const std::byte>(list_bytes), offset + 4);
-                if (entry_length < 26 || offset + entry_length > list_bytes.size()) {
-                    return base::Result<std::vector<std::uint64_t>>::failure(
-                        make_error(base::ErrorCode::kCorruptData, "ntfs.attribute_out_of_bounds"));
-                }
-                const auto packed = read_u64(std::span<const std::byte>(list_bytes), offset + 16);
-                const auto ref = unpack_file_reference(packed);
-                if (ref.record_number != base.record_number) {
-                    if (std::find(extensions.begin(), extensions.end(), ref.record_number) ==
-                        extensions.end()) {
-                        extensions.push_back(ref.record_number);
+            auto parsed = parse_attribute_list(std::span<const std::byte>(list_bytes));
+            if (!parsed) {
+                return base::Result<std::vector<std::uint64_t>>::failure(parsed.error());
+            }
+            auto valid =
+                ntfs_core::validate_attribute_list_entries(parsed.value(), base.record_number);
+            if (!valid) {
+                return base::Result<std::vector<std::uint64_t>>::failure(valid.error());
+            }
+            for (const auto& entry : parsed.value()) {
+                if (entry.attribute_record.record_number != base.record_number) {
+                    if (std::find(extensions.begin(), extensions.end(),
+                                  entry.attribute_record.record_number) == extensions.end()) {
+                        extensions.push_back(entry.attribute_record.record_number);
                     }
                 }
-                offset += entry_length;
-                ++depth_guard;
-                if (depth_guard > 4096 || extensions.size() > kMaximumAttributeListDepth) {
+                if (extensions.size() > kMaximumAttributeListDepth) {
                     return base::Result<std::vector<std::uint64_t>>::failure(
                         make_error(base::ErrorCode::kCorruptData, "ntfs.attribute_out_of_bounds"));
                 }
@@ -154,7 +215,6 @@ struct NtfsVolumeReader::Impl final {
     [[nodiscard]] base::Result<FileDataLayout>
     load_layout(const NtfsFileReference reference, const base::CancellationToken cancellation) {
         if (auto cached = layout_cache.try_get(reference.record_number); cached.has_value()) {
-            // Sequence must still match when describing by reference.
             return base::Result<FileDataLayout>::success(*cached);
         }
         auto base = read_mft_record(reference.record_number, cancellation);
@@ -199,7 +259,6 @@ struct NtfsVolumeReader::Impl final {
     enumerate_directory(const FileDataLayout& layout, const base::CancellationToken cancellation) {
         std::vector<NtfsEntry> all;
         if (layout.has_index_root && !layout.index_root.non_resident) {
-            // INDEX_ROOT: 16-byte header + INDEX_HEADER (16) then entries.
             const auto& root = layout.index_root.resident_data;
             if (root.size() < 32) {
                 return base::Result<std::vector<NtfsEntry>>::failure(
@@ -221,118 +280,13 @@ struct NtfsVolumeReader::Impl final {
         }
 
         if (layout.has_index_allocation) {
-            const auto& alloc = layout.index_allocation;
-            if (alloc.compressed) {
-                return base::Result<std::vector<NtfsEntry>>::failure(make_error(
-                    base::ErrorCode::kUnsupportedVersion, "ntfs.compressed_unsupported"));
+            auto alloc_page = enumerate_index_allocation(layout, cancellation);
+            if (!alloc_page) {
+                return alloc_page;
             }
-            const auto record_size = info.bytes_per_index_record;
-            constexpr std::uint64_t kMaxIndexBufferCount = 1'000'000;
-            if (record_size == 0 || alloc.data_size % record_size != 0) {
-                return base::Result<std::vector<NtfsEntry>>::failure(
-                    make_error(base::ErrorCode::kCorruptData, "ntfs.index_corrupt"));
-            }
-            const auto buffer_count = alloc.data_size / record_size;
-            if (buffer_count > kMaxIndexBufferCount || !layout.has_index_bitmap) {
-                return base::Result<std::vector<NtfsEntry>>::failure(
-                    make_error(base::ErrorCode::kCorruptData, "ntfs.index_corrupt"));
-            }
-
-            // $BITMAP ($I30): one bit per index buffer. Only allocated buffers are valid INDX.
-            std::vector<std::byte> index_bitmap_bytes;
-            const auto& bitmap_attr = layout.index_bitmap;
-            if (bitmap_attr.compressed) {
-                return base::Result<std::vector<NtfsEntry>>::failure(make_error(
-                    base::ErrorCode::kUnsupportedVersion, "ntfs.compressed_unsupported"));
-            }
-            const auto required_bitmap_bytes =
-                buffer_count / 8U + (buffer_count % 8U != 0 ? 1U : 0U);
-            constexpr std::uint64_t kMaxIndexBitmapBytes = 16ULL * 1024ULL * 1024ULL;
-            if (bitmap_attr.data_size < required_bitmap_bytes ||
-                bitmap_attr.data_size > kMaxIndexBitmapBytes) {
-                return base::Result<std::vector<NtfsEntry>>::failure(
-                    make_error(base::ErrorCode::kCorruptData, "ntfs.index_corrupt"));
-            }
-            index_bitmap_bytes.assign(static_cast<std::size_t>(bitmap_attr.data_size),
-                                      std::byte{0});
-            auto bitmap_read =
-                read_from_layout(*reader, info, bitmap_attr, 0,
-                                 std::span<std::byte>(index_bitmap_bytes), cancellation);
-            if (!bitmap_read) {
-                return base::Result<std::vector<NtfsEntry>>::failure(bitmap_read.error());
-            }
-            if (bitmap_read.value() != index_bitmap_bytes.size()) {
-                return base::Result<std::vector<NtfsEntry>>::failure(
-                    make_error(base::ErrorCode::kCorruptData, "ntfs.index_corrupt"));
-            }
-
-            const auto buffer_in_use = [&](const std::uint64_t buffer_index) noexcept -> bool {
-                const auto byte_index = static_cast<std::size_t>(buffer_index / 8U);
-                const auto bit = static_cast<unsigned>(buffer_index % 8U);
-                const auto value = std::to_integer<std::uint8_t>(index_bitmap_bytes[byte_index]);
-                return (value & static_cast<std::uint8_t>(1U << bit)) != 0;
-            };
-
-            std::uint64_t offset = 0;
-            std::uint64_t buffer_index = 0;
-            while (buffer_index < buffer_count) {
-                if (cancellation.stop_requested()) {
-                    return base::Result<std::vector<NtfsEntry>>::failure(
-                        make_error(base::ErrorCode::kCancelled, "ntfs.read_failed"));
-                }
-                if (!buffer_in_use(buffer_index)) {
-                    offset += record_size;
-                    ++buffer_index;
-                    continue;
-                }
-                std::vector<std::byte> record(record_size);
-                auto n = read_from_layout(*reader, info, alloc, offset,
-                                          std::span<std::byte>(record), cancellation);
-                if (!n) {
-                    return base::Result<std::vector<NtfsEntry>>::failure(n.error());
-                }
-                if (n.value() < record_size) {
-                    return base::Result<std::vector<NtfsEntry>>::failure(
-                        make_error(base::ErrorCode::kCorruptData, "ntfs.index_corrupt"));
-                }
-                if (std::memcmp(record.data(), "INDX", 4) != 0) {
-                    return base::Result<std::vector<NtfsEntry>>::failure(
-                        make_error(base::ErrorCode::kCorruptData, "ntfs.index_corrupt"));
-                }
-                auto fix = apply_fixup(std::span<std::byte>(record), info.bytes_per_sector,
-                                       read_u16(std::span<const std::byte>(record), 4),
-                                       read_u16(std::span<const std::byte>(record), 6));
-                if (!fix) {
-                    return base::Result<std::vector<NtfsEntry>>::failure(fix.error());
-                }
-                // INDEX_HEADER at offset 0x18 after INDX header (0x18 bytes) => 0x18+0x00
-                constexpr std::size_t kIndexHeaderOffset = 0x18;
-                if (record.size() < kIndexHeaderOffset + 16) {
-                    return base::Result<std::vector<NtfsEntry>>::failure(
-                        make_error(base::ErrorCode::kCorruptData, "ntfs.index_corrupt"));
-                }
-                const auto first_entry =
-                    read_u32(std::span<const std::byte>(record), kIndexHeaderOffset);
-                const auto total_size =
-                    read_u32(std::span<const std::byte>(record), kIndexHeaderOffset + 4);
-                const auto entries_base = kIndexHeaderOffset + first_entry;
-                if (entries_base > record.size() ||
-                    kIndexHeaderOffset + total_size > record.size() || first_entry > total_size) {
-                    return base::Result<std::vector<NtfsEntry>>::failure(
-                        make_error(base::ErrorCode::kCorruptData, "ntfs.index_corrupt"));
-                }
-                auto page = parse_index_entries(std::span<const std::byte>(record).subspan(
-                    entries_base, total_size - first_entry));
-                if (!page) {
-                    return base::Result<std::vector<NtfsEntry>>::failure(page.error());
-                }
-                all.insert(all.end(), page.value().begin(), page.value().end());
-                offset += record_size;
-                ++buffer_index;
-            }
+            all.insert(all.end(), alloc_page.value().begin(), alloc_page.value().end());
         }
 
-        // Deduplicate by record number, prefer longer Win32 names already filtered.
         std::vector<NtfsEntry> unique;
         unique.reserve(all.size());
         for (auto& entry : all) {
@@ -353,6 +307,66 @@ struct NtfsVolumeReader::Impl final {
             return left.name < right.name;
         });
         return base::Result<std::vector<NtfsEntry>>::success(std::move(unique));
+    }
+
+    [[nodiscard]] base::Result<std::vector<NtfsEntry>>
+    enumerate_index_allocation(const FileDataLayout& layout,
+                               const base::CancellationToken cancellation) {
+        const auto& alloc = layout.index_allocation;
+        if (alloc.compressed) {
+            return base::Result<std::vector<NtfsEntry>>::failure(
+                make_error(base::ErrorCode::kUnsupportedVersion, "ntfs.compressed_unsupported"));
+        }
+        const auto record_size = info.bytes_per_index_record;
+        constexpr std::uint64_t kMaxIndexBufferCount = 1'000'000;
+        if (record_size == 0 || alloc.data_size.value % record_size != 0) {
+            return base::Result<std::vector<NtfsEntry>>::failure(
+                make_error(base::ErrorCode::kCorruptData, "ntfs.index_corrupt"));
+        }
+        const auto buffer_count = alloc.data_size.value / record_size;
+        if (buffer_count > kMaxIndexBufferCount || !layout.has_index_bitmap) {
+            return base::Result<std::vector<NtfsEntry>>::failure(
+                make_error(base::ErrorCode::kCorruptData, "ntfs.index_corrupt"));
+        }
+        auto index_bitmap_bytes =
+            load_index_bitmap(*reader, info, layout.index_bitmap, buffer_count, cancellation);
+        if (!index_bitmap_bytes) {
+            return base::Result<std::vector<NtfsEntry>>::failure(index_bitmap_bytes.error());
+        }
+
+        std::vector<NtfsEntry> all;
+        std::uint64_t offset = 0;
+        for (std::uint64_t buffer_index = 0; buffer_index < buffer_count; ++buffer_index) {
+            if (cancellation.stop_requested()) {
+                return base::Result<std::vector<NtfsEntry>>::failure(
+                    make_error(base::ErrorCode::kCancelled, "ntfs.read_failed"));
+            }
+            auto in_use =
+                ntfs_core::bitmap_bit_is_set(index_bitmap_bytes.value(), buffer_index);
+            if (!in_use) {
+                return base::Result<std::vector<NtfsEntry>>::failure(in_use.error());
+            }
+            if (!in_use.value()) {
+                offset += record_size;
+                continue;
+            }
+            std::vector<std::byte> record(record_size);
+            auto n = read_from_attribute(*reader, to_boot_geometry(info), alloc,
+                                         ntfs_core::ByteOffset{offset},
+                                         std::span<std::byte>(record), cancellation);
+            if (!n || n.value() < record_size) {
+                return base::Result<std::vector<NtfsEntry>>::failure(
+                    n ? make_error(base::ErrorCode::kCorruptData, "ntfs.index_corrupt")
+                      : n.error());
+            }
+            auto page = parse_indx_buffer(std::span<std::byte>(record), info.bytes_per_sector);
+            if (!page) {
+                return base::Result<std::vector<NtfsEntry>>::failure(page.error());
+            }
+            all.insert(all.end(), page.value().begin(), page.value().end());
+            offset += record_size;
+        }
+        return base::Result<std::vector<NtfsEntry>>::success(std::move(all));
     }
 };
 
@@ -376,15 +390,11 @@ NtfsVolumeReader::open(ports::IRandomAccessReader& reader,
         return base::Result<std::unique_ptr<NtfsVolumeReader>>::failure(
             make_error(base::ErrorCode::kCorruptData, "ntfs.invalid_boot_sector"));
     }
-    auto info = parse_boot_sector(std::span<const std::byte>(boot));
-    if (!info) {
-        return base::Result<std::unique_ptr<NtfsVolumeReader>>::failure(info.error());
+    auto geometry = parse_boot_sector(std::span<const std::byte>(boot));
+    if (!geometry) {
+        return base::Result<std::unique_ptr<NtfsVolumeReader>>::failure(geometry.error());
     }
-    if (info.value().volume_size_bytes > reader.size_bytes() && reader.size_bytes() != 0) {
-        // Allow larger boot-reported size only if reader claims exact coverage; else still open
-        // but clamp later reads via runlist volume checks.
-    }
-    implementation->info = std::move(info).value();
+    implementation->info = to_volume_info(geometry.value());
 
     auto mft_record = implementation->read_mft_record(0, cancellation);
     if (!mft_record) {
@@ -398,7 +408,6 @@ NtfsVolumeReader::open(ports::IRandomAccessReader& reader,
     implementation->mft_data = std::move(mft_layout).value().unnamed_data;
     implementation->mft_ready = true;
 
-    // Validate root record 5 exists.
     auto root = implementation->read_mft_record(kNtfsRootFileReference, cancellation);
     if (!root || !root.value().in_use) {
         return base::Result<std::unique_ptr<NtfsVolumeReader>>::failure(
@@ -465,7 +474,6 @@ NtfsVolumeReader::describe_entry(const NtfsFileReference reference,
     NtfsEntry entry;
     entry.reference = reference;
     if (reference.sequence_number == 0) {
-        // Fill sequence from record when caller did not supply it.
         auto record = implementation_->read_mft_record(reference.record_number, cancellation);
         if (record) {
             entry.reference.sequence_number = record.value().sequence_number;
@@ -522,8 +530,9 @@ base::Result<std::size_t> NtfsVolumeReader::read_file(const NtfsFileReference re
         return base::Result<std::size_t>::failure(
             make_error(base::ErrorCode::kNotFound, "ntfs.entry_not_found"));
     }
-    return read_from_layout(*implementation_->reader, implementation_->info,
-                            layout.value().unnamed_data, offset, destination, cancellation);
+    return read_from_attribute(*implementation_->reader, to_boot_geometry(implementation_->info),
+                               layout.value().unnamed_data, ntfs_core::ByteOffset{offset},
+                               destination, cancellation);
 }
 
 } // namespace aegra::adapters::ntfs

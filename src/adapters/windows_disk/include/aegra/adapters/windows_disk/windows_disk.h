@@ -1,6 +1,7 @@
 #pragma once
 
 #include "aegra/ports/block_io.h"
+#include "aegra/ports/random_access_block_device.h"
 #include "aegra/ports/source_inventory.h"
 
 #include <cstdint>
@@ -105,6 +106,48 @@ class WindowsBlockSink final : public ports::IBlockSink {
     std::unique_ptr<Impl> impl_;
 };
 
+/// Open request for a random-access target used by NTFS shrink restore (ADR-0025).
+struct WindowsRandomAccessBlockDeviceOpenRequest final {
+    std::filesystem::path path;
+    WindowsBlockSinkKind kind{WindowsBlockSinkKind::kVolume};
+    std::optional<std::uint64_t> expected_capacity_bytes;
+    std::vector<std::filesystem::path> protected_sources;
+    /// When non-zero, volume/disk I/O ranges must be aligned to this sector size.
+    /// 0 = use geometry.logical_sector_size after open.
+    std::uint32_t required_alignment_bytes{0};
+};
+
+/// Volume/disk/file random-access device with true capacity, geometry, readback, and RAII lock.
+class WindowsRandomAccessBlockDevice final : public ports::IRandomAccessBlockDevice {
+  public:
+    ~WindowsRandomAccessBlockDevice() override;
+    WindowsRandomAccessBlockDevice(const WindowsRandomAccessBlockDevice&) = delete;
+    WindowsRandomAccessBlockDevice& operator=(const WindowsRandomAccessBlockDevice&) = delete;
+    WindowsRandomAccessBlockDevice(WindowsRandomAccessBlockDevice&&) = delete;
+    WindowsRandomAccessBlockDevice& operator=(WindowsRandomAccessBlockDevice&&) = delete;
+
+    [[nodiscard]] static base::Result<std::unique_ptr<WindowsRandomAccessBlockDevice>>
+    open(const WindowsRandomAccessBlockDeviceOpenRequest& request);
+
+    [[nodiscard]] ports::BlockDeviceGeometry geometry() const noexcept override;
+    [[nodiscard]] base::Result<std::size_t>
+    read_at(std::uint64_t offset, std::span<std::byte> destination,
+            base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<void> write_at(std::uint64_t offset, std::span<const std::byte> source,
+                                              base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<void> flush(base::CancellationToken cancellation) override;
+
+    /// Flush then read back `source.size()` bytes and compare. Mismatch → IoFailure.
+    [[nodiscard]] base::Result<void>
+    write_at_verified(std::uint64_t offset, std::span<const std::byte> source,
+                      base::CancellationToken cancellation);
+
+  private:
+    struct Impl;
+    explicit WindowsRandomAccessBlockDevice(std::unique_ptr<Impl> impl);
+    std::unique_ptr<Impl> impl_;
+};
+
 struct WindowsVolumeExtent final {
     std::uint32_t disk_number{0};
     std::uint64_t disk_offset_bytes{0};
@@ -147,8 +190,7 @@ struct FreeSkipPlan final {
                                                 std::uint64_t total_size_bytes,
                                                 std::uint32_t cluster_size_bytes);
 
-/// Adds pagefile.sys / hiberfil.sys / swapfile.sys extent ranges into the free-skip plan
-/// (AipCopy ExcludeJunkFiles / AddFileToExcludedClusters).
+/// Adds pagefile.sys / hiberfil.sys / swapfile.sys extent ranges into the free-skip plan.
 ///
 /// `read_device_path` must be the **same** device namespace used for block reads:
 /// - raw live volume: canonical Volume GUID path;
@@ -364,6 +406,22 @@ extend_filesystem_to_partition(std::uint32_t disk_number, std::uint64_t start_of
 /// Resolves which physical disk hosts a file path (for archive-on-target rejection).
 [[nodiscard]] base::Result<std::uint32_t>
 physical_disk_number_for_path(const std::filesystem::path& path);
+
+/// Read-only volume capacity + sector geometry (no lock/dismount). Path must be a canonical
+/// Volume GUID path with trailing slash. Used by NTFS shrink analyze before write open.
+[[nodiscard]] base::Result<ports::BlockDeviceGeometry>
+probe_volume_block_geometry(const std::filesystem::path& volume_guid_path);
+
+/// Post-CHKDSK volume dirty/capacity probe for NTFS shrink finalize (ADR-0025).
+struct VolumeShrinkPostcheckSnapshot final {
+    bool query_succeeded{false};
+    bool volume_dirty{true};
+    std::uint64_t capacity_bytes{0};
+    std::uint32_t bytes_per_sector{0};
+};
+
+[[nodiscard]] base::Result<VolumeShrinkPostcheckSnapshot>
+query_volume_shrink_postcheck(const std::filesystem::path& volume_guid_path);
 
 class WindowsSourceInventory final : public ports::ISourceInventory {
   public:

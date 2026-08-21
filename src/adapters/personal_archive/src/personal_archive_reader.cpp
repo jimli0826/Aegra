@@ -4,6 +4,7 @@
 #include "personal_archive_payload.h"
 #include "personal_archive_preamble.h"
 #include "personal_archive_shape_validation.h"
+#include "win32_input_file.h"
 
 #include "aegra/adapters/compression_zstd/zstd_codec.h"
 #include "aegra/adapters/crypto_sodium/payload_crypto.h"
@@ -13,7 +14,6 @@
 #include <algorithm>
 #include <condition_variable>
 #include <cstring>
-#include <fstream>
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -286,45 +286,27 @@ class PayloadPrefetcher final {
     std::jthread worker_;
 };
 
-[[nodiscard]] char* as_chars(std::byte* value) noexcept {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) stream byte-buffer boundary.
-    return reinterpret_cast<char*>(value);
-}
-
 [[nodiscard]] base::Result<std::vector<std::byte>>
-read_exact(std::ifstream& input, const std::uint64_t offset, const std::size_t size) {
-    if (size > static_cast<std::size_t>((std::numeric_limits<std::streamsize>::max)())) {
-        return base::Result<std::vector<std::byte>>::failure(
-            error(base::ErrorCode::kCorruptData, "archive read size exceeds stream limit"));
-    }
-    if (size == 0) {
-        return base::Result<std::vector<std::byte>>::success({});
-    }
-    input.clear();
-    input.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
-    std::vector<std::byte> result(size);
-    input.read(as_chars(result.data()), static_cast<std::streamsize>(size));
-    if (!input || input.gcount() != static_cast<std::streamsize>(size)) {
+read_exact(detail::Win32InputFile& input, const std::uint64_t offset, const std::size_t size) {
+    auto bytes = input.read_exact_at(offset, size);
+    if (!bytes) {
         return base::Result<std::vector<std::byte>>::failure(
             error(base::ErrorCode::kIoFailure, "personal archive is truncated"));
     }
-    return base::Result<std::vector<std::byte>>::success(std::move(result));
+    return bytes;
 }
 
-[[nodiscard]] base::Result<std::uint64_t> read_stream_size(std::ifstream& input) {
-    input.seekg(0, std::ios::end);
-    const auto position = input.tellg();
-    if (position < 0) {
+[[nodiscard]] base::Result<std::uint64_t> read_stream_size(detail::Win32InputFile& input) {
+    auto file_size = input.size();
+    if (!file_size) {
         return base::Result<std::uint64_t>::failure(
             error(base::ErrorCode::kIoFailure, "failed to determine personal archive size"));
     }
-    input.seekg(0, std::ios::beg);
-    return base::Result<std::uint64_t>::success(
-        static_cast<std::uint64_t>(static_cast<std::streamoff>(position)));
+    return file_size;
 }
 
 [[nodiscard]] base::Result<std::optional<archive::BackupFooter>>
-try_read_footer(std::ifstream& input, const std::uint64_t file_size) {
+try_read_footer(detail::Win32InputFile& input, const std::uint64_t file_size) {
     if (file_size < archive::kBackupFooterSize) {
         return base::Result<std::optional<archive::BackupFooter>>::success(std::nullopt);
     }
@@ -389,7 +371,7 @@ try_read_footer(std::ifstream& input, const std::uint64_t file_size) {
 }
 
 [[nodiscard]] base::Result<std::vector<archive::BlockEntry>>
-read_entries(std::ifstream& input, const std::uint64_t offset, const std::uint32_t count) {
+read_entries(detail::Win32InputFile& input, const std::uint64_t offset, const std::uint32_t count) {
     const auto byte_count = static_cast<std::uint64_t>(count) * archive::kBlockEntrySize;
     if (byte_count > (std::numeric_limits<std::size_t>::max)()) {
         return base::Result<std::vector<archive::BlockEntry>>::failure(
@@ -691,7 +673,7 @@ validate_entries(const std::vector<archive::BlockEntry>& entries, const archive:
 }
 
 [[nodiscard]] base::Result<ChunkRecord>
-read_chunk_record(std::ifstream& input, const std::uint64_t offset,
+read_chunk_record(detail::Win32InputFile& input, const std::uint64_t offset,
                   const archive::EncodedBackupHeader& part_header, const ParsedPreamble& preamble,
                   const PartReadRange& part, const ArchiveReadLimits& limits,
                   ScanStatistics& statistics) {
@@ -767,7 +749,7 @@ read_chunk_record(std::ifstream& input, const std::uint64_t offset,
 }
 
 [[nodiscard]] base::Result<std::uint64_t>
-append_chunk(std::ifstream& input, const std::uint64_t offset,
+append_chunk(detail::Win32InputFile& input, const std::uint64_t offset,
              const archive::EncodedBackupHeader& part_header, const PartReadRange& part,
              ArchiveScanState& state) {
     auto record = read_chunk_record(input, offset, part_header, state.preamble, part, state.limits,
@@ -789,7 +771,7 @@ append_chunk(std::ifstream& input, const std::uint64_t offset,
     return base::Result<std::uint64_t>::success(next_offset);
 }
 
-[[nodiscard]] base::Result<void> scan_part(std::ifstream& input,
+[[nodiscard]] base::Result<void> scan_part(detail::Win32InputFile& input,
                                            const archive::BackupHeader& header,
                                            const archive::EncodedBackupHeader& part_header,
                                            const PartReadRange& part, ArchiveScanState& state) {
@@ -808,7 +790,7 @@ append_chunk(std::ifstream& input, const std::uint64_t offset,
     return base::Result<void>::success();
 }
 
-[[nodiscard]] base::Result<archive::BackupHeader> read_part_header(std::ifstream& input) {
+[[nodiscard]] base::Result<archive::BackupHeader> read_part_header(detail::Win32InputFile& input) {
     auto bytes = read_exact(input, 0, archive::kBackupHeaderSize);
     if (!bytes) {
         return base::Result<archive::BackupHeader>::failure(bytes.error());
@@ -838,8 +820,8 @@ append_chunk(std::ifstream& input, const std::uint64_t offset,
 [[nodiscard]] base::Result<ScannedPart> read_and_scan_part(const std::filesystem::path& path,
                                                            const std::uint32_t part_index,
                                                            ArchiveScanState& state) {
-    std::ifstream input(path, std::ios::binary);
-    if (!input) {
+    detail::Win32InputFile input;
+    if (auto opened = input.open(path); !opened) {
         return base::Result<ScannedPart>::failure(
             error(missing_part_code(part_index), "archive split part is missing"));
     }
@@ -1150,8 +1132,8 @@ PersonalArchiveReader::open_with_workers(
         return base::Result<std::unique_ptr<PersonalArchiveReader>>::failure(
             error(base::ErrorCode::kInvalidArgument, "archive open request is invalid"));
     }
-    std::ifstream input(request.source, std::ios::binary);
-    if (!input) {
+    detail::Win32InputFile input;
+    if (auto opened = input.open(request.source); !opened) {
         return base::Result<std::unique_ptr<PersonalArchiveReader>>::failure(
             error(base::ErrorCode::kIoFailure, "failed to open personal archive"));
     }

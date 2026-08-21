@@ -68,6 +68,34 @@ namespace {
          QStringLiteral("aegra.error.restore.system_target_requires_pe")},
         {QStringLiteral("restore.target_too_small"),
          QStringLiteral("aegra.error.restore.target_too_small")},
+        {QStringLiteral("restore.shrink_provisional"),
+         QStringLiteral("aegra.error.restore.shrink_provisional")},
+        {QStringLiteral("restore.shrink_plan_ready"),
+         QStringLiteral("aegra.error.restore.shrink_plan_ready")},
+        {QStringLiteral("restore.shrink_not_ntfs"),
+         QStringLiteral("aegra.error.restore.shrink_not_ntfs")},
+        {QStringLiteral("restore.shrink_sector_mismatch"),
+         QStringLiteral("aegra.error.restore.shrink_sector_mismatch")},
+        {QStringLiteral("restore.shrink_below_minimum"),
+         QStringLiteral("aegra.error.restore.shrink_below_minimum")},
+        {QStringLiteral("restore.shrink_unsupported_layout"),
+         QStringLiteral("aegra.error.restore.shrink_unsupported_layout")},
+        {QStringLiteral("restore.shrink_scratch_insufficient"),
+         QStringLiteral("aegra.error.restore.shrink_scratch_insufficient")},
+        {QStringLiteral("restore.shrink_plan_changed"),
+         QStringLiteral("aegra.error.restore.shrink_plan_changed")},
+        {QStringLiteral("restore.shrink_plan_corrupt"),
+         QStringLiteral("aegra.error.restore.shrink_plan_corrupt")},
+        {QStringLiteral("restore.shrink_target_incomplete"),
+         QStringLiteral("aegra.error.restore.shrink_target_incomplete")},
+        {QStringLiteral("restore.shrink_postcheck_failed"),
+         QStringLiteral("aegra.error.restore.shrink_postcheck_failed")},
+        {QStringLiteral("restore.shrink_commit_outcome_unknown"),
+         QStringLiteral("aegra.error.restore.shrink_commit_outcome_unknown")},
+        {QStringLiteral("restore.shrink_analyze_failed"),
+         QStringLiteral("aegra.error.restore.shrink_analyze_failed")},
+        {QStringLiteral("service.capability_unavailable"),
+         QStringLiteral("aegra.error.service.capability_unavailable")},
         {QStringLiteral("mount.command_failed"),
          QStringLiteral("aegra.error.mount.command_failed")},
         {QStringLiteral("mount.list_failed"), QStringLiteral("aegra.error.mount.list_failed")},
@@ -220,6 +248,39 @@ QString translation_id_for_message_code(const QString& message_code) {
         return QStringLiteral("aegra.error.unknown");
     }
     return *it;
+}
+
+[[maybe_unused]] void keep_shrink_message_translation_ids() {
+    //% "Smaller target needs NTFS shrink analysis before restore can start"
+    qtTrId("aegra.error.restore.shrink_provisional");
+    //% "NTFS shrink plan is ready for confirmation"
+    qtTrId("aegra.error.restore.shrink_plan_ready");
+    //% "Shrink restore requires an NTFS source volume"
+    qtTrId("aegra.error.restore.shrink_not_ntfs");
+    //% "Source and target sector geometry are incompatible for shrink restore"
+    qtTrId("aegra.error.restore.shrink_sector_mismatch");
+    //% "Target volume is smaller than the exact minimum required for shrink restore"
+    qtTrId("aegra.error.restore.shrink_below_minimum");
+    //% "This NTFS layout is not supported for shrink restore"
+    qtTrId("aegra.error.restore.shrink_unsupported_layout");
+    //% "Not enough scratch space to complete NTFS shrink restore"
+    qtTrId("aegra.error.restore.shrink_scratch_insufficient");
+    //% "Source, target, or shrink plan changed; analyze again"
+    qtTrId("aegra.error.restore.shrink_plan_changed");
+    //% "Shrink plan is corrupt or incomplete; analyze again"
+    qtTrId("aegra.error.restore.shrink_plan_corrupt");
+    //% "Restore stopped before commit; target is incomplete and requires a full retry"
+    qtTrId("aegra.error.restore.shrink_target_incomplete");
+    //% "Post-restore volume check failed; do not treat the target as healthy"
+    qtTrId("aegra.error.restore.shrink_postcheck_failed");
+    //% "Boot commit outcome is unknown; verify the target before reuse"
+    qtTrId("aegra.error.restore.shrink_commit_outcome_unknown");
+    //% "NTFS shrink analysis failed"
+    qtTrId("aegra.error.restore.shrink_analyze_failed");
+    //% "This Service capability is not available"
+    qtTrId("aegra.error.service.capability_unavailable");
+    //% "Target is too small for this restore"
+    qtTrId("aegra.error.restore.target_too_small");
 }
 
 QString localize_message_code(const QString& message_code) {

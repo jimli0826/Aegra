@@ -1,6 +1,7 @@
 #include "aegra/adapters/personal_archive/personal_archive.h"
 
 #include "personal_file_archive_secondary_index.h"
+#include "win32_input_file.h"
 #include "win32_output_file.h"
 
 #include "aegra/adapters/compression_zstd/zstd_codec.h"
@@ -15,7 +16,6 @@
 
 #include <algorithm>
 #include <array>
-#include <fstream>
 #include <limits>
 #include <set>
 #include <span>
@@ -38,11 +38,6 @@ inline constexpr std::uint64_t kMaximumMetadataSize = 64ULL * 1024ULL * 1024ULL;
 [[nodiscard]] bool is_zero_uuid(const std::array<std::byte, 16>& value) noexcept {
     return std::all_of(value.begin(), value.end(),
                        [](const std::byte item) { return item == std::byte{0}; });
-}
-
-[[nodiscard]] char* as_mutable_chars(std::byte* value) noexcept {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) stream byte-buffer boundary.
-    return reinterpret_cast<char*>(value);
 }
 
 [[nodiscard]] base::Result<void> write_bytes(detail::Win32OutputFile& output,
@@ -203,10 +198,9 @@ make_index_page_aad(const archive::EncodedBackupHeader& part_header, const std::
     return base::Result<std::vector<std::byte>>::success(std::move(aad));
 }
 
-[[nodiscard]] base::Result<std::uint32_t> read_spool_size_prefix(std::ifstream& spool_input) {
+[[nodiscard]] base::Result<std::uint32_t> read_spool_size_prefix(detail::Win32InputFile& spool_input) {
     std::array<std::byte, 4> size_bytes{};
-    spool_input.read(as_mutable_chars(size_bytes.data()), 4);
-    if (!spool_input) {
+    if (auto read = spool_input.read(size_bytes); !read) {
         return base::Result<std::uint32_t>::failure(
             error(base::ErrorCode::kCorruptData, "index spool is truncated"));
     }
@@ -219,24 +213,18 @@ make_index_page_aad(const archive::EncodedBackupHeader& part_header, const std::
 }
 
 [[nodiscard]] base::Result<contracts::FileEntryDesc>
-read_spool_entry_at(std::ifstream& spool_input, const SpooledEntryRef& ref) {
-    spool_input.clear();
-    spool_input.seekg(static_cast<std::streamoff>(ref.body_offset), std::ios::beg);
-    std::vector<std::byte> encoded(ref.body_size);
-    if (ref.body_size != 0) {
-        spool_input.read(as_mutable_chars(encoded.data()),
-                         static_cast<std::streamsize>(ref.body_size));
-    }
-    if (!spool_input) {
+read_spool_entry_at(detail::Win32InputFile& spool_input, const SpooledEntryRef& ref) {
+    auto encoded = spool_input.read_exact_at(ref.body_offset, ref.body_size);
+    if (!encoded) {
         return base::Result<contracts::FileEntryDesc>::failure(
             error(base::ErrorCode::kCorruptData, "index spool entry is truncated"));
     }
-    return index::decode_leaf_entry_cbor(encoded);
+    return index::decode_leaf_entry_cbor(encoded.value());
 }
 
 /// First pass: validate each entry, keep only sort key + spool offsets (no full entry table).
 [[nodiscard]] base::Result<std::vector<SpooledEntryRef>>
-scan_spool_entry_refs(std::ifstream& spool_input, const std::uint64_t entry_count,
+scan_spool_entry_refs(detail::Win32InputFile& spool_input, const std::uint64_t entry_count,
                       const format::BackupType backup_type) {
     std::vector<SpooledEntryRef> refs;
     refs.reserve(static_cast<std::size_t>(entry_count));
@@ -246,17 +234,13 @@ scan_spool_entry_refs(std::ifstream& spool_input, const std::uint64_t entry_coun
         if (!size) {
             return base::Result<std::vector<SpooledEntryRef>>::failure(size.error());
         }
-        const auto body_offset = static_cast<std::uint64_t>(spool_input.tellg());
-        std::vector<std::byte> encoded(size.value());
-        if (size.value() != 0) {
-            spool_input.read(as_mutable_chars(encoded.data()),
-                             static_cast<std::streamsize>(size.value()));
-        }
-        if (!spool_input) {
+        const auto body_offset = spool_input.position();
+        auto encoded = spool_input.read_exact_at(body_offset, size.value());
+        if (!encoded) {
             return base::Result<std::vector<SpooledEntryRef>>::failure(
                 error(base::ErrorCode::kCorruptData, "index spool entry is truncated"));
         }
-        auto entry = index::decode_leaf_entry_cbor(encoded);
+        auto entry = index::decode_leaf_entry_cbor(encoded.value());
         if (!entry) {
             return base::Result<std::vector<SpooledEntryRef>>::failure(entry.error());
         }
@@ -452,7 +436,7 @@ void append_secondary_records_for_leaf(const std::vector<contracts::FileEntryDes
 
 /// Stream leaf packing: at most one leaf of FileEntryDesc resident (M5).
 [[nodiscard]] base::Result<NamespaceWriteResult> write_leaves_from_sorted_spool(
-    detail::Win32OutputFile& output, std::ifstream& spool_input, std::uint64_t& next_page_id,
+    detail::Win32OutputFile& output, detail::Win32InputFile& spool_input, std::uint64_t& next_page_id,
     const bool encryption_enabled, crypto_sodium::PayloadCipher* index_cipher,
     const archive::EncodedBackupHeader& part_header, const std::vector<SpooledEntryRef>& refs) {
     if (refs.empty()) {
@@ -1124,8 +1108,8 @@ PersonalFileArchiveSession::finalize(const base::CancellationToken cancellation)
     if (!spool_flushed) {
         return base::Result<void>::failure(spool_flushed.error());
     }
-    std::ifstream spool_input(implementation_->spool_path, std::ios::binary);
-    if (!spool_input) {
+    detail::Win32InputFile spool_input;
+    if (auto opened = spool_input.open(implementation_->spool_path); !opened) {
         return base::Result<void>::failure(
             error(base::ErrorCode::kIoFailure, "failed to open index spool"));
     }

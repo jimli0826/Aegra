@@ -235,6 +235,47 @@ std::optional<contracts::RestoreOptions> optional_restore(const Json& root) {
                 "worker request restore.partition_layout_edits has duplicate source_start");
         }
     }
+    const auto size_policy = iterator->find("volume_size_policy");
+    if (size_policy == iterator->end() || !size_policy->is_number_unsigned()) {
+        throw std::invalid_argument("worker request restore.volume_size_policy is required");
+    }
+    const auto size_policy_value = size_policy->get<std::uint64_t>();
+    if (size_policy_value != 1 && size_policy_value != 2) {
+        throw std::out_of_range("worker request restore.volume_size_policy is out of range");
+    }
+    result.volume_size_policy = static_cast<contracts::VolumeSizePolicy>(size_policy_value);
+    const auto plan_digest = iterator->find("shrink_plan_digest");
+    if (plan_digest == iterator->end() || !plan_digest->is_string()) {
+        throw std::invalid_argument("worker request restore.shrink_plan_digest is required");
+    }
+    result.shrink_plan_digest = plan_digest->get<std::string>();
+    if (result.shrink_plan_digest.size() > 128) {
+        throw std::invalid_argument("worker request restore.shrink_plan_digest is too long");
+    }
+    const auto chain_fp = iterator->find("source_chain_fingerprint");
+    if (chain_fp == iterator->end() || !chain_fp->is_string()) {
+        throw std::invalid_argument(
+            "worker request restore.source_chain_fingerprint is required");
+    }
+    result.source_chain_fingerprint = chain_fp->get<std::string>();
+    if (result.source_chain_fingerprint.size() > 2048) {
+        throw std::invalid_argument(
+            "worker request restore.source_chain_fingerprint is too long");
+    }
+    if (result.disk_restore &&
+        result.volume_size_policy != contracts::VolumeSizePolicy::kRequireSourceSize) {
+        throw std::invalid_argument("worker request disk restore requires require_source_size");
+    }
+    if (result.volume_size_policy == contracts::VolumeSizePolicy::kRequireSourceSize &&
+        (!result.shrink_plan_digest.empty() || !result.source_chain_fingerprint.empty())) {
+        throw std::invalid_argument(
+            "worker request shrink_plan_digest requires allow_ntfs_relocation");
+    }
+    if (result.volume_size_policy == contracts::VolumeSizePolicy::kAllowNtfsRelocation &&
+        !result.shrink_plan_digest.empty() && result.source_chain_fingerprint.empty()) {
+        throw std::invalid_argument(
+            "worker request shrink restore requires source_chain_fingerprint");
+    }
     return result;
 }
 

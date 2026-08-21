@@ -57,13 +57,16 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
 
 ## Schema 与不变量
 
-- `schema_meta.version` 当前为 `19`（`ports::kControlPlaneSchemaVersion`）。产品未发布：
-  - 新库 `CREATE IF NOT EXISTS` 即为当前完整表结构，再写入 version=18；
+- `schema_meta.version` 当前为 `20`（`ports::kControlPlaneSchemaVersion`）。产品未发布：
+  - 新库 `CREATE IF NOT EXISTS` 即为当前完整表结构，再写入当前 version；
   - **不提供** 历史 schema 的 `ALTER` 迁移或兼容读取；旧开发库必须删除后重建；
   - 非 0 且非当前版本 → `kUnsupportedVersion`。
 - schema 18：`schedules.local_minutes_of_day`（TEXT，逗号分隔分钟，如 `120,900`）替换单值
-- schema 19：删除 `schedules.owner_sid`；Service 不持久化或认证调用方身份
   `local_minute_of_day`；一条 Schedule 可配置多个当日时刻。
+- schema 19：删除 `schedules.owner_sid`；Service 不持久化或认证调用方身份。
+- schema 20（ADR-0025）：`restore_preflights` 增加 `volume_size_policy`、`feasibility`、
+  `minimum_target_bytes`、`relocation_bytes`、`scratch_upper_bound_bytes`、`shrink_plan_digest`、
+  `target_binding_digest`；`target_capacity_bytes` 仅要求 `> 0`（允许小于源逻辑大小的 provisional 缩容预检）。
 - `service_settings`（schema 16）：单行 `id=1`；`job_retention_months` ∈ {1,3,6} 默认 3；
   `updated_utc_ms`。Service 启动与 `UpdateServiceSettings` 时按 30 天/月对终端 Job 做
   `purge_terminal_completed_before` 硬删除。
@@ -120,8 +123,9 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
 - 唯一：Repository `locator`、Job `idempotency_key`（非空）、Command `idempotency_key`、至多一个
   `is_default=1`、Restore preflight token，以及非空 `jobs.preflight_token`。
 - Command record 保存请求指纹、command ID 与可选 resource ID；同键同请求可重放，同键不同请求冲突。
-- `restore_preflights` 只保存 connection/recovery point/target ID、Repository UUID、链指纹、容量/链深和
-  创建/过期 UTC；不保存 Secret、SecretRef、Archive path、Volume GUID、Manifest 或 Chunk Index。
+- `restore_preflights` 只保存 connection/recovery point/target ID、Repository UUID、链指纹、容量/链深、
+  size policy/feasibility、可选 ShrinkPlan digest/target binding digest，以及创建/过期 UTC；
+  不保存 Secret、SecretRef、Archive path、Volume GUID、Manifest、Chunk Index 或簇内容。
 - 一个非空 preflight token 最多关联一个 Job；数据库提供按 token 查询 Job，供 Start 在 Worker launch 前
   持久化并确认唯一 queued intent。
 - 时间全部为非负 UTC 毫秒整数；超出有符号 64 位线范围拒绝。

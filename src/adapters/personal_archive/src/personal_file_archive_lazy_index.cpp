@@ -22,11 +22,6 @@ namespace index = format::file_index;
     return {code, std::move(message)};
 }
 
-[[nodiscard]] char* as_mutable_chars(std::byte* value) noexcept {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-    return reinterpret_cast<char*>(value);
-}
-
 [[nodiscard]] base::Result<std::vector<std::byte>>
 make_index_page_aad(const archive::EncodedBackupHeader& part_header, const std::uint64_t body_size,
                     const archive::FileIndexPageHeader& header) {
@@ -49,7 +44,7 @@ make_index_page_aad(const archive::EncodedBackupHeader& part_header, const std::
 }
 
 [[nodiscard]] base::Result<DecodedPage>
-read_index_page_uncached(std::ifstream& input, const OpenedFileArchive& state,
+read_index_page_uncached(detail::Win32InputFile& input, const OpenedFileArchive& state,
                          const std::uint64_t page_offset) {
     auto prefix_bytes = read_exact(input, page_offset, archive::kArchiveRecordPrefixSize);
     if (!prefix_bytes) {
@@ -110,7 +105,7 @@ read_index_page_uncached(std::ifstream& input, const OpenedFileArchive& state,
 }
 
 [[nodiscard]] base::Result<DecodedPage>
-get_page_cached(std::ifstream& input, OpenedFileArchive& state, const std::uint64_t page_offset,
+get_page_cached(detail::Win32InputFile& input, OpenedFileArchive& state, const std::uint64_t page_offset,
                 const std::uint64_t expected_page_id) {
     auto& cache = state.page_cache;
     for (auto& slot : cache.slots) {
@@ -159,7 +154,7 @@ get_page_cached(std::ifstream& input, OpenedFileArchive& state, const std::uint6
 }
 
 [[nodiscard]] base::Result<void>
-verify_root_page(std::ifstream& input, OpenedFileArchive& state,
+verify_root_page(detail::Win32InputFile& input, OpenedFileArchive& state,
                  const archive::IndexRootLocator& root, const std::string_view digest_label,
                  const std::uint64_t primary_count, const std::uint64_t secondary_count,
                  const bool required) {
@@ -199,7 +194,7 @@ struct NamespaceCursor final {
 };
 
 [[nodiscard]] base::Result<NamespaceCursor>
-seek_namespace(std::ifstream& input, OpenedFileArchive& state, const index::IndexKey& target) {
+seek_namespace(detail::Win32InputFile& input, OpenedFileArchive& state, const index::IndexKey& target) {
     PageRef cur{state.footer.index_root_page_id, state.footer.index_root_offset};
     NamespaceCursor cursor;
     for (std::uint32_t depth = 0; depth <= index::kMaximumIndexDepth; ++depth) {
@@ -241,7 +236,7 @@ seek_namespace(std::ifstream& input, OpenedFileArchive& state, const index::Inde
 }
 
 [[nodiscard]] base::Result<bool>
-advance_namespace(std::ifstream& input, OpenedFileArchive& state, NamespaceCursor& cursor) {
+advance_namespace(detail::Win32InputFile& input, OpenedFileArchive& state, NamespaceCursor& cursor) {
     while (!cursor.path.empty()) {
         auto& frame = cursor.path.back();
         if (frame.child_index + 1 >= frame.children.size()) {
@@ -280,7 +275,7 @@ advance_namespace(std::ifstream& input, OpenedFileArchive& state, NamespaceCurso
 }
 
 [[nodiscard]] base::Result<PageRef>
-navigate_namespace(std::ifstream& input, OpenedFileArchive& state, const index::IndexKey& target) {
+navigate_namespace(detail::Win32InputFile& input, OpenedFileArchive& state, const index::IndexKey& target) {
     auto cursor = seek_namespace(input, state, target);
     if (!cursor) {
         return base::Result<PageRef>::failure(cursor.error());
@@ -289,7 +284,7 @@ navigate_namespace(std::ifstream& input, OpenedFileArchive& state, const index::
 }
 
 [[nodiscard]] base::Result<void>
-collect_index_pages(std::ifstream& input, OpenedFileArchive& state, const PageRef node,
+collect_index_pages(detail::Win32InputFile& input, OpenedFileArchive& state, const PageRef node,
                     const std::uint16_t leaf_kind, const std::uint16_t internal_kind,
                     const std::uint32_t depth, std::unordered_set<std::uint64_t>& page_ids) {
     if (depth > index::kMaximumIndexDepth || !page_ids.insert(node.page_id).second) {
@@ -336,7 +331,7 @@ collect_index_pages(std::ifstream& input, OpenedFileArchive& state, const PageRe
 }
 
 [[nodiscard]] base::Result<void>
-verify_index_page_count(std::ifstream& input, OpenedFileArchive& state) {
+verify_index_page_count(detail::Win32InputFile& input, OpenedFileArchive& state) {
     std::unordered_set<std::uint64_t> page_ids;
     const std::array trees{
         std::array<std::uint64_t, 4>{state.footer.index_root_page_id,
@@ -373,7 +368,7 @@ verify_index_page_count(std::ifstream& input, OpenedFileArchive& state) {
 }
 
 [[nodiscard]] base::Result<PageRef>
-navigate_integer(std::ifstream& input, OpenedFileArchive& state, const PageRef& root,
+navigate_integer(detail::Win32InputFile& input, OpenedFileArchive& state, const PageRef& root,
                  const std::uint64_t target_key, const std::uint16_t leaf_kind,
                  const std::uint16_t internal_kind) {
     PageRef cur = root;
@@ -418,7 +413,7 @@ navigate_integer(std::ifstream& input, OpenedFileArchive& state, const PageRef& 
 }
 
 [[nodiscard]] base::Result<const std::vector<contracts::FileEntryDesc>*>
-load_namespace_leaf(std::ifstream& input, OpenedFileArchive& state, const PageRef& leaf) {
+load_namespace_leaf(detail::Win32InputFile& input, OpenedFileArchive& state, const PageRef& leaf) {
     if (state.leaf_cache_offset == leaf.offset && !state.leaf_cache_entries.empty()) {
         return base::Result<const std::vector<contracts::FileEntryDesc>*>::success(
             &state.leaf_cache_entries);
@@ -442,7 +437,7 @@ load_namespace_leaf(std::ifstream& input, OpenedFileArchive& state, const PageRe
 }
 
 [[nodiscard]] base::Result<index::EntryIdIndexRecord>
-lookup_entry_id_record(std::ifstream& input, OpenedFileArchive& state,
+lookup_entry_id_record(detail::Win32InputFile& input, OpenedFileArchive& state,
                        const std::uint64_t entry_id) {
     if (entry_id == 0) {
         return base::Result<index::EntryIdIndexRecord>::failure(
@@ -475,7 +470,7 @@ lookup_entry_id_record(std::ifstream& input, OpenedFileArchive& state,
 }
 
 [[nodiscard]] base::Result<bool>
-entry_has_children(std::ifstream& input, OpenedFileArchive& state, const std::uint64_t entry_id) {
+entry_has_children(detail::Win32InputFile& input, OpenedFileArchive& state, const std::uint64_t entry_id) {
     auto cursor = seek_namespace(input, state, parent_lower_bound_key(entry_id));
     if (!cursor) {
         return base::Result<bool>::failure(cursor.error());
@@ -505,7 +500,7 @@ entry_has_children(std::ifstream& input, OpenedFileArchive& state, const std::ui
 }
 
 [[nodiscard]] base::Result<contracts::RecoveryPointEntrySummary>
-make_summary(std::ifstream& input, OpenedFileArchive& state, const contracts::FileEntryDesc& entry) {
+make_summary(detail::Win32InputFile& input, OpenedFileArchive& state, const contracts::FileEntryDesc& entry) {
     contracts::RecoveryPointEntrySummary summary;
     summary.entry_id = std::to_string(entry.entry_id);
     summary.entry_kind = entry.kind;
@@ -543,7 +538,7 @@ install_file_ciphers(OpenedFileArchive& state, const std::string_view password) 
 }
 
 [[nodiscard]] base::Result<archive::BackupFooter>
-read_required_footer(std::ifstream& input, const std::uint64_t file_size) {
+read_required_footer(detail::Win32InputFile& input, const std::uint64_t file_size) {
     if (file_size < archive::kBackupFooterSize) {
         return base::Result<archive::BackupFooter>::failure(
             error(base::ErrorCode::kCorruptData, "file archive is missing footer"));
@@ -637,7 +632,7 @@ paint_parent_chain(const std::vector<CompactEntry>& entries, const std::size_t s
 }
 
 [[nodiscard]] base::Result<void>
-collect_entry_id_leaf_records(std::ifstream& input, OpenedFileArchive& state, const PageRef& node,
+collect_entry_id_leaf_records(detail::Win32InputFile& input, OpenedFileArchive& state, const PageRef& node,
                               const std::uint32_t depth, std::vector<CompactEntry>& out) {
     if (depth > index::kMaximumIndexDepth) {
         return base::Result<void>::failure(
@@ -683,34 +678,22 @@ collect_entry_id_leaf_records(std::ifstream& input, OpenedFileArchive& state, co
 } // namespace
 
 base::Result<std::vector<std::byte>>
-read_exact(std::ifstream& input, const std::uint64_t offset, const std::size_t size) {
-    if (size > static_cast<std::size_t>((std::numeric_limits<std::streamsize>::max)())) {
-        return base::Result<std::vector<std::byte>>::failure(
-            error(base::ErrorCode::kCorruptData, "file archive read exceeds stream limit"));
-    }
-    input.clear();
-    input.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
-    std::vector<std::byte> result(size);
-    if (size != 0) {
-        input.read(as_mutable_chars(result.data()), static_cast<std::streamsize>(size));
-    }
-    if (!input || input.gcount() != static_cast<std::streamsize>(size)) {
+read_exact(detail::Win32InputFile& input, const std::uint64_t offset, const std::size_t size) {
+    auto bytes = input.read_exact_at(offset, size);
+    if (!bytes) {
         return base::Result<std::vector<std::byte>>::failure(
             error(base::ErrorCode::kIoFailure, "file archive is truncated"));
     }
-    return base::Result<std::vector<std::byte>>::success(std::move(result));
+    return bytes;
 }
 
-base::Result<std::uint64_t> read_stream_size(std::ifstream& input) {
-    input.seekg(0, std::ios::end);
-    const auto position = input.tellg();
-    if (position < 0) {
+base::Result<std::uint64_t> read_stream_size(detail::Win32InputFile& input) {
+    auto file_size = input.size();
+    if (!file_size) {
         return base::Result<std::uint64_t>::failure(
             error(base::ErrorCode::kIoFailure, "failed to determine file archive size"));
     }
-    input.seekg(0, std::ios::beg);
-    return base::Result<std::uint64_t>::success(
-        static_cast<std::uint64_t>(static_cast<std::streamoff>(position)));
+    return file_size;
 }
 
 std::string digest_to_hex(const std::array<std::byte, 32>& digest) {
@@ -754,7 +737,7 @@ make_file_chunk_aad(const archive::EncodedBackupHeader& part_header, const std::
     return base::Result<std::vector<std::byte>>::success(std::move(aad));
 }
 
-base::Result<void> prepare_roots(std::ifstream& input, OpenedFileArchive& state) {
+base::Result<void> prepare_roots(detail::Win32InputFile& input, OpenedFileArchive& state) {
     const auto& footer = state.footer;
     if (footer.index_page_count == 0 || footer.index_root_offset == 0 ||
         footer.index_root_page_id == 0 || footer.entry_count == 0) {
@@ -791,7 +774,7 @@ base::Result<void> prepare_roots(std::ifstream& input, OpenedFileArchive& state)
     return base::Result<void>::success();
 }
 
-base::Result<void> ensure_roots(std::ifstream& input, OpenedFileArchive& state) {
+base::Result<void> ensure_roots(detail::Win32InputFile& input, OpenedFileArchive& state) {
     if (state.roots_ready) {
         return base::Result<void>::success();
     }
@@ -799,7 +782,7 @@ base::Result<void> ensure_roots(std::ifstream& input, OpenedFileArchive& state) 
 }
 
 base::Result<contracts::FileEntryDesc>
-load_entry_by_id(std::ifstream& input, OpenedFileArchive& state, const std::uint64_t entry_id) {
+load_entry_by_id(detail::Win32InputFile& input, OpenedFileArchive& state, const std::uint64_t entry_id) {
     auto rec = lookup_entry_id_record(input, state, entry_id);
     if (!rec) {
         return base::Result<contracts::FileEntryDesc>::failure(rec.error());
@@ -823,7 +806,7 @@ load_entry_by_id(std::ifstream& input, OpenedFileArchive& state, const std::uint
 }
 
 base::Result<index::StreamIndexRecord>
-lookup_stream_record(std::ifstream& input, OpenedFileArchive& state,
+lookup_stream_record(detail::Win32InputFile& input, OpenedFileArchive& state,
                      const std::uint32_t stream_index) {
     if (stream_index == 0 || state.footer.stream_root.page_id == 0) {
         return base::Result<index::StreamIndexRecord>::failure(
@@ -856,7 +839,7 @@ lookup_stream_record(std::ifstream& input, OpenedFileArchive& state,
 }
 
 base::Result<StreamChunkLocator>
-load_chunk_locator(std::ifstream& input, OpenedFileArchive& state, const std::uint64_t chunk_index) {
+load_chunk_locator(detail::Win32InputFile& input, OpenedFileArchive& state, const std::uint64_t chunk_index) {
     if (state.footer.chunk_root.page_id == 0) {
         return base::Result<StreamChunkLocator>::failure(
             error(base::ErrorCode::kCorruptData, "stream extent references missing chunk"));
@@ -943,7 +926,7 @@ load_chunk_locator(std::ifstream& input, OpenedFileArchive& state, const std::ui
 }
 
 base::Result<ports::FileEntryPage>
-list_children(std::ifstream& input, OpenedFileArchive& state, const std::uint64_t parent_entry_id,
+list_children(detail::Win32InputFile& input, OpenedFileArchive& state, const std::uint64_t parent_entry_id,
               const std::uint32_t maximum_results, const std::uint64_t start_matched,
               const base::CancellationToken& cancellation) {
     ports::FileEntryPage page;
@@ -999,7 +982,7 @@ list_children(std::ifstream& input, OpenedFileArchive& state, const std::uint64_
 }
 
 base::Result<void> for_each_entry_in_leaf_order(
-    std::ifstream& input, OpenedFileArchive& state, const base::CancellationToken& cancellation,
+    detail::Win32InputFile& input, OpenedFileArchive& state, const base::CancellationToken& cancellation,
     const std::function<base::Result<void>(const contracts::FileEntryDesc&)>& visitor) {
     index::IndexKey cursor;
     cursor.parent_entry_id = 0;
@@ -1036,7 +1019,7 @@ base::Result<void> for_each_entry_in_leaf_order(
 }
 
 base::Result<void>
-verify_entry_id_index_and_parent_graph(std::ifstream& input, OpenedFileArchive& state,
+verify_entry_id_index_and_parent_graph(detail::Win32InputFile& input, OpenedFileArchive& state,
                                        const base::CancellationToken& cancellation) {
     if (cancellation.stop_requested()) {
         return base::Result<void>::failure(
@@ -1121,7 +1104,7 @@ verify_entry_id_index_and_parent_graph(std::ifstream& input, OpenedFileArchive& 
 }
 
 base::Result<OpenedFileArchive>
-open_file_archive_state(std::ifstream& input, const ArchiveOpenRequest& request,
+open_file_archive_state(detail::Win32InputFile& input, const ArchiveOpenRequest& request,
                         const std::uint64_t file_size) {
     auto preamble = detail::read_archive_preamble(input, request, file_size);
     if (!preamble) {

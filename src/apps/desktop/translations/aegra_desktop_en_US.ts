@@ -1719,6 +1719,114 @@
         <source>Volume restore writes one backup volume onto an existing non-system volume of equal or larger size. Partition layout is not changed.</source>
         <translation>Volume restore writes one backup volume onto an existing non-system volume of equal or larger size. Partition layout is not changed.</translation>
     </message>
+    <message id="aegra.restore.volume_options_hint_shrink">
+        <source>Volume restore writes onto a non-system target. A smaller NTFS target is analyzed before its mapping is accepted; failure after write needs a full retry.</source>
+        <translation>Volume restore writes onto a non-system target. A smaller NTFS target is analyzed before its mapping is accepted; failure after write needs a full retry.</translation>
+    </message>
+    <message id="aegra.restore.shrink_candidate_tag">
+        <source>— shrink</source>
+        <translation>— shrink</translation>
+    </message>
+    <message id="aegra.restore.shrink_confirm_title">
+        <source>NTFS shrink plan ready</source>
+        <translation>NTFS shrink plan ready</translation>
+    </message>
+    <message id="aegra.restore.shrink_source_size">
+        <source>Source size: %1</source>
+        <translation>Source size: %1</translation>
+    </message>
+    <message id="aegra.restore.shrink_target_size">
+        <source>Target size: %1</source>
+        <translation>Target size: %1</translation>
+    </message>
+    <message id="aegra.restore.shrink_minimum_target">
+        <source>Minimum target: %1</source>
+        <translation>Minimum target: %1</translation>
+    </message>
+    <message id="aegra.restore.shrink_relocation">
+        <source>Relocation: %1</source>
+        <translation>Relocation: %1</translation>
+    </message>
+    <message id="aegra.restore.shrink_scratch">
+        <source>Scratch upper bound: %1</source>
+        <translation>Scratch upper bound: %1</translation>
+    </message>
+    <message id="aegra.restore.shrink_restrictions">
+        <source>Restrictions: %1</source>
+        <translation>Restrictions: %1</translation>
+    </message>
+    <message id="aegra.restore.shrink_retry_warning">
+        <source>If restore fails after writing begins, the target may be unusable. You must run a full restore again.</source>
+        <translation>If restore fails after writing begins, the target may be unusable. You must run a full restore again.</translation>
+    </message>
+    <message id="aegra.restore.shrink_confirm">
+        <source>Confirm restore</source>
+        <translation>Confirm restore</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_provisional">
+        <source>Smaller target needs NTFS shrink analysis before restore can start</source>
+        <translation>Smaller target needs NTFS shrink analysis before restore can start</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_plan_ready">
+        <source>NTFS shrink plan is ready for confirmation</source>
+        <translation>NTFS shrink plan is ready for confirmation</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_not_ntfs">
+        <source>Shrink restore requires an NTFS source volume</source>
+        <translation>Shrink restore requires an NTFS source volume</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_sector_mismatch">
+        <source>Source and target sector geometry are incompatible for shrink restore</source>
+        <translation>Source and target sector geometry are incompatible for shrink restore</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_below_minimum">
+        <source>Target volume is smaller than the exact minimum required for shrink restore</source>
+        <translation>Target volume is smaller than the exact minimum required for shrink restore</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_unsupported_layout">
+        <source>This NTFS layout is not supported for shrink restore</source>
+        <translation>This NTFS layout is not supported for shrink restore</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_scratch_insufficient">
+        <source>Not enough scratch space to complete NTFS shrink restore</source>
+        <translation>Not enough scratch space to complete NTFS shrink restore</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_plan_changed">
+        <source>Source, target, or shrink plan changed; analyze again</source>
+        <translation>Source, target, or shrink plan changed; analyze again</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_plan_corrupt">
+        <source>Shrink plan is corrupt or incomplete; analyze again</source>
+        <translation>Shrink plan is corrupt or incomplete; analyze again</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_target_incomplete">
+        <source>Restore stopped before commit; target is incomplete and requires a full retry</source>
+        <translation>Restore stopped before commit; target is incomplete and requires a full retry</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_postcheck_failed">
+        <source>Post-restore volume check failed; do not treat the target as healthy</source>
+        <translation>Post-restore volume check failed; do not treat the target as healthy</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_commit_outcome_unknown">
+        <source>Boot commit outcome is unknown; verify the target before reuse</source>
+        <translation>Boot commit outcome is unknown; verify the target before reuse</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_analyze_failed">
+        <source>NTFS shrink analysis failed</source>
+        <translation>NTFS shrink analysis failed</translation>
+    </message>
+    <message id="aegra.error.service.capability_unavailable">
+        <source>This Service capability is not available</source>
+        <translation>This Service capability is not available</translation>
+    </message>
+    <message id="aegra.error.restore.target_too_small">
+        <source>Target is too small for this restore</source>
+        <translation>Target is too small for this restore</translation>
+    </message>
+    <message id="aegra.error.restore.command_failed">
+        <source>Could not start restore</source>
+        <translation>Could not start restore</translation>
+    </message>
     <message id="aegra.restore.no_recovery_points_on_date">
         <source>No recovery points on this date</source>
         <translation>No recovery points on this date</translation>

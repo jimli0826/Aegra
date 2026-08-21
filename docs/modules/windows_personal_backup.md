@@ -31,7 +31,7 @@ Validate Request
 -> Open VSS Snapshot Devices and non-VSS canonical Volumes as ordered WindowsBlockSources
 -> Classify volumes: FS candidate + IsVolumeSupported → VSS set; others raw
 -> Optionally wrap each source with Volume Bitmap free-cluster skip (same device path as read)
--> pagefile/hiber/swap exclusion on the same read root (live GUID or VSS snapshot; AipCopy style)
+-> pagefile/hiber/swap exclusion on the same read root (live GUID or VSS snapshot)
 -> Report both classes as FREE extents; do not read/hash them and persist FREE BlockEntry runs
 -> Build one V6 Manifest containing all selected Volumes
 -> Log worker thread count; hash/compress fan-out in PersonalArchive (exception-safe)

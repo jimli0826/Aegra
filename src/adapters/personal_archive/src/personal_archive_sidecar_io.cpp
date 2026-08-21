@@ -1,4 +1,5 @@
 #include "personal_archive_sidecar_io.h"
+#include "win32_input_file.h"
 #include "win32_output_file.h"
 
 #include "aegra/adapters/compression_zstd/zstd_codec.h"
@@ -7,7 +8,6 @@
 #include "aegra/base/error.h"
 #include "aegra/format/personal_archive.h"
 
-#include <fstream>
 #include <limits>
 #include <string>
 #include <system_error>
@@ -28,24 +28,14 @@ struct ArchiveKeyContext final {
     return {code, std::move(message)};
 }
 
-[[nodiscard]] char* as_chars(std::byte* value) noexcept {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) stream byte-buffer boundary.
-    return reinterpret_cast<char*>(value);
-}
-
-[[nodiscard]] base::Result<std::vector<std::byte>> read_exact(std::ifstream& input,
+[[nodiscard]] base::Result<std::vector<std::byte>> read_exact(detail::Win32InputFile& input,
                                                               const std::size_t size) {
-    if (size > static_cast<std::size_t>((std::numeric_limits<std::streamsize>::max)())) {
-        return base::Result<std::vector<std::byte>>::failure(
-            error(base::ErrorCode::kCorruptData, "sidecar read exceeds stream limit"));
-    }
-    std::vector<std::byte> result(size);
-    input.read(as_chars(result.data()), static_cast<std::streamsize>(size));
-    if (!input || input.gcount() != static_cast<std::streamsize>(size)) {
+    auto result = input.read_exact_at(input.position(), size);
+    if (!result) {
         return base::Result<std::vector<std::byte>>::failure(
             error(base::ErrorCode::kIoFailure, "sidecar file is truncated"));
     }
-    return base::Result<std::vector<std::byte>>::success(std::move(result));
+    return result;
 }
 
 [[nodiscard]] base::Result<void> write_bytes(detail::Win32OutputFile& output,
@@ -61,8 +51,8 @@ struct ArchiveKeyContext final {
 
 [[nodiscard]] base::Result<ArchiveKeyContext>
 read_archive_key_context(const std::filesystem::path& archive_path) {
-    std::ifstream input(archive_path, std::ios::binary);
-    if (!input) {
+    detail::Win32InputFile input;
+    if (auto opened = input.open(archive_path); !opened) {
         return base::Result<ArchiveKeyContext>::failure(
             error(base::ErrorCode::kIoFailure, "failed to open archive for sidecar"));
     }
@@ -74,7 +64,9 @@ read_archive_key_context(const std::filesystem::path& archive_path) {
     if (!header) {
         return base::Result<ArchiveKeyContext>::failure(header.error());
     }
-    input.seekg(static_cast<std::streamoff>(header.value().cbor_offset), std::ios::beg);
+    if (auto sought = input.seek(header.value().cbor_offset); !sought) {
+        return base::Result<ArchiveKeyContext>::failure(sought.error());
+    }
     auto envelope_bytes = read_exact(input, archive::kMetadataEnvelopeHeaderSize);
     if (!envelope_bytes) {
         return base::Result<ArchiveKeyContext>::failure(envelope_bytes.error());
@@ -109,12 +101,16 @@ make_sidecar_aad(archive::SidecarHeader header) {
 }
 
 [[nodiscard]] base::Result<std::vector<std::byte>>
-read_sidecar_ciphertext(std::ifstream& input, const archive::SidecarHeader& header) {
+read_sidecar_ciphertext(detail::Win32InputFile& input, const archive::SidecarHeader& header) {
     auto ciphertext = read_exact(input, static_cast<std::size_t>(header.payload_stored_size));
     if (!ciphertext) {
         return ciphertext;
     }
-    if (input.peek() != std::ifstream::traits_type::eof()) {
+    auto file_size = input.size();
+    if (!file_size) {
+        return base::Result<std::vector<std::byte>>::failure(file_size.error());
+    }
+    if (file_size.value() != input.position()) {
         return base::Result<std::vector<std::byte>>::failure(
             error(base::ErrorCode::kCorruptData, "sidecar has trailing data"));
     }
@@ -161,7 +157,7 @@ decode_sidecar_payload_data(const archive::SidecarHeader& header,
 }
 
 [[nodiscard]] base::Result<ArchiveSidecar>
-decode_sidecar_file(std::ifstream& input, const ArchiveKeyContext& archive_context,
+decode_sidecar_file(detail::Win32InputFile& input, const ArchiveKeyContext& archive_context,
                     const std::string_view password, const std::uint64_t maximum_size) {
     auto header_bytes = read_exact(input, archive::kSidecarHeaderSize);
     if (!header_bytes) {
@@ -272,8 +268,8 @@ base::Result<ArchiveSidecar> load_archive_sidecar(const std::filesystem::path& a
     if (!archive_context) {
         return base::Result<ArchiveSidecar>::failure(archive_context.error());
     }
-    std::ifstream input(sidecar_path(archive_path), std::ios::binary);
-    if (!input) {
+    detail::Win32InputFile input;
+    if (auto opened = input.open(sidecar_path(archive_path)); !opened) {
         return base::Result<ArchiveSidecar>::failure(
             error(base::ErrorCode::kNotFound, "archive sidecar does not exist"));
     }

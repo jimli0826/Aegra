@@ -499,27 +499,83 @@ base::Result<void> validate_start_verify_command(const StartVerifyCommand& comma
     return base::Result<void>::success();
 }
 
+[[nodiscard]] bool is_known_volume_size_policy(const VolumeSizePolicy policy) noexcept {
+    return policy == VolumeSizePolicy::kRequireSourceSize ||
+           policy == VolumeSizePolicy::kAllowNtfsRelocation;
+}
+
+[[nodiscard]] bool is_known_restore_feasibility(const RestoreFeasibility value) noexcept {
+    return value == RestoreFeasibility::kIneligible || value == RestoreFeasibility::kProvisional ||
+           value == RestoreFeasibility::kEligible;
+}
+
+[[nodiscard]] bool valid_code_list(const std::vector<std::string>& codes,
+                                   const std::size_t maximum_count) noexcept {
+    if (codes.size() > maximum_count) {
+        return false;
+    }
+    std::set<std::string_view> seen;
+    for (const auto& code : codes) {
+        if (!valid_stable_value(code, kMaximumMessageCodeBytes) || !seen.insert(code).second) {
+            return false;
+        }
+    }
+    return true;
+}
+
 base::Result<void> validate_restore_preflight_request(const RestorePreflightRequest& request) {
     if (!valid_stable_value(request.repository_connection_id, kMaximumIdentifierBytes) ||
         !valid_stable_value(request.recovery_point_id, kMaximumIdentifierBytes) ||
         !valid_stable_value(request.target_source_id, kMaximumIdentifierBytes) ||
-        request.archive_password.size() > 32) {
+        request.archive_password.size() > 32 ||
+        !is_known_volume_size_policy(request.volume_size_policy)) {
         return invalid("restore preflight request is invalid");
     }
     return base::Result<void>::success();
 }
 
 base::Result<void> validate_restore_preflight(const RestorePreflight& preflight) {
+    const bool eligible = preflight.feasibility == RestoreFeasibility::kEligible;
+    const bool capacity_ok =
+        preflight.volume_size_policy == VolumeSizePolicy::kAllowNtfsRelocation
+            ? preflight.target_capacity_bytes > 0
+            : preflight.target_capacity_bytes >= preflight.logical_size_bytes;
     if (!valid_token(preflight.preflight_token) ||
         !valid_stable_value(preflight.repository_connection_id, kMaximumIdentifierBytes) ||
         !valid_stable_value(preflight.recovery_point_id, kMaximumIdentifierBytes) ||
         !valid_stable_value(preflight.target_source_id, kMaximumIdentifierBytes) ||
         preflight.logical_size_bytes == 0 || !valid_wire_integer(preflight.logical_size_bytes) ||
-        preflight.target_capacity_bytes < preflight.logical_size_bytes ||
-        !valid_wire_integer(preflight.target_capacity_bytes) || preflight.chain_depth == 0 ||
-        preflight.expires_utc_ms == 0 || !valid_wire_integer(preflight.expires_utc_ms) ||
-        !preflight.restore_eligible ||
+        !capacity_ok || !valid_wire_integer(preflight.target_capacity_bytes) ||
+        preflight.chain_depth == 0 || preflight.expires_utc_ms == 0 ||
+        !valid_wire_integer(preflight.expires_utc_ms) ||
+        !is_known_volume_size_policy(preflight.volume_size_policy) ||
+        !is_known_restore_feasibility(preflight.feasibility) ||
+        preflight.restore_eligible != eligible || !valid_wire_integer(preflight.minimum_target_bytes) ||
+        !valid_wire_integer(preflight.relocation_bytes) ||
+        !valid_wire_integer(preflight.scratch_upper_bound_bytes) ||
+        preflight.shrink_plan_digest.size() > 128 ||
+        !valid_code_list(preflight.restriction_codes, 32) ||
+        !valid_code_list(preflight.warning_codes, 32) ||
         !valid_stable_value(preflight.message_code, kMaximumMessageCodeBytes)) {
+        return invalid("restore preflight is invalid");
+    }
+    if (preflight.feasibility == RestoreFeasibility::kIneligible) {
+        return invalid("restore preflight is invalid");
+    }
+    if (preflight.volume_size_policy == VolumeSizePolicy::kRequireSourceSize) {
+        if (preflight.feasibility != RestoreFeasibility::kEligible ||
+            !preflight.shrink_plan_digest.empty() || preflight.relocation_bytes != 0) {
+            return invalid("restore preflight is invalid");
+        }
+    }
+    if (preflight.feasibility == RestoreFeasibility::kProvisional &&
+        !preflight.shrink_plan_digest.empty()) {
+        return invalid("restore preflight is invalid");
+    }
+    if (preflight.feasibility == RestoreFeasibility::kEligible &&
+        preflight.volume_size_policy == VolumeSizePolicy::kAllowNtfsRelocation &&
+        preflight.target_capacity_bytes < preflight.logical_size_bytes &&
+        preflight.shrink_plan_digest.empty()) {
         return invalid("restore preflight is invalid");
     }
     return base::Result<void>::success();

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "personal_archive_preamble.h"
+#include "win32_input_file.h"
 
 #include "aegra/adapters/crypto_sodium/payload_crypto.h"
 #include "aegra/base/result.h"
@@ -11,7 +12,6 @@
 
 #include <array>
 #include <cstdint>
-#include <fstream>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -71,9 +71,9 @@ struct OpenedFileArchive final {
 };
 
 [[nodiscard]] base::Result<std::vector<std::byte>>
-read_exact(std::ifstream& input, std::uint64_t offset, std::size_t size);
+read_exact(detail::Win32InputFile& input, std::uint64_t offset, std::size_t size);
 
-[[nodiscard]] base::Result<std::uint64_t> read_stream_size(std::ifstream& input);
+[[nodiscard]] base::Result<std::uint64_t> read_stream_size(detail::Win32InputFile& input);
 
 [[nodiscard]] std::string digest_to_hex(const std::array<std::byte, 32>& digest);
 
@@ -84,36 +84,36 @@ make_file_chunk_aad(const format::personal_archive::EncodedBackupHeader& part_he
                     std::span<const format::personal_archive::BlockEntry> entries);
 
 /// Authenticate Footer roots only (O(1) open). Does not scan leaves or chunks.
-[[nodiscard]] base::Result<void> prepare_roots(std::ifstream& input, OpenedFileArchive& state);
+[[nodiscard]] base::Result<void> prepare_roots(detail::Win32InputFile& input, OpenedFileArchive& state);
 
 [[nodiscard]] base::Result<void>
-ensure_roots(std::ifstream& input, OpenedFileArchive& state);
+ensure_roots(detail::Win32InputFile& input, OpenedFileArchive& state);
 
 [[nodiscard]] base::Result<contracts::FileEntryDesc>
-load_entry_by_id(std::ifstream& input, OpenedFileArchive& state, std::uint64_t entry_id);
+load_entry_by_id(detail::Win32InputFile& input, OpenedFileArchive& state, std::uint64_t entry_id);
 
 [[nodiscard]] base::Result<format::file_index::StreamIndexRecord>
-lookup_stream_record(std::ifstream& input, OpenedFileArchive& state, std::uint32_t stream_index);
+lookup_stream_record(detail::Win32InputFile& input, OpenedFileArchive& state, std::uint32_t stream_index);
 
 [[nodiscard]] base::Result<StreamChunkLocator>
-load_chunk_locator(std::ifstream& input, OpenedFileArchive& state, std::uint64_t chunk_index);
+load_chunk_locator(detail::Win32InputFile& input, OpenedFileArchive& state, std::uint64_t chunk_index);
 
 [[nodiscard]] base::Result<ports::FileEntryPage>
-list_children(std::ifstream& input, OpenedFileArchive& state, std::uint64_t parent_entry_id,
+list_children(detail::Win32InputFile& input, OpenedFileArchive& state, std::uint64_t parent_entry_id,
               std::uint32_t maximum_results, std::uint64_t start_matched,
               const base::CancellationToken& cancellation);
 
 [[nodiscard]] base::Result<void> for_each_entry_in_leaf_order(
-    std::ifstream& input, OpenedFileArchive& state, const base::CancellationToken& cancellation,
+    detail::Win32InputFile& input, OpenedFileArchive& state, const base::CancellationToken& cancellation,
     const std::function<base::Result<void>(const contracts::FileEntryDesc&)>& visitor);
 
 /// Full parent-graph / unique-id validation for explicit Verify (O(N log N) via Entry ID index).
 [[nodiscard]] base::Result<void>
-verify_entry_id_index_and_parent_graph(std::ifstream& input, OpenedFileArchive& state,
+verify_entry_id_index_and_parent_graph(detail::Win32InputFile& input, OpenedFileArchive& state,
                                        const base::CancellationToken& cancellation);
 
 [[nodiscard]] base::Result<OpenedFileArchive>
-open_file_archive_state(std::ifstream& input, const ArchiveOpenRequest& request,
+open_file_archive_state(detail::Win32InputFile& input, const ArchiveOpenRequest& request,
                         std::uint64_t file_size);
 
 [[nodiscard]] base::Result<std::uint64_t> parse_token(const std::optional<std::string>& token);

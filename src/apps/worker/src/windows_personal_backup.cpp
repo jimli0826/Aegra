@@ -11,21 +11,73 @@
 
 #include <algorithm>
 #include <array>
-#include <fstream>
 #include <iomanip>
 #include <limits>
 #include <map>
 #include <optional>
 #include <set>
+#include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
 
+#include <windows.h>
+
 namespace aegra::apps::worker {
 namespace detail {
 namespace {
+
+class ScopedInputFile final {
+  public:
+    ScopedInputFile() noexcept = default;
+    ScopedInputFile(const ScopedInputFile&) = delete;
+    ScopedInputFile& operator=(const ScopedInputFile&) = delete;
+    ~ScopedInputFile() { close(); }
+
+    [[nodiscard]] bool open(const std::filesystem::path& path) {
+        close();
+        handle_ = ::CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        return handle_ != INVALID_HANDLE_VALUE;
+    }
+
+    [[nodiscard]] bool read_at(const std::uint64_t offset, const std::span<std::byte> destination) const {
+        if (handle_ == INVALID_HANDLE_VALUE || destination.empty()) {
+            return handle_ != INVALID_HANDLE_VALUE && destination.empty();
+        }
+        LARGE_INTEGER seek{};
+        seek.QuadPart = static_cast<LONGLONG>(offset);
+        if (::SetFilePointerEx(handle_, seek, nullptr, FILE_BEGIN) == FALSE) {
+            return false;
+        }
+        std::size_t total = 0;
+        while (total < destination.size()) {
+            const auto remaining = destination.size() - total;
+            const auto request = static_cast<DWORD>((std::min)(
+                remaining, static_cast<std::size_t>((std::numeric_limits<DWORD>::max)())));
+            DWORD transferred = 0;
+            if (::ReadFile(handle_, destination.data() + total, request, &transferred, nullptr) ==
+                    FALSE ||
+                transferred == 0) {
+                return false;
+            }
+            total += transferred;
+        }
+        return true;
+    }
+
+    void close() noexcept {
+        if (handle_ != INVALID_HANDLE_VALUE) {
+            ::CloseHandle(handle_);
+            handle_ = INVALID_HANDLE_VALUE;
+        }
+    }
+
+  private:
+    HANDLE handle_{INVALID_HANDLE_VALUE};
+};
 
 // Service wire integers are signed 64-bit (same bound as contracts/service validation).
 constexpr std::uint64_t kMaximumWireInteger =
@@ -493,15 +545,13 @@ resolve_final_archive_part(const std::filesystem::path& destination) {
         return base::Result<std::filesystem::path>::failure(
             base::Error{base::ErrorCode::kCorruptData, "committed archive header is missing"});
     }
-    std::ifstream input(destination, std::ios::binary);
-    if (!input) {
+    ScopedInputFile input;
+    if (!input.open(destination)) {
         return base::Result<std::filesystem::path>::failure(
             base::Error{base::ErrorCode::kIoFailure, "failed to open committed archive"});
     }
     std::array<std::byte, archive::kBackupHeaderSize> header_bytes{};
-    input.read(reinterpret_cast<char*>(header_bytes.data()),
-               static_cast<std::streamsize>(header_bytes.size()));
-    if (!input) {
+    if (!input.read_at(0, header_bytes)) {
         return base::Result<std::filesystem::path>::failure(
             base::Error{base::ErrorCode::kIoFailure, "failed to read committed archive header"});
     }
@@ -585,17 +635,13 @@ read_committed_footer_metrics(const std::filesystem::path& destination) {
         return base::Result<FooterCommitMetrics>::failure(
             base::Error{base::ErrorCode::kCorruptData, "committed archive footer is missing"});
     }
-    std::ifstream input(final_part.value(), std::ios::binary);
-    if (!input) {
+    ScopedInputFile input;
+    if (!input.open(final_part.value())) {
         return base::Result<FooterCommitMetrics>::failure(
             base::Error{base::ErrorCode::kIoFailure, "failed to open committed archive footer"});
     }
-    input.seekg(static_cast<std::streamoff>(file_size - archive::kBackupFooterSize),
-                std::ios::beg);
     std::array<std::byte, archive::kBackupFooterSize> footer_bytes{};
-    input.read(reinterpret_cast<char*>(footer_bytes.data()),
-               static_cast<std::streamsize>(footer_bytes.size()));
-    if (!input) {
+    if (!input.read_at(file_size - archive::kBackupFooterSize, footer_bytes)) {
         return base::Result<FooterCommitMetrics>::failure(
             base::Error{base::ErrorCode::kIoFailure, "failed to read committed archive footer"});
     }

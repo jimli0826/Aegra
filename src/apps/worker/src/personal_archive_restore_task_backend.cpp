@@ -1,5 +1,6 @@
 #include "personal_archive_restore_task_backend.h"
 
+#include "personal_archive_restore_shrink.h"
 #include "worker_task_log.h"
 
 #include "aegra/adapters/personal_archive/personal_archive.h"
@@ -687,6 +688,10 @@ class PersonalArchiveRestoreTaskBackend final : public IPersonalArchiveRestoreTa
     [[nodiscard]] static base::Result<pipeline::RestoreSummary>
     run_volume_restore(const PersonalArchiveRestoreBackendRequest& request,
                        const base::CancellationToken& cancellation) {
+        if (request.volume_size_policy == contracts::VolumeSizePolicy::kAllowNtfsRelocation &&
+            !request.shrink_plan_digest.empty()) {
+            return run_shrink_volume_restore(request, cancellation);
+        }
         if (request.layers.empty()) {
             return base::Result<pipeline::RestoreSummary>::failure(
                 {base::ErrorCode::kInvalidArgument, "volume restore requires at least one archive"});
@@ -727,13 +732,21 @@ class PersonalArchiveRestoreTaskBackend final : public IPersonalArchiveRestoreTa
             sink = std::move(opened).value();
             stage.note_bytes("capacity", sink->capacity_bytes());
             stage.note_bytes("source_logical_size", volume_reader->logical_size_bytes());
-            if (volume_reader->logical_size_bytes() > sink->capacity_bytes()) {
+            const auto write_limit = request.plan.logical_write_limit_bytes == 0
+                                         ? volume_reader->logical_size_bytes()
+                                         : request.plan.logical_write_limit_bytes;
+            if (write_limit > sink->capacity_bytes()) {
                 return fail_restore(stage,
                                     {base::ErrorCode::kInsufficientSpace,
                                      "restore target capacity is insufficient"},
                                     "capacity_preflight");
             }
-            stage.note("preflight", "source_size <= target_capacity");
+            if (request.plan.logical_write_limit_bytes == 0) {
+                stage.note("preflight", "source_size <= target_capacity");
+            } else {
+                stage.note_bytes("logical_write_limit", request.plan.logical_write_limit_bytes);
+                stage.note("preflight", "prefix_restore_limit <= target_capacity");
+            }
         }
 
         {

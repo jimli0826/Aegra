@@ -14,18 +14,24 @@ generation、分页列举和 generation 保护删除。
 ```text
 src/adapters/storage_local/
 ├── CMakeLists.txt
-├── include/aegra/adapters/storage_local/local_object_storage.h
+├── include/aegra/adapters/storage_local/
+│   ├── local_object_storage.h
+│   └── windows_scratch_store.h
 └── src/
     ├── local_object_storage.cpp
     ├── local_staged_writer.cpp
     ├── local_storage_internal.h
-    └── local_storage_paths.cpp
+    ├── local_storage_paths.cpp
+    ├── windows_scratch_index.cpp
+    ├── windows_scratch_internal.h
+    ├── windows_scratch_io.cpp
+    └── windows_scratch_store.cpp
 ```
 
 - Target：`aegra_adapter_storage_local` / `Aegra::AdapterStorageLocal`。
 - 仅在 Windows 构建，只依赖 `Aegra::Ports`、C++ 标准库和 Windows SDK。
 - 公共头不包含 `Windows.h`，平台句柄和实现状态通过私有 state 隔离。
-- 禁止依赖 `personal_repository`、Memory Adapter、数据库、Archive Adapter 或 Application。
+- 禁止依赖 `personal_repository`、Memory Adapter、数据库、Archive Adapter、`windows_disk` 或 Application。
 
 ## 公共接口
 
@@ -116,21 +122,44 @@ consistency；该声明以单一受管 Repository 根和 Adapter 协调写入为
 `kOutcomeUnknown`，不得伪报取消。Windows 错误映射到稳定 Aegra 错误码；消息只包含操作名和原生数值错误
 码，不包含 Repository 路径或客户对象名。
 
+## Scratch Store（ADR-0025 / SR2）
+
+`WindowsScratchStoreFactory` 实现 `ports::IScratchStoreFactory`，在本地绝对路径上创建稀疏文件 Scratch：
+
+- Win32 `CreateFileW` / `ReadFile` / `WriteFile` / `SetFilePointerEx` / `FlushFileBuffers` /
+  `DeviceIoControl(FSCTL_SET_SPARSE)`；禁止 iostream 文件流；公共头不包含 `Windows.h`。
+- 页面大小 65536；已写页面以 page index 为键的有序 map 跟踪，并保存 payload CRC32；未写页面读零；
+  CRC 不匹配返回 `kCorruptData`。
+- `allocated_bytes = written_pages * page_size`；超过 `maximum_allocation_bytes` 返回
+  `kInsufficientSpace`（消息含 `restore.shrink_scratch_insufficient`）。
+- `logical_size_bytes` 是完整源卷地址空间，和物理配额分离；创建前用 `GetDiskFreeSpaceExW` 证明硬配额可用。
+- `memory_budget_bytes` 限制内存索引；溢出时将较旧条目 spill 到伴生 `.idx`（有序记录，二分查找），
+  查找保持 O(log n)，禁止按写记录线性扫描。
+- 打开时若 `forbidden_volume_guid_utf8` 非空，用 `GetVolumePathNameW` +
+  `GetVolumeNameForVolumeMountPointW` 解析 Scratch 卷 GUID，与禁止 GUID 大小写不敏感相等则
+  `kConflict`。不依赖 `windows_disk` Adapter。
+- backing、`.idx` 和 merge 临时文件均使用 create-new 独占创建，绝不覆盖同名文件；
+  `close_and_discard` 只删除本实例实际创建并拥有的文件。
+- Factory 不创建父目录；Worker 在 Target 发生任何写入前创建
+  `<data_dir>/staging/<job_id>/ntfs-shrink/`，逐级拒绝 reparse point，并在 Store 释放后只清理本次创建的空目录。
+
 ## 验证
 
 构建 Local Storage 生产 Target，按公共 Object Storage 契约审查 open/create/reopen、staging、generation、
-路径拒绝、reparse point 和只读删除语义。涉及符号链接、空间不足、ACL 拒绝或进程崩溃时，仅在隔离的
-非生产目录执行管理员人工验证。
+路径拒绝、reparse point 和只读删除语义；并构建验证 Scratch factory。涉及符号链接、空间不足、ACL
+拒绝或进程崩溃时，仅在隔离的非生产目录执行管理员人工验证。
 
 ## Definition of Done
 
 - Windows Debug/Release 使用 VS 2026 Insiders 构建并遵循公共 Storage Contract。
 - root/key/reparse-point/扩展路径边界与本文件一致。
 - staging、发布、generation、删除、取消和 unknown outcome 语义有完整文档与验证记录。
+- Scratch 硬配额、CRC、卷冲突拒绝与 `.idx` spill 语义与本文件一致。
 - Target 只依赖 Ports 和 Windows SDK，公共头不泄漏 Windows 类型。
 - 函数、文件、格式、静态检查和秘密扫描通过。
 
 ## 当前状态
 
-阶段 12C 已实现上述 Local Object Storage Adapter。Repository Scanner、Catalog Reconcile、Delete Plan 和
-Tombstone 执行仍由后续 `personal_repository` 阶段实现。
+阶段 12C 已实现上述 Local Object Storage Adapter。SR2 已实现 Windows sparse Scratch Adapter。
+Repository Scanner、Catalog Reconcile、Delete Plan 和 Tombstone 执行仍由后续 `personal_repository`
+阶段实现。

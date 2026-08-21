@@ -44,6 +44,12 @@ FAT32 文件集 VSS 源、nullable stable identity 与能力降级恢复目标�
 Explorer 进程内只读浏览 `.bkf`（替代“Shell 仅 IPC 到 Mount Host”）见
 [ADR-0023](0023-in-process-explorer-archive-browsing.md)。
 
+Service session 并发分派与请求级 deadline 见
+[ADR-0024](0024-service-session-concurrent-dispatch.md)。
+
+NTFS 小目标卷恢复的模块、Ports、`$LogFile`/Dirty、Boot 提交与 CHKDSK 边界见
+[ADR-0025](0025-ntfs-smaller-target-volume-restore.md)。
+
 ## 状态
 
 - `Proposed`：讨论中，不构成实现依据。

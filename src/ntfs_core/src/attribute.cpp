@@ -1,8 +1,12 @@
-#include "ntfs_internal.h"
+#include "aegra/ntfs_core/attribute.h"
+
+#include "aegra/ntfs_core/binary.h"
+#include "aegra/ntfs_core/runlist.h"
 
 #include <cstring>
+#include <utility>
 
-namespace aegra::adapters::ntfs::detail {
+namespace aegra::ntfs_core {
 namespace {
 
 [[nodiscard]] base::Result<std::u16string>
@@ -19,6 +23,57 @@ read_utf16_name(const std::span<const std::byte> data, const std::size_t offset,
 }
 
 } // namespace
+
+bool is_known_attribute_type(const std::uint32_t type) noexcept {
+    switch (type) {
+    case kAttrStandardInformation:
+    case kAttrAttributeList:
+    case kAttrFileName:
+    case 0x40:
+    case 0x50:
+    case 0x60:
+    case 0x70:
+    case kAttrData:
+    case kAttrIndexRoot:
+    case kAttrIndexAllocation:
+    case kAttrBitmap:
+    case 0xC0:
+    case 0xD0:
+    case 0xE0:
+    case 0xF0:
+    case 0x100:
+    case kAttrEnd:
+        return true;
+    default:
+        return false;
+    }
+}
+
+base::Result<void> validate_attribute_header(const std::span<const std::byte> record,
+                                             const std::size_t offset, std::uint32_t& type,
+                                             std::uint32_t& length, bool& non_resident) {
+    if (offset > record.size() || record.size() - offset < 8) {
+        return base::Result<void>::failure(
+            make_error(base::ErrorCode::kCorruptData, "ntfs.attribute_out_of_bounds"));
+    }
+    type = read_u32(record, offset);
+    if (type == kAttrEnd) {
+        length = 0;
+        non_resident = false;
+        return base::Result<void>::success();
+    }
+    if (record.size() - offset < 16) {
+        return base::Result<void>::failure(
+            make_error(base::ErrorCode::kCorruptData, "ntfs.attribute_out_of_bounds"));
+    }
+    length = read_u32(record, offset + 4);
+    if (length < 16 || length > record.size() - offset) {
+        return base::Result<void>::failure(
+            make_error(base::ErrorCode::kCorruptData, "ntfs.attribute_out_of_bounds"));
+    }
+    non_resident = std::to_integer<std::uint8_t>(record[offset + 8]) != 0;
+    return base::Result<void>::success();
+}
 
 base::Result<AttributeValue> parse_attribute(const std::span<const std::byte> record,
                                              const std::size_t offset) {
@@ -37,10 +92,13 @@ base::Result<AttributeValue> parse_attribute(const std::span<const std::byte> re
     const auto attr = record.subspan(offset, length);
     AttributeValue value;
     value.type = type;
+    value.record_offset = static_cast<std::uint32_t>(offset);
+    value.attribute_length = length;
     value.non_resident = non_resident;
     const auto name_length = std::to_integer<std::uint8_t>(attr[9]);
     const auto name_offset = read_u16(attr, 10);
     const auto flags = read_u16(attr, 12);
+    value.attribute_id = read_u16(attr, 14);
     value.compressed = (flags & 0x0001) != 0;
     value.encrypted = (flags & 0x4000) != 0;
     value.sparse = (flags & 0x8000) != 0;
@@ -68,11 +126,11 @@ base::Result<AttributeValue> parse_attribute(const std::span<const std::byte> re
             return base::Result<AttributeValue>::failure(
                 make_error(base::ErrorCode::kCorruptData, "ntfs.attribute_out_of_bounds"));
         }
-        value.data_size = value_length;
-        value.allocated_size = value_length;
-        value.initialized_size = value_length;
+        value.data_size.value = value_length;
+        value.allocated_size.value = value_length;
+        value.initialized_size.value = value_length;
         value.resident_data.assign(attr.begin() + value_offset,
-                                  attr.begin() + value_offset + value_length);
+                                   attr.begin() + value_offset + value_length);
         return base::Result<AttributeValue>::success(std::move(value));
     }
 
@@ -80,13 +138,14 @@ base::Result<AttributeValue> parse_attribute(const std::span<const std::byte> re
         return base::Result<AttributeValue>::failure(
             make_error(base::ErrorCode::kCorruptData, "ntfs.attribute_out_of_bounds"));
     }
-    const auto start_vcn = read_u64(attr, 16);
-    const auto last_vcn = read_u64(attr, 24);
+    const VirtualClusterNumber start_vcn{read_u64(attr, 16)};
+    const VirtualClusterNumber last_vcn{read_u64(attr, 24)};
     const auto runlist_offset = read_u16(attr, 32);
+    value.runlist_offset = runlist_offset;
     const auto compression_unit = read_u16(attr, 34);
-    value.allocated_size = read_u64(attr, 40);
-    value.data_size = read_u64(attr, 48);
-    value.initialized_size = read_u64(attr, 56);
+    value.allocated_size.value = read_u64(attr, 40);
+    value.data_size.value = read_u64(attr, 48);
+    value.initialized_size.value = read_u64(attr, 56);
     if (compression_unit != 0 || value.compressed) {
         value.compressed = true;
     }
@@ -102,4 +161,4 @@ base::Result<AttributeValue> parse_attribute(const std::span<const std::byte> re
     return base::Result<AttributeValue>::success(std::move(value));
 }
 
-} // namespace aegra::adapters::ntfs::detail
+} // namespace aegra::ntfs_core

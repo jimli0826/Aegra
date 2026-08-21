@@ -25,6 +25,8 @@ add_library(aegra_app_service STATIC
     src/worker_job_service.cpp
     src/worker_job_service_file_restore.cpp
     src/worker_job_service_restore.cpp
+    src/worker_job_service_restore_shared.cpp
+    src/worker_job_service_shrink_analyze.cpp
     src/worker_supervisor.cpp
     src/supervisor_worker_protocol.cpp
 )
@@ -51,6 +53,8 @@ target_link_libraries(
         Aegra::PersonalRepository
         Aegra::AdapterWindowsFilesystem
         Aegra::AdapterWindowsSystem
+        Aegra::AdapterWindowsDisk
+        Aegra::NtfsResize
         nlohmann_json::nlohmann_json
         Advapi32
         Mpr

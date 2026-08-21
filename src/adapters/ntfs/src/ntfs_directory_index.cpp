@@ -1,6 +1,6 @@
 #include "ntfs_internal.h"
 
-#include <cstring>
+#include <utility>
 
 namespace aegra::adapters::ntfs::detail {
 
@@ -24,8 +24,7 @@ parse_index_entries(const std::span<const std::byte> entry_area) {
         if (key_length >= 66 && 16U + key_length <= entry_length) {
             const auto key = entry_area.subspan(offset + 16, key_length);
             const auto packed_ref = read_u64(entry_area, offset);
-            const auto reference = unpack_file_reference(packed_ref);
-            // Skip self/parent pseudo entries often seen as "." and ".."
+            const auto reference = to_explorer_reference(unpack_file_reference(packed_ref));
             const auto name_length = std::to_integer<std::uint8_t>(key[64]);
             const auto name_ns = std::to_integer<std::uint8_t>(key[65]);
             if (66U + static_cast<std::size_t>(name_length) * 2U > key.size()) {
@@ -37,7 +36,6 @@ parse_index_entries(const std::span<const std::byte> entry_area) {
                 offset += entry_length;
                 continue;
             }
-            // Prefer Win32 names; skip pure DOS short names when a Win32 name will appear.
             if (name_ns == 2 /* DOS */) {
                 offset += entry_length;
                 continue;
@@ -46,7 +44,6 @@ parse_index_entries(const std::span<const std::byte> entry_area) {
             NtfsEntry entry;
             entry.reference = reference;
             entry.name = std::move(name);
-            // $FILE_NAME: allocated@0x28, real@0x30, flags@0x38.
             entry.allocated_size = read_u64(key, 40);
             entry.logical_size = read_u64(key, 48);
             entry.file_attributes = read_u32(key, 56);

@@ -771,6 +771,28 @@ template <typename Item, typename Parser>
     return page;
 }
 
+[[nodiscard]] Json encode_string_array(const std::vector<std::string>& values) {
+    Json array = Json::array();
+    for (const auto& value : values) {
+        array.push_back(value);
+    }
+    return array;
+}
+
+[[nodiscard]] std::vector<std::string> parse_string_array(const Json& payload,
+                                                          const char* field) {
+    const auto& array = payload.at(field);
+    if (!array.is_array()) {
+        throw std::invalid_argument("restore preflight code array is invalid");
+    }
+    std::vector<std::string> values;
+    values.reserve(array.size());
+    for (const auto& item : array) {
+        values.push_back(item.get<std::string>());
+    }
+    return values;
+}
+
 [[nodiscard]] Json encode_restore_preflight(const contracts::RestorePreflight& preflight) {
     return Json{{"preflight_token", preflight.preflight_token},
                 {"repository_connection_id", preflight.repository_connection_id},
@@ -780,29 +802,55 @@ template <typename Item, typename Parser>
                 {"target_capacity_bytes", preflight.target_capacity_bytes},
                 {"chain_depth", preflight.chain_depth},
                 {"expires_utc_ms", preflight.expires_utc_ms},
+                {"volume_size_policy", static_cast<std::uint8_t>(preflight.volume_size_policy)},
+                {"feasibility", static_cast<std::uint8_t>(preflight.feasibility)},
                 {"restore_eligible", preflight.restore_eligible},
+                {"minimum_target_bytes", preflight.minimum_target_bytes},
+                {"relocation_bytes", preflight.relocation_bytes},
+                {"scratch_upper_bound_bytes", preflight.scratch_upper_bound_bytes},
+                {"shrink_plan_digest", preflight.shrink_plan_digest},
+                {"restriction_codes", encode_string_array(preflight.restriction_codes)},
+                {"warning_codes", encode_string_array(preflight.warning_codes)},
                 {"message_code", preflight.message_code}};
 }
 
 [[nodiscard]] contracts::RestorePreflight parse_restore_preflight(const Json& payload) {
-    constexpr std::array<std::string_view, 10> keys{
-        "preflight_token",  "repository_connection_id", "recovery_point_id",
-        "target_source_id", "logical_size_bytes",       "target_capacity_bytes",
-        "chain_depth",      "expires_utc_ms",           "restore_eligible",
-        "message_code"};
+    constexpr std::array<std::string_view, 18> keys{
+        "preflight_token",           "repository_connection_id", "recovery_point_id",
+        "target_source_id",          "logical_size_bytes",       "target_capacity_bytes",
+        "chain_depth",               "expires_utc_ms",           "volume_size_policy",
+        "feasibility",               "restore_eligible",         "minimum_target_bytes",
+        "relocation_bytes",          "scratch_upper_bound_bytes","shrink_plan_digest",
+        "restriction_codes",         "warning_codes",            "message_code"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("restore preflight fields are invalid");
     }
-    return {payload.at("preflight_token").get<std::string>(),
-            payload.at("repository_connection_id").get<std::string>(),
-            payload.at("recovery_point_id").get<std::string>(),
-            payload.at("target_source_id").get<std::string>(),
-            unsigned_value<std::uint64_t>(payload, "logical_size_bytes"),
-            unsigned_value<std::uint64_t>(payload, "target_capacity_bytes"),
-            unsigned_value<std::uint32_t>(payload, "chain_depth"),
-            unsigned_value<std::uint64_t>(payload, "expires_utc_ms"),
-            payload.at("restore_eligible").get<bool>(),
-            payload.at("message_code").get<std::string>()};
+    contracts::RestorePreflight preflight;
+    preflight.preflight_token = payload.at("preflight_token").get<std::string>();
+    preflight.repository_connection_id =
+        payload.at("repository_connection_id").get<std::string>();
+    preflight.recovery_point_id = payload.at("recovery_point_id").get<std::string>();
+    preflight.target_source_id = payload.at("target_source_id").get<std::string>();
+    preflight.logical_size_bytes = unsigned_value<std::uint64_t>(payload, "logical_size_bytes");
+    preflight.target_capacity_bytes =
+        unsigned_value<std::uint64_t>(payload, "target_capacity_bytes");
+    preflight.chain_depth = unsigned_value<std::uint32_t>(payload, "chain_depth");
+    preflight.expires_utc_ms = unsigned_value<std::uint64_t>(payload, "expires_utc_ms");
+    preflight.volume_size_policy = static_cast<contracts::VolumeSizePolicy>(
+        unsigned_value<std::uint8_t>(payload, "volume_size_policy"));
+    preflight.feasibility = static_cast<contracts::RestoreFeasibility>(
+        unsigned_value<std::uint8_t>(payload, "feasibility"));
+    preflight.restore_eligible = payload.at("restore_eligible").get<bool>();
+    preflight.minimum_target_bytes =
+        unsigned_value<std::uint64_t>(payload, "minimum_target_bytes");
+    preflight.relocation_bytes = unsigned_value<std::uint64_t>(payload, "relocation_bytes");
+    preflight.scratch_upper_bound_bytes =
+        unsigned_value<std::uint64_t>(payload, "scratch_upper_bound_bytes");
+    preflight.shrink_plan_digest = payload.at("shrink_plan_digest").get<std::string>();
+    preflight.restriction_codes = parse_string_array(payload, "restriction_codes");
+    preflight.warning_codes = parse_string_array(payload, "warning_codes");
+    preflight.message_code = payload.at("message_code").get<std::string>();
+    return preflight;
 }
 
 [[nodiscard]] Json encode_chain_layer(const contracts::RecoveryPointChainLayer& layer) {
@@ -1098,6 +1146,7 @@ Json encode_response_payload(const contracts::ServiceResponse& response) {
         return encode_page(std::get<contracts::MountSessionPage>(response.payload),
                            encode_mount_session);
     case contracts::ServiceRequestKind::kPrepareRestore:
+    case contracts::ServiceRequestKind::kAnalyzeNtfsShrink:
         return encode_restore_preflight(std::get<contracts::RestorePreflight>(response.payload));
     case contracts::ServiceRequestKind::kResolveRecoveryPointChain:
         return encode_chain_result(std::get<contracts::RecoveryPointChainResult>(response.payload));
@@ -1198,6 +1247,7 @@ parse_response_payload(const contracts::ServiceResponseKind response_kind,
     case contracts::ServiceRequestKind::kListMountSessions:
         return parse_page<contracts::MountSessionSummary>(payload, parse_mount_session);
     case contracts::ServiceRequestKind::kPrepareRestore:
+    case contracts::ServiceRequestKind::kAnalyzeNtfsShrink:
         return parse_restore_preflight(payload);
     case contracts::ServiceRequestKind::kResolveRecoveryPointChain:
         return parse_chain_result(payload);

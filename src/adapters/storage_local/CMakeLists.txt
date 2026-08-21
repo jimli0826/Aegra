@@ -3,6 +3,9 @@ add_library(aegra_adapter_storage_local STATIC
     src/local_repository_storage_factory.cpp
     src/local_staged_writer.cpp
     src/local_storage_paths.cpp
+    src/windows_scratch_index.cpp
+    src/windows_scratch_io.cpp
+    src/windows_scratch_store.cpp
 )
 
 add_library(Aegra::AdapterStorageLocal ALIAS aegra_adapter_storage_local)

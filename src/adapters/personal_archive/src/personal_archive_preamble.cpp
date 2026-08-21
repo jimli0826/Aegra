@@ -5,7 +5,6 @@
 #include "aegra/format/manifest_codec.h"
 
 #include <algorithm>
-#include <limits>
 #include <span>
 #include <string>
 #include <utility>
@@ -28,26 +27,14 @@ struct EncodedMetadata final {
     return {base::ErrorCode::kCorruptData, std::move(message)};
 }
 
-[[nodiscard]] char* as_chars(std::byte* value) noexcept {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) stream byte-buffer boundary.
-    return reinterpret_cast<char*>(value);
-}
-
 [[nodiscard]] base::Result<std::vector<std::byte>>
-read_exact(std::ifstream& input, const std::uint64_t offset, const std::size_t size) {
-    if (size > static_cast<std::size_t>((std::numeric_limits<std::streamsize>::max)())) {
-        return base::Result<std::vector<std::byte>>::failure(
-            corrupt("archive metadata read exceeds stream limit"));
-    }
-    input.clear();
-    input.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
-    std::vector<std::byte> result(size);
-    input.read(as_chars(result.data()), static_cast<std::streamsize>(size));
-    if (!input || input.gcount() != static_cast<std::streamsize>(size)) {
+read_exact(Win32InputFile& input, const std::uint64_t offset, const std::size_t size) {
+    auto bytes = input.read_exact_at(offset, size);
+    if (!bytes) {
         return base::Result<std::vector<std::byte>>::failure(
             {base::ErrorCode::kIoFailure, "personal archive metadata is truncated"});
     }
-    return base::Result<std::vector<std::byte>>::success(std::move(result));
+    return bytes;
 }
 
 [[nodiscard]] std::vector<std::byte> make_authenticated_data(std::span<const std::byte> header,
@@ -72,7 +59,7 @@ make_protected_metadata(const archive::MetadataEnvelopeHeader& envelope,
     return result;
 }
 
-[[nodiscard]] base::Result<EncodedMetadata> read_encoded_metadata(std::ifstream& input,
+[[nodiscard]] base::Result<EncodedMetadata> read_encoded_metadata(Win32InputFile& input,
                                                                   const ArchiveOpenRequest& request,
                                                                   const std::uint64_t file_size) {
     auto header_bytes = read_exact(input, 0, archive::kBackupHeaderSize);
@@ -195,7 +182,7 @@ format::BackupType archive_backup_type(const archive::BackupHeader& header) noex
     return format::BackupType::kFull;
 }
 
-base::Result<ParsedPreamble> read_archive_preamble(std::ifstream& input,
+base::Result<ParsedPreamble> read_archive_preamble(Win32InputFile& input,
                                                    const ArchiveOpenRequest& request,
                                                    const std::uint64_t file_size) {
     auto encoded = read_encoded_metadata(input, request, file_size);
@@ -223,21 +210,6 @@ base::Result<ParsedPreamble> read_archive_preamble(std::ifstream& input,
 namespace aegra::adapters::personal_archive {
 namespace {
 
-[[nodiscard]] base::Result<std::uint64_t> stream_size(std::ifstream& input) {
-    input.clear();
-    input.seekg(0, std::ios::end);
-    if (!input) {
-        return base::Result<std::uint64_t>::failure(
-            {base::ErrorCode::kIoFailure, "failed to size personal archive"});
-    }
-    const auto end = input.tellg();
-    if (end < 0) {
-        return base::Result<std::uint64_t>::failure(
-            {base::ErrorCode::kIoFailure, "failed to size personal archive"});
-    }
-    return base::Result<std::uint64_t>::success(static_cast<std::uint64_t>(end));
-}
-
 } // namespace
 
 base::Result<AuthenticatedArchiveMetadata>
@@ -246,14 +218,15 @@ authenticate_archive_metadata(const ArchiveOpenRequest& request) {
         return base::Result<AuthenticatedArchiveMetadata>::failure(
             {base::ErrorCode::kInvalidArgument, "archive open request is invalid"});
     }
-    std::ifstream input(request.source, std::ios::binary);
-    if (!input) {
+    detail::Win32InputFile input;
+    if (auto opened = input.open(request.source); !opened) {
         return base::Result<AuthenticatedArchiveMetadata>::failure(
             {base::ErrorCode::kIoFailure, "failed to open personal archive"});
     }
-    auto file_size = stream_size(input);
+    auto file_size = input.size();
     if (!file_size) {
-        return base::Result<AuthenticatedArchiveMetadata>::failure(file_size.error());
+        return base::Result<AuthenticatedArchiveMetadata>::failure(
+            {base::ErrorCode::kIoFailure, "failed to size personal archive"});
     }
     auto preamble = detail::read_archive_preamble(input, request, file_size.value());
     if (!preamble) {

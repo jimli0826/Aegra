@@ -19,7 +19,8 @@
 | 字节/时长 | 人类可读双写，例如 `3.0 GiB (3203399680 bytes)`、`14 ms` / `2.136 s` |
 | 失败必填 | `step`、`error_code`（`error_code_name`）、`error_message`（含 Win32）、可选 `hint`；`[Result]` 再汇总 `message_code` / `elapsed` |
 | Backup 阶段 | `resolve_credentials` → `prepare_sources`（VSS/raw、bitmap、pagefile 排除）→ `create_archive` → `backup_pipeline`（按卷） |
-| Restore 阶段 | `resolve_credentials` → `open_chain_reader` → `open_volume_reader` 或 `plan_disk_volumes` → `open_volume_sink` / `prepare_target_disk`+`open_disk_sink` → `restore_pipeline` →（disk）`rebuild_partition_table` |
+| Restore 阶段 | 直接卷：`resolve_credentials` → `open_chain_reader` → `open_volume_reader` → `open_volume_sink` → `restore_pipeline`；缩容卷：`analyze_shrink_plan`（校验 digest，记录源/目标容量与簇数）→ `prepare_scratch_directory` → `open_scratch_store` → `invalidate_boot` → 前缀 `restore_pipeline` → ordinary/critical relocate → Target-only audit → 持锁 Boot commit → 关闭原始句柄 → CHKDSK/postcheck；整盘：`plan_disk_volumes` → `prepare_target_disk`+`open_disk_sink` → `restore_pipeline` → `rebuild_partition_table` |
+| Restore Request | `mode` 为 `volume` / `volume_shrink` / `disk`；`volume_size_policy` 写可读名（`require_source_size` / `allow_ntfs_relocation`）；仅缩容时输出 `shrink_plan_digest` 与 `source_chain_fingerprint` |
 | Verify 阶段 | `resolve_credentials` → `open_archive` → `verify_pipeline` |
 | 禁止 | 密码、SecretRef 明文、凭据材料；可记 `password=present|empty` 或层计数 |
 
@@ -56,7 +57,7 @@ task log 与 Service 分级日志（`logs/trace.log` 等）同树。
 | `target_ref` | string | Backup/Restore/Export 必填；Verify 为空；file_set restore 为空 |
 | `credential_refs` | string array | 只允许 `SecretRef` 定位符 |
 | `backup` | object | Backup 必填；含 `type`、`deduplication_enabled`；volume 增量含父引用；file_set 含 `selection_fingerprint`，Incremental 可含 `candidate_parent_uuid` |
-| `restore` | object | volume_set Restore **必填**：`disk_restore`、`source_disk_number`、`source_volume_index`、`bring_target_online`、`preserve_disk_signature`、`auto_expand_last_partition` |
+| `restore` | object | volume_set Restore **必填**：`disk_restore`、`source_disk_number`、`source_volume_index`、`bring_target_online`、`preserve_disk_signature`、`auto_expand_last_partition`、`volume_size_policy`、`shrink_plan_digest`、`source_chain_fingerprint`（后两者在直接恢复时为空；缩容执行时 digest/fingerprint 必填） |
 | `trace_id` | string | 必填、非空 |
 | `deadline_utc_ms` | signed integer | 可选；`0` 表示无 deadline |
 

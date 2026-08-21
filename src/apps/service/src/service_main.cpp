@@ -161,6 +161,12 @@ class SpdlogServiceLog final : public service::IServiceLog {
     void write(const service::ServiceLogLevel level, const std::string_view message_code,
                const std::string_view detail) noexcept override {
         try {
+            if (message_code == "service.plain" ||
+                message_code == "service.interaction.request" ||
+                message_code == "service.interaction.response") {
+                logger_->log(log_level(level), "{}", detail);
+                return;
+            }
             logger_->log(log_level(level), "{}: {} [event={}]",
                          service::detail::readable_code(message_code), detail, message_code);
         } catch (...) {
@@ -414,7 +420,8 @@ create_service_log(const std::filesystem::path& data_dir, const bool service_mod
         auto logger = std::make_shared<spdlog::logger>("aegra_service", sinks.begin(), sinks.end());
         logger->set_level(spdlog::level::trace);
         logger->flush_on(spdlog::level::info);
-        logger->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] %v");
+        // %-5l keeps [info ]/[warn ]/[error] width aligned for field columns.
+        logger->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%-5l] %v");
         (void)service_mode; // retained for future SCM-specific log policy
         return aegra::base::Result<std::unique_ptr<service::IServiceLog>>::success(
             std::make_unique<SpdlogServiceLog>(std::move(logger)));
@@ -493,6 +500,8 @@ create_service_log(const std::filesystem::path& data_dir, const bool service_mod
         "repository.list",
         "restore.preflight",
         "restore.start",
+        // ADR-0025 keeps exact preflight and fail-closed execution mandatory in every build.
+        "restore.ntfs_shrink.v1",
         "schedule",
         "service.info",
         "service.settings",
@@ -723,7 +732,7 @@ create_runtime(const ServiceArguments& arguments) {
     components.worker_jobs = std::make_unique<service::WorkerJobService>(
         *components.source_query, *components.control_plane, *components.storage_factory,
         *components.supervisor, *components.clock, *components.random,
-        components.file_browse.get());
+        components.file_browse.get(), components.logger.get());
     components.repository_location_browse =
         std::make_unique<service::RepositoryLocationBrowseRegistry>();
     components.schedule_coordinator = std::make_unique<service::ScheduleExecutionCoordinator>();
@@ -783,16 +792,11 @@ create_listener(const ServiceArguments& arguments) {
     auto accepted = listener.accept({});
     if (!accepted)
         return ServiceExitCode::kHostFailure;
-    if (runtime.logger != nullptr) {
-        runtime.logger->write(service::ServiceLogLevel::kInfo, "service.session_started",
-                              "mode=once");
-    }
     const auto session = session_from_serial(1);
     auto result = service::run_service_session(*accepted.value(), runtime, session, {}, 1);
-    if (runtime.logger != nullptr) {
-        runtime.logger->write(
-            result ? service::ServiceLogLevel::kInfo : service::ServiceLogLevel::kError,
-            result ? "service.session_completed" : "service.session_failed", "mode=once");
+    if (!result && runtime.logger != nullptr) {
+        runtime.logger->write(service::ServiceLogLevel::kError, "service.session_failed",
+                              "mode=once");
     }
     return result ? ServiceExitCode::kSucceeded : ServiceExitCode::kHostFailure;
 }
@@ -809,16 +813,11 @@ create_listener(const ServiceArguments& arguments) {
             }
             return ServiceExitCode::kHostFailure;
         }
-        if (runtime.logger != nullptr) {
-            runtime.logger->write(service::ServiceLogLevel::kInfo, "service.session_started",
-                                  "mode=forever");
-        }
         const auto session = session_from_serial(serial++);
         auto result = service::run_service_session(*accepted.value(), runtime, session, {});
-        if (runtime.logger != nullptr) {
-            runtime.logger->write(
-                result ? service::ServiceLogLevel::kInfo : service::ServiceLogLevel::kWarning,
-                result ? "service.session_completed" : "service.session_failed", "mode=forever");
+        if (!result && runtime.logger != nullptr) {
+            runtime.logger->write(service::ServiceLogLevel::kWarning, "service.session_failed",
+                                  "mode=forever");
         }
     }
 }

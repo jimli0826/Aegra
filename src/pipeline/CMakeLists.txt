@@ -7,6 +7,7 @@ add_library(aegra_pipeline STATIC
     src/file_set_change_planner.cpp
     src/file_set_restore_pipeline.cpp
     src/restore_pipeline.cpp
+    src/protected_range_block_sink.cpp
     src/verify_pipeline.cpp
 )
 

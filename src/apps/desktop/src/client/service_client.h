@@ -98,6 +98,7 @@ class ServiceClient final : public QObject {
                    repositoryDirectoriesChanged)
     Q_PROPERTY(bool backupStartAvailable READ backupStartAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool restoreStartAvailable READ restoreStartAvailable NOTIFY stateChanged)
+    Q_PROPERTY(bool ntfsShrinkAvailable READ ntfsShrinkAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool restoreCommandBusy READ restoreCommandBusy NOTIFY restoreCommandChanged)
     Q_PROPERTY(bool mountStartAvailable READ mountStartAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool mountListAvailable READ mountListAvailable NOTIFY stateChanged)
@@ -226,6 +227,7 @@ class ServiceClient final : public QObject {
     [[nodiscard]] bool activeBackupTerminal() const noexcept;
     [[nodiscard]] bool activeBackupCancellable() const noexcept;
     [[nodiscard]] bool restoreStartAvailable() const noexcept;
+    [[nodiscard]] bool ntfsShrinkAvailable() const noexcept;
     [[nodiscard]] bool restoreCommandBusy() const noexcept;
     [[nodiscard]] bool mountStartAvailable() const noexcept;
     [[nodiscard]] bool mountListAvailable() const noexcept;
@@ -340,6 +342,12 @@ class ServiceClient final : public QObject {
     Q_INVOKABLE bool startVolumeRestore(int source_volume_index, const QString& target_source_id,
                                         const QString& recovery_point_id,
                                         const QString& archive_password = {});
+    /// Exact NTFS shrink analysis (kind 18). Does not Start; returns eligible or minimum capacity.
+    Q_INVOKABLE bool analyzeVolumeShrink(int source_volume_index, const QString& target_source_id,
+                                         const QString& recovery_point_id,
+                                         const QString& archive_password = {});
+    Q_INVOKABLE bool startRestoreWithPreflightToken(
+        const QString& preflight_token, const QString& archive_password = {});
     /// Mount a recovery-point disk read-only via Mount Host (preferred letter optional).
     Q_INVOKABLE bool startMount(int source_disk_number, const QString& recovery_point_id,
                                 const QString& preferred_drive_letter = {},
@@ -442,6 +450,11 @@ class ServiceClient final : public QObject {
     void restorePreflightSucceeded();
     /// File restore prepare failed (localized message already toasted as error).
     void restorePreflightFailed(const QString& message);
+    /// PrepareRestore returned provisional (analysis required); details for UI.
+    void restorePreflightProvisional(const QVariantMap& details);
+    /// AnalyzeNtfsShrink completed; details contain an eligible plan or required minimum capacity.
+    void ntfsShrinkAnalyzeSucceeded(const QVariantMap& details);
+    void ntfsShrinkAnalyzeFailed(const QString& message);
     void mountCommandChanged();
     void mountSessionsChanged();
     void mountStartSucceeded(const QString& sessionId);
@@ -498,7 +511,13 @@ class ServiceClient final : public QObject {
     [[nodiscard]] RequestDisposition handle_repository_command_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_schedule_command_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_start_backup_frame(const QByteArray& body);
+    [[nodiscard]] bool begin_volume_prepare_or_analyze(int source_volume_index,
+                                                       const QString& target_source_id,
+                                                       const QString& recovery_point_id,
+                                                       const QString& archive_password,
+                                                       bool analyze);
     [[nodiscard]] RequestDisposition handle_prepare_restore_frame(const QByteArray& body);
+    [[nodiscard]] RequestDisposition handle_analyze_ntfs_shrink_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_start_restore_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_cancel_job_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_mount_list_frame(const QByteArray& body);
@@ -724,6 +743,7 @@ class ServiceClient final : public QObject {
     bool backup_start_available_{false};
     bool restore_preflight_available_{false};
     bool restore_start_available_{false};
+    bool ntfs_shrink_available_{false};
     bool restore_command_busy_{false};
     bool mount_list_available_{false};
     bool mount_start_available_{false};

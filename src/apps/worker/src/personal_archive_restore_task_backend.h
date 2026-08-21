@@ -34,6 +34,10 @@ struct PersonalArchiveRestoreBackendRequest final {
     bool preserve_disk_signature{true};
     bool auto_expand_last_partition{true};
     std::vector<contracts::RestorePartitionLayoutEdit> partition_layout_edits;
+    contracts::VolumeSizePolicy volume_size_policy{contracts::VolumeSizePolicy::kRequireSourceSize};
+    std::string shrink_plan_digest; // expected plan_payload_digest hex from eligible preflight
+    std::string source_chain_fingerprint; // optional; may be empty if not plumbed yet
+    std::string job_id; // for scratch staging path
 };
 
 class IPersonalArchiveRestoreTaskBackend {

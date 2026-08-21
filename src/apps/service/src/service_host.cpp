@@ -75,6 +75,8 @@ void write_interaction_log(const ServiceRuntimeInfo& runtime, const std::string_
     case contracts::ServiceRequestKind::kGetServiceSettings:
     case contracts::ServiceRequestKind::kUpdateServiceSettings:
         return "service.settings";
+    case contracts::ServiceRequestKind::kAnalyzeNtfsShrink:
+        return "restore.ntfs_shrink.v1";
     default:
         return {};
     }
@@ -251,7 +253,26 @@ query_response(const contracts::ServiceRequest& request, const ServiceRuntimeInf
             return base::Result<contracts::ServiceResponse>::success(failure(
                 result.error().code, request.request_id, request.kind, "restore.preflight_failed"));
         }
-        response.message_code = "restore.preflight_ready";
+        response.message_code = result.value().message_code;
+        response.payload = std::move(result).value();
+        return base::Result<contracts::ServiceResponse>::success(std::move(response));
+    }
+    if (request.kind == contracts::ServiceRequestKind::kAnalyzeNtfsShrink && runtime.worker_jobs) {
+        auto result = runtime.worker_jobs->analyze_ntfs_shrink(
+            std::get<contracts::RestorePreflightRequest>(request.payload), cancellation);
+        if (!result) {
+            const auto message_code =
+                result.error().message.starts_with("restore.shrink_") ||
+                        result.error().message.starts_with("ntfs_resize.")
+                    ? result.error().message
+                    : "restore.shrink_analyze_failed";
+            write_log(runtime, ServiceLogLevel::kWarning, message_code,
+                      result.error().message.empty() ? "analyze ntfs shrink failed"
+                                                     : result.error().message);
+            return base::Result<contracts::ServiceResponse>::success(
+                failure(result.error().code, request.request_id, request.kind, message_code));
+        }
+        response.message_code = result.value().message_code;
         response.payload = std::move(result).value();
         return base::Result<contracts::ServiceResponse>::success(std::move(response));
     }
@@ -974,7 +995,6 @@ base::Result<contracts::ServiceResponse>
 dispatch_service_request(const contracts::ServiceRequest& request,
                          const ServiceRuntimeInfo& runtime, const ServiceSessionContext& session,
                          const base::CancellationToken cancellation) {
-    write_log(runtime, ServiceLogLevel::kInfo, "service.request_received", request_detail(request));
     auto valid_request = contracts::validate_service_request(request);
     if (!valid_request) {
         write_log(runtime, ServiceLogLevel::kWarning, "service.request_invalid",
@@ -1005,6 +1025,7 @@ dispatch_service_request(const contracts::ServiceRequest& request,
     case contracts::ServiceRequestKind::kListRepositoryConnections:
     case contracts::ServiceRequestKind::kListSourceInventory:
     case contracts::ServiceRequestKind::kPrepareRestore:
+    case contracts::ServiceRequestKind::kAnalyzeNtfsShrink:
         response = query_response(request, runtime, cancellation);
         break;
     case contracts::ServiceRequestKind::kResolveRecoveryPointChain:
@@ -1092,14 +1113,10 @@ dispatch_service_request(const contracts::ServiceRequest& request,
                   request_detail(request));
         return response;
     }
-    const auto level = response.value().kind == contracts::ServiceResponseKind::kRequestFailed
-                           ? ServiceLogLevel::kWarning
-                           : ServiceLogLevel::kInfo;
-    write_log(runtime, level,
-              response.value().kind == contracts::ServiceResponseKind::kRequestFailed
-                  ? "service.request_failed"
-                  : "service.request_completed",
-              response_detail(response.value()));
+    if (response.value().kind == contracts::ServiceResponseKind::kRequestFailed) {
+        write_log(runtime, ServiceLogLevel::kWarning, "service.request_failed",
+                  response_detail(response.value()));
+    }
     return response;
 }
 

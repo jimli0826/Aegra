@@ -1090,10 +1090,11 @@ WorkerJobService::WorkerJobService(application::ISourceInventoryQuery& source_in
                                    ports::IRepositoryStorageFactory& storage_factory,
                                    WorkerSupervisor& supervisor, ports::IClock& clock,
                                    ports::IRandomSource& random,
-                                   application::FileBrowseService* const file_browse) noexcept
+                                   application::FileBrowseService* const file_browse,
+                                   IServiceLog* const logger) noexcept
     : source_inventory_(source_inventory), control_plane_(control_plane),
       storage_factory_(storage_factory), supervisor_(supervisor), clock_(clock), random_(random),
-      file_browse_(file_browse) {}
+      file_browse_(file_browse), logger_(logger) {}
 
 base::Result<contracts::CommandAcknowledgement>
 WorkerJobService::start_backup(const contracts::StartBackupCommand& command,

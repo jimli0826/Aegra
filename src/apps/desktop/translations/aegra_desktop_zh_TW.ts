@@ -1719,6 +1719,114 @@
         <source>Volume restore writes one backup volume onto an existing non-system volume of equal or larger size. Partition layout is not changed.</source>
         <translation>磁碟區還原會將一個備份磁碟區寫入既有、容量不小於來源的非系統磁碟區。不變更分割區配置。</translation>
     </message>
+    <message id="aegra.restore.volume_options_hint_shrink">
+        <source>Volume restore writes onto a non-system target. A smaller NTFS target is analyzed before its mapping is accepted; failure after write needs a full retry.</source>
+        <translation>磁碟區還原寫入非系統目標。較小的 NTFS 目標會在接受對應前完成分析；寫入開始後失敗必須完整重試。</translation>
+    </message>
+    <message id="aegra.restore.shrink_candidate_tag">
+        <source>— shrink</source>
+        <translation>— 縮容</translation>
+    </message>
+    <message id="aegra.restore.shrink_confirm_title">
+        <source>NTFS shrink plan ready</source>
+        <translation>NTFS 縮容計劃已就緒</translation>
+    </message>
+    <message id="aegra.restore.shrink_source_size">
+        <source>Source size: %1</source>
+        <translation>來源大小：%1</translation>
+    </message>
+    <message id="aegra.restore.shrink_target_size">
+        <source>Target size: %1</source>
+        <translation>目標大小：%1</translation>
+    </message>
+    <message id="aegra.restore.shrink_minimum_target">
+        <source>Minimum target: %1</source>
+        <translation>最小目標：%1</translation>
+    </message>
+    <message id="aegra.restore.shrink_relocation">
+        <source>Relocation: %1</source>
+        <translation>遷移量：%1</translation>
+    </message>
+    <message id="aegra.restore.shrink_scratch">
+        <source>Scratch upper bound: %1</source>
+        <translation>Scratch 上界：%1</translation>
+    </message>
+    <message id="aegra.restore.shrink_restrictions">
+        <source>Restrictions: %1</source>
+        <translation>限制：%1</translation>
+    </message>
+    <message id="aegra.restore.shrink_retry_warning">
+        <source>If restore fails after writing begins, the target may be unusable. You must run a full restore again.</source>
+        <translation>若寫入開始後還原失敗，目標可能不可用，必須完整重試。</translation>
+    </message>
+    <message id="aegra.restore.shrink_confirm">
+        <source>Confirm restore</source>
+        <translation>確認還原</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_provisional">
+        <source>Smaller target needs NTFS shrink analysis before restore can start</source>
+        <translation>更小的目標需先完成 NTFS 縮容分析才能開始還原</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_plan_ready">
+        <source>NTFS shrink plan is ready for confirmation</source>
+        <translation>NTFS 縮容計劃已就緒，請確認</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_not_ntfs">
+        <source>Shrink restore requires an NTFS source volume</source>
+        <translation>縮容還原需要 NTFS 來源磁碟區</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_sector_mismatch">
+        <source>Source and target sector geometry are incompatible for shrink restore</source>
+        <translation>來源與目標扇區幾何不相容，無法縮容還原</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_below_minimum">
+        <source>Target volume is smaller than the exact minimum required for shrink restore</source>
+        <translation>目標磁碟區小於縮容還原所需的精確最小值</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_unsupported_layout">
+        <source>This NTFS layout is not supported for shrink restore</source>
+        <translation>此 NTFS 配置不支援縮容還原</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_scratch_insufficient">
+        <source>Not enough scratch space to complete NTFS shrink restore</source>
+        <translation>Scratch 空間不足，無法完成 NTFS 縮容還原</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_plan_changed">
+        <source>Source, target, or shrink plan changed; analyze again</source>
+        <translation>來源、目標或縮容計劃已變更，請重新分析</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_plan_corrupt">
+        <source>Shrink plan is corrupt or incomplete; analyze again</source>
+        <translation>縮容計劃損壞或不完整，請重新分析</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_target_incomplete">
+        <source>Restore stopped before commit; target is incomplete and requires a full retry</source>
+        <translation>還原在提交前停止；目標不完整，必須完整重試</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_postcheck_failed">
+        <source>Post-restore volume check failed; do not treat the target as healthy</source>
+        <translation>還原後磁碟區檢查失敗；請勿將目標視為健康</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_commit_outcome_unknown">
+        <source>Boot commit outcome is unknown; verify the target before reuse</source>
+        <translation>Boot 提交結果未知；重用前請驗證目標</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_analyze_failed">
+        <source>NTFS shrink analysis failed</source>
+        <translation>NTFS 縮容分析失敗</translation>
+    </message>
+    <message id="aegra.error.service.capability_unavailable">
+        <source>This Service capability is not available</source>
+        <translation>此 Service 能力不可用</translation>
+    </message>
+    <message id="aegra.error.restore.target_too_small">
+        <source>Target is too small for this restore</source>
+        <translation>目標對於此還原過小</translation>
+    </message>
+    <message id="aegra.error.restore.command_failed">
+        <source>Could not start restore</source>
+        <translation>無法啟動還原</translation>
+    </message>
     <message id="aegra.restore.no_recovery_points_on_date">
         <source>No recovery points on this date</source>
         <translation>此日期沒有還原點</translation>

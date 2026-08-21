@@ -112,11 +112,77 @@ base::Result<std::wstring> build_command_line(const std::wstring_view executable
     return base::Result<std::wstring>::success(std::move(command));
 }
 
+// Console tools emit the OEM code page when redirected to a file.
+std::string oem_bytes_to_utf8(const std::string_view bytes) {
+    if (bytes.empty() || bytes.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)())) {
+        return {};
+    }
+    const auto input_size = static_cast<int>(bytes.size());
+    const int wide_size =
+        MultiByteToWideChar(CP_OEMCP, 0, bytes.data(), input_size, nullptr, 0);
+    if (wide_size <= 0) {
+        return {};
+    }
+    std::wstring wide(static_cast<std::size_t>(wide_size), L'\0');
+    if (MultiByteToWideChar(CP_OEMCP, 0, bytes.data(), input_size, wide.data(), wide_size) == 0) {
+        return {};
+    }
+    const int utf8_size =
+        WideCharToMultiByte(CP_UTF8, 0, wide.data(), wide_size, nullptr, 0, nullptr, nullptr);
+    if (utf8_size <= 0) {
+        return {};
+    }
+    std::string utf8(static_cast<std::size_t>(utf8_size), '\0');
+    if (WideCharToMultiByte(CP_UTF8, 0, wide.data(), wide_size, utf8.data(), utf8_size, nullptr,
+                            nullptr) == 0) {
+        return {};
+    }
+    return utf8;
+}
+
+// Inheritable temp file backing the child's stdout/stderr. A file (unlike a pipe) cannot
+// deadlock the child when the parent only reads after exit; DELETE_ON_CLOSE cleans it up.
+[[nodiscard]] UniqueHandle create_output_capture_file() {
+    wchar_t temp_dir[MAX_PATH + 1]{};
+    const DWORD dir_length = GetTempPathW(MAX_PATH + 1, temp_dir);
+    if (dir_length == 0 || dir_length > MAX_PATH) {
+        return {};
+    }
+    wchar_t temp_file[MAX_PATH + 1]{};
+    if (GetTempFileNameW(temp_dir, L"aeg", 0, temp_file) == 0) {
+        return {};
+    }
+    SECURITY_ATTRIBUTES security{};
+    security.nLength = sizeof(security);
+    security.bInheritHandle = TRUE;
+    return UniqueHandle(CreateFileW(temp_file, GENERIC_READ | GENERIC_WRITE,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE, &security, CREATE_ALWAYS,
+                                    FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
+                                    nullptr));
+}
+
+constexpr DWORD kMaxCapturedOutputBytes = 16U * 1024U;
+
+[[nodiscard]] std::string read_captured_output(const HANDLE file) {
+    LARGE_INTEGER begin{};
+    if (SetFilePointerEx(file, begin, nullptr, FILE_BEGIN) == FALSE) {
+        return {};
+    }
+    std::string raw(kMaxCapturedOutputBytes, '\0');
+    DWORD read_bytes = 0;
+    if (ReadFile(file, raw.data(), kMaxCapturedOutputBytes, &read_bytes, nullptr) == FALSE) {
+        return {};
+    }
+    raw.resize(read_bytes);
+    return oem_bytes_to_utf8(raw);
+}
+
 } // namespace
 
 struct ProcessState final {
     explicit ProcessState(UniqueHandle value) : handle(std::move(value)) {}
     UniqueHandle handle;
+    UniqueHandle output_file;
     std::atomic<bool> waiter_active{false};
     std::atomic<bool> termination_requested{false};
 };
@@ -159,10 +225,24 @@ WindowsProcessLauncher::launch(const ports::ProcessLaunchRequest& request) {
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi{};
 
+    UniqueHandle output_file;
+    BOOL inherit_handles = FALSE;
+    if (request.capture_output) {
+        output_file = create_output_capture_file();
+        if (output_file) {
+            si.dwFlags |= STARTF_USESTDHANDLES;
+            si.hStdOutput = output_file.get();
+            si.hStdError = output_file.get();
+            si.hStdInput = INVALID_HANDLE_VALUE;
+            inherit_handles = TRUE;
+        }
+        // Capture setup failure is non-fatal; the process runs without capture.
+    }
+
     const DWORD creation_flags = CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP;
 
-    if (!CreateProcessW(executable.value().c_str(), command.value().data(), nullptr, nullptr, FALSE,
-                        creation_flags, nullptr, nullptr, &si, &pi)) {
+    if (!CreateProcessW(executable.value().c_str(), command.value().data(), nullptr, nullptr,
+                        inherit_handles, creation_flags, nullptr, nullptr, &si, &pi)) {
         return base::Result<ports::ProcessLaunchResult>::failure(
             base::Error{base::ErrorCode::kInternal, "CreateProcessW failed"});
     }
@@ -171,7 +251,9 @@ WindowsProcessLauncher::launch(const ports::ProcessLaunchRequest& request) {
     UniqueHandle process_handle(pi.hProcess);
 
     std::lock_guard lock(impl_->mutex);
-    impl_->processes[pi.dwProcessId] = std::make_shared<ProcessState>(std::move(process_handle));
+    auto state = std::make_shared<ProcessState>(std::move(process_handle));
+    state->output_file = std::move(output_file);
+    impl_->processes[pi.dwProcessId] = std::move(state);
 
     return base::Result<ports::ProcessLaunchResult>::success(
         ports::ProcessLaunchResult{pi.dwProcessId});
@@ -236,6 +318,9 @@ WindowsProcessLauncher::wait(std::uint32_t pid, const base::CancellationToken& c
     ports::ProcessExitStatus status;
     status.exit_code = exit_code;
     status.terminated = state->termination_requested;
+    if (state->output_file) {
+        status.output = read_captured_output(state->output_file.get());
+    }
 
     return base::Result<ports::ProcessExitStatus>::success(status);
 }

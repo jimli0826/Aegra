@@ -2,6 +2,7 @@
 
 #include "personal_archive_preamble.h"
 #include "personal_file_archive_lazy_index.h"
+#include "win32_input_file.h"
 
 #include "aegra/adapters/compression_zstd/zstd_codec.h"
 #include "aegra/base/error.h"
@@ -9,7 +10,6 @@
 #include "aegra/format/personal_archive.h"
 
 #include <algorithm>
-#include <fstream>
 #include <memory>
 #include <optional>
 #include <string>
@@ -28,7 +28,7 @@ namespace lazy = lazy_index;
 
 /// Decrypts chunk payload then expands RAW / zstd COMPRESSED BlockEntry to logical bytes.
 [[nodiscard]] base::Result<std::vector<std::byte>>
-materialize_file_block(std::ifstream& input, lazy::OpenedFileArchive& state,
+materialize_file_block(detail::Win32InputFile& input, lazy::OpenedFileArchive& state,
                        const lazy::StreamChunkLocator& locator, const std::size_t entry_index) {
     if (entry_index >= locator.entries.size()) {
         return base::Result<std::vector<std::byte>>::failure(
@@ -87,7 +87,7 @@ struct PersonalFileArchiveReader::Impl final {
     /// Mutable so const accessors can complete deferred root auth (M6 / ADR-0019).
     mutable lazy::OpenedFileArchive archive;
     ArchiveIdentity identity;
-    mutable std::ifstream input;
+    mutable detail::Win32InputFile input;
 };
 
 PersonalFileArchiveReader::PersonalFileArchiveReader(
@@ -132,8 +132,8 @@ PersonalFileArchiveReader::open(const ArchiveOpenRequest& request) {
         return base::Result<std::unique_ptr<PersonalFileArchiveReader>>::failure(
             error(base::ErrorCode::kInvalidArgument, "file archive source is required"));
     }
-    std::ifstream input(request.source, std::ios::binary);
-    if (!input) {
+    detail::Win32InputFile input;
+    if (auto opened = input.open(request.source); !opened) {
         return base::Result<std::unique_ptr<PersonalFileArchiveReader>>::failure(
             error(base::ErrorCode::kNotFound, "file archive was not found"));
     }

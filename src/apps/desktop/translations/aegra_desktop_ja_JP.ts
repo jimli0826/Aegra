@@ -1719,6 +1719,114 @@
         <source>Volume restore writes one backup volume onto an existing non-system volume of equal or larger size. Partition layout is not changed.</source>
         <translation>ボリューム復元は、ソース以上のサイズの既存の非システムボリュームへ書き込みます。パーティション配置は変更しません。</translation>
     </message>
+    <message id="aegra.restore.volume_options_hint_shrink">
+        <source>Volume restore writes onto a non-system target. A smaller NTFS target is analyzed before its mapping is accepted; failure after write needs a full retry.</source>
+        <translation>ボリューム復元は非システムターゲットへ書き込みます。小さい NTFS ターゲットはマッピング確定前に分析され、書き込み後の失敗は完全な再実行が必要です。</translation>
+    </message>
+    <message id="aegra.restore.shrink_candidate_tag">
+        <source>— shrink</source>
+        <translation>— 縮小</translation>
+    </message>
+    <message id="aegra.restore.shrink_confirm_title">
+        <source>NTFS shrink plan ready</source>
+        <translation>NTFS 縮小プランの準備完了</translation>
+    </message>
+    <message id="aegra.restore.shrink_source_size">
+        <source>Source size: %1</source>
+        <translation>ソースサイズ: %1</translation>
+    </message>
+    <message id="aegra.restore.shrink_target_size">
+        <source>Target size: %1</source>
+        <translation>ターゲットサイズ: %1</translation>
+    </message>
+    <message id="aegra.restore.shrink_minimum_target">
+        <source>Minimum target: %1</source>
+        <translation>最小ターゲット: %1</translation>
+    </message>
+    <message id="aegra.restore.shrink_relocation">
+        <source>Relocation: %1</source>
+        <translation>再配置: %1</translation>
+    </message>
+    <message id="aegra.restore.shrink_scratch">
+        <source>Scratch upper bound: %1</source>
+        <translation>スクラッチ上限: %1</translation>
+    </message>
+    <message id="aegra.restore.shrink_restrictions">
+        <source>Restrictions: %1</source>
+        <translation>制限: %1</translation>
+    </message>
+    <message id="aegra.restore.shrink_retry_warning">
+        <source>If restore fails after writing begins, the target may be unusable. You must run a full restore again.</source>
+        <translation>書き込み開始後に失敗した場合、ターゲットは使用不能になることがあり、完全な再実行が必要です。</translation>
+    </message>
+    <message id="aegra.restore.shrink_confirm">
+        <source>Confirm restore</source>
+        <translation>復元を確認</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_provisional">
+        <source>Smaller target needs NTFS shrink analysis before restore can start</source>
+        <translation>より小さいターゲットは復元前に NTFS 縮小分析が必要です</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_plan_ready">
+        <source>NTFS shrink plan is ready for confirmation</source>
+        <translation>NTFS 縮小プランは確認待ちです</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_not_ntfs">
+        <source>Shrink restore requires an NTFS source volume</source>
+        <translation>縮小復元には NTFS ソースボリュームが必要です</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_sector_mismatch">
+        <source>Source and target sector geometry are incompatible for shrink restore</source>
+        <translation>ソースとターゲットのセクタ幾何が縮小復元に非互換です</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_below_minimum">
+        <source>Target volume is smaller than the exact minimum required for shrink restore</source>
+        <translation>ターゲットが縮小復元の厳密な最小値より小さいです</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_unsupported_layout">
+        <source>This NTFS layout is not supported for shrink restore</source>
+        <translation>この NTFS レイアウトは縮小復元に未対応です</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_scratch_insufficient">
+        <source>Not enough scratch space to complete NTFS shrink restore</source>
+        <translation>スクラッチ領域が不足し、NTFS 縮小復元を完了できません</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_plan_changed">
+        <source>Source, target, or shrink plan changed; analyze again</source>
+        <translation>ソース、ターゲット、または縮小プランが変化しました。再分析してください</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_plan_corrupt">
+        <source>Shrink plan is corrupt or incomplete; analyze again</source>
+        <translation>縮小プランが破損または不完全です。再分析してください</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_target_incomplete">
+        <source>Restore stopped before commit; target is incomplete and requires a full retry</source>
+        <translation>コミット前に停止しました。ターゲットは不完全で完全な再実行が必要です</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_postcheck_failed">
+        <source>Post-restore volume check failed; do not treat the target as healthy</source>
+        <translation>復元後のボリューム検査に失敗しました。ターゲットを健全と見なさないでください</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_commit_outcome_unknown">
+        <source>Boot commit outcome is unknown; verify the target before reuse</source>
+        <translation>Boot コミット結果が不明です。再利用前にターゲットを確認してください</translation>
+    </message>
+    <message id="aegra.error.restore.shrink_analyze_failed">
+        <source>NTFS shrink analysis failed</source>
+        <translation>NTFS 縮小分析に失敗しました</translation>
+    </message>
+    <message id="aegra.error.service.capability_unavailable">
+        <source>This Service capability is not available</source>
+        <translation>この Service 機能は利用できません</translation>
+    </message>
+    <message id="aegra.error.restore.target_too_small">
+        <source>Target is too small for this restore</source>
+        <translation>この復元にはターゲットが小さすぎます</translation>
+    </message>
+    <message id="aegra.error.restore.command_failed">
+        <source>Could not start restore</source>
+        <translation>復元を開始できませんでした</translation>
+    </message>
     <message id="aegra.restore.no_recovery_points_on_date">
         <source>No recovery points on this date</source>
         <translation>この日に回復ポイントはありません</translation>

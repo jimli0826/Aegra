@@ -171,8 +171,10 @@ Inventory 返回 opaque source ID 并在 Service 内解析为稳定设备 key；
 
 ## NTFS Adapter（`aegra_adapter_ntfs`）
 
-只读解析 `IRandomAccessReader` 呈现的 NTFS 卷视图（offset 0 = Boot Sector）。依赖仅 `Aegra::Base` 与
-`Aegra::Ports`。公共入口 `NtfsVolumeReader`：
+只读解析 `IRandomAccessReader` 呈现的 NTFS 卷视图（offset 0 = Boot Sector）。依赖 `Aegra::Base`、
+`Aegra::Ports` 与 `Aegra::NtfsCore`。Boot/USA/MFT/属性/Runlist 等编解码在 `NtfsCore`；本 Adapter 只
+公开 Explorer 只读浏览合同，不向 Shell Extension 暴露 write/mutate/commit 类型，也不链接
+`Aegra::NtfsResize`。公共入口 `NtfsVolumeReader`：
 
 - `open(IRandomAccessReader&, CancellationToken)` 借用 reader（reader 必须更长寿）；
 - `volume_info()`、`list_directory`、`describe_entry`、`read_file`；
@@ -182,6 +184,7 @@ Inventory 返回 opaque source ID 并在 Service 内解析为稳定设备 key；
 解析范围与边界见 [ADR-0023](../adr/0023-in-process-explorer-archive-browsing.md) 与
 [Explorer 进程内浏览](../architecture/EXPLORER_ARCHIVE_BROWSING.md)。禁止全量 MFT 扫描；MFT/Index
 使用固定容量 LRU。compressed/EFS 返回稳定 unsupported；reparse 不跟随；named ADS 不暴露为普通文件。
+NtfsCore 模块说明见 [ntfs_core.md](ntfs_core.md)。
 
 `PersonalArchiveVolumeRandomReader` 位于 `adapters/personal_archive`：把 Archive 单卷 Chunk 视图适配为
 `IRandomAccessReader`，不知道 NTFS。

@@ -87,6 +87,13 @@ ServiceClient (QML 门面)
   再 `ExecuteDeletePlan`，只展示 server 返回的 target 数量，不在 UI 重算依赖。
 - `post_to_object` 提供单线程 Qt 投递边界，供后续 task event 在对象销毁后安全丢弃更新。
 - V4 字段以 Contracts 与 ADR-0017 / SERVICE_CONTROL_PROTOCOL_V4 为准；Desktop 私有 codec 不独立扩展 wire schema。
+- NTFS 小目标卷恢复（ADR-0025）：仅当 Service 宣告 `restore.ntfs_shrink.v1` 时
+  `ntfsShrinkAvailable` 为 true。Source 放到更小 Target 时先发起 Analyze（kind 18），映射在精确分析
+  返回 eligible 且 Target 不小于 `minimum_target_bytes` 后才生效；失败立即提示且不建立映射。
+  Summary 只展示精确最小容量/迁移字节/Scratch 上界并确认 Start，不再首次触发 Analyze；provisional
+  不得当作可执行。
+  capability 关闭时 UI 与既有“目标过小拒绝”行为一致。Debug 与 Release Service 均宣告 capability；
+  M01–M26 完成前该入口只表示可受控验证，不表示已取得对外发布资格。Disk 模式永不提供缩容。
 
 ## ServiceClient 行为
 

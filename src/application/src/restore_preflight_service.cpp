@@ -41,17 +41,22 @@ constexpr std::size_t kMaximumStableValueBytes = 128;
 make_record(const contracts::RestorePreflightRequest& request, const RestoreChainSnapshot& chain,
             const ports::SourceInventoryRecord& target, std::string token,
             const std::uint64_t expires) {
-    return {std::move(token),
-            request.repository_connection_id,
-            chain.repository_uuid,
-            request.recovery_point_id,
-            request.target_source_id,
-            chain.chain_fingerprint,
-            chain.logical_size_bytes,
-            target.capacity_bytes,
-            chain.chain_depth,
-            expires - kRestorePreflightTtlMs,
-            expires};
+    ports::RestorePreflightRecord record;
+    record.preflight_token = std::move(token);
+    record.repository_connection_id = request.repository_connection_id;
+    record.repository_uuid = chain.repository_uuid;
+    record.recovery_point_id = request.recovery_point_id;
+    record.target_source_id = request.target_source_id;
+    record.chain_fingerprint = chain.chain_fingerprint;
+    record.logical_size_bytes = chain.logical_size_bytes;
+    record.target_capacity_bytes = target.capacity_bytes;
+    record.chain_depth = chain.chain_depth;
+    record.created_utc_ms = expires - kRestorePreflightTtlMs;
+    record.expires_utc_ms = expires;
+    record.volume_size_policy = contracts::VolumeSizePolicy::kRequireSourceSize;
+    record.feasibility = contracts::RestoreFeasibility::kEligible;
+    record.minimum_target_bytes = chain.logical_size_bytes;
+    return record;
 }
 
 [[nodiscard]] base::Result<void> persist_record(ports::IControlPlaneDatabase& control_plane,
@@ -69,10 +74,25 @@ make_record(const contracts::RestorePreflightRequest& request, const RestoreChai
 }
 
 [[nodiscard]] contracts::RestorePreflight to_contract(const ports::RestorePreflightRecord& record) {
-    return {record.preflight_token,   record.repository_connection_id, record.recovery_point_id,
-            record.target_source_id,  record.logical_size_bytes,       record.target_capacity_bytes,
-            record.chain_depth,       record.expires_utc_ms,           true,
-            "restore.preflight_ready"};
+    contracts::RestorePreflight preflight;
+    preflight.preflight_token = record.preflight_token;
+    preflight.repository_connection_id = record.repository_connection_id;
+    preflight.recovery_point_id = record.recovery_point_id;
+    preflight.target_source_id = record.target_source_id;
+    preflight.logical_size_bytes = record.logical_size_bytes;
+    preflight.target_capacity_bytes = record.target_capacity_bytes;
+    preflight.chain_depth = record.chain_depth;
+    preflight.expires_utc_ms = record.expires_utc_ms;
+    preflight.volume_size_policy = record.volume_size_policy;
+    preflight.feasibility = record.feasibility;
+    preflight.restore_eligible =
+        record.feasibility == contracts::RestoreFeasibility::kEligible;
+    preflight.minimum_target_bytes = record.minimum_target_bytes;
+    preflight.relocation_bytes = record.relocation_bytes;
+    preflight.scratch_upper_bound_bytes = record.scratch_upper_bound_bytes;
+    preflight.shrink_plan_digest = record.shrink_plan_digest;
+    preflight.message_code = "restore.preflight_ready";
+    return preflight;
 }
 
 } // namespace

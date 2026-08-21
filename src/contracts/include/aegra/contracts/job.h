@@ -74,6 +74,13 @@ struct RestorePartitionLayoutEdit final {
     std::uint64_t size_bytes{0};
 };
 
+/// How volume restore treats target capacity relative to source logical size.
+/// Disk restore always behaves as kRequireSourceSize.
+enum class VolumeSizePolicy : std::uint8_t {
+    kRequireSourceSize = 1,
+    kAllowNtfsRelocation = 2,
+};
+
 /// Volume/disk restore options (content_kind = volume_set).
 struct RestoreOptions final {
     bool disk_restore{false};
@@ -84,6 +91,11 @@ struct RestoreOptions final {
     bool auto_expand_last_partition{true};
     /// Desktop Target layout (empty = keep source starts/sizes for data volumes).
     std::vector<RestorePartitionLayoutEdit> partition_layout_edits;
+    VolumeSizePolicy volume_size_policy{VolumeSizePolicy::kRequireSourceSize};
+    /// Exact ShrinkPlan digest from eligible shrink preflight; empty for direct restore.
+    std::string shrink_plan_digest;
+    /// Volume restore chain fingerprint (`volc|…`) bound into ShrinkPlan; empty for direct.
+    std::string source_chain_fingerprint;
 };
 
 /// Schema 4 Worker Job envelope.

@@ -18,6 +18,9 @@ struct ProcessLaunchResult final {
 struct ProcessLaunchRequest final {
     std::string executable_path;
     std::vector<std::string> arguments;
+    /// Capture combined stdout/stderr for retrieval via ProcessExitStatus::output.
+    /// Best-effort: capture setup failure must not fail the launch.
+    bool capture_output{false};
 };
 
 /// Status returned when a process exits.
@@ -25,6 +28,9 @@ struct ProcessExitStatus final {
     std::uint32_t exit_code{};
     /// True when the process was forcefully terminated rather than exiting normally.
     bool terminated{false};
+    /// Combined stdout/stderr (UTF-8, possibly truncated). Empty unless the launch requested
+    /// capture_output and capture succeeded.
+    std::string output;
 };
 
 /// Abstraction for creating, waiting on, and terminating child processes.

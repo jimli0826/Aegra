@@ -459,7 +459,7 @@ nt_device_path_for_dos_map(const std::wstring& normalized_root) {
     return std::nullopt;
 }
 
-// Temporary DOS device (AipCopy MapDriveLetter / numeric drive style) so Win32 can open
+// Temporary DOS device (numeric drive letter style) so Win32 can open
 // files under a VSS shadow copy when the GLOBALROOT path form fails.
 class TemporaryDosDeviceMap final {
   public:
@@ -553,7 +553,7 @@ struct FileExtent final {
 [[nodiscard]] detail::UniqueHandle open_file_for_extents(const std::wstring& file_path) {
     // pagefile.sys is often share-locked on live volumes; try attribute/query opens first
     // (old DiskDevice path), then backup-semantics opens (service/SYSTEM / snapshot).
-    // Snapshot-homologous opens (AipCopy CreateFile access=0 + BACKUP_SEMANTICS) are first.
+    // Snapshot-homologous opens (CreateFile access=0 + BACKUP_SEMANTICS) are first.
     constexpr DWORD kShare = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
     const DWORD access_modes[] = {static_cast<DWORD>(0), FILE_READ_ATTRIBUTES, GENERIC_READ};
     const DWORD flag_modes[] = {FILE_FLAG_BACKUP_SEMANTICS, 0, FILE_FLAG_BACKUP_SEMANTICS};
@@ -810,7 +810,7 @@ void merge_ranges(std::vector<std::pair<std::uint64_t, std::uint64_t>>& ranges) 
     return query_file_extents(root_with_slash + file_name, extents) && !extents.empty();
 }
 
-// Merge one junk file's LCN runs into free_ranges (AipCopy AddFileToExcludedClusters).
+// Merge one junk file's LCN runs into free_ranges.
 [[nodiscard]] std::uint64_t
 append_file_extents_to_plan(FreeSkipPlan& plan, const std::vector<FileExtent>& extents,
                             const std::uint64_t cluster_size) {
@@ -846,7 +846,7 @@ std::uint64_t merge_page_and_hibernation_exclusions(FreeSkipPlan& plan,
         cluster_size = 4096;
     }
 
-    // AipCopy: open pagefile/hiberfil on the same static volume root used for the volume read
+    // Open pagefile/hiberfil on the same static volume root used for the volume read
     // (live Volume GUID or VSS snapshot device), then clear those LCNs in the free bitmap.
     const auto normalized = normalize_volume_root_for_files(read_device_path);
     if (normalized.empty()) {
@@ -854,8 +854,8 @@ std::uint64_t merge_page_and_hibernation_exclusions(FreeSkipPlan& plan,
     }
     auto primary_root = trailing_slash_path(std::filesystem::path(normalized));
 
-    // Optional temporary DOS map for VSS GLOBALROOT when direct file open fails (AipCopy
-    // DefineDosDevice(DDD_RAW_TARGET_PATH) pattern). Kept for the whole merge so all three
+    // Optional temporary DOS map for VSS GLOBALROOT when direct file open fails
+    // (DefineDosDevice(DDD_RAW_TARGET_PATH)). Kept for the whole merge so all three
     // names share one mapping.
     TemporaryDosDeviceMap dos_map;
     std::wstring dos_root;

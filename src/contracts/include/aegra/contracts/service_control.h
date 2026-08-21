@@ -431,6 +431,13 @@ struct ExecuteDeletePlanCommand final {
     bool confirmed{false};
 };
 
+/// Service quick filter vs Worker exact analysis outcome for volume restore.
+enum class RestoreFeasibility : std::uint8_t {
+    kIneligible = 1,
+    kProvisional = 2,
+    kEligible = 3,
+};
+
 struct RestorePreflightRequest final {
     std::string repository_connection_id;
     std::string recovery_point_id;
@@ -442,6 +449,9 @@ struct RestorePreflightRequest final {
     std::uint32_t source_volume_index{0};
     /// Opens encrypted archives during preflight; empty for unencrypted. Never log.
     std::string archive_password;
+    /// Disk targets must use kRequireSourceSize. Smaller NTFS volume analysis uses
+    /// kAllowNtfsRelocation; capability `restore.ntfs_shrink.v1` remains gated separately.
+    VolumeSizePolicy volume_size_policy{VolumeSizePolicy::kRequireSourceSize};
 };
 
 struct RestorePreflight final {
@@ -453,7 +463,20 @@ struct RestorePreflight final {
     std::uint64_t target_capacity_bytes{0};
     std::uint32_t chain_depth{0};
     std::uint64_t expires_utc_ms{0};
+    VolumeSizePolicy volume_size_policy{VolumeSizePolicy::kRequireSourceSize};
+    RestoreFeasibility feasibility{RestoreFeasibility::kIneligible};
+    /// True only when feasibility == kEligible. StartRestore requires this.
     bool restore_eligible{false};
+    /// Exact minimum target bytes when known; 0 when Service quick filter cannot compute it.
+    std::uint64_t minimum_target_bytes{0};
+    std::uint64_t relocation_bytes{0};
+    std::uint64_t scratch_upper_bound_bytes{0};
+    /// Empty until Worker exact ShrinkPlan exists.
+    std::string shrink_plan_digest;
+    /// Stable restriction codes (e.g. restore.shrink_below_minimum). No secrets.
+    std::vector<std::string> restriction_codes;
+    /// Stable warning codes. Warnings never replace failure.
+    std::vector<std::string> warning_codes;
     std::string message_code;
 };
 

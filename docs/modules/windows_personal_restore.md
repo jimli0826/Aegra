@@ -26,6 +26,24 @@ Service / Desktop 控制面：PrepareRestore（kind 9）+ StartRestore（kind 40
 选项：多余目标容量默认为未分配，由用户在 Target 上先拖边调整（Desktop 固定传
 `auto_expand_last_partition=false`）。
 
+### NTFS 小目标卷恢复（ADR-0025 / SR9）
+
+当目标卷小于源卷且 Manifest 为 NTFS 时：
+
+1. PrepareRestore（policy=`allow_ntfs_relocation`）只做 Service 快速筛选，返回
+   `feasibility=provisional`（不可 Start）；
+2. AnalyzeNtfsShrink（kind 18）在 Service 内同步调用 `NtfsShrinkAnalyzer`，签发新的
+   `feasibility=eligible` token（含 `shrink_plan_digest` / 精确容量与 Scratch 上界）；分析器以簇为单位
+   搜索确定性规划器可接受的最小边界。Target 低于该边界时返回带 `minimum_target_bytes` 的 provisional，
+   不签发可执行计划；
+3. StartRestore 仅接受 eligible；缩容 Job 携带 `volume_size_policy`、`shrink_plan_digest`、
+   `source_chain_fingerprint`；
+4. Worker 在 `kAllowNtfsRelocation` + 非空 digest 时进入 shrink 状态机（重分析校验 digest →
+   Boot 失效 → 前缀恢复 → 复合设备重定位 → Target-only 审计 → Boot commit → 关闭锁卷句柄 →
+   CHKDSK → 卷后检）；
+5. Debug 与 Release Service 均宣告 `restore.ntfs_shrink.v1`；两种配置使用完全相同的 Analyze/Start 安全
+   路径。M01–M26 完成前 capability 仅供受控验证，不代表发布资格。Disk restore 仍拒绝小盘。
+
 ## 依赖边界
 
 `apps/worker` Composition Root 可以依赖 `PersonalArchiveChainReader`、
@@ -60,8 +78,8 @@ Worker 数据面（Phase A）、Service Prepare/Start（Phase B）与 Desktop �
 
 Desktop Restore 页提供 **Disk / Volume** 模式切换：
 - Disk：源磁盘 → 目标 `disk.N`（Preserve signature；Target 条拖边调整大小）；
-- Volume：源 Manifest 卷 → 目标 Inventory `vol.*`（拖放或 “Restore to”；多卷可排队
-  逐个 StartRestore）。
+- Volume：源 Manifest 卷 → 目标 Inventory `vol.*`。更小 Target 的拖放先执行 target-bound 精确 Analyze，
+  只有 eligible 且容量满足 `minimum_target_bytes` 才建立映射；Summary 复用该 token 做确认与 Start。
 
 ## 整盘恢复流程
 

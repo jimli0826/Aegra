@@ -18,6 +18,10 @@
 - [FAT32 文件集支持开发计划（FS1-FS5）](development/FAT32_FILE_SET_DEVELOPMENT_PLAN.md)
 - [Volume Set 单 Chunk 去重设计](architecture/VOLUME_SET_DEDUPLICATION.md)
 - [Volume Set 单 Chunk 去重开发计划（VD1-VD6）](development/VOLUME_SET_DEDUPLICATION_DEVELOPMENT_PLAN.md)
+- [NTFS 小目标卷恢复开发计划（SR0-SR10）](development/NTFS_SMALLER_TARGET_VOLUME_RESTORE_DEVELOPMENT_PLAN.md)
+- [NTFS 缩容 SR0 技术验证](development/NTFS_SHRINK_SR0_TECHNICAL_VERIFICATION.md)
+- [NTFS 缩容 SR10 静态审计](development/NTFS_SHRINK_SR10_STATIC_AUDIT.md)
+- [NTFS 缩容 SR10 人工验证矩阵](development/NTFS_SHRINK_SR10_VERIFICATION_MATRIX.md)
 - [文件集增量备份历史开发计划](development/FILE_SET_INCREMENTAL_DEVELOPMENT_PLAN.md)
 - [文件集产品上限、稳定码与验证矩阵](development/FILE_SET_PRODUCT_LIMITS_AND_CODES.md)
 

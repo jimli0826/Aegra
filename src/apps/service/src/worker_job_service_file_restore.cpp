@@ -558,6 +558,13 @@ WorkerJobService::prepare_file_restore(const contracts::PrepareFileRestoreReques
     record.created_utc_ms = now_u;
     record.expires_utc_ms = now_u + kFileRestorePreflightTtlMs;
     record.entry_ids = request.entry_ids;
+    record.volume_size_policy = contracts::VolumeSizePolicy::kRequireSourceSize;
+    record.feasibility = contracts::RestoreFeasibility::kEligible;
+    record.minimum_target_bytes = 0;
+    record.relocation_bytes = 0;
+    record.scratch_upper_bound_bytes = 0;
+    record.shrink_plan_digest.clear();
+    record.target_binding_digest.clear();
     auto unit = control_plane_.begin_unit_of_work(cancellation);
     if (!unit) {
         return base::Result<contracts::FileRestorePreflight>::failure(unit.error());

@@ -45,12 +45,20 @@ inline constexpr int kListRecoveryPointEntriesRequestKind = 14;
 inline constexpr int kPrepareFileRestoreRequestKind = 15;
 inline constexpr int kGetServiceSettingsRequestKind = 16;
 inline constexpr int kListRepositoryDirectoriesRequestKind = 17;
+inline constexpr int kAnalyzeNtfsShrinkRequestKind = 18;
 inline constexpr int kAddRepositoryConnectionRequestKind = 32;
 inline constexpr int kImportRepositoryConnectionRequestKind = 33;
 inline constexpr int kTestRepositoryConnectionRequestKind = 34;
 inline constexpr int kSetDefaultRepositoryRequestKind = 35;
 inline constexpr int kRemoveRepositoryConnectionRequestKind = 36;
 inline constexpr int kPrepareRestoreRequestKind = 9;
+/// RestorePreflight.feasibility (ADR-0025 / V4).
+inline constexpr int kRestoreFeasibilityIneligible = 1;
+inline constexpr int kRestoreFeasibilityProvisional = 2;
+inline constexpr int kRestoreFeasibilityEligible = 3;
+/// PrepareRestore / AnalyzeNtfsShrink volume_size_policy.
+inline constexpr int kVolumeSizePolicyRequireSourceSize = 1;
+inline constexpr int kVolumeSizePolicyAllowNtfsRelocation = 2;
 inline constexpr int kStartBackupRequestKind = 37;
 inline constexpr int kCancelJobRequestKind = 38;
 inline constexpr int kStartRestoreRequestKind = 40;
@@ -165,6 +173,28 @@ struct FileRestorePreflightPage final {
     QString message_code;
 };
 
+/// Volume/disk PrepareRestore or AnalyzeNtfsShrink success payload (exact 18 fields).
+struct RestorePreflightPage final {
+    QString preflight_token;
+    QString repository_connection_id;
+    QString recovery_point_id;
+    QString target_source_id;
+    quint64 logical_size_bytes{0};
+    quint64 target_capacity_bytes{0};
+    quint32 chain_depth{0};
+    quint64 expires_utc_ms{0};
+    int volume_size_policy{kVolumeSizePolicyRequireSourceSize};
+    int feasibility{kRestoreFeasibilityIneligible};
+    bool restore_eligible{false};
+    quint64 minimum_target_bytes{0};
+    quint64 relocation_bytes{0};
+    quint64 scratch_upper_bound_bytes{0};
+    QString shrink_plan_digest;
+    QStringList restriction_codes;
+    QStringList warning_codes;
+    QString message_code;
+};
+
 [[nodiscard]] QByteArray encode_service_info_request(const QString& request_id);
 [[nodiscard]] QByteArray encode_recovery_point_request(
     const QString& request_id, const std::optional<QString>& continuation_token,
@@ -192,7 +222,13 @@ encode_schedule_list_request(const QString& request_id,
 encode_prepare_restore_request(const QString& request_id, const QString& connection_id,
                                const QString& recovery_point_id, const QString& target_source_id,
                                int source_disk_number, int source_volume_index = 0,
-                               const QString& archive_password = {});
+                               const QString& archive_password = {},
+                               int volume_size_policy = kVolumeSizePolicyRequireSourceSize);
+/// Exact ShrinkPlan analysis for a smaller NTFS volume target (kind 18). Policy forced to allow.
+[[nodiscard]] QByteArray encode_analyze_ntfs_shrink_request(
+    const QString& request_id, const QString& connection_id, const QString& recovery_point_id,
+    const QString& target_source_id, int source_disk_number, int source_volume_index = 0,
+    const QString& archive_password = {});
 [[nodiscard]] QByteArray encode_start_restore_request(
     const QString& request_id, const QString& idempotency_key, const QString& preflight_token,
     const QString& archive_password = {}, bool preserve_disk_signature = true,
@@ -314,6 +350,9 @@ encode_plan_delete_recovery_points_request(const QString& request_id, const QStr
                                                               RecoveryPointEntryPage& result);
 [[nodiscard]] bool parse_prepare_file_restore_response(const QJsonObject& root,
                                                        FileRestorePreflightPage& result);
+/// Parses RestorePreflight for PrepareRestore (kind 9) or AnalyzeNtfsShrink (kind 18).
+[[nodiscard]] bool parse_restore_preflight_response(const QJsonObject& root, int expected_kind,
+                                                    RestorePreflightPage& result);
 [[nodiscard]] bool is_browse_file_sources_failure_response(const QJsonObject& root);
 [[nodiscard]] bool is_list_recovery_point_entries_failure_response(const QJsonObject& root);
 [[nodiscard]] bool is_prepare_file_restore_failure_response(const QJsonObject& root);

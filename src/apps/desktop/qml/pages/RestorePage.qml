@@ -110,6 +110,13 @@ Item {
     property string restoreSessionErrorText: ""
     /// True while workspace Next is waiting on file-restore preflight (capacity check).
     property bool filePreflightPending: false
+    /// NTFS shrink analyze confirmation (volume mode, capability-gated).
+    property bool shrinkConfirmOpen: false
+    property var shrinkConfirmDetails: ({})
+    /// Smaller-target mapping waiting for exact, target-bound analysis.
+    property var pendingShrinkMapping: null
+    /// Target-bound shrink analyses, keyed by source volume index.
+    property var analyzedShrinkMappings: ({})
     /// 1 volume_set, 2 file_set — taken from selected checkpoint.
     property int selectedContentKind: 1
     /// File restore conflict policy: 1 fail, 2 replace, 3 rename.
@@ -225,6 +232,8 @@ Item {
         root.pendingRestoreQueue = []
         root.multiRestoreActive = false
         root.filePreflightPending = false
+        root.shrinkConfirmOpen = false
+        root.shrinkConfirmDetails = ({})
     }
 
     function goBackToTypeSelection() {
@@ -322,6 +331,11 @@ Item {
         }
         root.clearRestoreSession()
         root.restoreStep = 2
+        var shrink = root.readyMappedShrinkAnalysis()
+        if (shrink) {
+            root.shrinkConfirmDetails = shrink.details || ({})
+            root.shrinkConfirmOpen = true
+        }
     }
 
     /// Normalize inventory mount letter to "X:" (accepts "X", "X:", "X:\\").
@@ -684,6 +698,7 @@ Item {
         }
         return serviceClient.restoreStartAvailable
                && root.hasMapping
+               && (!root.isVolumeMode || !root.needsNtfsShrinkAnalyze)
                && !root.sourceLayoutLoading
     }
     readonly property string restoreBlockReason: {
@@ -725,6 +740,8 @@ Item {
                    ? qsTrId("aegra.restore.volume_map_required")
                    //% "Drag a source disk onto a target disk"
                    : qsTrId("aegra.restore.map_required")
+        if (root.isVolumeMode && root.needsNtfsShrinkAnalyze)
+            return qsTrId("aegra.restore.volume_map_required")
         return ""
     }
 
@@ -987,6 +1004,10 @@ Item {
 
     function clearVolumeMappings() {
         root.volumeMappings = ({})
+        root.pendingShrinkMapping = null
+        root.analyzedShrinkMappings = ({})
+        root.shrinkConfirmOpen = false
+        root.shrinkConfirmDetails = ({})
         root.mappingEpoch++
     }
 
@@ -1143,7 +1164,9 @@ Item {
     function volumeMappingBlockReason(sourceVolumeIndex, targetSourceId) {
         if (sourceVolumeIndex < 0 || !targetSourceId || targetSourceId.length === 0)
             return ""
-        if (!root.targetVolumeLargeEnough(sourceVolumeIndex, targetSourceId))
+        // Capability-off rejects smaller targets; capability-on analyzes before committing a map.
+        if (!serviceClient.ntfsShrinkAvailable
+                && !root.targetVolumeLargeEnough(sourceVolumeIndex, targetSourceId))
             //% "Target volume is smaller than the source volume"
             return qsTrId("aegra.restore.volume_target_too_small")
         if (root.isVolumeTargetMappedByOther(sourceVolumeIndex, targetSourceId))
@@ -1185,6 +1208,31 @@ Item {
         root.mappingEpoch++
     }
 
+    function commitVolumeMapping(sourceVolumeIndex, targetSourceId) {
+        var analyses = Object.assign({}, root.analyzedShrinkMappings || {})
+        delete analyses[String(sourceVolumeIndex)]
+        root.analyzedShrinkMappings = analyses
+        var map = Object.assign({}, root.volumeMappings || {})
+        map[String(sourceVolumeIndex)] = targetSourceId || ""
+        root.volumeMappings = map
+        root.mappingEpoch++
+    }
+
+    function beginShrinkMappingAnalysis(sourceVolumeIndex, targetSourceId) {
+        root.pendingShrinkMapping = {
+            sourceVolumeIndex: Number(sourceVolumeIndex),
+            targetSourceId: String(targetSourceId)
+        }
+        root.shrinkConfirmOpen = false
+        root.shrinkConfirmDetails = ({})
+        var started = serviceClient.analyzeVolumeShrink(
+                    sourceVolumeIndex, targetSourceId,
+                    root.selectedCheckpointId, root.pendingLayoutPassword)
+        if (!started)
+            root.pendingShrinkMapping = null
+        return started
+    }
+
     function setVolumeMapping(sourceVolumeIndex, targetSourceId) {
         if (sourceVolumeIndex < 0)
             return
@@ -1192,10 +1240,12 @@ Item {
         if (tid.length > 0
                 && root.volumeMappingBlockReason(sourceVolumeIndex, tid).length > 0)
             return
-        var map = Object.assign({}, root.volumeMappings || {})
-        map[String(sourceVolumeIndex)] = tid
-        root.volumeMappings = map
-        root.mappingEpoch++
+        if (tid.length > 0
+                && !root.targetVolumeLargeEnough(sourceVolumeIndex, tid)) {
+            root.beginShrinkMappingAnalysis(sourceVolumeIndex, tid)
+            return
+        }
+        root.commitVolumeMapping(sourceVolumeIndex, tid)
     }
 
     /// Options for source → target ComboBox (old RestoreBackend::targetDiskOptions).
@@ -1337,10 +1387,14 @@ Item {
                 //% "[System]"
                 lab += "  " + qsTrId("aegra.restore.system_tag")
             var tooSmall = !root.targetVolumeLargeEnough(sourceVolumeIndex, sid)
+            var shrinkOk = tooSmall && serviceClient.ntfsShrinkAvailable
             var inUse = root.isVolumeTargetMappedByOther(sourceVolumeIndex, sid)
-            if (tooSmall)
+            if (tooSmall && !shrinkOk)
                 //% "— too small"
                 lab += "  " + qsTrId("aegra.restore.target_too_small_tag")
+            else if (shrinkOk)
+                //% "— shrink"
+                lab += "  " + qsTrId("aegra.restore.shrink_candidate_tag")
             else if (inUse)
                 //% "— in use"
                 lab += "  " + qsTrId("aegra.restore.target_in_use_tag")
@@ -1357,14 +1411,111 @@ Item {
                 label: lab,
                 value: sid,
                 tooSmall: tooSmall,
+                shrinkCandidate: shrinkOk,
                 inUse: inUse,
                 isSystem: isSystem,
                 isReadOnly: isReadOnly,
                 hasArchive: hasArchive,
-                enabled: !tooSmall && !inUse && !isSystem && !isReadOnly && !hasArchive
+                enabled: (!tooSmall || shrinkOk) && !inUse && !isSystem && !isReadOnly && !hasArchive
             })
         }
         return out
+    }
+
+    function shrinkAnalysisMatches(pair) {
+        var analyzed = root.shrinkAnalysisFor(pair)
+        return !!analyzed
+    }
+
+    function shrinkAnalysisFor(pair) {
+        if (!pair)
+            return null
+        var analyses = root.analyzedShrinkMappings || ({})
+        var analyzed = analyses[String(pair.sourceVolumeIndex)]
+        return !!(analyzed && pair
+                   && Number(analyzed.sourceVolumeIndex) === Number(pair.sourceVolumeIndex)
+                   && String(analyzed.targetSourceId) === String(pair.targetSourceId))
+                ? analyzed : null
+    }
+
+    function readyMappedShrinkAnalysis() {
+        var pair = root.firstShrinkVolumePair()
+        return root.shrinkAnalysisFor(pair)
+    }
+
+    /// True only for a stale smaller mapping that has no target-bound analysis token.
+    readonly property bool needsNtfsShrinkAnalyze: {
+        var _e = root.mappingEpoch
+        if (!root.isVolumeMode || !serviceClient.ntfsShrinkAvailable)
+            return false
+        var pairs = root.allMappedVolumePairs()
+        for (var i = 0; i < pairs.length; ++i) {
+            if (!root.targetVolumeLargeEnough(pairs[i].sourceVolumeIndex, pairs[i].targetSourceId)
+                    && !root.shrinkAnalysisMatches(pairs[i]))
+                return true
+        }
+        return false
+    }
+
+    function firstShrinkVolumePair() {
+        var pairs = root.allMappedVolumePairs()
+        for (var i = 0; i < pairs.length; ++i) {
+            if (!root.targetVolumeLargeEnough(pairs[i].sourceVolumeIndex, pairs[i].targetSourceId))
+                return pairs[i]
+        }
+        return null
+    }
+
+    function shrinkCapacityText(details) {
+        var target = serviceClient.formatBytes(Number(details.targetCapacityBytes) || 0)
+        var minimum = serviceClient.formatBytes(Number(details.minimumTargetBytes) || 0)
+        return qsTrId("aegra.restore.shrink_minimum_target").arg(minimum)
+                + "  ·  " + qsTrId("aegra.restore.shrink_target_size").arg(target)
+    }
+
+    function acceptAnalyzedShrinkMapping(details) {
+        var pending = root.pendingShrinkMapping
+        root.pendingShrinkMapping = null
+        if (!pending)
+            return
+        if (String(details.targetSourceId || "") !== String(pending.targetSourceId)
+                || String(details.recoveryPointId || "") !== root.selectedCheckpointId)
+            return
+        var targetBytes = Number(details.targetCapacityBytes) || 0
+        var minimumBytes = Number(details.minimumTargetBytes) || 0
+        if (minimumBytes <= 0 || targetBytes < minimumBytes) {
+            serviceClient.showToast(root.shrinkCapacityText(details), true)
+            return
+        }
+        root.commitVolumeMapping(pending.sourceVolumeIndex, pending.targetSourceId)
+        var analyses = Object.assign({}, root.analyzedShrinkMappings || {})
+        analyses[String(pending.sourceVolumeIndex)] = {
+            sourceVolumeIndex: pending.sourceVolumeIndex,
+            targetSourceId: pending.targetSourceId,
+            details: details || ({})
+        }
+        root.analyzedShrinkMappings = analyses
+        serviceClient.showToast(root.shrinkCapacityText(details), false)
+        if (root.restoreStep === 2) {
+            root.shrinkConfirmDetails = details || ({})
+            root.shrinkConfirmOpen = true
+        }
+    }
+
+    function rejectAnalyzedShrinkMapping() {
+        root.pendingShrinkMapping = null
+        root.shrinkConfirmOpen = false
+        root.shrinkConfirmDetails = ({})
+    }
+
+    function confirmShrinkRestore() {
+        root.shrinkConfirmOpen = false
+        root.beginMappedRestoreQueue()
+    }
+
+    function cancelShrinkConfirm() {
+        root.shrinkConfirmOpen = false
+        root.shrinkConfirmDetails = ({})
     }
 
     function beginRestoreSession() {
@@ -1511,10 +1662,19 @@ Item {
         root.pendingRestoreQueue = q.slice(1)
         var ok = false
         if (root.isVolumeMode) {
-            ok = serviceClient.startVolumeRestore(pair.sourceVolumeIndex,
-                                                  pair.targetSourceId,
-                                                  root.selectedCheckpointId,
-                                                  root.pendingLayoutPassword)
+            var shrink = root.targetVolumeLargeEnough(pair.sourceVolumeIndex,
+                                                       pair.targetSourceId)
+                    ? null : root.shrinkAnalysisFor(pair)
+            if (shrink) {
+                var token = String((shrink.details || ({})).preflightToken || "")
+                ok = serviceClient.startRestoreWithPreflightToken(
+                            token, root.pendingLayoutPassword)
+            } else {
+                ok = serviceClient.startVolumeRestore(pair.sourceVolumeIndex,
+                                                      pair.targetSourceId,
+                                                      root.selectedCheckpointId,
+                                                      root.pendingLayoutPassword)
+            }
         } else {
             // auto_expand_last_partition always false: grow only via Target bar edge drag.
             ok = serviceClient.startDiskRestore(
@@ -1533,14 +1693,7 @@ Item {
         }
     }
 
-    function startMappedRestore() {
-        // Summary step owns the Restore action; workspace only advances via Next.
-        if (root.restoreStep !== 2)
-            return
-        if (!root.canRestore)
-            return
-        if (root.restoreJobsSubmitted && !root.restoreSessionFailed && !root.restoreSessionComplete)
-            return
+    function beginMappedRestoreQueue() {
         root.beginRestoreSession()
         if (root.isFileMode) {
             // Reuses the Next-step preflight token when selection is unchanged.
@@ -1575,6 +1728,23 @@ Item {
         root.startNextQueuedRestore()
     }
 
+    function startMappedRestore() {
+        // Summary step owns the Restore action; workspace only advances via Next.
+        if (root.restoreStep !== 2)
+            return
+        if (!root.canRestore)
+            return
+        if (root.restoreJobsSubmitted && !root.restoreSessionFailed && !root.restoreSessionComplete)
+            return
+        var analyzedShrink = root.isVolumeMode ? root.readyMappedShrinkAnalysis() : null
+        if (analyzedShrink) {
+            root.shrinkConfirmDetails = analyzedShrink.details || ({})
+            root.shrinkConfirmOpen = true
+            return
+        }
+        root.beginMappedRestoreQueue()
+    }
+
     Connections {
         target: serviceClient
         function onRestorePreflightSucceeded() {
@@ -1603,6 +1773,18 @@ Item {
             root.restoreJobsSubmitted = true
             root.restoreSessionFailed = true
             root.restoreSessionErrorText = message || ""
+        }
+        function onNtfsShrinkAnalyzeSucceeded(details) {
+            root.acceptAnalyzedShrinkMapping(details || ({}))
+        }
+        function onNtfsShrinkAnalyzeFailed(message) {
+            root.rejectAnalyzedShrinkMapping()
+            // Red toast already shown by ServiceClient.
+        }
+        function onRestorePreflightProvisional(details) {
+            // Direct prepare returned provisional — analysis required (capability path).
+            root.shrinkConfirmOpen = false
+            root.shrinkConfirmDetails = details || ({})
         }
     }
 
@@ -4655,9 +4837,19 @@ Item {
 
                     Text {
                         Layout.fillWidth: true
-                        visible: root.isVolumeMode
+                        visible: root.isVolumeMode && !serviceClient.ntfsShrinkAvailable
                         //% "Volume restore writes one backup volume onto an existing non-system volume of equal or larger size. Partition layout is not changed."
                         text: qsTrId("aegra.restore.volume_options_hint")
+                        color: Theme.colorTextGrey
+                        font.pixelSize: 11
+                        font.family: Theme.fontFamily
+                        wrapMode: Text.WordWrap
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        visible: root.isVolumeMode && serviceClient.ntfsShrinkAvailable
+                        //% "Volume restore writes onto a non-system target. A smaller NTFS target is analyzed before its mapping is accepted; failure after write needs a full retry."
+                        text: qsTrId("aegra.restore.volume_options_hint_shrink")
                         color: Theme.colorTextGrey
                         font.pixelSize: 11
                         font.family: Theme.fontFamily
@@ -5090,6 +5282,132 @@ Item {
                     radius: 12
                     color: Theme.colorCard
                     border.width: 1
+                    border.color: Theme.colorAccentBlue
+                    visible: root.shrinkConfirmOpen && root.isVolumeMode
+                    implicitHeight: shrinkConfirmCol.implicitHeight + 32
+
+                    ColumnLayout {
+                        id: shrinkConfirmCol
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.margins: 16
+                        spacing: 10
+
+                        Text {
+                            Layout.fillWidth: true
+                            //% "NTFS shrink plan ready"
+                            text: qsTrId("aegra.restore.shrink_confirm_title")
+                            color: Theme.colorTextWhite
+                            font.pixelSize: 14
+                            font.bold: true
+                            font.family: Theme.fontFamily
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            //% "Source size: %1"
+                            text: qsTrId("aegra.restore.shrink_source_size").arg(
+                                      serviceClient.formatBytes(
+                                          Number(root.shrinkConfirmDetails.logicalSizeBytes) || 0))
+                            color: Theme.colorTextGrey
+                            font.pixelSize: 12
+                            font.family: Theme.fontFamily
+                            wrapMode: Text.WordWrap
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            //% "Target size: %1"
+                            text: qsTrId("aegra.restore.shrink_target_size").arg(
+                                      serviceClient.formatBytes(
+                                          Number(root.shrinkConfirmDetails.targetCapacityBytes) || 0))
+                            color: Theme.colorTextGrey
+                            font.pixelSize: 12
+                            font.family: Theme.fontFamily
+                            wrapMode: Text.WordWrap
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            //% "Minimum target: %1"
+                            text: qsTrId("aegra.restore.shrink_minimum_target").arg(
+                                      serviceClient.formatBytes(
+                                          Number(root.shrinkConfirmDetails.minimumTargetBytes) || 0))
+                            color: Theme.colorTextGrey
+                            font.pixelSize: 12
+                            font.family: Theme.fontFamily
+                            wrapMode: Text.WordWrap
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            //% "Relocation: %1"
+                            text: qsTrId("aegra.restore.shrink_relocation").arg(
+                                      serviceClient.formatBytes(
+                                          Number(root.shrinkConfirmDetails.relocationBytes) || 0))
+                            color: Theme.colorTextGrey
+                            font.pixelSize: 12
+                            font.family: Theme.fontFamily
+                            wrapMode: Text.WordWrap
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            //% "Scratch upper bound: %1"
+                            text: qsTrId("aegra.restore.shrink_scratch").arg(
+                                      serviceClient.formatBytes(
+                                          Number(root.shrinkConfirmDetails.scratchUpperBoundBytes) || 0))
+                            color: Theme.colorTextGrey
+                            font.pixelSize: 12
+                            font.family: Theme.fontFamily
+                            wrapMode: Text.WordWrap
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            visible: (root.shrinkConfirmDetails.restrictionCodes || []).length > 0
+                            //% "Restrictions: %1"
+                            text: qsTrId("aegra.restore.shrink_restrictions").arg(
+                                      (root.shrinkConfirmDetails.restrictionCodes || []).join(", "))
+                            color: Theme.colorAccentRed
+                            font.pixelSize: 12
+                            font.family: Theme.fontFamily
+                            wrapMode: Text.WordWrap
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            //% "If restore fails after writing begins, the target may be unusable. You must run a full restore again."
+                            text: qsTrId("aegra.restore.shrink_retry_warning")
+                            color: Theme.colorAccentRed
+                            font.pixelSize: 12
+                            font.family: Theme.fontFamily
+                            wrapMode: Text.WordWrap
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.topMargin: 4
+                            spacing: 12
+                            Item { Layout.fillWidth: true }
+                            AppButton {
+                                Layout.preferredWidth: 100
+                                Layout.preferredHeight: 36
+                                //% "Cancel"
+                                text: qsTrId("aegra.common.cancel")
+                                onClicked: root.cancelShrinkConfirm()
+                            }
+                            AppButton {
+                                Layout.preferredWidth: 120
+                                Layout.preferredHeight: 36
+                                //% "Confirm restore"
+                                text: qsTrId("aegra.restore.shrink_confirm")
+                                primary: true
+                                enabled: !serviceClient.restoreCommandBusy
+                                onClicked: root.confirmShrinkRestore()
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    radius: 12
+                    color: Theme.colorCard
+                    border.width: 1
                     border.color: Theme.colorBorder
                     implicitHeight: summaryProgressCol.implicitHeight + 32
 
@@ -5210,6 +5528,7 @@ Item {
                          && !root.restoreSessionComplete
                          && !root.restoreJobsSubmitted
                          && !root.restoreSessionRunning
+                         && !root.shrinkConfirmOpen
                 text: {
                     if (serviceClient.restoreCommandBusy)
                         //% "Restoring..."

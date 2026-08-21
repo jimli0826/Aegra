@@ -1,10 +1,6 @@
 add_library(aegra_adapter_ntfs STATIC
-    src/ntfs_validation.cpp
-    src/ntfs_fixup.cpp
-    src/ntfs_boot_sector.cpp
-    src/ntfs_runlist.cpp
-    src/ntfs_attribute_parser.cpp
-    src/ntfs_record_parser.cpp
+    src/ntfs_adapter_convert.cpp
+    src/ntfs_file_layout.cpp
     src/ntfs_directory_index.cpp
     src/ntfs_volume_reader.cpp
 )
@@ -19,7 +15,7 @@ target_include_directories(
 
 target_link_libraries(
     aegra_adapter_ntfs
-    PUBLIC Aegra::Base Aegra::Ports
+    PUBLIC Aegra::Base Aegra::Ports Aegra::NtfsCore
 )
 
 aegra_configure_target(aegra_adapter_ntfs)

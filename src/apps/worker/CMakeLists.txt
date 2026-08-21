@@ -3,6 +3,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 add_library(aegra_app_worker_personal STATIC
     src/personal_archive_restore_task.cpp
     src/personal_archive_restore_task_backend.cpp
+    src/personal_archive_restore_shrink.cpp
     src/personal_archive_verify_task.cpp
     src/personal_archive_verify_task_backend.cpp
     src/personal_file_archive_restore_task.cpp
@@ -34,10 +35,13 @@ target_link_libraries(
     PRIVATE
         Aegra::AdapterCryptoSodium
         Aegra::AdapterPersonalArchive
+        Aegra::AdapterStorageLocal
         Aegra::AdapterWindowsDisk
         Aegra::AdapterWindowsFilesystem
+        Aegra::AdapterWindowsProcess
         Aegra::AdapterWindowsVss
         Aegra::Format
+        Aegra::NtfsResize
         Aegra::ThirdPartySpdlog
         nlohmann_json::nlohmann_json
 )

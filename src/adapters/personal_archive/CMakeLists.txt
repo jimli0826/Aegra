@@ -17,6 +17,7 @@ add_library(aegra_adapter_personal_archive STATIC
     src/personal_archive_sidecar_io.cpp
     src/whole_disk_byte_reader.cpp
     src/win32_output_file.cpp
+    src/win32_input_file.cpp
     src/windows_cng_sha256.cpp
 )
 

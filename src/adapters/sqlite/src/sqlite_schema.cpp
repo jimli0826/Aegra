@@ -140,10 +140,17 @@ CREATE TABLE IF NOT EXISTS restore_preflights (
     target_source_id TEXT NOT NULL,
     chain_fingerprint TEXT NOT NULL,
     logical_size_bytes INTEGER NOT NULL CHECK (logical_size_bytes >= 0),
-    target_capacity_bytes INTEGER NOT NULL CHECK (target_capacity_bytes >= logical_size_bytes),
+    target_capacity_bytes INTEGER NOT NULL CHECK (target_capacity_bytes > 0),
     chain_depth INTEGER NOT NULL CHECK (chain_depth > 0 AND chain_depth <= 4294967295),
     created_utc_ms INTEGER NOT NULL CHECK (created_utc_ms >= 0),
-    expires_utc_ms INTEGER NOT NULL CHECK (expires_utc_ms > created_utc_ms)
+    expires_utc_ms INTEGER NOT NULL CHECK (expires_utc_ms > created_utc_ms),
+    volume_size_policy INTEGER NOT NULL DEFAULT 1 CHECK (volume_size_policy IN (1, 2)),
+    feasibility INTEGER NOT NULL DEFAULT 3 CHECK (feasibility IN (1, 2, 3)),
+    minimum_target_bytes INTEGER NOT NULL DEFAULT 0 CHECK (minimum_target_bytes >= 0),
+    relocation_bytes INTEGER NOT NULL DEFAULT 0 CHECK (relocation_bytes >= 0),
+    scratch_upper_bound_bytes INTEGER NOT NULL DEFAULT 0 CHECK (scratch_upper_bound_bytes >= 0),
+    shrink_plan_digest TEXT NOT NULL DEFAULT '',
+    target_binding_digest TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS ix_restore_preflights_expires
     ON restore_preflights(expires_utc_ms);

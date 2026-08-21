@@ -9,6 +9,8 @@
 | `ports` | [ports.md](ports.md) | 外部能力抽象 |
 | `format` | [format.md](format.md) | Manifest、个人 Archive、企业 Repository 二进制格式 |
 | `pipeline` | [pipeline.md](pipeline.md) | 通用 Backup/Restore 数据面 |
+| `ntfs_core` | [ntfs_core.md](ntfs_core.md) | NTFS Boot/MFT/属性/Runlist 安全解析与编码 |
+| `ntfs_resize` | [ntfs_resize.md](ntfs_resize.md) | NTFS 小目标卷 ShrinkPlan、分析与重定位（ADR-0025） |
 | `application` | [application.md](application.md) | Use Case、权限前置和任务编排 |
 | `personal_repository` | [personal_repository.md](personal_repository.md) | 个人版 Archive Store、可重建 Catalog、链图与删除计划 |
 | `repository` | [repository.md](repository.md) | 企业 CAS、Gateway、索引与维护 |

@@ -173,7 +173,7 @@ base::Result<std::unique_ptr<ports::IBlockSource>> open_volume_source(
     std::unique_ptr<ports::IBlockSource> result = std::move(source).value();
 
     // Free-cluster skip + pagefile/hiber/swap exclusion on the **same** device path used for
-    // reads (AipCopy: ExcludeJunkFiles on swStaticVolume — live GUID or VSS snapshot root).
+    // reads (live GUID or VSS snapshot root).
     auto free_plan = windows_disk::build_free_skip_plan(path, volume.filesystem, size,
                                                         volume.cluster_size_bytes);
     free_plan.total_bytes = size;

@@ -137,6 +137,11 @@ base::Result<void> validate_backup_options(const JobRequest& request) {
     return base::Result<void>::success();
 }
 
+[[nodiscard]] bool is_known_volume_size_policy(const VolumeSizePolicy policy) noexcept {
+    return policy == VolumeSizePolicy::kRequireSourceSize ||
+           policy == VolumeSizePolicy::kAllowNtfsRelocation;
+}
+
 base::Result<void> validate_restore_options(const RestoreOptions& options) {
     if (options.partition_layout_edits.size() > kMaximumPartitionLayoutEdits) {
         return invalid("partition_layout_edits exceeds maximum entry count");
@@ -147,6 +152,27 @@ base::Result<void> validate_restore_options(const RestoreOptions& options) {
     // Explicit layout is the size authority; auto-expand must not also apply.
     if (!options.partition_layout_edits.empty() && options.auto_expand_last_partition) {
         return invalid("auto_expand_last_partition cannot be used with partition_layout_edits");
+    }
+    if (!is_known_volume_size_policy(options.volume_size_policy)) {
+        return invalid("volume_size_policy is invalid");
+    }
+    if (options.disk_restore &&
+        options.volume_size_policy != VolumeSizePolicy::kRequireSourceSize) {
+        return invalid("disk restore requires kRequireSourceSize");
+    }
+    if (options.volume_size_policy == VolumeSizePolicy::kRequireSourceSize &&
+        (!options.shrink_plan_digest.empty() || !options.source_chain_fingerprint.empty())) {
+        return invalid("shrink_plan_digest requires kAllowNtfsRelocation");
+    }
+    if (options.shrink_plan_digest.size() > 128) {
+        return invalid("shrink_plan_digest is too long");
+    }
+    if (options.source_chain_fingerprint.size() > 2048) {
+        return invalid("source_chain_fingerprint is too long");
+    }
+    if (options.volume_size_policy == VolumeSizePolicy::kAllowNtfsRelocation &&
+        !options.shrink_plan_digest.empty() && options.source_chain_fingerprint.empty()) {
+        return invalid("shrink restore requires source_chain_fingerprint");
     }
     std::set<std::uint64_t> source_starts;
     for (const auto& edit : options.partition_layout_edits) {

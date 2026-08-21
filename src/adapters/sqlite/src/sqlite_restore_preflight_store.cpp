@@ -8,7 +8,9 @@ namespace {
 constexpr auto kSelectRestorePreflightSql =
     "SELECT preflight_token, repository_connection_id, repository_uuid, recovery_point_id, "
     "target_source_id, chain_fingerprint, logical_size_bytes, target_capacity_bytes, chain_depth, "
-    "created_utc_ms, expires_utc_ms FROM restore_preflights WHERE preflight_token = ?";
+    "created_utc_ms, expires_utc_ms, volume_size_policy, feasibility, minimum_target_bytes, "
+    "relocation_bytes, scratch_upper_bound_bytes, shrink_plan_digest, target_binding_digest "
+    "FROM restore_preflights WHERE preflight_token = ?";
 
 } // namespace
 
@@ -31,8 +33,10 @@ base::Result<void> RestorePreflightStore::insert(const ports::RestorePreflightRe
         state_.db,
         "INSERT INTO restore_preflights(preflight_token, repository_connection_id, "
         "repository_uuid, recovery_point_id, target_source_id, chain_fingerprint, "
-        "logical_size_bytes, target_capacity_bytes, chain_depth, created_utc_ms, expires_utc_ms) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?)");
+        "logical_size_bytes, target_capacity_bytes, chain_depth, created_utc_ms, expires_utc_ms, "
+        "volume_size_policy, feasibility, minimum_target_bytes, relocation_bytes, "
+        "scratch_upper_bound_bytes, shrink_plan_digest, target_binding_digest) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     if (!statement) {
         return base::Result<void>::failure(statement.error());
     }
@@ -60,6 +64,26 @@ base::Result<void> RestorePreflightStore::insert(const ports::RestorePreflightRe
     if (auto bound = stmt.bind_int64(10, static_cast<std::int64_t>(record.created_utc_ms)); !bound)
         return bound;
     if (auto bound = stmt.bind_int64(11, static_cast<std::int64_t>(record.expires_utc_ms)); !bound)
+        return bound;
+    if (auto bound =
+            stmt.bind_int64(12, static_cast<std::int64_t>(record.volume_size_policy));
+        !bound)
+        return bound;
+    if (auto bound = stmt.bind_int64(13, static_cast<std::int64_t>(record.feasibility)); !bound)
+        return bound;
+    if (auto bound = stmt.bind_int64(14, static_cast<std::int64_t>(record.minimum_target_bytes));
+        !bound)
+        return bound;
+    if (auto bound = stmt.bind_int64(15, static_cast<std::int64_t>(record.relocation_bytes));
+        !bound)
+        return bound;
+    if (auto bound =
+            stmt.bind_int64(16, static_cast<std::int64_t>(record.scratch_upper_bound_bytes));
+        !bound)
+        return bound;
+    if (auto bound = stmt.bind_text(17, record.shrink_plan_digest); !bound)
+        return bound;
+    if (auto bound = stmt.bind_text(18, record.target_binding_digest); !bound)
         return bound;
     auto stepped = stmt.step();
     if (!stepped) {

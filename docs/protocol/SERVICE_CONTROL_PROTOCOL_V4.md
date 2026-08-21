@@ -629,6 +629,119 @@ payload 保持 repository/schedule/job 引用形状；若 Schedule 为 file_set�
 }
 ```
 
+### 7.3a kind 9 — PrepareRestore（volume_set）
+
+**用途：** volume_set 卷/整盘恢复快速预检，签发短期 preflight token。
+
+**Capability：** `restore.preflight`
+
+精确 NTFS 缩容分析由 AnalyzeNtfsShrink（kind 18）完成；Service 不得用 Manifest free size 冒充 exact eligible。
+
+**请求 payload（exact 7 字段）：**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `repository_connection_id` | string | |
+| `recovery_point_id` | string | |
+| `target_source_id` | string | `vol.…` 或 `disk.N` |
+| `source_disk_number` | number | 整盘恢复时的 Manifest disk_number |
+| `source_volume_index` | number | 卷恢复时的 Manifest volume_index |
+| `archive_password` | string | 未加密为 `""`；不记日志 |
+| `volume_size_policy` | number | `1` = require source size；`2` = allow NTFS relocation |
+
+**成功 payload — RestorePreflight（exact 18 字段）：**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `preflight_token` | string | |
+| `repository_connection_id` | string | |
+| `recovery_point_id` | string | |
+| `target_source_id` | string | |
+| `logical_size_bytes` | uint64 | 源逻辑大小 |
+| `target_capacity_bytes` | uint64 | 目标真实容量 |
+| `chain_depth` | number | |
+| `expires_utc_ms` | uint64 | |
+| `volume_size_policy` | number | 绑定策略 |
+| `feasibility` | number | `1` ineligible / `2` provisional / `3` eligible |
+| `restore_eligible` | bool | 仅当 `feasibility == 3` 为 true |
+| `minimum_target_bytes` | uint64 | 未知时为 0 |
+| `relocation_bytes` | uint64 | |
+| `scratch_upper_bound_bytes` | uint64 | |
+| `shrink_plan_digest` | string | 无计划时为 `""` |
+| `restriction_codes` | string[] | 稳定码列表 |
+| `warning_codes` | string[] | 警告不得替代失败 |
+| `message_code` | string | 如 `restore.preflight_ready` / `restore.shrink_provisional` |
+
+规则：
+
+- `target >= source`：`feasibility=eligible`，`volume_size_policy` 按 require source size 处理；
+- 更小目标 + policy=`allow_ntfs_relocation` + Manifest NTFS：可返回 **provisional**（非可执行）；
+- 更小目标 + require source size：失败（既有 smaller-than-source）；
+- 更小非 NTFS + allow relocation：失败 `restore.shrink_not_ntfs`；
+- disk 目标禁止 policy=`allow_ntfs_relocation`；
+- `StartRestore` 仅接受 `feasibility=eligible`；缩容执行另受 capability `restore.ntfs_shrink.v1` 门禁。
+  Debug 与 Release 均宣告该能力，但 capability 可见不等于 M01–M26 发布门禁已经通过。
+
+### 7.3b kind 18 — AnalyzeNtfsShrink
+
+**用途：** 在 Service 进程内对较小 NTFS 目标卷做**精确** ShrinkPlan 预检，签发可执行
+`feasibility=eligible` 的 RestorePreflight（含 `shrink_plan_digest`）。
+
+**Capability：** `restore.ntfs_shrink.v1`（Debug 与 Release 均宣告；若自定义构建未宣告，Host 返回
+`service.capability_unavailable`）。
+
+**请求 payload：** 与 kind 9 `PrepareRestore` 相同（exact 7 字段）。约束：
+
+- `volume_size_policy` 必须为 `2`（allow NTFS relocation）；
+- `target_source_id` 必须为 `vol.…`（拒绝 `disk.N`）；
+- 目标容量必须小于源卷逻辑大小；
+- 同步打开 Archive 链 + 源卷随机读视图 + 只读探测目标几何（不锁卷、不卸载、不写目标）。
+
+**成功 payload：** 与 kind 9 相同的 `RestorePreflight`（exact 18 字段）。分析器以簇为单位搜索当前
+确定性规划器可接受的最小边界。所选 Target 可行时：
+
+- `feasibility=eligible`，`restore_eligible=true`；
+- `volume_size_policy=2`；
+- `minimum_target_bytes` / `relocation_bytes` / `scratch_upper_bound_bytes` 来自 ShrinkPlan；
+- `shrink_plan_digest` = `plan_payload_digest`（64 位小写 hex）；
+- `message_code` = `restore.shrink_plan_ready`。
+
+所选 Target 小于精确最小边界时仍返回只读分析结果，但不得签发可执行计划：
+
+- `feasibility=provisional`，`restore_eligible=false`；
+- `minimum_target_bytes` 为精确搜索结果；
+- `shrink_plan_digest=""`；
+- `restriction_codes=["restore.shrink_below_minimum"]`；
+- Desktop 比较容量、提示用户且不建立映射，Start 继续拒绝 provisional token。
+
+**`target_stable_id_digest` 预镜像（与 Worker 一致）：**
+
+1. 取 Inventory `stable_key` 解析出的 canonical Volume GUID path（UTF-16 原生路径，含尾 `\`）；
+2. 经 `std::filesystem::path::generic_u8string()` 得到 UTF-8（Windows 上将 `\` 规范为 `/`）；
+3. `target_stable_id_digest` = lowercase hex SHA-256（`crypto_sodium::sha256`）of 该 UTF-8 字节序列；
+4. 写入控制面 `target_binding_digest` 的值与此相同。
+
+失败使用稳定 `restore.shrink_*` / `ntfs_resize.*` message code。Inventory 容量与只读几何探测容量不一致时返回
+`restore.shrink_plan_changed`。
+
+```json
+{
+  "schema_version": 4,
+  "message_type": 1,
+  "request_id": "…",
+  "kind": 18,
+  "payload": {
+    "repository_connection_id": "…",
+    "recovery_point_id": "…",
+    "target_source_id": "vol.…",
+    "source_disk_number": 0,
+    "source_volume_index": 0,
+    "archive_password": "",
+    "volume_size_policy": 2
+  }
+}
+```
+
 ### 7.4 kind 40 — StartRestore
 
 **用途：** 在用户确认后，用预检 token 启动 volume_set Restore Job（卷恢复或整盘恢复）。
@@ -671,6 +784,13 @@ payload 保持 repository/schedule/job 引用形状；若 Schedule 为 file_set�
 
 - **整盘（指纹 `diskc|…`）：** `disk_restore=true`，`target_ref=\\.\PhysicalDriveN`，可带布局 edits。
 - **卷（指纹 `volc|…`）：** `disk_restore=false`，`source_volume_index` + Volume GUID Path；`preserve_disk_signature` / `auto_expand_last_partition` / 布局 edits 忽略。
+
+**Start 容量 / 缩容门禁：**
+
+- 一律要求 `feasibility=eligible`，且当前 Inventory 容量等于 preflight 绑定的 `target_capacity_bytes`；
+- `volume_size_policy=require_source_size`：目标容量 ≥ 源逻辑大小（既有路径）；
+- `volume_size_policy=allow_ntfs_relocation`：要求非空 `shrink_plan_digest`，且目标容量 ≥ `minimum_target_bytes`；Worker Job 写入 `restore.volume_size_policy` / `restore.shrink_plan_digest` / `restore.source_chain_fingerprint`；
+- Desktop 在 capability `restore.ntfs_shrink.v1` 未宣告前不得发起缩容 Analyze/Start；Analyze 仍由 Host 用该 capability 失败关闭。
 
 ```json
 {

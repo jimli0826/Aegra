@@ -20,7 +20,8 @@ namespace aegra::ports {
 // v11: content_kind on jobs/schedules + schedule_file_selections (file_set).
 // v12: restore_preflight_entry_ids for file_set selective restore preflight.
 // v16: service_settings (job retention months) + terminal job purge support.
-inline constexpr std::uint32_t kControlPlaneSchemaVersion = 19;
+// v20: volume restore size policy / feasibility / shrink plan token bindings (ADR-0025).
+inline constexpr std::uint32_t kControlPlaneSchemaVersion = 20;
 
 // ---- Durable records (control-plane only; no plaintext secrets, no RP authority) ----
 
@@ -143,6 +144,14 @@ struct RestorePreflightRecord final {
     std::uint64_t expires_utc_ms{0};
     /// file_set only: selected entry IDs (decimal u64 text). Empty for volume restore.
     std::vector<std::string> entry_ids;
+    contracts::VolumeSizePolicy volume_size_policy{contracts::VolumeSizePolicy::kRequireSourceSize};
+    contracts::RestoreFeasibility feasibility{contracts::RestoreFeasibility::kIneligible};
+    std::uint64_t minimum_target_bytes{0};
+    std::uint64_t relocation_bytes{0};
+    std::uint64_t scratch_upper_bound_bytes{0};
+    std::string shrink_plan_digest;
+    /// Target inventory identity digest (stable id + capacity + geometry). Empty if unused.
+    std::string target_binding_digest;
 };
 
 // ---- Job state machine (shared pure rules) ----

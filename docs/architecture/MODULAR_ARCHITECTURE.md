@@ -33,6 +33,8 @@ src/
 │   ├── restore/
 │   ├── chunking/
 │   └── transforms/
+├── ntfs_core/
+├── ntfs_resize/
 ├── application/
 ├── personal_repository/
 ├── repository/
@@ -80,6 +82,9 @@ pipeline ----------------> format, ports, contracts
 personal repository -----> format, ports, contracts
 repository client -------> ports, contracts
 repository gateway ------> repository modules, adapters
+ntfs_core ---------------> base, ports
+ntfs_resize -------------> base, ports, ntfs_core
+adapters/ntfs -----------> ntfs_core, ports, contracts/base（只读 Explorer 合同；不链接 NtfsResize）
 adapters ----------------> ports, contracts
 format, ports, contracts -> base
 base --------------------> C++ standard library only
@@ -92,6 +97,8 @@ base --------------------> C++ standard library only
 - `ports` 只依赖 `base` 和必要的 `contracts`。
 - `format` 不知道路径、数据库、VSS、虚拟机或 UI。
 - `pipeline` 不依赖具体 Storage、Windows、PostgreSQL 或厂商 SDK。
+- `ntfs_core` 只依赖 `base` 与 `ports`；不含 Windows/Qt/Archive/Service。
+- `ntfs_resize` 只依赖 `base`、`ports` 与 `ntfs_core`；不含 Windows/Qt/Archive/Service；承载只读分析、不可变 ShrinkPlan、复合设备与提交前审计（ADR-0025）。
 - Adapter 只能实现 Port，不直接依赖另一个 Adapter 的实现。
 - `application` 组织 Use Case，不接受 HTTP、Qt、数据库句柄或厂商类型。
 - `apps` 是唯一 Composition Root。

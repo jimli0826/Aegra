@@ -103,6 +103,9 @@ template <typename Payload, typename Validator>
     case ServiceRequestKind::kListRepositoryDirectories:
         return validate_payload<RepositoryDirectoryListRequest>(
             request, validate_repository_directory_list_request);
+    case ServiceRequestKind::kAnalyzeNtfsShrink:
+        return validate_payload<RestorePreflightRequest>(request,
+                                                         validate_restore_preflight_request);
     default:
         return invalid("service query kind is invalid");
     }
@@ -204,6 +207,8 @@ template <typename Payload, typename Validator>
     case ServiceRequestKind::kListRepositoryDirectories:
         return validate_response_payload<FileSourceNodePage>(response,
                                                              validate_file_source_node_page);
+    case ServiceRequestKind::kAnalyzeNtfsShrink:
+        return validate_response_payload<RestorePreflight>(response, validate_restore_preflight);
     default:
         return invalid("service query response kind is invalid");
     }
@@ -234,7 +239,7 @@ template <typename Payload, typename Validator>
 
 bool is_service_query_kind(const ServiceRequestKind kind) noexcept {
     return kind >= ServiceRequestKind::kGetServiceInfo &&
-           kind <= ServiceRequestKind::kListRepositoryDirectories;
+           kind <= ServiceRequestKind::kAnalyzeNtfsShrink;
 }
 
 bool is_service_command_kind(const ServiceRequestKind kind) noexcept {

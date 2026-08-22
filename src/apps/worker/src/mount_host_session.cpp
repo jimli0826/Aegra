@@ -52,6 +52,7 @@ using Json = nlohmann::json;
 
 struct MountJob final {
     std::string session_id;
+    std::string content_kind;
     std::uint32_t source_disk_number{0};
     std::string preferred_drive_letter;
     std::filesystem::path overlay_dir;
@@ -76,6 +77,7 @@ struct MountJob final {
     }
     MountJob job;
     job.session_id = root.value("session_id", "");
+    job.content_kind = root.value("content_kind", "volume_set");
     job.source_disk_number = root.value("source_disk_number", 0U);
     job.preferred_drive_letter = root.value("preferred_drive_letter", "");
     const auto overlay = root.value("overlay_dir", "");
@@ -151,29 +153,57 @@ base::Result<void> run_mount_host_session(ports::IMessageChannel& channel,
 
     adapters::personal_archive::ArchiveChainOpenRequest open_request;
     open_request.layers = std::move(job.value().layers);
-    auto chain = adapters::personal_archive::PersonalArchiveChainReader::open(open_request);
-    if (!chain) {
-        (void)send_frame(
-            channel,
-            encode_event("failed", job.value().session_id, "mount.host_failed", nullptr),
-            cancellation);
-        return base::Result<void>::failure(chain.error());
-    }
 
-    auto disk_reader = adapters::personal_archive::WholeDiskByteReader::open(
-        *chain.value(), chain.value()->manifest(), job.value().source_disk_number);
-    if (!disk_reader) {
-        const auto code = disk_reader.error().code == base::ErrorCode::kNotFound
-                              ? "mount.disk_not_found"
-                              : "mount.host_failed";
-        (void)send_frame(channel, encode_event("failed", job.value().session_id, code, nullptr),
-                         cancellation);
-        return base::Result<void>::failure(disk_reader.error());
-    }
+    // Readers must stay alive until unmount completes (reset after unmount below).
+    std::unique_ptr<adapters::personal_archive::PersonalArchiveChainReader> chain;
+    std::unique_ptr<adapters::personal_archive::PersonalFileArchiveChainReader> file_chain;
+    std::unique_ptr<adapters::personal_archive::WholeDiskByteReader> disk_reader;
 
-    auto mounted = adapters::dokan::mount_whole_disk_readonly(
-        *disk_reader.value(), chain.value()->manifest(), job.value().source_disk_number,
-        job.value().preferred_drive_letter, job.value().overlay_dir, job.value().session_id);
+    base::Result<adapters::dokan::MountSessionInfo> mounted =
+        base::Result<adapters::dokan::MountSessionInfo>::failure(
+            make_error(base::ErrorCode::kInternal, "mount.host_failed"));
+    if (job.value().content_kind == "file_set") {
+        auto opened =
+            adapters::personal_archive::PersonalFileArchiveChainReader::open(open_request);
+        if (!opened) {
+            (void)send_frame(
+                channel,
+                encode_event("failed", job.value().session_id, "mount.host_failed", nullptr),
+                cancellation);
+            return base::Result<void>::failure(opened.error());
+        }
+        file_chain = std::move(opened).value();
+        mounted = adapters::dokan::mount_file_set_readonly(
+            *file_chain, job.value().preferred_drive_letter, job.value().session_id);
+    } else {
+        auto opened = adapters::personal_archive::PersonalArchiveChainReader::open(open_request);
+        if (!opened) {
+            (void)send_frame(
+                channel,
+                encode_event("failed", job.value().session_id, "mount.host_failed", nullptr),
+                cancellation);
+            return base::Result<void>::failure(opened.error());
+        }
+        chain = std::move(opened).value();
+
+        auto disk = adapters::personal_archive::WholeDiskByteReader::open(
+            *chain, chain->manifest(), job.value().source_disk_number);
+        if (!disk) {
+            const auto code = disk.error().code == base::ErrorCode::kNotFound
+                                  ? "mount.disk_not_found"
+                                  : "mount.host_failed";
+            (void)send_frame(channel,
+                             encode_event("failed", job.value().session_id, code, nullptr),
+                             cancellation);
+            return base::Result<void>::failure(disk.error());
+        }
+        disk_reader = std::move(disk).value();
+
+        mounted = adapters::dokan::mount_whole_disk_readonly(
+            *disk_reader, chain->manifest(), job.value().source_disk_number,
+            job.value().preferred_drive_letter, job.value().overlay_dir,
+            job.value().session_id);
+    }
     if (!mounted) {
         const auto code = mounted.error().message.empty() ? "mount.host_failed"
                                                           : mounted.error().message;
@@ -208,9 +238,10 @@ base::Result<void> run_mount_host_session(ports::IMessageChannel& channel,
                      encode_event("unmounted", job.value().session_id,
                                   unmounted ? "mount.unmounted" : "mount.unmount_failed", nullptr),
                      cancellation);
-    // Keep reader/chain alive until unmount completes (already done above).
-    disk_reader.value().reset();
-    chain.value().reset();
+    // Keep readers alive until unmount completes (already done above).
+    disk_reader.reset();
+    chain.reset();
+    file_chain.reset();
     return unmounted ? base::Result<void>::success()
                      : base::Result<void>::failure(unmounted.error());
 }

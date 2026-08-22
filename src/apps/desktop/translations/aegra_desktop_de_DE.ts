@@ -1844,8 +1844,16 @@
         <translation>(Datenträger zum Mounten markieren — Laufwerksbuchstaben automatisch)</translation>
     </message>
     <message id="aegra.mount.source_empty">
-        <source>Select a checkpoint to view source disks</source>
-        <translation>Prüfpunkt wählen, um Quelldatenträger anzuzeigen</translation>
+        <source>Select a checkpoint to view its contents</source>
+        <translation>Prüfpunkt wählen, um den Inhalt anzuzeigen</translation>
+    </message>
+    <message id="aegra.mount.source">
+        <source>Source</source>
+        <translation>Quelle</translation>
+    </message>
+    <message id="aegra.mount.file_set_hint">
+        <source>Mounts as a read-only drive letter</source>
+        <translation>Wird als schreibgeschützter Laufwerksbuchstabe eingebunden</translation>
     </message>
     <message id="aegra.mount.mounted">
         <source>Mounted</source>
@@ -2454,6 +2462,86 @@
     <message id="aegra.error.file_source.unsupported_cloud_placeholder">
         <source>Cloud placeholder files are not supported for file backup.</source>
         <translation>Cloud-Platzhalterdateien werden für Dateisicherung nicht unterstützt.</translation>
+    </message>
+    <message id="aegra.settings.job_retention">
+        <source>Job history retention</source>
+        <translation>Aufbewahrung des Auftragsverlaufs</translation>
+    </message>
+    <message id="aegra.settings.job_retention_desc">
+        <source>Completed jobs older than this period are permanently deleted from the service.</source>
+        <translation>Abgeschlossene Aufträge, die älter als dieser Zeitraum sind, werden endgültig aus dem Service gelöscht.</translation>
+    </message>
+    <message id="aegra.settings.job_retention.1_month">
+        <source>1 month</source>
+        <translation>1 Monat</translation>
+    </message>
+    <message id="aegra.settings.job_retention.3_months">
+        <source>3 months</source>
+        <translation>3 Monate</translation>
+    </message>
+    <message id="aegra.settings.job_retention.6_months">
+        <source>6 months</source>
+        <translation>6 Monate</translation>
+    </message>
+    <message id="aegra.backup.offline_dialog_title">
+        <source>Repository Offline</source>
+        <translation>Repository offline</translation>
+    </message>
+    <message id="aegra.backup.offline_dialog_message">
+        <source>The selected backup destination is offline and cannot receive backups. Please choose an online repository below to continue:</source>
+        <translation>Das ausgewählte Sicherungsziel ist offline und kann keine Sicherungen empfangen. Wählen Sie unten ein Online-Repository aus, um fortzufahren:</translation>
+    </message>
+    <message id="aegra.backup.offline_dialog_none_available">
+        <source>No online repositories found. Please bring a repository online or add a new location in the Repository page.</source>
+        <translation>Keine Online-Repositorys gefunden. Bringen Sie ein Repository online oder fügen Sie auf der Repository-Seite einen neuen Speicherort hinzu.</translation>
+    </message>
+    <message id="aegra.backup.run.not_connected">
+        <source>Service not connected</source>
+        <translation>Service nicht verbunden</translation>
+    </message>
+    <message id="aegra.repository.column.path">
+        <source>PATH</source>
+        <translation>PFAD</translation>
+    </message>
+    <message id="aegra.repository.field.hostname_ip">
+        <source>Hostname/IP</source>
+        <translation>Hostname/IP</translation>
+    </message>
+    <message id="aegra.repository.hostname_placeholder">
+        <source>e.g. 192.168.1.1</source>
+        <translation>z. B. 192.168.1.1</translation>
+    </message>
+    <message id="aegra.repository.please_enter_hostname">
+        <source>Please enter a hostname or IP</source>
+        <translation>Bitte geben Sie einen Hostnamen oder eine IP ein</translation>
+    </message>
+    <message id="aegra.repository.hostname_invalid">
+        <source>Invalid hostname or IP</source>
+        <translation>Ungültiger Hostname oder ungültige IP</translation>
+    </message>
+    <message id="aegra.restore.cannot_restore">
+        <source>Cannot restore now</source>
+        <translation>Wiederherstellung derzeit nicht möglich</translation>
+    </message>
+    <message id="aegra.restore.stat.volume_sets">
+        <source>Volume Sets</source>
+        <translation>Volume-Sets</translation>
+    </message>
+    <message id="aegra.restore.stat.file_sets">
+        <source>File Sets</source>
+        <translation>Datei-Sets</translation>
+    </message>
+    <message id="aegra.shell.service_running">
+        <source>Service is running</source>
+        <translation>Service läuft</translation>
+    </message>
+    <message id="aegra.shell.service_offline">
+        <source>Service offline</source>
+        <translation>Service offline</translation>
+    </message>
+    <message id="aegra.shell.last_sync_just_now">
+        <source>Last sync · just now</source>
+        <translation>Letzte Synchronisierung · gerade eben</translation>
     </message>
 </context>
 </TS>

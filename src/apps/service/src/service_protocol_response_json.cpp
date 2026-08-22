@@ -534,20 +534,22 @@ parse_recovery_point_source_volume(const Json& payload) {
     }
     return Json{{"repository_connection_id", layout.repository_connection_id},
                 {"recovery_point_id", layout.recovery_point_id},
+                {"content_kind", layout.content_kind},
                 {"disks", std::move(disks)},
                 {"volumes", std::move(volumes)}};
 }
 
 [[nodiscard]] contracts::RecoveryPointLayout parse_recovery_point_layout(const Json& payload) {
-    constexpr std::array<std::string_view, 4> keys{"repository_connection_id", "recovery_point_id",
-                                                   "disks", "volumes"};
-    if (!exact_keys(payload, keys) || !payload.at("disks").is_array() ||
-        !payload.at("volumes").is_array()) {
+    constexpr std::array<std::string_view, 5> keys{"repository_connection_id", "recovery_point_id",
+                                                   "content_kind", "disks", "volumes"};
+    if (!exact_keys(payload, keys) || !payload.at("content_kind").is_string() ||
+        !payload.at("disks").is_array() || !payload.at("volumes").is_array()) {
         throw std::invalid_argument("recovery point layout fields are invalid");
     }
     contracts::RecoveryPointLayout layout;
     layout.repository_connection_id = payload.at("repository_connection_id").get<std::string>();
     layout.recovery_point_id = payload.at("recovery_point_id").get<std::string>();
+    layout.content_kind = payload.at("content_kind").get<std::string>();
     for (const auto& item : payload.at("disks")) {
         layout.disks.push_back(parse_recovery_point_source_disk(item));
     }

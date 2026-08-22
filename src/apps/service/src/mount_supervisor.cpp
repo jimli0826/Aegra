@@ -129,7 +129,8 @@ resolve_chain(ports::IControlPlaneDatabase& control_plane,
 
 [[nodiscard]] base::Result<std::string>
 build_mount_request_json(const contracts::MountRecoveryPointCommand& command,
-                         const std::string& session_id, const std::string& overlay_dir_utf8,
+                         const std::string& session_id, const std::string& content_kind,
+                         const std::string& overlay_dir_utf8,
                          const std::vector<std::string>& absolute_paths) {
     if (absolute_paths.empty()) {
         return base::Result<std::string>::failure(
@@ -142,6 +143,7 @@ build_mount_request_json(const contracts::MountRecoveryPointCommand& command,
     Json root{{"schema_version", 1},
               {"operation", "mount"},
               {"session_id", session_id},
+              {"content_kind", content_kind},
               {"source_disk_number", command.source_disk_number},
               {"preferred_drive_letter", command.preferred_drive_letter.value_or("")},
               {"overlay_dir", overlay_dir_utf8},
@@ -307,8 +309,11 @@ MountSupervisor::mount(const contracts::MountRecoveryPointCommand& command,
             {base::ErrorCode::kIoFailure, "mount overlay directory could not be created"});
     }
 
-    auto request_json =
-        build_mount_request_json(command, session_id.value(), path_to_utf8(overlay_dir), absolute_paths);
+    // Tip catalog entry decides the mount path: whole-disk (volume_set) or
+    // read-only file namespace (file_set).
+    auto request_json = build_mount_request_json(command, session_id.value(),
+                                                 chain.value().back().content_kind,
+                                                 path_to_utf8(overlay_dir), absolute_paths);
     if (!request_json) {
         (void)impl_->launcher->terminate(launched.value().pid);
         (void)impl_->launcher->wait(launched.value().pid, {});

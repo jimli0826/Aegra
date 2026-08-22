@@ -1844,8 +1844,16 @@
         <translation>（勾選要掛載的磁碟 — 磁碟區將自動取得磁碟機代號）</translation>
     </message>
     <message id="aegra.mount.source_empty">
-        <source>Select a checkpoint to view source disks</source>
-        <translation>選擇檢查點以檢視來源磁碟</translation>
+        <source>Select a checkpoint to view its contents</source>
+        <translation>選擇檢查點以檢視內容</translation>
+    </message>
+    <message id="aegra.mount.source">
+        <source>Source</source>
+        <translation>來源</translation>
+    </message>
+    <message id="aegra.mount.file_set_hint">
+        <source>Mounts as a read-only drive letter</source>
+        <translation>掛載為唯讀磁碟機代號</translation>
     </message>
     <message id="aegra.mount.mounted">
         <source>Mounted</source>
@@ -2454,6 +2462,86 @@
     <message id="aegra.error.file_source.unsupported_cloud_placeholder">
         <source>Cloud placeholder files are not supported for file backup.</source>
         <translation>檔案備份不支援雲端佔位檔案。</translation>
+    </message>
+    <message id="aegra.settings.job_retention">
+        <source>Job history retention</source>
+        <translation>工作歷史保留期</translation>
+    </message>
+    <message id="aegra.settings.job_retention_desc">
+        <source>Completed jobs older than this period are permanently deleted from the service.</source>
+        <translation>早於此期限的已完成工作將從 Service 中永久刪除。</translation>
+    </message>
+    <message id="aegra.settings.job_retention.1_month">
+        <source>1 month</source>
+        <translation>1 個月</translation>
+    </message>
+    <message id="aegra.settings.job_retention.3_months">
+        <source>3 months</source>
+        <translation>3 個月</translation>
+    </message>
+    <message id="aegra.settings.job_retention.6_months">
+        <source>6 months</source>
+        <translation>6 個月</translation>
+    </message>
+    <message id="aegra.backup.offline_dialog_title">
+        <source>Repository Offline</source>
+        <translation>Repository 離線</translation>
+    </message>
+    <message id="aegra.backup.offline_dialog_message">
+        <source>The selected backup destination is offline and cannot receive backups. Please choose an online repository below to continue:</source>
+        <translation>所選備份目標已離線，無法接收備份。請在下方選擇一個線上的 Repository 以繼續：</translation>
+    </message>
+    <message id="aegra.backup.offline_dialog_none_available">
+        <source>No online repositories found. Please bring a repository online or add a new location in the Repository page.</source>
+        <translation>找不到線上的 Repository。請將某個 Repository 恢復上線，或在 Repository 頁面新增位置。</translation>
+    </message>
+    <message id="aegra.backup.run.not_connected">
+        <source>Service not connected</source>
+        <translation>Service 未連線</translation>
+    </message>
+    <message id="aegra.repository.column.path">
+        <source>PATH</source>
+        <translation>路徑</translation>
+    </message>
+    <message id="aegra.repository.field.hostname_ip">
+        <source>Hostname/IP</source>
+        <translation>主機名稱/IP</translation>
+    </message>
+    <message id="aegra.repository.hostname_placeholder">
+        <source>e.g. 192.168.1.1</source>
+        <translation>例如 192.168.1.1</translation>
+    </message>
+    <message id="aegra.repository.please_enter_hostname">
+        <source>Please enter a hostname or IP</source>
+        <translation>請輸入主機名稱或 IP</translation>
+    </message>
+    <message id="aegra.repository.hostname_invalid">
+        <source>Invalid hostname or IP</source>
+        <translation>主機名稱或 IP 無效</translation>
+    </message>
+    <message id="aegra.restore.cannot_restore">
+        <source>Cannot restore now</source>
+        <translation>目前無法還原</translation>
+    </message>
+    <message id="aegra.restore.stat.volume_sets">
+        <source>Volume Sets</source>
+        <translation>磁碟區集</translation>
+    </message>
+    <message id="aegra.restore.stat.file_sets">
+        <source>File Sets</source>
+        <translation>檔案集</translation>
+    </message>
+    <message id="aegra.shell.service_running">
+        <source>Service is running</source>
+        <translation>Service 執行中</translation>
+    </message>
+    <message id="aegra.shell.service_offline">
+        <source>Service offline</source>
+        <translation>Service 離線</translation>
+    </message>
+    <message id="aegra.shell.last_sync_just_now">
+        <source>Last sync · just now</source>
+        <translation>上次同步 · 剛剛</translation>
     </message>
 </context>
 </TS>

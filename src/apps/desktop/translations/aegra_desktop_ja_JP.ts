@@ -1844,8 +1844,16 @@
         <translation>（マウントするディスクにチェック — ボリュームにドライブレターを自動割当）</translation>
     </message>
     <message id="aegra.mount.source_empty">
-        <source>Select a checkpoint to view source disks</source>
-        <translation>チェックポイントを選択してソースディスクを表示</translation>
+        <source>Select a checkpoint to view its contents</source>
+        <translation>チェックポイントを選択して内容を表示</translation>
+    </message>
+    <message id="aegra.mount.source">
+        <source>Source</source>
+        <translation>ソース</translation>
+    </message>
+    <message id="aegra.mount.file_set_hint">
+        <source>Mounts as a read-only drive letter</source>
+        <translation>読み取り専用ドライブとしてマウントされます</translation>
     </message>
     <message id="aegra.mount.mounted">
         <source>Mounted</source>
@@ -2454,6 +2462,86 @@
     <message id="aegra.error.file_source.unsupported_cloud_placeholder">
         <source>Cloud placeholder files are not supported for file backup.</source>
         <translation>クラウド プレースホルダー ファイルはファイル バックアップでサポートされていません。</translation>
+    </message>
+    <message id="aegra.settings.job_retention">
+        <source>Job history retention</source>
+        <translation>ジョブ履歴の保持期間</translation>
+    </message>
+    <message id="aegra.settings.job_retention_desc">
+        <source>Completed jobs older than this period are permanently deleted from the service.</source>
+        <translation>この期間より古い完了済みジョブは Service から完全に削除されます。</translation>
+    </message>
+    <message id="aegra.settings.job_retention.1_month">
+        <source>1 month</source>
+        <translation>1 か月</translation>
+    </message>
+    <message id="aegra.settings.job_retention.3_months">
+        <source>3 months</source>
+        <translation>3 か月</translation>
+    </message>
+    <message id="aegra.settings.job_retention.6_months">
+        <source>6 months</source>
+        <translation>6 か月</translation>
+    </message>
+    <message id="aegra.backup.offline_dialog_title">
+        <source>Repository Offline</source>
+        <translation>リポジトリはオフラインです</translation>
+    </message>
+    <message id="aegra.backup.offline_dialog_message">
+        <source>The selected backup destination is offline and cannot receive backups. Please choose an online repository below to continue:</source>
+        <translation>選択したバックアップ先はオフラインのため、バックアップを受信できません。続行するには以下からオンラインのリポジトリを選択してください：</translation>
+    </message>
+    <message id="aegra.backup.offline_dialog_none_available">
+        <source>No online repositories found. Please bring a repository online or add a new location in the Repository page.</source>
+        <translation>オンラインのリポジトリが見つかりません。リポジトリをオンラインに戻すか、リポジトリページで新しい場所を追加してください。</translation>
+    </message>
+    <message id="aegra.backup.run.not_connected">
+        <source>Service not connected</source>
+        <translation>Service に接続されていません</translation>
+    </message>
+    <message id="aegra.repository.column.path">
+        <source>PATH</source>
+        <translation>パス</translation>
+    </message>
+    <message id="aegra.repository.field.hostname_ip">
+        <source>Hostname/IP</source>
+        <translation>ホスト名/IP</translation>
+    </message>
+    <message id="aegra.repository.hostname_placeholder">
+        <source>e.g. 192.168.1.1</source>
+        <translation>例：192.168.1.1</translation>
+    </message>
+    <message id="aegra.repository.please_enter_hostname">
+        <source>Please enter a hostname or IP</source>
+        <translation>ホスト名または IP を入力してください</translation>
+    </message>
+    <message id="aegra.repository.hostname_invalid">
+        <source>Invalid hostname or IP</source>
+        <translation>ホスト名または IP が無効です</translation>
+    </message>
+    <message id="aegra.restore.cannot_restore">
+        <source>Cannot restore now</source>
+        <translation>現在は復元できません</translation>
+    </message>
+    <message id="aegra.restore.stat.volume_sets">
+        <source>Volume Sets</source>
+        <translation>ボリュームセット</translation>
+    </message>
+    <message id="aegra.restore.stat.file_sets">
+        <source>File Sets</source>
+        <translation>ファイルセット</translation>
+    </message>
+    <message id="aegra.shell.service_running">
+        <source>Service is running</source>
+        <translation>Service は実行中です</translation>
+    </message>
+    <message id="aegra.shell.service_offline">
+        <source>Service offline</source>
+        <translation>Service はオフラインです</translation>
+    </message>
+    <message id="aegra.shell.last_sync_just_now">
+        <source>Last sync · just now</source>
+        <translation>最終同期 · たった今</translation>
     </message>
 </context>
 </TS>

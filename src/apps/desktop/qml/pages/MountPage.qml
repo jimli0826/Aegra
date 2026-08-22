@@ -38,6 +38,20 @@ Item {
 
     readonly property var sourceDisks: serviceClient.recoveryPointSourceDisks
     readonly property bool sourceLayoutLoading: serviceClient.recoveryPointLayoutLoading
+    /// 1 = volume_set, 2 = file_set (from the selected checkpoint item).
+    property int selectedContentKind: 1
+    // file_set checkpoints have no source disks; the archive file tree is shown
+    // instead and the whole namespace mounts as one read-only drive.
+    readonly property bool isFileSetCheckpoint: root.selectedContentKind === 2
+
+    Component {
+        id: mountFolderIconComponent
+        FolderIcon { size: 16 }
+    }
+    Component {
+        id: mountFileIconComponent
+        FileDocIcon { size: 16 }
+    }
     readonly property string sourceLayoutError: serviceClient.recoveryPointLayoutErrorText
     readonly property var mountSessions: serviceClient.mountSessions
     readonly property bool mountBusy: serviceClient.mountCommandBusy
@@ -78,7 +92,7 @@ Item {
                                      && serviceClient.mountStartAvailable
                                      && !root.mountBusy
                                      && root.selectedCheckpointId.length > 0
-                                     && root.checkedDiskCount > 0
+                                     && (root.checkedDiskCount > 0 || root.isFileSetCheckpoint)
                                      && !root.sourceLayoutLoading
 
     readonly property int selectedSessionCount: {
@@ -433,12 +447,16 @@ Item {
         if (!item) {
             root.selectedCheckpointId = ""
             root.selectedCheckpointLabel = ""
+            root.selectedContentKind = 1
             root.pendingLayoutPassword = ""
             root.clearSelectedDisks()
             serviceClient.loadRecoveryPointLayout("")
+            if (typeof serviceClient.clearFileRestoreState === "function")
+                serviceClient.clearFileRestoreState()
             return
         }
         root.selectedCheckpointId = item.fileUuid || ""
+        root.selectedContentKind = Number(item.contentKind || 1)
         root.pendingLayoutPassword = ""
         root.clearSelectedDisks()
         var bits = []
@@ -455,6 +473,14 @@ Item {
         if (item.sizeText)
             bits.push(item.sizeText)
         root.selectedCheckpointLabel = bits.join("  ·  ")
+        if (root.isFileSetCheckpoint) {
+            // file_set: browse the archive file tree; there is no disk layout.
+            serviceClient.loadRecoveryPointLayout("")
+            serviceClient.loadFileRecoverRoots(root.selectedCheckpointId, "")
+            return
+        }
+        if (typeof serviceClient.clearFileRestoreState === "function")
+            serviceClient.clearFileRestoreState()
         serviceClient.loadRecoveryPointLayout(root.selectedCheckpointId, "")
     }
 
@@ -463,6 +489,11 @@ Item {
             return
         root.pendingLayoutPassword = password || ""
         root.clearSelectedDisks()
+        if (root.isFileSetCheckpoint) {
+            serviceClient.loadFileRecoverRoots(root.selectedCheckpointId,
+                                               root.pendingLayoutPassword)
+            return
+        }
         serviceClient.loadRecoveryPointLayout(root.selectedCheckpointId, root.pendingLayoutPassword)
     }
 
@@ -513,6 +544,14 @@ Item {
     function runMount() {
         if (!root.canMount)
             return
+        if (root.isFileSetCheckpoint) {
+            // file_set: no source disks; Service ignores the disk number and
+            // mounts the file namespace as one read-only drive.
+            serviceClient.startMountDisks([0], root.selectedCheckpointId,
+                                          root.preferredDriveLetter || "",
+                                          root.pendingLayoutPassword || "")
+            return
+        }
         var disks = root.checkedDiskNumbers || []
         if (disks.length === 0)
             return
@@ -553,6 +592,23 @@ Item {
         if (!serviceClient.unmountSession(next)) {
             root.unmountQueue = []
             return
+        }
+    }
+
+    Connections {
+        target: serviceClient.fileRecoverEntries
+        // file_set: a failed tree load is likely an encrypted archive — same
+        // password recovery flow as the volume layout query below.
+        function onLoadingChanged() {
+            if (!root.isFileSetCheckpoint || root.selectedCheckpointId.length === 0)
+                return
+            var entries = serviceClient.fileRecoverEntries
+            if (!entries || entries.loading)
+                return
+            if (entries.count === 0 && entries.errorText && entries.errorText.length > 0) {
+                passwordDialog.errorText = entries.errorText
+                passwordDialog.open()
+            }
         }
     }
 
@@ -900,30 +956,6 @@ Item {
         anchors.margins: 16
         spacing: 12
 
-        RowLayout {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 28
-            Row {
-                spacing: 8
-                Rectangle {
-                    width: 3
-                    height: 20
-                    color: Theme.colorAccentBlue
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-                Text {
-                    //% "Mount"
-                    text: qsTrId("aegra.nav.mount")
-                    color: Theme.colorTextWhite
-                    font.pixelSize: 18
-                    font.bold: true
-                    font.family: Theme.fontFamily
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-            }
-            Item { Layout.fillWidth: true }
-        }
-
         // Main: Source + Mounted (left) | Options (right)
         RowLayout {
             id: mainSplitRow
@@ -941,8 +973,9 @@ Item {
                 Layout.minimumWidth: 280
                 spacing: 0
 
-                // -------- Source Disks --------
+                // -------- Source --------
                 Rectangle {
+                    id: sourceCard
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     Layout.preferredHeight: Math.round(1000 * root.sourceMountedRatio)
@@ -951,6 +984,24 @@ Item {
                     radius: 4
                     border.width: 1
                     border.color: Theme.colorBorder
+                    opacity: 0
+                    transform: Translate { id: sourceCardShift; y: 14 }
+                    Component.onCompleted: sourceCardEnter.restart()
+                    SequentialAnimation {
+                        id: sourceCardEnter
+                        ParallelAnimation {
+                            NumberAnimation {
+                                target: sourceCard; property: "opacity"
+                                from: 0; to: 1; duration: 280
+                                easing.type: Easing.OutCubic
+                            }
+                            NumberAnimation {
+                                target: sourceCardShift; property: "y"
+                                from: 14; to: 0; duration: 280
+                                easing.type: Easing.OutCubic
+                            }
+                        }
+                    }
 
                     ColumnLayout {
                         anchors.fill: parent
@@ -967,8 +1018,9 @@ Item {
                                 Layout.alignment: Qt.AlignVCenter
                             }
                             Text {
-                                //% "Source Disks"
-                                text: qsTrId("aegra.mount.source_disks")
+                                // Covers disks (volume_set) and folders (file_set).
+                                //% "Source"
+                                text: qsTrId("aegra.mount.source")
                                 color: Theme.colorTextWhite
                                 font.pixelSize: 14
                                 font.bold: true
@@ -976,8 +1028,11 @@ Item {
                                 Layout.alignment: Qt.AlignVCenter
                             }
                             Text {
-                                //% "(check disks to mount — volumes auto-get drive letters)"
-                                text: qsTrId("aegra.mount.source_hint")
+                                text: root.isFileSetCheckpoint
+                                      //% "Mounts as a read-only drive letter"
+                                      ? "(" + qsTrId("aegra.mount.file_set_hint") + ")"
+                                      //% "(check disks to mount — volumes auto-get drive letters)"
+                                      : qsTrId("aegra.mount.source_hint")
                                 color: Theme.colorTextGrey
                                 font.pixelSize: 11
                                 font.family: Theme.fontFamily
@@ -1038,11 +1093,112 @@ Item {
                                 font.family: Theme.fontFamily
                             }
 
+                            // file_set checkpoint: browse-only archive file tree
+                            // (no checkboxes — the whole namespace is mounted).
+                            ListView {
+                                id: fileArchiveList
+                                anchors.fill: parent
+                                clip: true
+                                spacing: 0
+                                visible: root.selectedCheckpointId.length > 0
+                                         && root.isFileSetCheckpoint
+                                ScrollBar.vertical: ScrollBar {
+                                    policy: ScrollBar.AsNeeded
+                                }
+                                boundsBehavior: Flickable.StopAtBounds
+                                model: root.isFileSetCheckpoint
+                                       ? serviceClient.fileRecoverEntries : null
+                                delegate: Rectangle {
+                                    required property string entryId
+                                    required property string displayName
+                                    required property bool hasChildren
+                                    required property bool isDirectory
+                                    required property int depth
+                                    required property bool expanded
+                                    required property bool nodeLoading
+                                    width: fileArchiveList.width
+                                    height: 26
+                                    radius: 4
+                                    color: "transparent"
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: parent.radius
+                                        color: Theme.colorHover
+                                        opacity: mountArchiveRowHover.containsMouse ? 1.0 : 0.0
+                                        Behavior on opacity { NumberAnimation { duration: 120 } }
+                                    }
+                                    MouseArea {
+                                        id: mountArchiveRowHover
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        acceptedButtons: Qt.NoButton
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        enabled: hasChildren
+                                        cursorShape: hasChildren ? Qt.PointingHandCursor
+                                                                 : Qt.ArrowCursor
+                                        onClicked: serviceClient.fileRecoverEntries
+                                                       .toggleExpanded(entryId)
+                                    }
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 8 + Math.max(0, depth) * 14
+                                        anchors.rightMargin: 8
+                                        spacing: 8
+                                        Text {
+                                            text: hasChildren ? (expanded ? "▾" : "▸") : " "
+                                            color: Theme.colorTextGrey
+                                            font.pixelSize: 12
+                                            Layout.preferredWidth: 14
+                                        }
+                                        Loader {
+                                            Layout.preferredWidth: 16
+                                            Layout.preferredHeight: 16
+                                            Layout.alignment: Qt.AlignVCenter
+                                            sourceComponent: isDirectory
+                                                             ? mountFolderIconComponent
+                                                             : mountFileIconComponent
+                                        }
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: displayName + (nodeLoading ? " …" : "")
+                                            color: Theme.colorTextWhite
+                                            font.pixelSize: 12
+                                            font.family: Theme.fontFamily
+                                            elide: Text.ElideMiddle
+                                        }
+                                    }
+                                }
+                                Text {
+                                    anchors.centerIn: parent
+                                    width: parent.width - 24
+                                    horizontalAlignment: Text.AlignHCenter
+                                    wrapMode: Text.WordWrap
+                                    visible: fileArchiveList.visible && fileArchiveList.count === 0
+                                    text: {
+                                        if (serviceClient.fileRecoverEntries
+                                                && serviceClient.fileRecoverEntries.loading)
+                                            //% "Loading archive files..."
+                                            return qsTrId("aegra.restore.file.loading_entries")
+                                        if (serviceClient.fileRecoverEntries
+                                                && serviceClient.fileRecoverEntries.errorText)
+                                            return serviceClient.fileRecoverEntries.errorText
+                                        //% "No files in this recovery point"
+                                        return qsTrId("aegra.restore.file.empty_entries")
+                                    }
+                                    color: Theme.colorTextGrey
+                                    font.pixelSize: 12
+                                    font.family: Theme.fontFamily
+                                }
+                            }
+
                             ListView {
                                 anchors.fill: parent
                                 clip: true
                                 visible: !root.sourceLayoutLoading
                                          && root.selectedCheckpointId.length > 0
+                                         && !root.isFileSetCheckpoint
                                          && (root.sourceDisks || []).length > 0
                                 model: root.sourceDisks || []
                                 spacing: 6
@@ -1105,6 +1261,7 @@ Item {
 
                 // -------- Mounted --------
                 Rectangle {
+                    id: mountedCard
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     Layout.preferredHeight: Math.round(1000 * (1.0 - root.sourceMountedRatio))
@@ -1113,6 +1270,25 @@ Item {
                     radius: 4
                     border.width: 1
                     border.color: Theme.colorBorder
+                    opacity: 0
+                    transform: Translate { id: mountedCardShift; y: 14 }
+                    Component.onCompleted: mountedCardEnter.restart()
+                    SequentialAnimation {
+                        id: mountedCardEnter
+                        PauseAnimation { duration: 90 }
+                        ParallelAnimation {
+                            NumberAnimation {
+                                target: mountedCard; property: "opacity"
+                                from: 0; to: 1; duration: 280
+                                easing.type: Easing.OutCubic
+                            }
+                            NumberAnimation {
+                                target: mountedCardShift; property: "y"
+                                from: 14; to: 0; duration: 280
+                                easing.type: Easing.OutCubic
+                            }
+                        }
+                    }
 
                     ColumnLayout {
                         anchors.fill: parent
@@ -1488,6 +1664,25 @@ Item {
                 border.width: 1
                 border.color: Theme.colorBorder
                 clip: true
+                opacity: 0
+                transform: Translate { id: optionsPanelShift; y: 14 }
+                Component.onCompleted: optionsPanelEnter.restart()
+                SequentialAnimation {
+                    id: optionsPanelEnter
+                    PauseAnimation { duration: 180 }
+                    ParallelAnimation {
+                        NumberAnimation {
+                            target: optionsPanel; property: "opacity"
+                            from: 0; to: 1; duration: 280
+                            easing.type: Easing.OutCubic
+                        }
+                        NumberAnimation {
+                            target: optionsPanelShift; property: "y"
+                            from: 14; to: 0; duration: 280
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+                }
 
                 Item {
                     anchors.fill: parent
@@ -1742,6 +1937,8 @@ Item {
 
     function ensureSourceLayout() {
         if (!serviceClient.connected || root.selectedCheckpointId.length === 0)
+            return
+        if (root.isFileSetCheckpoint)
             return
         if (root.sourceLayoutLoading)
             return

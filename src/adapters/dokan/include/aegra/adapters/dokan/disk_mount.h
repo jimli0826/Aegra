@@ -2,6 +2,7 @@
 
 #include "aegra/base/result.h"
 #include "aegra/format/manifest.h"
+#include "aegra/ports/file_recovery_point.h"
 #include "aegra/ports/random_access.h"
 
 #include <cstdint>
@@ -32,6 +33,14 @@ mount_whole_disk_readonly(ports::IRandomAccessReader& reader,
                           std::string_view preferred_drive_letter,
                           const std::filesystem::path& overlay_root,
                           std::string_view session_id);
+
+// Mounts a file_set Recovery Point namespace read-only under a drive letter.
+// reader must outlive the mount session until Unmount returns.
+// preferred_drive_letter: empty or single letter "D".."Z"
+[[nodiscard]] base::Result<MountSessionInfo>
+mount_file_set_readonly(ports::IFileRecoveryPointReader& reader,
+                        std::string_view preferred_drive_letter,
+                        std::string_view session_id);
 
 [[nodiscard]] base::Result<void> unmount_session(std::string_view session_id);
 [[nodiscard]] base::Result<void> unmount_all_sessions();

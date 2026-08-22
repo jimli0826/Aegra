@@ -99,9 +99,16 @@ Online Prepare -> Validate -> Build/Cache WinRE -> Write Pending Job
 ## Mount Host
 
 Mount Host 是 `aegra_personal_worker.exe` 的 `--mount-pipe` 运行模式（无独立 EXE），只读打开 Recovery Point，
-组合 `PersonalArchiveChainReader`、`WholeDiskByteReader`、Dokan/VHDX Adapter（dokan2.dll 延迟加载，
-缺失时仅 mount 模式失败）。每个挂载会话仍是独立进程实例，具有独立生命周期、取消和临时 overlay。
-Mount Host 服务**盘符/整盘挂载**用例，由 Service 编排；Explorer 双击浏览不以 Mount Host 为路径，
+按请求 `content_kind` 分发（dokan2.dll 延迟加载，缺失时仅 mount 模式失败）：
+
+- `volume_set`：组合 `PersonalArchiveChainReader`、`WholeDiskByteReader`、Dokan/VHDX Adapter，
+  整盘呈现为虚拟磁盘并挂载数据分区盘符；会话使用临时 overlay（COW sidecar）。
+- `file_set`：组合 `PersonalFileArchiveChainReader` + `FileSetFileSystem`（Dokan 文件级、
+  `DOKAN_OPTION_WRITE_PROTECT`），把 File Index 命名空间直接挂载为一个只读盘符；
+  无 overlay、无 VHDX/virt_disk attach。目录/元数据缓存会话内不失效（Index 稳定）。
+
+每个挂载会话仍是独立进程实例，具有独立生命周期、取消和清理。
+Mount Host 服务**盘符挂载**用例，由 Service 编排；Explorer 双击浏览不以 Mount Host 为路径，
 Shell Extension 不加载 Dokan/VHDX 实现。
 
 ### Service 编排（S7）
@@ -110,7 +117,8 @@ Shell Extension 不加载 Dokan/VHDX 实现。
 - Service 通过 `--mount-pipe` 启动 `aegra_personal_worker`，发送 mount 请求 JSON，等待 `mounted`/`failed` 事件后向 Desktop 返回 CommandAcknowledgement。
 - 能力位：`mount.list`、`mount.start`、`mount.unmount`。协议 kinds：8 / 41 / 42。
 - 可选 CLI：`--mount-host-path <abs>`（调试覆盖）；默认与 Service 同目录的 `aegra_personal_worker.exe`。
-- Overlay 根：`<data_dir>/mount_overlays/<session_id>`（Service 已按会话隔离，host 不再二次嵌套）。
+- 请求 JSON 携带 `content_kind`（取自 tip Catalog 条目；缺省 volume_set，向后兼容）。
+- Overlay 根（仅 volume_set）：`<data_dir>/mount_overlays/<session_id>`（Service 已按会话隔离，host 不再二次嵌套）。
   - Dokan 挂载点：`<session>/mnt/`（必须为空目录，与旧 backup host 一致）。
   - COW sidecar：`<session>/diskN.vhdx.overlay(.map)`，**不得**放在 `mnt/` 内，否则 Dokan 报 `DOKAN_MOUNT_POINT_ERROR`。
 - Tear-down：unmount 命令 → 终止 host → join waiter；Service 析构时 `shutdown()` 清理全部会话。

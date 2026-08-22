@@ -366,7 +366,7 @@ Footer，其它任务为 0。file_set backup 成功时 `requested_backup_type` /
 | 5 ListJobs | summary 含 `content_kind` 与 requested/effective backup 投影（FI7）；请求增加 `scope`（1=all / 2=active / 3=terminal）与可选 `from_utc_ms`/`to_utc_ms`（按 `created_utc_ms`）。热路径用 active；Task Log 用 terminal + 时间窗 |
 | 6 ListSchedules | summary 含 `content_kind` 与 file selection 安全摘要 |
 | 9 PrepareRestore | **仅 volume_set** RP；file_set RP 必须用 kind 15 |
-| 12 GetRecoveryPointLayout | volume geometry；file_set 返回稳定 unsupported |
+| 12 GetRecoveryPointLayout | payload 增加 `content_kind`（"volume_set"/"file_set"）；volume_set 返回 volume geometry；file_set 返回空 `disks`/`volumes`（无磁盘布局，挂载为只读文件盘符） |
 | 16 GetServiceSettings | 控制面偏好：`job_retention_months` ∈ {1,3,6}，默认 3；`updated_utc_ms` |
 
 非法对 file_set 使用 volume-only API → `service.content_kind_mismatch`。
@@ -383,7 +383,7 @@ Footer，其它任务为 0。file_set backup 成功时 `requested_backup_type` /
 | Get 请求 | kind 16，payload `{}`，capability `service.settings` |
 | Get 响应 | `{ "job_retention_months": 3, "updated_utc_ms": 0 }` |
 | Update 请求 | kind 49 命令，`idempotency_key` 必填，payload `{ "job_retention_months": 1\|3\|6 }` |
-| Update 响应 | `CommandAcknowledgement`；message_code `service.settings_updated` |
+| Update 响应 | `CommandAcknowledgement`；message_code `command.accepted` / `command.replayed`（与其他命令一致；Desktop 通用 ack 解析器仅接受这两个） |
 
 ---
 

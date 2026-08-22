@@ -9,6 +9,7 @@ add_library(aegra_adapter_dokan STATIC
     src/vhdx_disk_image.cpp
     src/aux_file_store.cpp
     src/dokan_file_system.cpp
+    src/file_set_fs.cpp
     src/virt_disk_attach.cpp
     src/partition_filter.cpp
     src/disk_mount.cpp

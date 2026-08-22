@@ -3,6 +3,7 @@
 #include "cow_backing_store.h"
 #include "dokan_file_system.h"
 #include "dokan_ntstatus.h"
+#include "file_set_fs.h"
 #include "partition_filter.h"
 #include "vhdx_disk_image.h"
 #include "virt_disk_attach.h"
@@ -11,6 +12,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cwctype>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -23,6 +25,7 @@ namespace {
 namespace fs = std::filesystem;
 using detail::CowBackingStore;
 using detail::DokanFileSystem;
+using detail::FileSetFileSystem;
 using detail::VirtualDiskEntry;
 using detail::VhdxDiskImage;
 
@@ -34,6 +37,7 @@ constexpr const char* kMsgDokanFailed = "mount.dokan_failed";
 constexpr const char* kMsgAttachFailed = "mount.attach_failed";
 constexpr const char* kMsgUnmountFailed = "mount.unmount_failed";
 constexpr const char* kMsgInvalidArgument = "mount.invalid_argument";
+constexpr const char* kMsgNoFreeDriveLetter = "mount.no_free_drive_letter";
 
 struct ActiveMountSession {
     MountSessionInfo info;
@@ -44,6 +48,8 @@ struct ActiveMountSession {
     std::wstring vhdx_path;
     std::wstring overlay_base;
     std::unique_ptr<DokanFileSystem> fs;
+    // file_set sessions: drive-letter Dokan namespace, no VHD/overlay involved.
+    std::unique_ptr<FileSetFileSystem> file_fs;
     HANDLE vhd_handle{INVALID_HANDLE_VALUE};
 };
 
@@ -170,6 +176,10 @@ void tear_down_session(ActiveMountSession& session) {
     if (session.fs) {
         session.fs->close(15000);
         session.fs.reset();
+    }
+    if (session.file_fs) {
+        session.file_fs->close(15000);
+        session.file_fs.reset();
     }
 
     cleanup_overlay_files(session.overlay_base);
@@ -353,6 +363,93 @@ mount_whole_disk_readonly(ports::IRandomAccessReader& reader,
                              ? static_cast<std::uint32_t>(attach.windows_disk_number)
                              : 0xFFFFFFFFu;
     info.disk_size_bytes = attach.total_data_size;
+    info.message_code.clear();
+    session->info = info;
+
+    {
+        std::lock_guard lock(g_sessions_mu);
+        if (session_exists_locked(session_id)) {
+            tear_down_session(*session);
+            info.message_code = kMsgAlreadyMounted;
+            return base::Result<MountSessionInfo>::failure(
+                make_error(base::ErrorCode::kConflict, kMsgAlreadyMounted));
+        }
+        g_sessions[std::string(session_id)] = std::move(session);
+    }
+
+    return base::Result<MountSessionInfo>::success(std::move(info));
+}
+
+base::Result<MountSessionInfo>
+mount_file_set_readonly(ports::IFileRecoveryPointReader& reader,
+                        std::string_view preferred_drive_letter,
+                        std::string_view session_id) {
+    MountSessionInfo info;
+    info.session_id = std::string(session_id);
+
+    if (session_id.empty() || !is_valid_preferred_letter(preferred_drive_letter)) {
+        info.message_code = kMsgInvalidArgument;
+        return base::Result<MountSessionInfo>::failure(
+            make_error(base::ErrorCode::kInvalidArgument, kMsgInvalidArgument));
+    }
+
+    if (!is_dokan_available()) {
+        info.message_code = kMsgDokanUnavailable;
+        return base::Result<MountSessionInfo>::failure(
+            make_error(base::ErrorCode::kIoFailure, kMsgDokanUnavailable));
+    }
+
+    {
+        std::lock_guard lock(g_sessions_mu);
+        if (session_exists_locked(session_id)) {
+            info.message_code = kMsgAlreadyMounted;
+            return base::Result<MountSessionInfo>::failure(
+                make_error(base::ErrorCode::kConflict, kMsgAlreadyMounted));
+        }
+    }
+
+    std::string letter =
+        detail::normalize_drive_letter(std::string(preferred_drive_letter));
+    if (letter.empty() || detail::drive_letter_exists(letter)) {
+        letter = detail::find_free_drive_letter();
+    }
+    if (letter.empty()) {
+        info.message_code = kMsgNoFreeDriveLetter;
+        return base::Result<MountSessionInfo>::failure(
+            make_error(base::ErrorCode::kConflict, kMsgNoFreeDriveLetter));
+    }
+
+    auto fs = std::make_unique<FileSetFileSystem>(reader);
+    const std::wstring mount_point =
+        std::wstring(1, static_cast<wchar_t>(letter[0])) + L":\\";
+    if (fs->mount(mount_point) != DOKAN_SUCCESS) {
+        info.message_code = kMsgDokanFailed;
+        return base::Result<MountSessionInfo>::failure(
+            make_error(base::ErrorCode::kIoFailure, kMsgDokanFailed));
+    }
+
+    // The mount manager may adjust the letter; wait for the Mounted callback.
+    for (int i = 0; i < 25 && fs->actual_mount_point().empty(); ++i) {
+        Sleep(200);
+    }
+    if (!fs->is_running()) {
+        fs->close(15000);
+        info.message_code = kMsgDokanFailed;
+        return base::Result<MountSessionInfo>::failure(
+            make_error(base::ErrorCode::kIoFailure, kMsgDokanFailed));
+    }
+    const auto& actual = fs->actual_mount_point();
+    if (!actual.empty() && iswalpha(actual[0]) != 0) {
+        letter = std::string(1, static_cast<char>(towupper(actual[0]))) + ":";
+    }
+
+    auto session = std::make_unique<ActiveMountSession>();
+    session->file_fs = std::move(fs);
+
+    info.drive_letters = {letter};
+    info.mount_point = letter;
+    info.device_number = 0xFFFFFFFFu;
+    info.disk_size_bytes = 0;
     info.message_code.clear();
     session->info = info;
 

@@ -935,7 +935,8 @@ update_service_settings_response(const contracts::ServiceRequest& request,
         response.kind = contracts::ServiceResponseKind::kCommandAccepted;
         response.request_kind = request.kind;
         response.boundary_error_code = base::ErrorCode::kNone;
-        response.message_code = "service.settings_updated";
+        // Desktop's generic ack parser requires command.accepted/command.replayed.
+        response.message_code = "command.replayed";
         response.payload = std::move(ack);
         return base::Result<contracts::ServiceResponse>::success(std::move(response));
     }
@@ -986,7 +987,8 @@ update_service_settings_response(const contracts::ServiceRequest& request,
     response.kind = contracts::ServiceResponseKind::kCommandAccepted;
     response.request_kind = request.kind;
     response.boundary_error_code = base::ErrorCode::kNone;
-    response.message_code = "service.settings_updated";
+    // Desktop's generic ack parser requires command.accepted/command.replayed.
+    response.message_code = "command.accepted";
     response.payload = std::move(ack);
     return base::Result<contracts::ServiceResponse>::success(std::move(response));
 }

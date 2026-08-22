@@ -731,7 +731,17 @@ base::Result<void> validate_mount_session_page(const MountSessionPage& page) {
 base::Result<void> validate_recovery_point_layout(const RecoveryPointLayout& layout) {
     if (!valid_stable_value(layout.repository_connection_id, kMaximumIdentifierBytes) ||
         !valid_stable_value(layout.recovery_point_id, kMaximumIdentifierBytes) ||
-        layout.disks.empty() || layout.disks.size() > 64 || layout.volumes.empty() ||
+        (layout.content_kind != "volume_set" && layout.content_kind != "file_set")) {
+        return invalid("recovery point layout is invalid");
+    }
+    if (layout.content_kind == "file_set") {
+        // file_set has no disk layout; the recovery point mounts as a file namespace.
+        if (!layout.disks.empty() || !layout.volumes.empty()) {
+            return invalid("recovery point layout is invalid");
+        }
+        return base::Result<void>::success();
+    }
+    if (layout.disks.empty() || layout.disks.size() > 64 || layout.volumes.empty() ||
         layout.volumes.size() > 100) {
         return invalid("recovery point layout is invalid");
     }

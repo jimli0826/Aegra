@@ -566,6 +566,10 @@ QString ServiceClient::recoveryPointLayoutErrorText() const {
                : localize_message_code(recovery_point_layout_error_code_);
 }
 
+QString ServiceClient::recoveryPointLayoutContentKind() const {
+    return recovery_point_layout_content_kind_;
+}
+
 void ServiceClient::loadRecoveryPointLayout(const QString& recovery_point_id,
                                             const QString& archive_password) {
     if (recovery_point_id.isEmpty()) {
@@ -578,6 +582,7 @@ void ServiceClient::loadRecoveryPointLayout(const QString& recovery_point_id,
     }
     // Replace any in-flight layout query for a different checkpoint.
     recovery_point_layout_error_code_.clear();
+    recovery_point_layout_content_kind_.clear();
     recovery_point_source_disks_.clear();
     recovery_point_source_volumes_.clear();
     recovery_point_layout_loading_ = true;
@@ -623,14 +628,19 @@ RequestDisposition ServiceClient::handle_recovery_point_layout_frame(const QByte
         finish_recovery_point_layout_failure(QStringLiteral("recovery_point.layout_failed"));
         return RequestDisposition::kFinished;
     }
+    const auto content_kind = layout.value(QStringLiteral("contentKind")).toString();
+    const bool file_set = content_kind == QStringLiteral("file_set");
     const auto layout_volumes = layout.value(QStringLiteral("volumes")).toList();
     recovery_point_source_disks_ = source_disks_from_layout(
         layout.value(QStringLiteral("disks")).toList(), layout_volumes, format_);
     recovery_point_source_volumes_ = source_volumes_from_layout(layout_volumes, format_);
-    if (recovery_point_source_disks_.isEmpty() || recovery_point_source_volumes_.isEmpty()) {
+    // file_set has no disk layout; MountPage offers a single read-only drive mount.
+    if (!file_set &&
+        (recovery_point_source_disks_.isEmpty() || recovery_point_source_volumes_.isEmpty())) {
         finish_recovery_point_layout_failure(QStringLiteral("recovery_point.layout_failed"));
         return RequestDisposition::kFinished;
     }
+    recovery_point_layout_content_kind_ = content_kind;
     recovery_point_layout_loading_ = false;
     recovery_point_layout_request_id_.clear();
     recovery_point_layout_error_code_.clear();
@@ -656,6 +666,7 @@ void ServiceClient::reset_recovery_point_layout() {
         !recovery_point_layout_recovery_point_id_.isEmpty();
     recovery_point_source_disks_.clear();
     recovery_point_source_volumes_.clear();
+    recovery_point_layout_content_kind_.clear();
     recovery_point_layout_loading_ = false;
     recovery_point_layout_request_id_.clear();
     recovery_point_layout_recovery_point_id_.clear();

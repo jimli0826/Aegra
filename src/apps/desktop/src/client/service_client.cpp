@@ -1016,6 +1016,9 @@ RequestDisposition ServiceClient::handle_get_service_settings_frame(const QByteA
     }
     ServiceSettings settings;
     if (!parse_service_settings_response(root, settings)) {
+        // Fail safe: an unexpected-but-addressed reply must not leave the
+        // settings UI disabled forever behind a stuck loading flag.
+        finish_service_settings_failure(QStringLiteral("service.settings_failed"));
         return RequestDisposition::kProtocolError;
     }
     job_retention_months_ = settings.job_retention_months;
@@ -1037,6 +1040,9 @@ RequestDisposition ServiceClient::handle_update_service_settings_frame(const QBy
     }
     CommandAck ack;
     if (!parse_command_ack_response(root, kUpdateServiceSettingsRequestKind, ack)) {
+        // Fail safe: an unexpected-but-addressed reply must not leave the
+        // settings UI disabled forever behind a stuck busy flag.
+        finish_service_settings_failure(QStringLiteral("service.settings_update_failed"));
         return RequestDisposition::kProtocolError;
     }
     job_retention_months_ = pending_job_retention_months_;

@@ -2,8 +2,9 @@ import QtQuick 2.15
 import QtQuick.Layouts 1.15
 
 /**
- * Compact Win11-style folder glyph for file browse trees.
- * Soft yellow body + raised tab; no emoji dependency.
+ * Win11 Fluent-style folder glyph for file browse trees.
+ * Flat two-tone: dark amber back flap + light yellow front panel.
+ * No borders, gloss, or shadows; no emoji dependency.
  */
 Item {
     id: root
@@ -24,79 +25,39 @@ Item {
     Layout.maximumHeight: size
     Layout.alignment: Qt.AlignVCenter
 
-    // Soft drop shadow
+    // Back sheet: tab silhouette on the top-left.
     Rectangle {
-        anchors.horizontalCenter: body.horizontalCenter
-        anchors.top: body.bottom
-        anchors.topMargin: -1
-        width: body.width * 0.9
-        height: Math.max(2, size * 0.08)
-        radius: height / 2
-        color: "#28000000"
-    }
-
-    // Tab (back flap)
-    Rectangle {
-        id: tab
         anchors.left: body.left
-        anchors.bottom: body.top
-        anchors.bottomMargin: -size * 0.08
-        width: size * 0.42
-        height: size * 0.28
-        radius: Math.max(2, size * 0.08)
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: "#FFE08A" }
-            GradientStop { position: 1.0; color: "#F0C14D" }
-        }
-        border.width: 1
-        border.color: "#D4A017"
+        anchors.top: parent.top
+        anchors.topMargin: size * 0.10
+        width: size * 0.44
+        height: size * 0.30
+        radius: Math.max(1.5, size * 0.10)
+        color: "#E8A33D"
+    }
+    Rectangle {
+        id: backSheet
+        anchors.left: body.left
+        anchors.right: body.right
+        anchors.top: parent.top
+        anchors.topMargin: size * 0.20
+        anchors.bottom: body.bottom
+        radius: Math.max(2, size * 0.12)
+        color: "#E8A33D"
     }
 
-    // Folder body
+    // Front panel: light yellow, slightly shorter so a strip of the back shows.
     Rectangle {
         id: body
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: size * 0.08
         width: size * 0.92
-        height: size * 0.68
+        height: size * 0.56
         radius: Math.max(2, size * 0.12)
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#FFD966" }
-            GradientStop { position: 0.55; color: "#F5C542" }
-            GradientStop { position: 1.0; color: "#E0A820" }
-        }
-        border.width: 1
-        border.color: "#C99212"
-
-        // Top sheen
-        Rectangle {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.margins: 1
-            height: parent.height * 0.38
-            radius: parent.radius
-            color: "#55ffffff"
-            Rectangle {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                height: parent.height * 0.5
-                color: parent.color
-            }
-        }
-
-        // Front lip highlight
-        Rectangle {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.topMargin: parent.height * 0.22
-            anchors.leftMargin: parent.width * 0.06
-            anchors.rightMargin: parent.width * 0.06
-            height: 1
-            color: "#40ffffff"
+            GradientStop { position: 0.0; color: "#FFE29E" }
+            GradientStop { position: 1.0; color: "#FFC44D" }
         }
     }
 }

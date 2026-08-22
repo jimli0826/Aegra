@@ -141,6 +141,25 @@ load_recovery_point_layout(ports::IControlPlaneDatabase& control_plane,
     open_request.source = std::move(archive_path).value();
     // Empty password opens unencrypted archives; encrypted archives need archive_password.
     open_request.password = reference.archive_password;
+    contracts::RecoveryPointLayout layout;
+    layout.repository_connection_id = reference.repository_connection_id;
+    layout.recovery_point_id = reference.recovery_point_id;
+    // The volume reader rejects file_set archives at open, so dispatch on the
+    // catalog entry first. The file reader open still validates the password.
+    if (entry.value().content_kind == personal_repository::kCatalogContentKindFileSet) {
+        auto file_reader =
+            adapters::personal_archive::PersonalFileArchiveReader::open(open_request);
+        if (!file_reader) {
+            return base::Result<contracts::RecoveryPointLayout>::failure(file_reader.error());
+        }
+        // file_set has no disk layout; Desktop offers a single read-only drive mount.
+        layout.content_kind = "file_set";
+        auto valid_file_set = contracts::validate_recovery_point_layout(layout);
+        if (!valid_file_set) {
+            return base::Result<contracts::RecoveryPointLayout>::failure(valid_file_set.error());
+        }
+        return base::Result<contracts::RecoveryPointLayout>::success(std::move(layout));
+    }
     auto reader = adapters::personal_archive::PersonalArchiveReader::open(open_request);
     if (!reader) {
         return base::Result<contracts::RecoveryPointLayout>::failure(reader.error());
@@ -151,9 +170,6 @@ load_recovery_point_layout(ports::IControlPlaneDatabase& control_plane,
             {base::ErrorCode::kConflict,
              "recovery point layout is incomplete; re-run backup after disk layout support"});
     }
-    contracts::RecoveryPointLayout layout;
-    layout.repository_connection_id = reference.repository_connection_id;
-    layout.recovery_point_id = reference.recovery_point_id;
     layout.disks.reserve(manifest.disks.size());
     for (const auto& disk : manifest.disks) {
         contracts::RecoveryPointSourceDisk item;

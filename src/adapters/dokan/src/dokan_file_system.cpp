@@ -12,6 +12,20 @@ namespace {
 std::mutex g_dokan_init_mu;
 int g_dokan_init_count = 0;
 
+bool is_drive_letter_mount_point(const std::wstring& mount_point) {
+    if (mount_point.size() == 1) {
+        return iswalpha(mount_point[0]) != 0;
+    }
+    if (mount_point.size() == 2) {
+        return iswalpha(mount_point[0]) != 0 && mount_point[1] == L':';
+    }
+    return mount_point.size() == 3 && iswalpha(mount_point[0]) != 0 &&
+           mount_point[1] == L':' &&
+           (mount_point[2] == L'\\' || mount_point[2] == L'/');
+}
+
+} // namespace
+
 void acquire_dokan_library() {
     std::lock_guard lock(g_dokan_init_mu);
     if (g_dokan_init_count++ == 0) {
@@ -24,18 +38,6 @@ void release_dokan_library() {
     if (g_dokan_init_count > 0 && --g_dokan_init_count == 0) {
         DokanShutdown();
     }
-}
-
-bool is_drive_letter_mount_point(const std::wstring& mount_point) {
-    if (mount_point.size() == 1) {
-        return iswalpha(mount_point[0]) != 0;
-    }
-    if (mount_point.size() == 2) {
-        return iswalpha(mount_point[0]) != 0 && mount_point[1] == L':';
-    }
-    return mount_point.size() == 3 && iswalpha(mount_point[0]) != 0 &&
-           mount_point[1] == L':' &&
-           (mount_point[2] == L'\\' || mount_point[2] == L'/');
 }
 
 bool request_dokan_unmount(const std::wstring& mount_point) {
@@ -82,8 +84,6 @@ void fill_dot_entries(PFillFindData fill_find_data, PDOKAN_FILE_INFO info) {
     find_data.cFileName[1] = L'.';
     fill_find_data(&find_data, info);
 }
-
-} // namespace
 
 DokanFileSystem::DokanFileSystem(std::vector<VirtualDiskEntry> disks, bool read_only)
     : disks_(std::move(disks)), read_only_(read_only) {}

@@ -248,6 +248,8 @@ class ServiceClient final : public QObject {
     [[nodiscard]] QVariantList recoveryPointSourceDisks() const;
     [[nodiscard]] QVariantList recoveryPointSourceVolumes() const;
     [[nodiscard]] QString recoveryPointLayoutErrorText() const;
+    /// "volume_set", "file_set", or empty while no layout is loaded.
+    [[nodiscard]] QString recoveryPointLayoutContentKind() const;
 
     Q_INVOKABLE void reconnect();
     Q_INVOKABLE void refreshRepository();
@@ -268,6 +270,8 @@ class ServiceClient final : public QObject {
     Q_PROPERTY(QVariantList recoveryPointSourceVolumes READ recoveryPointSourceVolumes NOTIFY
                    recoveryPointLayoutChanged)
     Q_PROPERTY(QString recoveryPointLayoutErrorText READ recoveryPointLayoutErrorText NOTIFY
+                   recoveryPointLayoutChanged)
+    Q_PROPERTY(QString recoveryPointLayoutContentKind READ recoveryPointLayoutContentKind NOTIFY
                    recoveryPointLayoutChanged)
     /// Create or update a schedule (empty scheduleId creates). Returns false if not sent.
     Q_INVOKABLE bool upsertSchedule(const QString& schedule_id, const QString& display_name,
@@ -618,6 +622,7 @@ class ServiceClient final : public QObject {
     QString repository_uuid_;
     QString repository_error_code_;
     QString recovery_point_layout_error_code_;
+    QString recovery_point_layout_content_kind_;
     QVariantList recovery_point_source_disks_;
     QVariantList recovery_point_source_volumes_;
     QString jobs_error_code_;

@@ -407,6 +407,9 @@ struct RecoveryPointSourceVolume final {
 struct RecoveryPointLayout final {
     std::string repository_connection_id;
     std::string recovery_point_id;
+    /// "volume_set": disks/volumes populated. "file_set": no disk layout exists;
+    /// the recovery point mounts as one read-only file namespace drive.
+    std::string content_kind{"volume_set"};
     std::vector<RecoveryPointSourceDisk> disks;
     std::vector<RecoveryPointSourceVolume> volumes;
 };

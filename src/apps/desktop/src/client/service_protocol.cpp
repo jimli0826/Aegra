@@ -608,10 +608,11 @@ bool parse_recovery_point_layout_response(const QJsonObject& root, QVariantMap& 
         return false;
     }
     const auto payload = root.value(QStringLiteral("payload")).toObject();
-    if (!has_exact_keys(payload,
-                        {"repository_connection_id", "recovery_point_id", "disks", "volumes"}) ||
+    if (!has_exact_keys(payload, {"repository_connection_id", "recovery_point_id", "content_kind",
+                                  "disks", "volumes"}) ||
         !payload.value(QStringLiteral("repository_connection_id")).isString() ||
         !payload.value(QStringLiteral("recovery_point_id")).isString() ||
+        !payload.value(QStringLiteral("content_kind")).isString() ||
         !payload.value(QStringLiteral("disks")).isArray() ||
         !payload.value(QStringLiteral("volumes")).isArray()) {
         return false;
@@ -638,13 +639,21 @@ bool parse_recovery_point_layout_response(const QJsonObject& root, QVariantMap& 
         }
         volumes.push_back(std::move(volume));
     }
-    if (disks.isEmpty() || volumes.isEmpty()) {
+    const auto content_kind = payload.value(QStringLiteral("content_kind")).toString();
+    if (content_kind != QStringLiteral("volume_set") &&
+        content_kind != QStringLiteral("file_set")) {
+        return false;
+    }
+    // file_set carries no disk layout; the recovery point mounts as one file drive.
+    if (content_kind == QStringLiteral("volume_set") &&
+        (disks.isEmpty() || volumes.isEmpty())) {
         return false;
     }
     result = {{QStringLiteral("repositoryConnectionId"),
                payload.value(QStringLiteral("repository_connection_id")).toString()},
               {QStringLiteral("recoveryPointId"),
                payload.value(QStringLiteral("recovery_point_id")).toString()},
+              {QStringLiteral("contentKind"), content_kind},
               {QStringLiteral("disks"), disks},
               {QStringLiteral("volumes"), volumes}};
     return true;

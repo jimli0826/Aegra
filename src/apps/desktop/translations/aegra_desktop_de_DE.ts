@@ -1875,6 +1875,86 @@
         <source>Size</source>
         <translation>Größe</translation>
     </message>
+    <message id="aegra.mount.disk_name">
+        <source>Disk %1</source>
+        <translation>Datenträger %1</translation>
+    </message>
+    <message id="aegra.mount.state.mounting">
+        <source>Mounting</source>
+        <translation>Wird eingehängt</translation>
+    </message>
+    <message id="aegra.mount.state.mounted">
+        <source>Mounted</source>
+        <translation>Eingehängt</translation>
+    </message>
+    <message id="aegra.mount.state.unmounting">
+        <source>Unmounting</source>
+        <translation>Wird ausgehängt</translation>
+    </message>
+    <message id="aegra.mount.state.failed">
+        <source>Failed</source>
+        <translation>Fehlgeschlagen</translation>
+    </message>
+    <message id="aegra.mount.started">
+        <source>Mount started</source>
+        <translation>Mount gestartet</translation>
+    </message>
+    <message id="aegra.mount.unmounted">
+        <source>Unmounted</source>
+        <translation>Ausgehängt</translation>
+    </message>
+    <message id="aegra.mount.already_mounted_selection">
+        <source>Selected disk(s) are already mounted</source>
+        <translation>Ausgewählte Datenträger sind bereits eingehängt</translation>
+    </message>
+    <message id="aegra.mount.capability_missing">
+        <source>Service does not support mount</source>
+        <translation>Service unterstützt Mount nicht</translation>
+    </message>
+    <message id="aegra.mount.busy">
+        <source>A mount command is already in progress</source>
+        <translation>Ein Mount-Befehl läuft bereits</translation>
+    </message>
+    <message id="aegra.mount.select_required">
+        <source>Select a checkpoint and at least one source disk</source>
+        <translation>Prüfpunkt und mindestens einen Quelldatenträger wählen</translation>
+    </message>
+    <message id="aegra.mount.invalid_drive_letter">
+        <source>Preferred drive letter must be a single letter A–Z</source>
+        <translation>Bevorzugter Laufwerksbuchstabe muss ein einzelner Buchstabe A–Z sein</translation>
+    </message>
+    <message id="aegra.mount.select_session">
+        <source>Select a mounted session to unmount</source>
+        <translation>Zum Aushängen eine eingehängte Sitzung wählen</translation>
+    </message>
+    <message id="aegra.error.mount.command_failed">
+        <source>Mount command failed</source>
+        <translation>Mount-Befehl fehlgeschlagen</translation>
+    </message>
+    <message id="aegra.error.mount.list_failed">
+        <source>Unable to list mount sessions</source>
+        <translation>Mount-Sitzungen können nicht aufgelistet werden</translation>
+    </message>
+    <message id="aegra.error.mount.host_unavailable">
+        <source>Mount host is unavailable</source>
+        <translation>Mount-Host ist nicht verfügbar</translation>
+    </message>
+    <message id="aegra.error.mount.already_mounted">
+        <source>This disk is already mounted</source>
+        <translation>Dieser Datenträger ist bereits eingehängt</translation>
+    </message>
+    <message id="aegra.error.mount.dokan_unavailable">
+        <source>Dokan is not available</source>
+        <translation>Dokan ist nicht verfügbar</translation>
+    </message>
+    <message id="aegra.error.mount.disk_not_found">
+        <source>Source disk was not found in this recovery point</source>
+        <translation>Quelldatenträger wurde in diesem Wiederherstellungspunkt nicht gefunden</translation>
+    </message>
+    <message id="aegra.error.mount.host_failed">
+        <source>Mount host failed</source>
+        <translation>Mount-Host fehlgeschlagen</translation>
+    </message>
     <message id="aegra.mount.drive_letter">
         <source>Drive letter</source>
         <translation>Laufwerksbuchstabe</translation>

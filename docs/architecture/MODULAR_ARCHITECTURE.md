@@ -65,7 +65,6 @@ src/
     ├── repository_gateway/
     ├── vmware_connector/
     ├── hyperv_connector/
-    ├── mount_host/
     ├── pe_restore/
     ├── desktop/
     └── shell_extension/

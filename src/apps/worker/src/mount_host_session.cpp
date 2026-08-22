@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-namespace aegra::apps::mount_host {
+namespace aegra::apps::worker {
 namespace {
 
 using Json = nlohmann::json;
@@ -215,4 +215,4 @@ base::Result<void> run_mount_host_session(ports::IMessageChannel& channel,
                      : base::Result<void>::failure(unmounted.error());
 }
 
-} // namespace aegra::apps::mount_host
+} // namespace aegra::apps::worker

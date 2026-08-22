@@ -1,6 +1,8 @@
 #include "aegra/apps/worker/worker_protocol.h"
 #include "aegra/apps/worker/worker_session.h"
 
+#include "mount_host_session.h"
+
 #include "aegra/adapters/windows_ipc/windows_named_pipe_channel.h"
 #include "aegra/adapters/windows_system/windows_system.h"
 #include "aegra/apps/worker/windows_personal_backup_task.h"
@@ -110,7 +112,29 @@ int run_pipe_worker(Runtime& runtime, const std::string_view pipe_name) {
     return static_cast<int>(exit);
 }
 
+// Holds one Dokan mount session for its full lifetime; the Service terminates
+// this process (or sends "unmount") to end the session.
+int run_mount_host(const std::string_view pipe_name) {
+    aegra::adapters::windows_ipc::WindowsNamedPipeConnectRequest request;
+    request.pipe_name = std::string(pipe_name);
+    request.connect_timeout_ms = 30'000;
+
+    aegra::base::CancellationSource cancel;
+    auto channel =
+        aegra::adapters::windows_ipc::WindowsNamedPipeChannel::connect(request, cancel.get_token());
+    if (!channel) {
+        std::cerr << "mount host failed to connect to service pipe\n";
+        return 1;
+    }
+    auto result =
+        aegra::apps::worker::run_mount_host_session(*channel.value(), cancel.get_token());
+    return result ? 0 : 1;
+}
+
 int run_worker(const std::span<const char* const> arguments) {
+    if (arguments.size() == 3 && std::string_view(arguments[1]) == "--mount-pipe") {
+        return run_mount_host(arguments[2]);
+    }
     Runtime runtime;
     if (arguments.size() == 3 && std::string_view(arguments[1]) == "--pipe") {
         return run_pipe_worker(runtime, arguments[2]);

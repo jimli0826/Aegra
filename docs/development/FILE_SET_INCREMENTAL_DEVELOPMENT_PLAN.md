@@ -711,7 +711,7 @@ credentials、日志和样本不提交仓库。
 - production targets（Debug/Release，`out/build/vs2026-{debug,release}`，
   `AEGRA_BUILD_DESKTOP=ON`，Qt `C:/Qt6/6.8.3/msvc2022_64`，VS 2026 Insiders）：
   - 全量 `cmake --build` 通过（含 `aegra_service`、`aegra_personal_worker`、
-    `aegra_mount_host`、`aegra_desktop` 及全部 library targets）
+    `aegra_desktop` 及全部 library targets）
 - architecture/static/format/secret checks：
   - `cmake -DAEGRA_SOURCE_ROOT=... -P cmake/CheckSourceLimits.cmake` → 通过
   - `git diff --check` → 无 whitespace error（仅 CRLF 提示）

@@ -283,7 +283,7 @@ MountSupervisor::mount(const contracts::MountRecoveryPointCommand& command,
 
     ports::ProcessLaunchRequest launch;
     launch.executable_path = impl_->config.mount_host_executable_path;
-    launch.arguments = {"--pipe", pipe_name.value()};
+    launch.arguments = {"--mount-pipe", pipe_name.value()};
     auto launched = impl_->launcher->launch(launch);
     if (!launched) {
         return base::Result<contracts::CommandAcknowledgement>::failure(launched.error());

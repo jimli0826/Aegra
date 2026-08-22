@@ -1875,6 +1875,86 @@
         <source>Size</source>
         <translation>サイズ</translation>
     </message>
+    <message id="aegra.mount.disk_name">
+        <source>Disk %1</source>
+        <translation>ディスク %1</translation>
+    </message>
+    <message id="aegra.mount.state.mounting">
+        <source>Mounting</source>
+        <translation>マウント中</translation>
+    </message>
+    <message id="aegra.mount.state.mounted">
+        <source>Mounted</source>
+        <translation>マウント済み</translation>
+    </message>
+    <message id="aegra.mount.state.unmounting">
+        <source>Unmounting</source>
+        <translation>アンマウント中</translation>
+    </message>
+    <message id="aegra.mount.state.failed">
+        <source>Failed</source>
+        <translation>失敗</translation>
+    </message>
+    <message id="aegra.mount.started">
+        <source>Mount started</source>
+        <translation>マウントを開始しました</translation>
+    </message>
+    <message id="aegra.mount.unmounted">
+        <source>Unmounted</source>
+        <translation>アンマウントしました</translation>
+    </message>
+    <message id="aegra.mount.already_mounted_selection">
+        <source>Selected disk(s) are already mounted</source>
+        <translation>選択したディスクは既にマウントされています</translation>
+    </message>
+    <message id="aegra.mount.capability_missing">
+        <source>Service does not support mount</source>
+        <translation>Service はマウントに対応していません</translation>
+    </message>
+    <message id="aegra.mount.busy">
+        <source>A mount command is already in progress</source>
+        <translation>マウントコマンドは既に実行中です</translation>
+    </message>
+    <message id="aegra.mount.select_required">
+        <source>Select a checkpoint and at least one source disk</source>
+        <translation>チェックポイントと少なくとも 1 つのソースディスクを選択してください</translation>
+    </message>
+    <message id="aegra.mount.invalid_drive_letter">
+        <source>Preferred drive letter must be a single letter A–Z</source>
+        <translation>希望のドライブレターは A–Z の 1 文字である必要があります</translation>
+    </message>
+    <message id="aegra.mount.select_session">
+        <source>Select a mounted session to unmount</source>
+        <translation>アンマウントするマウント済みセッションを選択してください</translation>
+    </message>
+    <message id="aegra.error.mount.command_failed">
+        <source>Mount command failed</source>
+        <translation>マウントコマンドに失敗しました</translation>
+    </message>
+    <message id="aegra.error.mount.list_failed">
+        <source>Unable to list mount sessions</source>
+        <translation>マウントセッションを一覧表示できません</translation>
+    </message>
+    <message id="aegra.error.mount.host_unavailable">
+        <source>Mount host is unavailable</source>
+        <translation>マウントホストを利用できません</translation>
+    </message>
+    <message id="aegra.error.mount.already_mounted">
+        <source>This disk is already mounted</source>
+        <translation>このディスクは既にマウントされています</translation>
+    </message>
+    <message id="aegra.error.mount.dokan_unavailable">
+        <source>Dokan is not available</source>
+        <translation>Dokan を利用できません</translation>
+    </message>
+    <message id="aegra.error.mount.disk_not_found">
+        <source>Source disk was not found in this recovery point</source>
+        <translation>このリカバリポイントにソースディスクが見つかりません</translation>
+    </message>
+    <message id="aegra.error.mount.host_failed">
+        <source>Mount host failed</source>
+        <translation>マウントホストに失敗しました</translation>
+    </message>
     <message id="aegra.mount.drive_letter">
         <source>Drive letter</source>
         <translation>ドライブレター</translation>

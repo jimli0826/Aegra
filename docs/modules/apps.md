@@ -7,10 +7,9 @@
 ## 进程
 
 - `service`：控制面 API、鉴权和任务；个人版组合 SQLite，企业版组合 PostgreSQL。
-- `worker`：每任务执行 Backup/Restore Pipeline。
+- `worker`：每任务执行 Backup/Restore Pipeline；`--mount-pipe` 模式承载 Recovery Point 挂载会话（Dokan/虚拟磁盘呈现）。
 - `repository_gateway`：企业 Repository 在线入口。
 - `vmware_connector`、`hyperv_connector`：厂商 SDK 隔离。
-- `mount_host`：Recovery Point 随机读取、Dokan 和虚拟磁盘呈现。
 - `pe_restore`：WinPE 最小离线恢复程序。
 - `desktop`：普通用户 GUI。
 - `shell_extension`：Explorer 进程内只读浏览 current V7 `.bkf`（ADR-0023）；Composition Root 装配 Archive/NTFS，不请求 Mount Host。
@@ -99,16 +98,18 @@ Online Prepare -> Validate -> Build/Cache WinRE -> Write Pending Job
 
 ## Mount Host
 
-Mount Host 只读打开 Recovery Point，组合 `PersonalArchiveChainReader`、`WholeDiskByteReader`、Dokan/VHDX Adapter。
-每个挂载会话具有独立生命周期、取消和临时 overlay。Mount Host 服务**盘符/整盘挂载**用例，由 Service
-编排；Explorer 双击浏览不以 Mount Host 为路径，Shell Extension 不加载 Dokan/VHDX 实现。
+Mount Host 是 `aegra_personal_worker.exe` 的 `--mount-pipe` 运行模式（无独立 EXE），只读打开 Recovery Point，
+组合 `PersonalArchiveChainReader`、`WholeDiskByteReader`、Dokan/VHDX Adapter（dokan2.dll 延迟加载，
+缺失时仅 mount 模式失败）。每个挂载会话仍是独立进程实例，具有独立生命周期、取消和临时 overlay。
+Mount Host 服务**盘符/整盘挂载**用例，由 Service 编排；Explorer 双击浏览不以 Mount Host 为路径，
+Shell Extension 不加载 Dokan/VHDX 实现。
 
 ### Service 编排（S7）
 
 - `MountSupervisor` 在 `apps/service` 内维护内存态会话表（session_id → host PID、pipe、summary）。
-- Service 通过 `--pipe` 启动 `aegra_mount_host`，发送 mount 请求 JSON，等待 `mounted`/`failed` 事件后向 Desktop 返回 CommandAcknowledgement。
+- Service 通过 `--mount-pipe` 启动 `aegra_personal_worker`，发送 mount 请求 JSON，等待 `mounted`/`failed` 事件后向 Desktop 返回 CommandAcknowledgement。
 - 能力位：`mount.list`、`mount.start`、`mount.unmount`。协议 kinds：8 / 41 / 42。
-- 可选 CLI：`--mount-host-path <abs>`；默认与 Service 同目录的 `aegra_mount_host.exe`。
+- 可选 CLI：`--mount-host-path <abs>`（调试覆盖）；默认与 Service 同目录的 `aegra_personal_worker.exe`。
 - Overlay 根：`<data_dir>/mount_overlays/<session_id>`（Service 已按会话隔离，host 不再二次嵌套）。
   - Dokan 挂载点：`<session>/mnt/`（必须为空目录，与旧 backup host 一致）。
   - COW sidecar：`<session>/diskN.vhdx.overlay(.map)`，**不得**放在 `mnt/` 内，否则 Dokan 报 `DOKAN_MOUNT_POINT_ERROR`。

@@ -614,7 +614,7 @@ composition/capability；未完成 Release 构建或隔离非系统卷人工 Res
 
 **状态：S7/D6 实现中（MVP 接线完成，待人工挂载验收）。**
 
-- 隔离 `aegra_mount_host` + Service `MountSupervisor`；会话权威状态在 Service 内存表。
+- 隔离 `aegra_personal_worker --mount-pipe` 挂载进程 + Service `MountSupervisor`；会话权威状态在 Service 内存表。
 - Desktop 不直接调用 Dokan；经 kinds 8/41/42 与 `mount.list|start|unmount` 能力。
 - Mount 页面：checkpoint → layout 源盘勾选 → mount/unmount；会话表展示挂载点、状态、开始时间。
 - 待验收：Dokan 可用环境整盘只读、强制 unmount、Service 停止清理 overlay、加密 Archive 口令路径。

@@ -1875,6 +1875,86 @@
         <source>Size</source>
         <translation>大小</translation>
     </message>
+    <message id="aegra.mount.disk_name">
+        <source>Disk %1</source>
+        <translation>磁碟 %1</translation>
+    </message>
+    <message id="aegra.mount.state.mounting">
+        <source>Mounting</source>
+        <translation>掛載中</translation>
+    </message>
+    <message id="aegra.mount.state.mounted">
+        <source>Mounted</source>
+        <translation>已掛載</translation>
+    </message>
+    <message id="aegra.mount.state.unmounting">
+        <source>Unmounting</source>
+        <translation>卸載中</translation>
+    </message>
+    <message id="aegra.mount.state.failed">
+        <source>Failed</source>
+        <translation>失敗</translation>
+    </message>
+    <message id="aegra.mount.started">
+        <source>Mount started</source>
+        <translation>已開始掛載</translation>
+    </message>
+    <message id="aegra.mount.unmounted">
+        <source>Unmounted</source>
+        <translation>已卸載</translation>
+    </message>
+    <message id="aegra.mount.already_mounted_selection">
+        <source>Selected disk(s) are already mounted</source>
+        <translation>所選磁碟已掛載</translation>
+    </message>
+    <message id="aegra.mount.capability_missing">
+        <source>Service does not support mount</source>
+        <translation>Service 不支援掛載</translation>
+    </message>
+    <message id="aegra.mount.busy">
+        <source>A mount command is already in progress</source>
+        <translation>已有掛載命令正在進行</translation>
+    </message>
+    <message id="aegra.mount.select_required">
+        <source>Select a checkpoint and at least one source disk</source>
+        <translation>請選擇檢查點和至少一個來源磁碟</translation>
+    </message>
+    <message id="aegra.mount.invalid_drive_letter">
+        <source>Preferred drive letter must be a single letter A–Z</source>
+        <translation>首選磁碟機代號必須是單一字母 A–Z</translation>
+    </message>
+    <message id="aegra.mount.select_session">
+        <source>Select a mounted session to unmount</source>
+        <translation>請選擇要卸載的已掛載工作階段</translation>
+    </message>
+    <message id="aegra.error.mount.command_failed">
+        <source>Mount command failed</source>
+        <translation>掛載命令失敗</translation>
+    </message>
+    <message id="aegra.error.mount.list_failed">
+        <source>Unable to list mount sessions</source>
+        <translation>無法列出掛載工作階段</translation>
+    </message>
+    <message id="aegra.error.mount.host_unavailable">
+        <source>Mount host is unavailable</source>
+        <translation>掛載主機不可用</translation>
+    </message>
+    <message id="aegra.error.mount.already_mounted">
+        <source>This disk is already mounted</source>
+        <translation>此磁碟已掛載</translation>
+    </message>
+    <message id="aegra.error.mount.dokan_unavailable">
+        <source>Dokan is not available</source>
+        <translation>Dokan 不可用</translation>
+    </message>
+    <message id="aegra.error.mount.disk_not_found">
+        <source>Source disk was not found in this recovery point</source>
+        <translation>在此還原點中找不到來源磁碟</translation>
+    </message>
+    <message id="aegra.error.mount.host_failed">
+        <source>Mount host failed</source>
+        <translation>掛載主機失敗</translation>
+    </message>
     <message id="aegra.mount.drive_letter">
         <source>Drive letter</source>
         <translation>磁碟機代號</translation>

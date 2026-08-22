@@ -148,6 +148,19 @@ find_data_partition_numbers(const format::Manifest& manifest,
     std::set<std::uint32_t> result;
     const format::Disk* disk = find_disk(manifest, source_disk_number);
 
+    // Only partitions covered by a Manifest volume extent were selected for
+    // backup; the rest appear in the disk layout but hold no data in the
+    // archive and must stay letterless (Desktop shows them as "Not backed up").
+    std::set<std::uint32_t> backed_up_parts;
+    for (const auto& volume : manifest.volumes) {
+        for (const auto& extent : volume.extents) {
+            if (extent.disk_number == source_disk_number &&
+                extent.partition_number != 0) {
+                backed_up_parts.insert(extent.partition_number);
+            }
+        }
+    }
+
     for (const auto& volume : manifest.volumes) {
         if (!volume.filesystem.empty() &&
             !filesystem_looks_mountable(volume.filesystem)) {
@@ -172,6 +185,12 @@ find_data_partition_numbers(const format::Manifest& manifest,
 
     if (disk != nullptr) {
         for (const auto& part : disk->partitions) {
+            // Legacy manifests without volume extents fall back to the layout
+            // heuristic; otherwise skip partitions that were not backed up.
+            if (!backed_up_parts.empty() &&
+                backed_up_parts.count(part.partition_number) == 0) {
+                continue;
+            }
             if (is_mountable_partition(part)) {
                 result.insert(part.partition_number);
             }

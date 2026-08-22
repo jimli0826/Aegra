@@ -346,9 +346,11 @@ resolve_worker_path(const ServiceArguments& arguments) {
     return resolve_sibling_executable(arguments.worker_path, L"aegra_personal_worker.exe");
 }
 
+// Mount sessions run in the worker executable (--mount-pipe mode);
+// --mount-host-path remains as a debugging override.
 [[nodiscard]] aegra::base::Result<std::filesystem::path>
 resolve_mount_host_path(const ServiceArguments& arguments) {
-    return resolve_sibling_executable(arguments.mount_host_path, L"aegra_mount_host.exe");
+    return resolve_sibling_executable(arguments.mount_host_path, L"aegra_personal_worker.exe");
 }
 
 [[nodiscard]] aegra::base::Result<std::string> path_to_utf8(const std::filesystem::path& path) {

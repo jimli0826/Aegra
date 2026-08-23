@@ -10,14 +10,9 @@ Item {
     //% "Mount"
     Accessible.name: qsTrId("aegra.nav.mount")
 
-    /// Options expanded by default (old MountPage: optionsCollapsed: false).
-    property bool optionsCollapsed: false
-    readonly property int optionsCollapsedWidth: 36
     property bool checkpointPanelOpen: false
     /// Vertical split between Source / Mounted panes (0.2 … 0.8)
     property real sourceMountedRatio: 0.45
-    /// Horizontal split: Options width share when expanded (0.18 … 0.45)
-    property real optionsPaneRatio: 0.30
     property string selectedCheckpointId: ""
     property string selectedCheckpointLabel: ""
     property string panelSelectedDate: ""
@@ -956,22 +951,14 @@ Item {
         anchors.margins: 16
         spacing: 12
 
-        // Main: Source + Mounted (left) | Options (right)
-        RowLayout {
-            id: mainSplitRow
+        // Main: Source (top) + Mounted (bottom), full width.
+        // The single mount option (drive letter) lives in the bottom action bar.
+        ColumnLayout {
+            id: disksColumn
             Layout.fillWidth: true
             Layout.fillHeight: true
+            Layout.minimumWidth: 280
             spacing: 0
-
-            ColumnLayout {
-                id: disksColumn
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                Layout.preferredWidth: root.optionsCollapsed
-                                       ? 1
-                                       : Math.round(1000 * (1.0 - root.optionsPaneRatio))
-                Layout.minimumWidth: 280
-                spacing: 0
 
                 // -------- Source --------
                 Rectangle {
@@ -1599,204 +1586,29 @@ Item {
                         }
                     }
                 }
+        }
+
+        // Bottom action bar: drive-letter option inline with the Mount/Unmount buttons.
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 44
+            spacing: 12
+
+            Text {
+                //% "Drive letter"
+                text: qsTrId("aegra.mount.drive_letter")
+                color: Theme.colorTextWhite
+                font.pixelSize: 12
+                font.bold: true
+                font.family: Theme.fontFamily
+                Layout.alignment: Qt.AlignVCenter
             }
 
-            // Horizontal drag handle
-            Item {
-                id: optionsSplitter
-                Layout.fillHeight: true
-                Layout.preferredWidth: root.optionsCollapsed ? 0 : 5
-                Layout.minimumWidth: root.optionsCollapsed ? 0 : 5
-                Layout.maximumWidth: root.optionsCollapsed ? 0 : 5
-                visible: !root.optionsCollapsed
-                z: 2
-                Rectangle {
-                    anchors.centerIn: parent
-                    width: 2
-                    height: Math.min(36, parent.height - 24)
-                    radius: 1
-                    color: optSplitMouse.pressed || optSplitMouse.containsMouse
-                           ? Theme.colorAccentBlue : Theme.colorBorder
-                    opacity: optSplitMouse.pressed || optSplitMouse.containsMouse ? 1.0 : 0.7
-                }
-                MouseArea {
-                    id: optSplitMouse
-                    anchors.fill: parent
-                    anchors.leftMargin: -3
-                    anchors.rightMargin: -3
-                    hoverEnabled: true
-                    cursorShape: Qt.SplitHCursor
-                    preventStealing: true
-                    enabled: !root.optionsCollapsed
-                    property real pressX: 0
-                    property real pressRatio: 0.3
-                    onPressed: function(mouse) {
-                        pressX = mapToItem(mainSplitRow, mouse.x, 0).x
-                        pressRatio = root.optionsPaneRatio
-                    }
-                    onPositionChanged: function(mouse) {
-                        if (!pressed || root.optionsCollapsed)
-                            return
-                        var x = mapToItem(mainSplitRow, mouse.x, 0).x
-                        var avail = mainSplitRow.width - optionsSplitter.width
-                        if (avail < 200)
-                            return
-                        var r = pressRatio - (x - pressX) / avail
-                        root.optionsPaneRatio = Math.min(0.45, Math.max(0.18, r))
-                    }
-                }
-            }
-
-            // -------- Options (right, collapsible) --------
-            Rectangle {
-                id: optionsPanel
-                Layout.fillHeight: true
-                Layout.fillWidth: false
-                Layout.preferredWidth: root.optionsCollapsed
-                                       ? root.optionsCollapsedWidth
-                                       : Math.round(1000 * root.optionsPaneRatio)
-                Layout.minimumWidth: root.optionsCollapsed ? root.optionsCollapsedWidth : 180
-                Layout.maximumWidth: root.optionsCollapsed
-                                     ? root.optionsCollapsedWidth
-                                     : parent.width * 0.48
-                color: Theme.colorCard
-                radius: 4
-                border.width: 1
-                border.color: Theme.colorBorder
-                clip: true
-                opacity: 0
-                transform: Translate { id: optionsPanelShift; y: 14 }
-                Component.onCompleted: optionsPanelEnter.restart()
-                SequentialAnimation {
-                    id: optionsPanelEnter
-                    PauseAnimation { duration: 180 }
-                    ParallelAnimation {
-                        NumberAnimation {
-                            target: optionsPanel; property: "opacity"
-                            from: 0; to: 1; duration: 280
-                            easing.type: Easing.OutCubic
-                        }
-                        NumberAnimation {
-                            target: optionsPanelShift; property: "y"
-                            from: 14; to: 0; duration: 280
-                            easing.type: Easing.OutCubic
-                        }
-                    }
-                }
-
-                Item {
-                    anchors.fill: parent
-                    visible: root.optionsCollapsed
-                    z: 2
-                    MouseArea {
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.optionsCollapsed = false
-                    }
-                    Column {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        anchors.top: parent.top
-                        anchors.topMargin: 10
-                        spacing: 10
-                        Text {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            text: "\u25C0"
-                            color: Theme.colorTextWhite
-                            font.pixelSize: 12
-                            font.bold: true
-                            font.family: Theme.fontFamily
-                        }
-                        Item {
-                            width: 16
-                            height: mountOptsCollapsedLabel.implicitWidth
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            Text {
-                                id: mountOptsCollapsedLabel
-                                anchors.centerIn: parent
-                                //% "Options"
-                                text: qsTrId("aegra.restore.options")
-                                color: Theme.colorTextWhite
-                                font.pixelSize: 12
-                                font.bold: true
-                                font.family: Theme.fontFamily
-                                rotation: -90
-                                transformOrigin: Item.Center
-                            }
-                        }
-                    }
-                }
-
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 12
-                    spacing: 12
-                    visible: !root.optionsCollapsed
-                    enabled: !root.optionsCollapsed
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-                        Rectangle {
-                            width: 3
-                            height: 16
-                            color: Theme.colorAccentBlue
-                            Layout.alignment: Qt.AlignVCenter
-                        }
-                        Text {
-                            //% "Options"
-                            text: qsTrId("aegra.restore.options")
-                            color: Theme.colorTextWhite
-                            font.pixelSize: 14
-                            font.bold: true
-                            font.family: Theme.fontFamily
-                            Layout.alignment: Qt.AlignVCenter
-                        }
-                        Item { Layout.fillWidth: true }
-                        Rectangle {
-                            Layout.preferredWidth: 28
-                            Layout.preferredHeight: 28
-                            radius: 4
-                            color: mountOptsCollapseMouse.containsMouse
-                                   ? Theme.colorHover : "transparent"
-                            border.width: mountOptsCollapseMouse.containsMouse ? 1 : 0
-                            border.color: Theme.colorBorder
-                            Layout.alignment: Qt.AlignVCenter
-                            Text {
-                                anchors.centerIn: parent
-                                text: "\u25B6"
-                                color: Theme.colorTextWhite
-                                font.pixelSize: 11
-                                font.bold: true
-                                font.family: Theme.fontFamily
-                            }
-                            MouseArea {
-                                id: mountOptsCollapseMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.optionsCollapsed = true
-                            }
-                        }
-                    }
-
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 6
-
-                        Text {
-                            //% "Drive letter"
-                            text: qsTrId("aegra.mount.drive_letter")
-                            color: Theme.colorTextWhite
-                            font.pixelSize: 12
-                            font.bold: true
-                            font.family: Theme.fontFamily
-                        }
-
-                        ComboBox {
+            ComboBox {
                             id: driveLetterCombo
-                            Layout.fillWidth: true
+                            Layout.preferredWidth: 170
                             Layout.preferredHeight: 32
+                            Layout.alignment: Qt.AlignVCenter
                             model: root.driveLetterModel
                             textRole: "label"
                             // Rebind when free-letter list refreshes after mount/unmount.
@@ -1829,7 +1641,8 @@ Item {
                                 elide: Text.ElideRight
                             }
                             popup: Popup {
-                                y: driveLetterCombo.height
+                                // Bottom action bar: open upward so the list is not clipped.
+                                y: -implicitHeight - 4
                                 width: driveLetterCombo.width
                                 implicitHeight: Math.min(contentItem.implicitHeight + 4, 240)
                                 padding: 2
@@ -1869,27 +1682,17 @@ Item {
                             }
                         }
 
-                        Text {
-                            Layout.fillWidth: true
-                            //% "Preferred letter for the first volume. Choose Auto to pick the next free letter. Additional volumes are assigned automatically."
-                            text: qsTrId("aegra.mount.drive_letter_hint")
-                            color: Theme.colorTextGrey
-                            font.pixelSize: 11
-                            font.family: Theme.fontFamily
-                            wrapMode: Text.WordWrap
-                        }
-                    }
-
-                    Item { Layout.fillHeight: true }
-                }
+            Text {
+                Layout.fillWidth: true
+                Layout.alignment: Qt.AlignVCenter
+                //% "Preferred letter for the first volume. Choose Auto to pick the next free letter. Additional volumes are assigned automatically."
+                text: qsTrId("aegra.mount.drive_letter_hint")
+                color: Theme.colorTextGrey
+                font.pixelSize: 11
+                font.family: Theme.fontFamily
+                elide: Text.ElideRight
             }
-        }
 
-        RowLayout {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 44
-            spacing: 12
-            Item { Layout.fillWidth: true }
             AppButton {
                 //% "Unmount"
                 text: qsTrId("aegra.mount.unmount")

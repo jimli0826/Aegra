@@ -76,7 +76,8 @@ Item {
                     label: volume.name && volume.name.length > 0 ? volume.name : volume.letter,
                     meta: disk.mediaType + " · " + volume.size,
                     usedRatio: capacity > 0 ? (capacity - free) / capacity : 0,
-                    usedText: "已用 " + serviceClient.formatBytes(Math.max(0, capacity - free)),
+                    //% "Used %1"
+                    usedText: qsTrId("aegra.home.volume.used").arg(serviceClient.formatBytes(Math.max(0, capacity - free))),
                     isProtected: protectedIds[volume.sourceId] === true
                 })
             }
@@ -87,11 +88,14 @@ Item {
     function frequencyText(frequency) {
         var f = (frequency || "").toLowerCase()
         if (f === "daily")
-            return "每日"
+            //% "Daily"
+            return qsTrId("aegra.home.freq.daily")
         if (f === "weekly")
-            return "每周"
+            //% "Weekly"
+            return qsTrId("aegra.home.freq.weekly")
         if (f === "monthly")
-            return "每月"
+            //% "Monthly"
+            return qsTrId("aegra.home.freq.monthly")
         return frequency || ""
     }
 
@@ -99,7 +103,8 @@ Item {
         if (!schedule)
             return "—"
         if (schedule.contentKind === 2)
-            return "文件备份"
+            //% "File Backup"
+            return qsTrId("aegra.home.source.file_backup")
         var ids = schedule.sourceIds || []
         var letters = []
         var tree = serviceClient.sources.disksTree
@@ -112,15 +117,28 @@ Item {
             }
         }
         if (letters.length === 0)
-            return ids.length + " 个卷"
-        return letters.join(" & ") + " 盘"
+            //% "%1 volume(s)"
+            return qsTrId("aegra.home.source.volumes").arg(ids.length)
+        //% "Drive %1"
+        return qsTrId("aegra.home.source.drives").arg(letters.join(" & "))
+    }
+
+    function backupTypeLabel(schedule) {
+        if (!schedule) return ""
+        if (schedule.backupType === 1)
+            //% "Full"
+            return qsTrId("aegra.backup.type.full")
+        //% "Incremental"
+        return qsTrId("aegra.backup.type.incremental")
     }
 
     /// Free-space text plus host-volume usage ratio for a repository locator.
     /// inventoryRevision forces re-evaluation when the inventory snapshot changes.
     function repoSpaceInfo(locator, available, inventoryRevision) {
-        if (!available)
-            return { text: "不可用", ratio: 0, hasBar: false }
+        if (!available) {
+            //% "Unavailable"
+            return { text: qsTrId("aegra.home.repo.unavailable"), ratio: 0, hasBar: false }
+        }
         var letter = ""
         if (locator && locator.length >= 2 && locator.charAt(1) === ":")
             letter = locator.substring(0, 2).toUpperCase()
@@ -134,9 +152,12 @@ Item {
                         continue
                     var capacity = volume.capacityBytes
                     var free = volume.freeBytes
+                    //% "Free %1 / %2"
+                    var freeOfTotal = qsTrId("aegra.home.repo.free_total").arg(
+                        serviceClient.formatBytes(free)).arg(
+                        serviceClient.formatBytes(capacity))
                     return {
-                        text: "剩余 " + serviceClient.formatBytes(free) + " / "
-                              + serviceClient.formatBytes(capacity),
+                        text: freeOfTotal,
                         ratio: capacity > 0 ? (capacity - free) / capacity : 0,
                         hasBar: true
                     }
@@ -144,8 +165,10 @@ Item {
             }
         }
         var freeBytes = serviceClient.freeBytesForLocator(locator)
-        if (freeBytes >= 0)
-            return { text: "剩余 " + serviceClient.formatBytes(freeBytes), ratio: 0, hasBar: false }
+        if (freeBytes >= 0) {
+            //% "Free %1"
+            return { text: qsTrId("aegra.home.repo.free").arg(serviceClient.formatBytes(freeBytes)), ratio: 0, hasBar: false }
+        }
         return { text: "", ratio: 0, hasBar: false }
     }
 
@@ -327,7 +350,7 @@ Item {
         }
     }
 
-    // Small pill badge (e.g. 加密 / 重删 / 受保护)
+    // Small pill badge
     component PillBadge: Rectangle {
         property string text: ""
         property color fg: Theme.colorAccentBlue
@@ -399,12 +422,14 @@ Item {
                     Layout.preferredWidth: 100
                     animOn: root.animStage1
                     animIndex: 0
-                    label: "已保护数据量"
+                    //% "Protected Data"
+                    label: qsTrId("aegra.home.stat.protected_data")
                     value: serviceClient.formatBytes(serviceClient.recoveryPoints.totalLogicalBytes)
                     emoji: "🛡️"
                     gradStart: Theme.colorMenuActive
                     gradEnd: Theme.colorMenuActiveEnd
-                    footLabel: "恢复点总数"
+                    //% "Total Recovery Points"
+                    footLabel: qsTrId("aegra.home.stat.recovery_points")
                     footValue: String(serviceClient.recoveryPointCount)
                 }
 
@@ -413,12 +438,14 @@ Item {
                     Layout.preferredWidth: 100
                     animOn: root.animStage1
                     animIndex: 1
-                    label: "存储总占用"
+                    //% "Storage Used"
+                    label: qsTrId("aegra.home.stat.storage_used")
                     value: serviceClient.formatBytes(serviceClient.recoveryPoints.totalStoredBytes)
                     emoji: "🗄️"
                     gradStart: Theme.colorAccentBlue
                     gradEnd: Qt.darker(Theme.colorAccentBlue, 1.25)
-                    footLabel: "重删与压缩率"
+                    //% "Dedup Ratio"
+                    footLabel: qsTrId("aegra.home.stat.dedup_ratio")
                     footValue: root.dedupRatioText
                 }
 
@@ -427,12 +454,14 @@ Item {
                     Layout.preferredWidth: 100
                     animOn: root.animStage1
                     animIndex: 2
-                    label: "近 30 天任务"
+                    //% "Tasks (30 Days)"
+                    label: qsTrId("aegra.home.stat.recent_tasks")
                     value: String(serviceClient.taskLog.count + serviceClient.jobs.activeCount)
                     emoji: "📊"
                     gradStart: Theme.colorGreen
                     gradEnd: Qt.darker(Theme.colorGreen, 1.3)
-                    footLabel: "成功 / 运行中 / 失败"
+                    //% "Succeeded / Running / Failed"
+                    footLabel: qsTrId("aegra.home.stat.task_breakdown")
                     footValue: serviceClient.taskLog.succeededCount + " / "
                                + serviceClient.jobs.activeCount + " / "
                                + serviceClient.taskLog.failedCount
@@ -445,12 +474,14 @@ Item {
                     Layout.preferredWidth: 100
                     animOn: root.animStage1
                     animIndex: 3
-                    label: "备份计划"
+                    //% "Backup Plans"
+                    label: qsTrId("aegra.home.stat.backup_plans")
                     value: String(serviceClient.schedules.length)
                     emoji: "📅"
                     gradStart: Theme.colorAccentRed
                     gradEnd: Qt.darker(Theme.colorAccentRed, 1.25)
-                    footLabel: "已启用 " + root.scheduleEnabledCount + " · 下次备份"
+                    //% "Enabled %1 · Next backup"
+                    footLabel: qsTrId("aegra.home.stat.enabled_next").arg(root.scheduleEnabledCount)
                     footValue: root.nextSchedule ? root.nextSchedule.nextRun : "—"
                     navIndex: 1
                     onNavigate: function(navTo) { root.homeNavigate(navTo) }
@@ -474,12 +505,14 @@ Item {
                     spacing: 20
                     Layout.alignment: Qt.AlignTop
 
-                    // Card ①: 下一次计划备份
+                    // Card 1: Next Scheduled Backup
                     AnimCard {
                         Layout.fillWidth: true
                         implicitHeight: root.contentRow1Height
-                        title: "下一次计划备份"
-                        actionText: "管理备份计划"
+                        //% "Next Scheduled Backup"
+                        title: qsTrId("aegra.home.card.next_schedule")
+                        //% "Manage Plans"
+                        actionText: qsTrId("aegra.home.card.manage_plans")
                         onActionClicked: root.homeNavigate(1)
                         animOn: root.animStage2
 
@@ -494,13 +527,12 @@ Item {
 
                             Item { Layout.fillHeight: true }
 
-                            // Schedule name + time + option badges
                             RowLayout {
                                 Layout.alignment: Qt.AlignHCenter
                                 spacing: 10
                                 PillBadge {
                                     text: "🛡️ " + (root.nextSchedule ? root.nextSchedule.displayName : "")
-                                          + " · " + (root.nextSchedule && root.nextSchedule.backupType === 1 ? "完整" : "增量")
+                                          + " · " + root.backupTypeLabel(root.nextSchedule)
                                     implicitHeight: 24
                                     radius: 12
                                 }
@@ -513,8 +545,18 @@ Item {
                                     font.family: Theme.fontFamily
                                     Layout.alignment: Qt.AlignVCenter
                                 }
-                                PillBadge { visible: root.nextSchedule !== null && root.nextSchedule.encryptionEnabled === true; text: "🔒 加密"; fg: Theme.colorGreen; bg: Theme.colorToastSuccessBg }
-                                PillBadge { visible: root.nextSchedule !== null && root.nextSchedule.deduplicationEnabled === true; text: "♻️ 重删"; fg: Theme.colorGreen; bg: Theme.colorToastSuccessBg }
+                                PillBadge {
+                                    visible: root.nextSchedule !== null && root.nextSchedule.encryptionEnabled === true
+                                    //% "Encrypted"
+                                    text: "🔒 " + qsTrId("aegra.home.badge.encrypted")
+                                    fg: Theme.colorGreen; bg: Theme.colorToastSuccessBg
+                                }
+                                PillBadge {
+                                    visible: root.nextSchedule !== null && root.nextSchedule.deduplicationEnabled === true
+                                    //% "Dedup"
+                                    text: "♻️ " + qsTrId("aegra.home.badge.dedup")
+                                    fg: Theme.colorGreen; bg: Theme.colorToastSuccessBg
+                                }
                             }
 
                             // Source -> SYNC -> Target
@@ -580,7 +622,8 @@ Item {
                                         Text { text: "🗄️"; font.pixelSize: 20; anchors.verticalCenter: parent.verticalCenter }
                                         Text {
                                             text: root.nextSchedule && root.nextSchedule.destinationName
-                                                  ? root.nextSchedule.destinationName : "默认仓库"
+                                                  //% "Default Repository"
+                                                  ? root.nextSchedule.destinationName : qsTrId("aegra.home.repo.default_name")
                                             color: Theme.colorTextWhite
                                             font.pixelSize: 14
                                             font.bold: true
@@ -604,7 +647,8 @@ Item {
                             visible: root.nextSchedule === null
 
                             Text {
-                                text: "尚未配置启用的备份计划"
+                                //% "No enabled backup plan configured"
+                                text: qsTrId("aegra.home.empty.no_schedule")
                                 color: Theme.colorTextDim
                                 font.pixelSize: 13
                                 font.family: Theme.fontFamily
@@ -619,7 +663,8 @@ Item {
                                 Behavior on color { ColorAnimation { duration: 150 } }
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "新建备份计划"
+                                    //% "Create Backup Plan"
+                                    text: qsTrId("aegra.home.action.new_plan")
                                     color: Theme.colorTextWhite
                                     font.pixelSize: 12
                                     font.bold: true
@@ -636,12 +681,14 @@ Item {
                         }
                     }
 
-                    // Card ②: 正在运行的任务
+                    // Card 2: Running Tasks
                     AnimCard {
                         Layout.fillWidth: true
                         implicitHeight: root.contentRow2Height
-                        title: "正在运行的任务"
-                        actionText: "查看任务日志"
+                        //% "Running Tasks"
+                        title: qsTrId("aegra.home.card.running_tasks")
+                        //% "View Task Log"
+                        actionText: qsTrId("aegra.home.card.view_task_log")
                         onActionClicked: root.homeNavigate(5)
                         animOn: root.animStage3
 
@@ -656,7 +703,8 @@ Item {
 
                             EmptyHint {
                                 visible: serviceClient.jobs.activeCount === 0
-                                text: "当前没有正在运行的任务"
+                                //% "No tasks currently running"
+                                text: qsTrId("aegra.home.empty.no_tasks")
                             }
 
                             Repeater {
@@ -690,7 +738,7 @@ Item {
                                             color: Theme.colorHover
                                             Text {
                                                 anchors.centerIn: parent
-                                                text: operationText.indexOf("备份") >= 0 || operationText.toLowerCase().indexOf("backup") >= 0 ? "💾" : "🔍"
+                                                text: operationText.toLowerCase().indexOf("backup") >= 0 ? "💾" : "🔍"
                                                 font.pixelSize: 15
                                             }
                                         }
@@ -739,12 +787,14 @@ Item {
                         }
                     }
 
-                    // Card ④: 仓库连接状态
+                    // Card 3: Repository Status
                     AnimCard {
                         Layout.fillWidth: true
                         implicitHeight: root.contentRow3Height
-                        title: "仓库连接状态"
-                        actionText: "管理仓库"
+                        //% "Repository Status"
+                        title: qsTrId("aegra.home.card.repo_status")
+                        //% "Manage Repositories"
+                        actionText: qsTrId("aegra.home.card.manage_repos")
                         onActionClicked: root.homeNavigate(4)
                         animOn: root.animStage4
 
@@ -759,7 +809,8 @@ Item {
 
                             EmptyHint {
                                 visible: serviceClient.connections.count === 0
-                                text: "尚未添加仓库连接"
+                                //% "No repository connections added"
+                                text: qsTrId("aegra.home.empty.no_repos")
                             }
 
                             Repeater {
@@ -818,7 +869,12 @@ Item {
                                             RowLayout {
                                                 spacing: 6
                                                 Text { text: repoRow.displayName; color: Theme.colorTextWhite; font.pixelSize: 13; font.bold: true; font.family: Theme.fontFamily }
-                                                PillBadge { visible: repoRow.isDefault; text: "默认"; fg: Theme.colorAccentBlue; bg: Theme.colorHover }
+                                                PillBadge {
+                                                    visible: repoRow.isDefault
+                                                    //% "Default"
+                                                    text: qsTrId("aegra.home.badge.default")
+                                                    fg: Theme.colorAccentBlue; bg: Theme.colorHover
+                                                }
                                             }
                                             Text {
                                                 text: repoRow.locator
@@ -863,12 +919,14 @@ Item {
                     spacing: 20
                     Layout.alignment: Qt.AlignTop
 
-                    // Card ⑥: 本机磁盘概览
+                    // Card 4: Local Disk Overview
                     AnimCard {
                         Layout.fillWidth: true
                         implicitHeight: root.contentRow1Height
-                        title: "本机磁盘概览"
-                        actionText: "新建备份计划"
+                        //% "Local Disk Overview"
+                        title: qsTrId("aegra.home.card.disk_overview")
+                        //% "New Backup Plan"
+                        actionText: qsTrId("aegra.home.card.new_plan")
                         onActionClicked: root.homeNavigate(1)
                         animOn: root.animStage2
 
@@ -883,7 +941,8 @@ Item {
 
                             EmptyHint {
                                 visible: root.homeVolumes.length === 0
-                                text: "正在加载磁盘信息…"
+                                //% "Loading disk information..."
+                                text: qsTrId("aegra.home.empty.loading_disks")
                             }
 
                             Repeater {
@@ -955,7 +1014,11 @@ Item {
                                         }
 
                                         PillBadge {
-                                            text: modelData.isProtected ? "✓ 受保护" : "! 未保护"
+                                            //% "Protected"
+                                            readonly property string protectedText: qsTrId("aegra.home.badge.protected")
+                                            //% "Unprotected"
+                                            readonly property string unprotectedText: qsTrId("aegra.home.badge.unprotected")
+                                            text: modelData.isProtected ? "✓ " + protectedText : "! " + unprotectedText
                                             fg: modelData.isProtected ? Theme.colorToastSuccessBorder : Theme.colorToastErrorBorder
                                             bg: modelData.isProtected ? Theme.colorToastSuccessBg : Theme.colorToastErrorBg
                                         }
@@ -965,12 +1028,14 @@ Item {
                         }
                     }
 
-                    // Card ⑦: 活动挂载
+                    // Card 5: Active Mounts
                     AnimCard {
                         Layout.fillWidth: true
                         implicitHeight: root.contentRow2Height
-                        title: "活动挂载"
-                        actionText: "挂载管理"
+                        //% "Active Mounts"
+                        title: qsTrId("aegra.home.card.active_mounts")
+                        //% "Mount Management"
+                        actionText: qsTrId("aegra.home.card.mount_mgmt")
                         onActionClicked: root.homeNavigate(3)
                         animOn: root.animStage3
 
@@ -985,7 +1050,8 @@ Item {
 
                             EmptyHint {
                                 visible: serviceClient.mountSessions.length === 0
-                                text: "暂无挂载的恢复点"
+                                //% "No recovery points mounted"
+                                text: qsTrId("aegra.home.empty.no_mounts")
                             }
 
                             Repeater {
@@ -1059,7 +1125,7 @@ Item {
                         }
                     }
 
-                    // Banner: 数据安全提醒 (CTA, pairs with 仓库连接状态 row)
+                    // Banner: Data Security CTA (pairs with Repository Status row)
                     AnimCard {
                         Layout.fillWidth: true
                         implicitHeight: root.contentRow3Height
@@ -1089,7 +1155,8 @@ Item {
                             spacing: 10
 
                             Text {
-                                text: "数据安全提醒"
+                                //% "Data Security Reminder"
+                                text: qsTrId("aegra.home.banner.title")
                                 color: Qt.rgba(1, 1, 1, 0.75)
                                 font.pixelSize: 10
                                 font.bold: true
@@ -1097,7 +1164,8 @@ Item {
                                 font.family: Theme.fontFamily
                             }
                             Text {
-                                text: "立即为重要卷配置\n异地冷备计划"
+                                //% "Configure offsite cold backup\nfor critical volumes now"
+                                text: qsTrId("aegra.home.banner.body")
                                 color: "#ffffff"
                                 font.pixelSize: 18
                                 font.bold: true
@@ -1115,7 +1183,8 @@ Item {
 
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "前往新建备份计划"
+                                    //% "Go to New Backup Plan"
+                                    text: qsTrId("aegra.home.banner.action")
                                     color: Theme.themeId === "dark" ? Theme.colorTextWhite : Theme.colorMenuActiveEnd
                                     font.pixelSize: 11
                                     font.bold: true

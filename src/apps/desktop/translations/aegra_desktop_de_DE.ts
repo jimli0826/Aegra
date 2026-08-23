@@ -2543,5 +2543,180 @@
         <source>Last sync · just now</source>
         <translation>Letzte Synchronisierung · gerade eben</translation>
     </message>
+    <!-- Home page -->
+    <message id="aegra.home.stat.protected_data">
+        <source>Protected Data</source>
+        <translation>Geschützte Daten</translation>
+    </message>
+    <message id="aegra.home.stat.recovery_points">
+        <source>Total Recovery Points</source>
+        <translation>Wiederherstellungspunkte gesamt</translation>
+    </message>
+    <message id="aegra.home.stat.storage_used">
+        <source>Storage Used</source>
+        <translation>Speicherverbrauch</translation>
+    </message>
+    <message id="aegra.home.stat.dedup_ratio">
+        <source>Dedup Ratio</source>
+        <translation>Deduplizierungsrate</translation>
+    </message>
+    <message id="aegra.home.stat.recent_tasks">
+        <source>Tasks (30 Days)</source>
+        <translation>Aufgaben (30 Tage)</translation>
+    </message>
+    <message id="aegra.home.stat.task_breakdown">
+        <source>Succeeded / Running / Failed</source>
+        <translation>Erfolgreich / Aktiv / Fehlgeschlagen</translation>
+    </message>
+    <message id="aegra.home.stat.backup_plans">
+        <source>Backup Plans</source>
+        <translation>Sicherungspläne</translation>
+    </message>
+    <message id="aegra.home.stat.enabled_next">
+        <source>Enabled %1 · Next backup</source>
+        <translation>Aktiviert %1 · Nächste Sicherung</translation>
+    </message>
+    <message id="aegra.home.card.next_schedule">
+        <source>Next Scheduled Backup</source>
+        <translation>Nächste geplante Sicherung</translation>
+    </message>
+    <message id="aegra.home.card.manage_plans">
+        <source>Manage Plans</source>
+        <translation>Pläne verwalten</translation>
+    </message>
+    <message id="aegra.home.card.running_tasks">
+        <source>Running Tasks</source>
+        <translation>Laufende Aufgaben</translation>
+    </message>
+    <message id="aegra.home.card.view_task_log">
+        <source>View Task Log</source>
+        <translation>Aufgabenprotokoll anzeigen</translation>
+    </message>
+    <message id="aegra.home.card.repo_status">
+        <source>Repository Status</source>
+        <translation>Repository-Status</translation>
+    </message>
+    <message id="aegra.home.card.manage_repos">
+        <source>Manage Repositories</source>
+        <translation>Repositorys verwalten</translation>
+    </message>
+    <message id="aegra.home.card.disk_overview">
+        <source>Local Disk Overview</source>
+        <translation>Lokale Datenträger</translation>
+    </message>
+    <message id="aegra.home.card.new_plan">
+        <source>New Backup Plan</source>
+        <translation>Neuer Sicherungsplan</translation>
+    </message>
+    <message id="aegra.home.card.active_mounts">
+        <source>Active Mounts</source>
+        <translation>Aktive Einbindungen</translation>
+    </message>
+    <message id="aegra.home.card.mount_mgmt">
+        <source>Mount Management</source>
+        <translation>Einbindungsverwaltung</translation>
+    </message>
+    <message id="aegra.home.empty.no_schedule">
+        <source>No enabled backup plan configured</source>
+        <translation>Kein aktiver Sicherungsplan konfiguriert</translation>
+    </message>
+    <message id="aegra.home.empty.no_tasks">
+        <source>No tasks currently running</source>
+        <translation>Zurzeit werden keine Aufgaben ausgeführt</translation>
+    </message>
+    <message id="aegra.home.empty.no_repos">
+        <source>No repository connections added</source>
+        <translation>Keine Repository-Verbindungen hinzugefügt</translation>
+    </message>
+    <message id="aegra.home.empty.loading_disks">
+        <source>Loading disk information...</source>
+        <translation>Datenträgerinformationen werden geladen…</translation>
+    </message>
+    <message id="aegra.home.empty.no_mounts">
+        <source>No recovery points mounted</source>
+        <translation>Keine Wiederherstellungspunkte eingebunden</translation>
+    </message>
+    <message id="aegra.home.action.new_plan">
+        <source>Create Backup Plan</source>
+        <translation>Sicherungsplan erstellen</translation>
+    </message>
+    <message id="aegra.home.badge.encrypted">
+        <source>Encrypted</source>
+        <translation>Verschlüsselt</translation>
+    </message>
+    <message id="aegra.home.badge.dedup">
+        <source>Dedup</source>
+        <translation>Deduplizierung</translation>
+    </message>
+    <message id="aegra.home.badge.default">
+        <source>Default</source>
+        <translation>Standard</translation>
+    </message>
+    <message id="aegra.home.badge.protected">
+        <source>Protected</source>
+        <translation>Geschützt</translation>
+    </message>
+    <message id="aegra.home.badge.unprotected">
+        <source>Unprotected</source>
+        <translation>Ungeschützt</translation>
+    </message>
+    <message id="aegra.home.freq.daily">
+        <source>Daily</source>
+        <translation>Täglich</translation>
+    </message>
+    <message id="aegra.home.freq.weekly">
+        <source>Weekly</source>
+        <translation>Wöchentlich</translation>
+    </message>
+    <message id="aegra.home.freq.monthly">
+        <source>Monthly</source>
+        <translation>Monatlich</translation>
+    </message>
+    <message id="aegra.home.source.file_backup">
+        <source>File Backup</source>
+        <translation>Dateisicherung</translation>
+    </message>
+    <message id="aegra.home.source.volumes">
+        <source>%1 volume(s)</source>
+        <translation>%1 Volume(s)</translation>
+    </message>
+    <message id="aegra.home.source.drives">
+        <source>Drive %1</source>
+        <translation>Laufwerk %1</translation>
+    </message>
+    <message id="aegra.home.volume.used">
+        <source>Used %1</source>
+        <translation>Belegt %1</translation>
+    </message>
+    <message id="aegra.home.repo.unavailable">
+        <source>Unavailable</source>
+        <translation>Nicht verfügbar</translation>
+    </message>
+    <message id="aegra.home.repo.free_total">
+        <source>Free %1 / %2</source>
+        <translation>Frei %1 / %2</translation>
+    </message>
+    <message id="aegra.home.repo.free">
+        <source>Free %1</source>
+        <translation>Frei %1</translation>
+    </message>
+    <message id="aegra.home.repo.default_name">
+        <source>Default Repository</source>
+        <translation>Standard-Repository</translation>
+    </message>
+    <message id="aegra.home.banner.title">
+        <source>Data Security Reminder</source>
+        <translation>Datensicherheitshinweis</translation>
+    </message>
+    <message id="aegra.home.banner.body">
+        <source>Configure offsite cold backup
+for critical volumes now</source>
+        <translation>Konfigurieren Sie jetzt ein
+Offsite-Coldbackup für kritische Volumes</translation>
+    </message>
+    <message id="aegra.home.banner.action">
+        <source>Go to New Backup Plan</source>
+        <translation>Zum neuen Sicherungsplan</translation>
+    </message>
 </context>
 </TS>

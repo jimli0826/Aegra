@@ -25,7 +25,7 @@
     </message>
     <message id="aegra.nav.repository">
         <source>Repository</source>
-        <translation>Repository</translation>
+        <translation>儲存庫</translation>
     </message>
     <message id="aegra.nav.event_log">
         <source>Event Log</source>
@@ -193,7 +193,7 @@
     </message>
     <message id="aegra.repository.title">
         <source>Repository</source>
-        <translation>Repository</translation>
+        <translation>儲存庫</translation>
     </message>
     <message id="aegra.repository.personal_name">
         <source>Personal Repository</source>
@@ -241,7 +241,7 @@
     </message>
     <message id="aegra.repository.kind_local_catalog">
         <source>local · catalog</source>
-        <translation>local · catalog</translation>
+        <translation>本機 · 目錄</translation>
     </message>
     <message id="aegra.repository.empty">
         <source>No repository</source>
@@ -393,7 +393,7 @@
     </message>
     <message id="aegra.home.card.repository">
         <source>Repository</source>
-        <translation>Repository</translation>
+        <translation>儲存庫</translation>
     </message>
     <message id="aegra.home.card.tasks">
         <source>Tasks</source>
@@ -2542,6 +2542,181 @@
     <message id="aegra.shell.last_sync_just_now">
         <source>Last sync · just now</source>
         <translation>上次同步 · 剛剛</translation>
+    </message>
+    <!-- Home page -->
+    <message id="aegra.home.stat.protected_data">
+        <source>Protected Data</source>
+        <translation>已保護資料量</translation>
+    </message>
+    <message id="aegra.home.stat.recovery_points">
+        <source>Total Recovery Points</source>
+        <translation>復原點總數</translation>
+    </message>
+    <message id="aegra.home.stat.storage_used">
+        <source>Storage Used</source>
+        <translation>儲存總佔用</translation>
+    </message>
+    <message id="aegra.home.stat.dedup_ratio">
+        <source>Dedup Ratio</source>
+        <translation>重複刪除率</translation>
+    </message>
+    <message id="aegra.home.stat.recent_tasks">
+        <source>Tasks (30 Days)</source>
+        <translation>近 30 天任務</translation>
+    </message>
+    <message id="aegra.home.stat.task_breakdown">
+        <source>Succeeded / Running / Failed</source>
+        <translation>成功 / 執行中 / 失敗</translation>
+    </message>
+    <message id="aegra.home.stat.backup_plans">
+        <source>Backup Plans</source>
+        <translation>備份計畫</translation>
+    </message>
+    <message id="aegra.home.stat.enabled_next">
+        <source>Enabled %1 · Next backup</source>
+        <translation>已啟用 %1 · 下次備份</translation>
+    </message>
+    <message id="aegra.home.card.next_schedule">
+        <source>Next Scheduled Backup</source>
+        <translation>下一次計畫備份</translation>
+    </message>
+    <message id="aegra.home.card.manage_plans">
+        <source>Manage Plans</source>
+        <translation>管理備份計畫</translation>
+    </message>
+    <message id="aegra.home.card.running_tasks">
+        <source>Running Tasks</source>
+        <translation>執行中的任務</translation>
+    </message>
+    <message id="aegra.home.card.view_task_log">
+        <source>View Task Log</source>
+        <translation>檢視任務日誌</translation>
+    </message>
+    <message id="aegra.home.card.repo_status">
+        <source>Repository Status</source>
+        <translation>儲存庫連線狀態</translation>
+    </message>
+    <message id="aegra.home.card.manage_repos">
+        <source>Manage Repositories</source>
+        <translation>管理儲存庫</translation>
+    </message>
+    <message id="aegra.home.card.disk_overview">
+        <source>Local Disk Overview</source>
+        <translation>本機磁碟概覽</translation>
+    </message>
+    <message id="aegra.home.card.new_plan">
+        <source>New Backup Plan</source>
+        <translation>新增備份計畫</translation>
+    </message>
+    <message id="aegra.home.card.active_mounts">
+        <source>Active Mounts</source>
+        <translation>使用中的掛載</translation>
+    </message>
+    <message id="aegra.home.card.mount_mgmt">
+        <source>Mount Management</source>
+        <translation>掛載管理</translation>
+    </message>
+    <message id="aegra.home.empty.no_schedule">
+        <source>No enabled backup plan configured</source>
+        <translation>尚未設定啟用的備份計畫</translation>
+    </message>
+    <message id="aegra.home.empty.no_tasks">
+        <source>No tasks currently running</source>
+        <translation>目前沒有執行中的任務</translation>
+    </message>
+    <message id="aegra.home.empty.no_repos">
+        <source>No repository connections added</source>
+        <translation>尚未新增儲存庫連線</translation>
+    </message>
+    <message id="aegra.home.empty.loading_disks">
+        <source>Loading disk information...</source>
+        <translation>正在載入磁碟資訊…</translation>
+    </message>
+    <message id="aegra.home.empty.no_mounts">
+        <source>No recovery points mounted</source>
+        <translation>沒有已掛載的復原點</translation>
+    </message>
+    <message id="aegra.home.action.new_plan">
+        <source>Create Backup Plan</source>
+        <translation>建立備份計畫</translation>
+    </message>
+    <message id="aegra.home.badge.encrypted">
+        <source>Encrypted</source>
+        <translation>加密</translation>
+    </message>
+    <message id="aegra.home.badge.dedup">
+        <source>Dedup</source>
+        <translation>重複刪除</translation>
+    </message>
+    <message id="aegra.home.badge.default">
+        <source>Default</source>
+        <translation>預設</translation>
+    </message>
+    <message id="aegra.home.badge.protected">
+        <source>Protected</source>
+        <translation>受保護</translation>
+    </message>
+    <message id="aegra.home.badge.unprotected">
+        <source>Unprotected</source>
+        <translation>未保護</translation>
+    </message>
+    <message id="aegra.home.freq.daily">
+        <source>Daily</source>
+        <translation>每日</translation>
+    </message>
+    <message id="aegra.home.freq.weekly">
+        <source>Weekly</source>
+        <translation>每週</translation>
+    </message>
+    <message id="aegra.home.freq.monthly">
+        <source>Monthly</source>
+        <translation>每月</translation>
+    </message>
+    <message id="aegra.home.source.file_backup">
+        <source>File Backup</source>
+        <translation>檔案備份</translation>
+    </message>
+    <message id="aegra.home.source.volumes">
+        <source>%1 volume(s)</source>
+        <translation>%1 個磁碟區</translation>
+    </message>
+    <message id="aegra.home.source.drives">
+        <source>Drive %1</source>
+        <translation>%1 磁碟</translation>
+    </message>
+    <message id="aegra.home.volume.used">
+        <source>Used %1</source>
+        <translation>已用 %1</translation>
+    </message>
+    <message id="aegra.home.repo.unavailable">
+        <source>Unavailable</source>
+        <translation>無法使用</translation>
+    </message>
+    <message id="aegra.home.repo.free_total">
+        <source>Free %1 / %2</source>
+        <translation>剩餘 %1 / %2</translation>
+    </message>
+    <message id="aegra.home.repo.free">
+        <source>Free %1</source>
+        <translation>剩餘 %1</translation>
+    </message>
+    <message id="aegra.home.repo.default_name">
+        <source>Default Repository</source>
+        <translation>預設儲存庫</translation>
+    </message>
+    <message id="aegra.home.banner.title">
+        <source>Data Security Reminder</source>
+        <translation>資料安全提醒</translation>
+    </message>
+    <message id="aegra.home.banner.body">
+        <source>Configure offsite cold backup
+for critical volumes now</source>
+        <translation>立即為重要磁碟區設定
+異地冷備計畫</translation>
+    </message>
+    <message id="aegra.home.banner.action">
+        <source>Go to New Backup Plan</source>
+        <translation>前往建立備份計畫</translation>
     </message>
 </context>
 </TS>

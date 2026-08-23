@@ -2543,5 +2543,180 @@
         <source>Last sync · just now</source>
         <translation>最終同期 · たった今</translation>
     </message>
+    <!-- Home page -->
+    <message id="aegra.home.stat.protected_data">
+        <source>Protected Data</source>
+        <translation>保護データ量</translation>
+    </message>
+    <message id="aegra.home.stat.recovery_points">
+        <source>Total Recovery Points</source>
+        <translation>リカバリポイント合計</translation>
+    </message>
+    <message id="aegra.home.stat.storage_used">
+        <source>Storage Used</source>
+        <translation>ストレージ使用量</translation>
+    </message>
+    <message id="aegra.home.stat.dedup_ratio">
+        <source>Dedup Ratio</source>
+        <translation>重複排除率</translation>
+    </message>
+    <message id="aegra.home.stat.recent_tasks">
+        <source>Tasks (30 Days)</source>
+        <translation>過去30日のタスク</translation>
+    </message>
+    <message id="aegra.home.stat.task_breakdown">
+        <source>Succeeded / Running / Failed</source>
+        <translation>成功 / 実行中 / 失敗</translation>
+    </message>
+    <message id="aegra.home.stat.backup_plans">
+        <source>Backup Plans</source>
+        <translation>バックアップ計画</translation>
+    </message>
+    <message id="aegra.home.stat.enabled_next">
+        <source>Enabled %1 · Next backup</source>
+        <translation>有効 %1 · 次回バックアップ</translation>
+    </message>
+    <message id="aegra.home.card.next_schedule">
+        <source>Next Scheduled Backup</source>
+        <translation>次回のバックアップ予定</translation>
+    </message>
+    <message id="aegra.home.card.manage_plans">
+        <source>Manage Plans</source>
+        <translation>計画管理</translation>
+    </message>
+    <message id="aegra.home.card.running_tasks">
+        <source>Running Tasks</source>
+        <translation>実行中のタスク</translation>
+    </message>
+    <message id="aegra.home.card.view_task_log">
+        <source>View Task Log</source>
+        <translation>タスクログを表示</translation>
+    </message>
+    <message id="aegra.home.card.repo_status">
+        <source>Repository Status</source>
+        <translation>リポジトリ接続状態</translation>
+    </message>
+    <message id="aegra.home.card.manage_repos">
+        <source>Manage Repositories</source>
+        <translation>リポジトリ管理</translation>
+    </message>
+    <message id="aegra.home.card.disk_overview">
+        <source>Local Disk Overview</source>
+        <translation>ローカルディスク概要</translation>
+    </message>
+    <message id="aegra.home.card.new_plan">
+        <source>New Backup Plan</source>
+        <translation>新規バックアップ計画</translation>
+    </message>
+    <message id="aegra.home.card.active_mounts">
+        <source>Active Mounts</source>
+        <translation>アクティブマウント</translation>
+    </message>
+    <message id="aegra.home.card.mount_mgmt">
+        <source>Mount Management</source>
+        <translation>マウント管理</translation>
+    </message>
+    <message id="aegra.home.empty.no_schedule">
+        <source>No enabled backup plan configured</source>
+        <translation>有効なバックアップ計画が設定されていません</translation>
+    </message>
+    <message id="aegra.home.empty.no_tasks">
+        <source>No tasks currently running</source>
+        <translation>現在実行中のタスクはありません</translation>
+    </message>
+    <message id="aegra.home.empty.no_repos">
+        <source>No repository connections added</source>
+        <translation>リポジトリ接続がまだ追加されていません</translation>
+    </message>
+    <message id="aegra.home.empty.loading_disks">
+        <source>Loading disk information...</source>
+        <translation>ディスク情報を読み込み中…</translation>
+    </message>
+    <message id="aegra.home.empty.no_mounts">
+        <source>No recovery points mounted</source>
+        <translation>マウント中のリカバリポイントはありません</translation>
+    </message>
+    <message id="aegra.home.action.new_plan">
+        <source>Create Backup Plan</source>
+        <translation>バックアップ計画を作成</translation>
+    </message>
+    <message id="aegra.home.badge.encrypted">
+        <source>Encrypted</source>
+        <translation>暗号化</translation>
+    </message>
+    <message id="aegra.home.badge.dedup">
+        <source>Dedup</source>
+        <translation>重複排除</translation>
+    </message>
+    <message id="aegra.home.badge.default">
+        <source>Default</source>
+        <translation>デフォルト</translation>
+    </message>
+    <message id="aegra.home.badge.protected">
+        <source>Protected</source>
+        <translation>保護済み</translation>
+    </message>
+    <message id="aegra.home.badge.unprotected">
+        <source>Unprotected</source>
+        <translation>未保護</translation>
+    </message>
+    <message id="aegra.home.freq.daily">
+        <source>Daily</source>
+        <translation>毎日</translation>
+    </message>
+    <message id="aegra.home.freq.weekly">
+        <source>Weekly</source>
+        <translation>毎週</translation>
+    </message>
+    <message id="aegra.home.freq.monthly">
+        <source>Monthly</source>
+        <translation>毎月</translation>
+    </message>
+    <message id="aegra.home.source.file_backup">
+        <source>File Backup</source>
+        <translation>ファイルバックアップ</translation>
+    </message>
+    <message id="aegra.home.source.volumes">
+        <source>%1 volume(s)</source>
+        <translation>%1 ボリューム</translation>
+    </message>
+    <message id="aegra.home.source.drives">
+        <source>Drive %1</source>
+        <translation>%1 ドライブ</translation>
+    </message>
+    <message id="aegra.home.volume.used">
+        <source>Used %1</source>
+        <translation>使用 %1</translation>
+    </message>
+    <message id="aegra.home.repo.unavailable">
+        <source>Unavailable</source>
+        <translation>利用不可</translation>
+    </message>
+    <message id="aegra.home.repo.free_total">
+        <source>Free %1 / %2</source>
+        <translation>空き %1 / %2</translation>
+    </message>
+    <message id="aegra.home.repo.free">
+        <source>Free %1</source>
+        <translation>空き %1</translation>
+    </message>
+    <message id="aegra.home.repo.default_name">
+        <source>Default Repository</source>
+        <translation>デフォルトリポジトリ</translation>
+    </message>
+    <message id="aegra.home.banner.title">
+        <source>Data Security Reminder</source>
+        <translation>データセキュリティ通知</translation>
+    </message>
+    <message id="aegra.home.banner.body">
+        <source>Configure offsite cold backup
+for critical volumes now</source>
+        <translation>重要なボリュームのオフサイト
+コールドバックアップを今すぐ設定</translation>
+    </message>
+    <message id="aegra.home.banner.action">
+        <source>Go to New Backup Plan</source>
+        <translation>バックアップ計画を新規作成</translation>
+    </message>
 </context>
 </TS>

@@ -244,6 +244,14 @@ qint64 RecoveryPointModel::totalStoredBytes() const {
     return total;
 }
 
+qint64 RecoveryPointModel::totalLogicalBytes() const {
+    qint64 total = 0;
+    for (const auto& row : rows_) {
+        total += row.logical_size_bytes;
+    }
+    return total;
+}
+
 QVariantMap RecoveryPointModel::recoveryPointDetails(const QString& file_uuid) const {
     const auto* row = find_row(file_uuid);
     if (row == nullptr) {

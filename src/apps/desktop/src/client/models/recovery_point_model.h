@@ -37,6 +37,8 @@ class RecoveryPointModel final : public QAbstractListModel {
     Q_PROPERTY(int fileSetCount READ fileSetCount NOTIFY countChanged)
     /// Sum of stored_size_bytes for the currently loaded catalog (selected connection).
     Q_PROPERTY(qint64 totalStoredBytes READ totalStoredBytes NOTIFY countChanged)
+    /// Sum of logical_size_bytes for the currently loaded catalog (selected connection).
+    Q_PROPERTY(qint64 totalLogicalBytes READ totalLogicalBytes NOTIFY countChanged)
 
   public:
     enum Role : int {
@@ -80,6 +82,7 @@ class RecoveryPointModel final : public QAbstractListModel {
     /// Number of recovery points whose content_kind is 2 (file set).
     [[nodiscard]] int fileSetCount() const;
     [[nodiscard]] qint64 totalStoredBytes() const;
+    [[nodiscard]] qint64 totalLogicalBytes() const;
     Q_INVOKABLE [[nodiscard]] QStringList backupDateYmds() const;
     /// Checkpoints for a local date, newest first. Each map: fileUuid, timeText, backupType,
     /// contentKind, sizeText, logicalSizeBytes, sourceCount, createdUtcMs, createdText,

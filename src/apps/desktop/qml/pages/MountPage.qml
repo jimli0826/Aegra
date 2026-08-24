@@ -680,7 +680,8 @@ Item {
     }
 
     // Source disk row: checkbox + DiskIcon + name/style/size + volume bar (old MountPage).
-    component SourceDiskRow: Rectangle {
+    // Schedule-style row chrome: HoverHandler + soft hover fill + gradient divider.
+    component SourceDiskRow: Item {
         id: rowRoot
         property var diskData: ({})
         property bool checked: false
@@ -690,14 +691,44 @@ Item {
 
         width: parent ? parent.width : 100
         height: 68
-        radius: 6
-        color: Theme.colorListItem
-        border.width: 1
-        border.color: Theme.colorBorder
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.leftMargin: 10
+            anchors.rightMargin: 10
+            height: 1
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.00; color: "transparent" }
+                GradientStop { position: 0.15; color: Theme.colorBorder }
+                GradientStop { position: 0.85; color: Theme.colorBorder }
+                GradientStop { position: 1.00; color: "transparent" }
+            }
+        }
+
+        HoverHandler {
+            id: sourceRowHover
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            anchors.leftMargin: 4
+            anchors.rightMargin: 4
+            radius: 10
+            color: rowRoot.checked || sourceRowHover.hovered
+                   ? Theme.colorHover : "transparent"
+            border.width: rowRoot.checked ? 1 : 0
+            border.color: Theme.colorAccentBlue
+        }
 
         RowLayout {
             anchors.fill: parent
-            anchors.margins: 8
+            anchors.leftMargin: 10
+            anchors.rightMargin: 10
+            anchors.topMargin: 8
+            anchors.bottomMargin: 8
             spacing: 10
 
             CheckBox {
@@ -935,8 +966,7 @@ Item {
         MouseArea {
             anchors.fill: parent
             anchors.leftMargin: 40
-            z: -1
-            hoverEnabled: true
+            acceptedButtons: Qt.LeftButton
             cursorShape: Qt.PointingHandCursor
             onClicked: {
                 if (rowRoot.diskNumber < 0)
@@ -968,7 +998,7 @@ Item {
                     Layout.preferredHeight: Math.round(1000 * root.sourceMountedRatio)
                     Layout.minimumHeight: 120
                     color: Theme.colorCard
-                    radius: 4
+                    radius: Theme.radiusCard
                     border.width: 1
                     border.color: Theme.colorBorder
                     opacity: 0
@@ -998,12 +1028,6 @@ Item {
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 8
-                            Rectangle {
-                                width: 3
-                                height: 16
-                                color: Theme.colorAccentBlue
-                                Layout.alignment: Qt.AlignVCenter
-                            }
                             Text {
                                 // Covers disks (volume_set) and folders (file_set).
                                 //% "Source"
@@ -1095,7 +1119,7 @@ Item {
                                 boundsBehavior: Flickable.StopAtBounds
                                 model: root.isFileSetCheckpoint
                                        ? serviceClient.fileRecoverEntries : null
-                                delegate: Rectangle {
+                                delegate: Item {
                                     required property string entryId
                                     required property string displayName
                                     required property bool hasChildren
@@ -1104,21 +1128,19 @@ Item {
                                     required property bool expanded
                                     required property bool nodeLoading
                                     width: fileArchiveList.width
-                                    height: 26
-                                    radius: 4
-                                    color: "transparent"
+                                    height: 28
+
+                                    HoverHandler {
+                                        id: mountArchiveRowHover
+                                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                                    }
                                     Rectangle {
                                         anchors.fill: parent
-                                        radius: parent.radius
-                                        color: Theme.colorHover
-                                        opacity: mountArchiveRowHover.containsMouse ? 1.0 : 0.0
-                                        Behavior on opacity { NumberAnimation { duration: 120 } }
-                                    }
-                                    MouseArea {
-                                        id: mountArchiveRowHover
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        acceptedButtons: Qt.NoButton
+                                        anchors.leftMargin: 4
+                                        anchors.rightMargin: 4
+                                        radius: 10
+                                        color: mountArchiveRowHover.hovered
+                                               ? Theme.colorHover : "transparent"
                                     }
                                     MouseArea {
                                         anchors.fill: parent
@@ -1181,17 +1203,34 @@ Item {
                             }
 
                             ListView {
+                                id: sourceDiskList
                                 anchors.fill: parent
+                                anchors.rightMargin: needsScroll ? 10 : 0
                                 clip: true
                                 visible: !root.sourceLayoutLoading
                                          && root.selectedCheckpointId.length > 0
                                          && !root.isFileSetCheckpoint
                                          && (root.sourceDisks || []).length > 0
                                 model: root.sourceDisks || []
-                                spacing: 6
+                                spacing: 0
                                 boundsBehavior: Flickable.StopAtBounds
+                                readonly property bool needsScroll: contentHeight > height + 1
+                                ScrollBar.vertical: ScrollBar {
+                                    policy: sourceDiskList.needsScroll ? ScrollBar.AlwaysOn
+                                                                       : ScrollBar.AlwaysOff
+                                    width: 8
+                                    padding: 0
+                                    contentItem: Rectangle {
+                                        implicitWidth: 6
+                                        radius: 3
+                                        color: Theme.colorBorder
+                                        opacity: parent.pressed ? 1.0
+                                                 : (parent.hovered ? 0.9 : 0.65)
+                                    }
+                                    background: Item {}
+                                }
                                 delegate: SourceDiskRow {
-                                    width: ListView.view.width
+                                    width: sourceDiskList.width
                                     diskData: modelData || ({})
                                     checked: root.isDiskChecked(
                                                  modelData && modelData.diskNumber !== undefined
@@ -1254,7 +1293,7 @@ Item {
                     Layout.preferredHeight: Math.round(1000 * (1.0 - root.sourceMountedRatio))
                     Layout.minimumHeight: 120
                     color: Theme.colorCard
-                    radius: 4
+                    radius: Theme.radiusCard
                     border.width: 1
                     border.color: Theme.colorBorder
                     opacity: 0
@@ -1284,12 +1323,6 @@ Item {
 
                         Row {
                             spacing: 8
-                            Rectangle {
-                                width: 3
-                                height: 16
-                                color: Theme.colorAccentBlue
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
                             Text {
                                 //% "Mounted"
                                 text: qsTrId("aegra.mount.mounted")
@@ -1310,109 +1343,117 @@ Item {
                             }
                         }
 
-                        RowLayout {
+                        // Column headers — uppercase, muted, letter-spaced (schedule standings)
+                        Item {
                             Layout.fillWidth: true
-                            Layout.leftMargin: 10
-                            Layout.rightMargin: 10
-                            spacing: 8
+                            Layout.preferredHeight: 34
 
-                            CheckBox {
-                                id: selectAllMountedCheck
-                                Layout.preferredWidth: 28
-                                Layout.alignment: Qt.AlignVCenter
-                                enabled: (root.mountSessions || []).length > 0
-                                checked: {
-                                    var _e = root.selectedSessionsEpoch
-                                    var total = (root.mountSessions || []).length
-                                    return total > 0 && root.selectedSessionCount === total
-                                }
-                                onClicked: {
-                                    var total = (root.mountSessions || []).length
-                                    var allOn = total > 0 && root.selectedSessionCount === total
-                                    root.setAllSessionsSelected(!allOn)
-                                }
-                                indicator: Rectangle {
-                                    implicitWidth: 18
-                                    implicitHeight: 18
-                                    x: selectAllMountedCheck.leftPadding
-                                    y: parent.height / 2 - height / 2
-                                    radius: 3
-                                    color: {
-                                        if (!selectAllMountedCheck.enabled)
-                                            return Theme.colorButtonDisabled
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 10
+                                anchors.rightMargin: 10
+                                spacing: 8
+
+                                CheckBox {
+                                    id: selectAllMountedCheck
+                                    Layout.preferredWidth: 28
+                                    Layout.alignment: Qt.AlignVCenter
+                                    enabled: (root.mountSessions || []).length > 0
+                                    checked: {
+                                        var _e = root.selectedSessionsEpoch
                                         var total = (root.mountSessions || []).length
-                                        if (total > 0 && root.selectedSessionCount > 0
-                                                && root.selectedSessionCount < total)
-                                            return Theme.colorAccentBlue
-                                        return selectAllMountedCheck.checked
-                                               ? Theme.colorAccentBlue : Theme.colorInput
+                                        return total > 0 && root.selectedSessionCount === total
                                     }
-                                    border.color: {
-                                        if (!selectAllMountedCheck.enabled)
-                                            return Theme.colorBorder
-                                        if (selectAllMountedCheck.checked
-                                                || root.selectedSessionCount > 0)
-                                            return Theme.colorAccentBlue
-                                        return Theme.colorBorder
+                                    onClicked: {
+                                        var total = (root.mountSessions || []).length
+                                        var allOn = total > 0 && root.selectedSessionCount === total
+                                        root.setAllSessionsSelected(!allOn)
                                     }
-                                    border.width: 1
-                                    opacity: selectAllMountedCheck.enabled ? 1.0 : 0.5
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: {
+                                    indicator: Rectangle {
+                                        implicitWidth: 18
+                                        implicitHeight: 18
+                                        x: selectAllMountedCheck.leftPadding
+                                        y: parent.height / 2 - height / 2
+                                        radius: 3
+                                        color: {
+                                            if (!selectAllMountedCheck.enabled)
+                                                return Theme.colorButtonDisabled
                                             var total = (root.mountSessions || []).length
-                                            var n = root.selectedSessionCount
-                                            if (n <= 0)
-                                                return ""
-                                            if (n < total)
-                                                return "\u2212"
-                                            return "\u2713"
+                                            if (total > 0 && root.selectedSessionCount > 0
+                                                    && root.selectedSessionCount < total)
+                                                return Theme.colorAccentBlue
+                                            return selectAllMountedCheck.checked
+                                                   ? Theme.colorAccentBlue : Theme.colorInput
                                         }
-                                        color: "white"
-                                        font.pixelSize: 12
-                                        font.bold: true
+                                        border.color: {
+                                            if (!selectAllMountedCheck.enabled)
+                                                return Theme.colorBorder
+                                            if (selectAllMountedCheck.checked
+                                                    || root.selectedSessionCount > 0)
+                                                return Theme.colorAccentBlue
+                                            return Theme.colorBorder
+                                        }
+                                        border.width: 1
+                                        opacity: selectAllMountedCheck.enabled ? 1.0 : 0.5
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: {
+                                                var total = (root.mountSessions || []).length
+                                                var n = root.selectedSessionCount
+                                                if (n <= 0)
+                                                    return ""
+                                                if (n < total)
+                                                    return "\u2212"
+                                                return "\u2713"
+                                            }
+                                            color: "white"
+                                            font.pixelSize: 12
+                                            font.bold: true
+                                        }
                                     }
                                 }
+                                Text {
+                                    Layout.preferredWidth: 64
+                                    //% "Drive(s)"
+                                    text: qsTrId("aegra.mount.col.drives").toUpperCase()
+                                    color: Theme.colorTextDim
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                    font.letterSpacing: 0.8
+                                    font.family: Theme.fontFamily
+                                }
+                                Text {
+                                    Layout.preferredWidth: 56
+                                    //% "Disk"
+                                    text: qsTrId("aegra.mount.col.disk").toUpperCase()
+                                    color: Theme.colorTextDim
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                    font.letterSpacing: 0.8
+                                    font.family: Theme.fontFamily
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    //% "Image"
+                                    text: qsTrId("aegra.mount.col.image").toUpperCase()
+                                    color: Theme.colorTextDim
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                    font.letterSpacing: 0.8
+                                    font.family: Theme.fontFamily
+                                }
+                                Text {
+                                    Layout.preferredWidth: 72
+                                    horizontalAlignment: Text.AlignRight
+                                    //% "Size"
+                                    text: qsTrId("aegra.mount.col.size").toUpperCase()
+                                    color: Theme.colorTextDim
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                    font.letterSpacing: 0.8
+                                    font.family: Theme.fontFamily
+                                }
                             }
-                            Text {
-                                Layout.preferredWidth: 64
-                                //% "Drive(s)"
-                                text: qsTrId("aegra.mount.col.drives")
-                                color: Theme.colorTextGrey
-                                font.pixelSize: 11
-                                font.family: Theme.fontFamily
-                            }
-                            Text {
-                                Layout.preferredWidth: 56
-                                //% "Disk"
-                                text: qsTrId("aegra.mount.col.disk")
-                                color: Theme.colorTextGrey
-                                font.pixelSize: 11
-                                font.family: Theme.fontFamily
-                            }
-                            Text {
-                                Layout.fillWidth: true
-                                //% "Image"
-                                text: qsTrId("aegra.mount.col.image")
-                                color: Theme.colorTextGrey
-                                font.pixelSize: 11
-                                font.family: Theme.fontFamily
-                            }
-                            Text {
-                                Layout.preferredWidth: 72
-                                horizontalAlignment: Text.AlignRight
-                                //% "Size"
-                                text: qsTrId("aegra.mount.col.size")
-                                color: Theme.colorTextGrey
-                                font.pixelSize: 11
-                                font.family: Theme.fontFamily
-                            }
-                        }
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 1
-                            color: Theme.colorBorder
                         }
 
                         Item {
@@ -1431,7 +1472,7 @@ Item {
                                     //% "No mounted images"
                                     text: qsTrId("aegra.mount.mounted_empty")
                                     color: Theme.colorTextGrey
-                                    font.pixelSize: 12
+                                    font.pixelSize: 13
                                     font.family: Theme.fontFamily
                                 }
                                 Text {
@@ -1450,10 +1491,11 @@ Item {
                             ListView {
                                 id: mountedList
                                 anchors.fill: parent
+                                anchors.rightMargin: needsScroll ? 10 : 0
                                 clip: true
                                 visible: (root.mountSessions || []).length > 0
                                 model: root.mountSessions || []
-                                spacing: 4
+                                spacing: 0
                                 boundsBehavior: Flickable.StopAtBounds
                                 readonly property bool needsScroll: contentHeight > height + 1
                                 ScrollBar.vertical: ScrollBar {
@@ -1472,26 +1514,49 @@ Item {
                                     background: Item {}
                                 }
 
-                                delegate: Rectangle {
+                                delegate: Item {
                                     id: mountedRow
                                     width: mountedList.width
-                                           - (mountedList.needsScroll ? 12 : 0)
-                                    height: 48
-                                    radius: 4
+                                    height: 52
                                     readonly property string sessionId: modelData.sessionId || ""
                                     readonly property bool checked:
                                         root.isSessionChecked(sessionId)
-                                    color: checked ? Theme.colorHover
-                                                   : (sessionMouse.containsMouse
-                                                      ? Theme.colorHover : Theme.colorListItem)
-                                    border.width: checked ? 1 : 0
-                                    border.color: Theme.colorAccentBlue
+
+                                    Rectangle {
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.leftMargin: 10
+                                        anchors.rightMargin: 10
+                                        height: 1
+                                        gradient: Gradient {
+                                            orientation: Gradient.Horizontal
+                                            GradientStop { position: 0.00; color: "transparent" }
+                                            GradientStop { position: 0.15; color: Theme.colorBorder }
+                                            GradientStop { position: 0.85; color: Theme.colorBorder }
+                                            GradientStop { position: 1.00; color: "transparent" }
+                                        }
+                                    }
+
+                                    HoverHandler {
+                                        id: mountedRowHover
+                                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                                    }
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 4
+                                        anchors.rightMargin: 4
+                                        radius: 10
+                                        color: mountedRow.checked || mountedRowHover.hovered
+                                               ? Theme.colorHover : "transparent"
+                                        border.width: mountedRow.checked ? 1 : 0
+                                        border.color: Theme.colorAccentBlue
+                                    }
 
                                     MouseArea {
-                                        id: sessionMouse
                                         anchors.fill: parent
-                                        hoverEnabled: true
-                                        z: -1
+                                        anchors.leftMargin: 40
+                                        acceptedButtons: Qt.LeftButton
                                         cursorShape: Qt.PointingHandCursor
                                         onClicked: root.setSessionChecked(
                                                        mountedRow.sessionId, !mountedRow.checked)
@@ -1535,7 +1600,8 @@ Item {
                                             Layout.preferredWidth: 64
                                             text: modelData.mountPoint || "\u2014"
                                             color: Theme.colorTextWhite
-                                            font.pixelSize: 12
+                                            font.pixelSize: 13
+                                            font.bold: true
                                             font.family: Theme.fontFamily
                                             elide: Text.ElideRight
                                             verticalAlignment: Text.AlignVCenter
@@ -1546,8 +1612,9 @@ Item {
                                                   || (modelData.sourceDiskNumber !== undefined
                                                       ? ("Disk " + modelData.sourceDiskNumber)
                                                       : "")
-                                            color: Theme.colorTextWhite
-                                            font.pixelSize: 11
+                                            color: Theme.colorTextGrey
+                                            font.pixelSize: 13
+                                            font.bold: true
                                             font.family: Theme.fontFamily
                                             verticalAlignment: Text.AlignVCenter
                                         }
@@ -1558,15 +1625,16 @@ Item {
                                                 width: parent.width
                                                 text: root.imageLabelForSession(modelData)
                                                 color: Theme.colorTextWhite
-                                                font.pixelSize: 12
+                                                font.pixelSize: 13
+                                                font.bold: true
                                                 font.family: Theme.fontFamily
                                                 elide: Text.ElideMiddle
                                             }
                                             Text {
                                                 width: parent.width
                                                 text: modelData.recoveryPointId || ""
-                                                color: Theme.colorTextGrey
-                                                font.pixelSize: 10
+                                                color: Theme.colorTextDim
+                                                font.pixelSize: 11
                                                 font.family: Theme.fontFamily
                                                 elide: Text.ElideMiddle
                                             }
@@ -1576,7 +1644,8 @@ Item {
                                             horizontalAlignment: Text.AlignRight
                                             text: modelData.sizeText || ""
                                             color: Theme.colorTextGrey
-                                            font.pixelSize: 11
+                                            font.pixelSize: 13
+                                            font.bold: true
                                             font.family: Theme.fontFamily
                                             verticalAlignment: Text.AlignVCenter
                                         }

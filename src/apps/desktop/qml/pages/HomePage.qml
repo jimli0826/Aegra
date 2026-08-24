@@ -815,7 +815,7 @@ Item {
 
                             Repeater {
                                 model: serviceClient.connections
-                                delegate: Rectangle {
+                                delegate: Item {
                                     id: repoRow
                                     required property int index
                                     required property string displayName
@@ -828,9 +828,6 @@ Item {
 
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 54
-                                    radius: 10
-                                    color: repoRowMouse.containsMouse ? Theme.colorHover : "transparent"
-                                    Behavior on color { ColorAnimation { duration: 150 } }
 
                                     opacity: root.animStage4 ? 1 : 0
                                     transform: Translate {
@@ -839,10 +836,18 @@ Item {
                                     }
                                     Behavior on opacity { NumberAnimation { duration: 320 + index * 45; easing.type: Easing.OutCubic } }
 
-                                    MouseArea {
-                                        id: repoRowMouse
+                                    // HoverHandler keeps hovered stable across child text/bars
+                                    // (MouseArea + sibling content toggles containsMouse and flickers).
+                                    HoverHandler {
+                                        id: repoRowHover
+                                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                                    }
+
+                                    Rectangle {
                                         anchors.fill: parent
-                                        hoverEnabled: true
+                                        radius: 10
+                                        color: repoRowHover.hovered
+                                               ? Theme.colorHover : "transparent"
                                     }
 
                                     RowLayout {
@@ -947,14 +952,11 @@ Item {
 
                             Repeater {
                                 model: root.homeVolumes
-                                delegate: Rectangle {
+                                delegate: Item {
                                     required property var modelData
                                     required property int index
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 54
-                                    radius: 10
-                                    color: volRowMouse.containsMouse ? Theme.colorHover : "transparent"
-                                    Behavior on color { ColorAnimation { duration: 150 } }
 
                                     opacity: root.animStage2 ? 1 : 0
                                     transform: Translate {
@@ -963,10 +965,16 @@ Item {
                                     }
                                     Behavior on opacity { NumberAnimation { duration: 320 + index * 45; easing.type: Easing.OutCubic } }
 
-                                    MouseArea {
-                                        id: volRowMouse
+                                    HoverHandler {
+                                        id: volRowHover
+                                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                                    }
+
+                                    Rectangle {
                                         anchors.fill: parent
-                                        hoverEnabled: true
+                                        radius: 10
+                                        color: volRowHover.hovered
+                                               ? Theme.colorHover : "transparent"
                                     }
 
                                     RowLayout {
@@ -1056,22 +1064,25 @@ Item {
 
                             Repeater {
                                 model: serviceClient.mountSessions
-                                delegate: Rectangle {
+                                delegate: Item {
                                     required property var modelData
                                     required property int index
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 50
-                                    radius: 10
-                                    color: mountRowMouse.containsMouse ? Theme.colorHover : "transparent"
-                                    Behavior on color { ColorAnimation { duration: 150 } }
 
                                     opacity: root.animStage3 ? 1 : 0
                                     Behavior on opacity { NumberAnimation { duration: 320 + index * 60; easing.type: Easing.OutCubic } }
 
-                                    MouseArea {
-                                        id: mountRowMouse
+                                    HoverHandler {
+                                        id: mountRowHover
+                                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                                    }
+
+                                    Rectangle {
                                         anchors.fill: parent
-                                        hoverEnabled: true
+                                        radius: 10
+                                        color: mountRowHover.hovered
+                                               ? Theme.colorHover : "transparent"
                                     }
 
                                     RowLayout {

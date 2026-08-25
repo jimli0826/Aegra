@@ -66,12 +66,9 @@ class ServiceClient final : public QObject {
     Q_PROPERTY(
         aegra::desktop::FileRecoverModel* fileRecoverEntries READ fileRecoverEntries CONSTANT)
     Q_PROPERTY(QVariantList schedules READ schedules NOTIFY schedulesChanged)
-    /// Stable ListView model; enable toggle uses dataChanged (no full table reset).
     Q_PROPERTY(aegra::desktop::ScheduleListModel* scheduleList READ scheduleList CONSTANT)
     Q_PROPERTY(bool schedulesLoading READ schedulesLoading NOTIFY schedulesChanged)
     Q_PROPERTY(bool scheduleCommandBusy READ scheduleCommandBusy NOTIFY scheduleCommandChanged)
-    /// True when a schedule command should show the full-window loading overlay.
-    /// Enable/disable toggle is busy but must not block/flash the main window.
     Q_PROPERTY(
         bool scheduleCommandBlocksUi READ scheduleCommandBlocksUi NOTIFY scheduleCommandChanged)
     Q_PROPERTY(bool schedulesAvailable READ schedulesAvailable NOTIFY stateChanged)
@@ -488,6 +485,10 @@ class ServiceClient final : public QObject {
     void start_repository_query();
     void start_job_query();
     void start_terminal_job_seed();
+    void apply_active_job_snapshot(QVector<JobRow> rows);
+    void apply_terminal_job_seed(QVector<JobRow> rows);
+    void resolve_awaiting_terminal_jobs();
+    void observe_accepted_restore_job(const QString& job_id);
     void start_task_log_query(bool append);
     void start_inventory_query();
     enum class JobQueryPurpose : std::uint8_t {
@@ -495,11 +496,11 @@ class ServiceClient final : public QObject {
         kTerminalSeed = 2,
         kTaskLog = 3,
     };
-    [[nodiscard]] JobListQuery
-    make_active_job_query(const std::optional<QString>& continuation_token) const;
+    [[nodiscard]] JobListQuery make_active_job_query(
+        const std::optional<QString>& continuation_token) const;
     [[nodiscard]] JobListQuery make_terminal_seed_query() const;
-    [[nodiscard]] JobListQuery
-    make_task_log_query(const std::optional<QString>& continuation_token) const;
+    [[nodiscard]] JobListQuery make_task_log_query(
+        const std::optional<QString>& continuation_token) const;
     void start_connection_query();
     void begin_next_repository_refresh();
     void request_connection_snapshot_after_probe();
@@ -516,10 +517,8 @@ class ServiceClient final : public QObject {
     [[nodiscard]] RequestDisposition handle_schedule_command_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_start_backup_frame(const QByteArray& body);
     [[nodiscard]] bool begin_volume_prepare_or_analyze(int source_volume_index,
-                                                       const QString& target_source_id,
-                                                       const QString& recovery_point_id,
-                                                       const QString& archive_password,
-                                                       bool analyze);
+        const QString& target_source_id, const QString& recovery_point_id,
+        const QString& archive_password, bool analyze);
     [[nodiscard]] RequestDisposition handle_prepare_restore_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_analyze_ntfs_shrink_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_start_restore_frame(const QByteArray& body);
@@ -529,8 +528,8 @@ class ServiceClient final : public QObject {
     [[nodiscard]] RequestDisposition handle_unmount_command_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_browse_file_sources_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_file_target_browse_frame(const QByteArray& body);
-    [[nodiscard]] RequestDisposition
-    handle_list_recovery_point_entries_frame(const QByteArray& body);
+    [[nodiscard]] RequestDisposition handle_list_recovery_point_entries_frame(
+        const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_prepare_file_restore_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_start_file_restore_frame(const QByteArray& body);
     void on_file_browse_expand_requested(const QString& node_token);
@@ -556,7 +555,6 @@ class ServiceClient final : public QObject {
     void finish_schedule_command_failure(const QString& message_code);
     void set_schedule_command_busy(bool busy);
     void enrich_schedules_with_connections();
-    /// Patch one schedule's enabled flag via ScheduleListModel::dataChanged (no list reset).
     [[nodiscard]] bool patch_schedule_enabled(const QString& schedule_id, bool enabled);
     void publish_schedules(QVariantList items);
     void enrich_job_row(JobRow& row) const;
@@ -573,7 +571,7 @@ class ServiceClient final : public QObject {
     void finish_mount_disk_batch();
     [[nodiscard]] bool begin_next_mount_from_queue();
     [[nodiscard]] bool is_disk_already_mounted(int source_disk_number,
-                                               const QString& recovery_point_id) const;
+        const QString& recovery_point_id) const;
     void reset_repository();
     void reset_recovery_point_layout();
     void reset_jobs();
@@ -585,10 +583,8 @@ class ServiceClient final : public QObject {
     [[nodiscard]] RequestDisposition handle_repository_directories_frame(const QByteArray& body);
     void finish_repository_directories_failure(const QString& message_code);
     void start_repository_input_command(int request_kind, const QString& display_name,
-                                        const QString& locator,
-                                        const QString& network_username = {},
-                                        const QString& network_password = {},
-                                        const QString& network_domain = {});
+        const QString& locator, const QString& network_username = {},
+        const QString& network_password = {}, const QString& network_domain = {});
     void start_repository_resource_command(int request_kind, const QString& connection_id);
     void reset_backup_command();
     void set_state(State state, QString error_code = {});
@@ -647,7 +643,6 @@ class ServiceClient final : public QObject {
     QString schedule_command_request_id_;
     QString schedule_command_idempotency_key_;
     int schedule_command_kind_{0};
-    /// When true, command success patches local enabled only (toggle), no full list reload.
     bool schedule_enable_patch_active_{false};
     QString schedule_enable_patch_id_;
     bool schedule_enable_patch_previous_{false};
@@ -688,7 +683,6 @@ class ServiceClient final : public QObject {
     quint32 api_version_{0};
     quint64 toast_generation_{0};
     bool toast_is_error_{false};
-    /// When true, prepare handler stops after preflight (wizard Next). When false, auto-starts.
     bool restore_prepare_only_{false};
     int active_backup_progress_percent_{0};
     State state_{State::kDisconnected};
@@ -779,7 +773,6 @@ class ServiceClient final : public QObject {
     QString mount_command_error_code_;
     QString mount_sessions_error_code_;
     QVariantList mount_sessions_;
-    /// Multi-disk mount batch (old MountBackend sequential mounts).
     QVector<int> mount_disk_queue_;
     QString mount_queue_recovery_point_id_;
     QString mount_queue_archive_password_;
@@ -796,6 +789,8 @@ class ServiceClient final : public QObject {
     bool splash_error_{false};
     bool toast_visible_{false};
     bool jobs_baseline_seeded_{false};
+    bool pending_terminal_job_sync_{false};
+    QSet<QString> awaiting_terminal_job_ids_;
     QTimer* splash_connect_timer_{nullptr};
     QString pending_splash_error_code_;
     QTimer* reconnect_watchdog_{nullptr};

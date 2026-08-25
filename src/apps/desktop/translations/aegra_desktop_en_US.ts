@@ -848,8 +848,8 @@
         <translation>Waiting for restore progress...</translation>
     </message>
     <message id="aegra.restore.summary.finished">
-        <source>Restore completed</source>
-        <translation>Restore completed</translation>
+        <source>Restore completed successfully</source>
+        <translation>Restore completed successfully</translation>
     </message>
     <message id="aegra.restore.summary.finished_errors">
         <source>Restore finished with errors</source>
@@ -1590,6 +1590,10 @@
     <message id="aegra.restore.select_date_with_backups">
         <source>Select a date with backups</source>
         <translation>Select a date with backups</translation>
+    </message>
+    <message id="aegra.restore.unmap_target">
+        <source>Remove mapping</source>
+        <translation>Remove mapping</translation>
     </message>
     <message id="aegra.restore.target_disks">
         <source>Target Disks</source>

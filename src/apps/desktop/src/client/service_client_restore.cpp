@@ -21,15 +21,6 @@ namespace {
     return code.isEmpty() ? QStringLiteral("service.request_failed") : code;
 }
 
-[[nodiscard]] bool is_command_accepted(const QByteArray& body) {
-    const auto document = QJsonDocument::fromJson(body);
-    if (!document.isObject()) {
-        return false;
-    }
-    const auto kind = document.object().value(QStringLiteral("kind")).toInt();
-    return kind == kCommandAcceptedResponseKind;
-}
-
 [[nodiscard]] QVariantMap restore_preflight_details(const RestorePreflightPage& preflight) {
     return QVariantMap{
         {QStringLiteral("preflightToken"), preflight.preflight_token},
@@ -335,9 +326,19 @@ RequestDisposition ServiceClient::handle_analyze_ntfs_shrink_frame(const QByteAr
 }
 
 RequestDisposition ServiceClient::handle_start_restore_frame(const QByteArray& body) {
-    if (!is_command_accepted(body)) {
+    const auto request_id = extract_response_request_id(body);
+    QJsonObject root;
+    if (!parse_response_root(body, request_id, root)) {
+        return RequestDisposition::kProtocolError;
+    }
+    if (is_command_failure_response(root, kStartRestoreRequestKind)) {
         finish_restore_command_failure(parse_failure_message_code(body));
         return RequestDisposition::kFinished;
+    }
+    CommandAck ack;
+    if (!parse_command_ack_response(root, kStartRestoreRequestKind, ack) || !ack.has_resource_id ||
+        ack.resource_id.isEmpty()) {
+        return RequestDisposition::kProtocolError;
     }
     restore_command_busy_ = false;
     restore_archive_password_.clear();
@@ -346,7 +347,7 @@ RequestDisposition ServiceClient::handle_start_restore_frame(const QByteArray& b
     const auto msg = qtTrId("aegra.restore.started");
     show_toast(msg);
     emit restoreStartSucceeded();
-    refreshJobs();
+    observe_accepted_restore_job(ack.resource_id);
     return RequestDisposition::kFinished;
 }
 

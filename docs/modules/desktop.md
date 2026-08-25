@@ -90,8 +90,8 @@ ServiceClient (QML 门面)
 - NTFS 小目标卷恢复（ADR-0025）：仅当 Service 宣告 `restore.ntfs_shrink.v1` 时
   `ntfsShrinkAvailable` 为 true。Source 放到更小 Target 时先发起 Analyze（kind 18），映射在精确分析
   返回 eligible 且 Target 不小于 `minimum_target_bytes` 后才生效；失败立即提示且不建立映射。
-  Summary 只展示精确最小容量/迁移字节/Scratch 上界并确认 Start，不再首次触发 Analyze；provisional
-  不得当作可执行。
+  UI 与普通 volume 映射一致：不展示 shrink 详情卡片或容量确认页；Analyze 成功后静默完成映射，
+  Summary 直接点 Restore（使用分析签发的 preflight token）。provisional 不得当作可执行。
   capability 关闭时 UI 与既有“目标过小拒绝”行为一致。Debug 与 Release Service 均宣告 capability；
   M01–M26 完成前该入口只表示可受控验证，不表示已取得对外发布资格。Disk 模式永不提供缩容。
 
@@ -101,6 +101,9 @@ ServiceClient (QML 门面)
 - 发送和接收与 ADR-0011 相同的 4 字节长度帧，最大 1 MiB。
 - `ListJobs` 使用 `scope`：热路径仅 `active`（queued/running/cancelling）轮询；Task Log 使用
   `terminal` + 可选时间窗/`operation`/`state` 过滤。不再在 500ms 轮询中拉全历史。
+- Restore/Backup `CommandAck.resource_id` 立即 upsert 到 `JobModel`。Job 离开 active 集合时保留
+  最后一帧进度，并立刻（失败则 500ms 轮询重试）拉取 terminal 页合并终态。不得把已完成的
+  restore 停在中途 Running 百分比；Succeeded restore 进度固定 100%。
 - 连接后生成新的 request ID 并发送 schema 3 `GetServiceInfo`，协商 API V3 后分页发送
   `ListRecoveryPoints`。
 - 只接受 schema、kind、request ID、字段类型和范围全部合法的响应。
@@ -234,9 +237,9 @@ Repository 容量卡片只使用 Service 异步返回的本机 volume inventory 
   - Checkpoint 面板按类型过滤：`contentKind=1`（volume_set）仅 Disk/Volume；`contentKind=2`
     仅 Files；类型不匹配拒绝应用。
 - Restore 整盘 / 卷映射与启动：
-  - Disk：Source 磁盘 **Restore to** / 拖放到 Target；签名与自动扩容选项。
-  - Volume：Source 卷映射到本机非系统卷；无整盘选项。
-  - 多映射串行 `startDiskRestore` / `startVolumeRestore`；全部 accepted 后留在 Summary 显示进度。
+  - Disk：Source 磁盘拖放到 Target；同一 Source 可映射到多个不同 Target，每个 Target 仍最多一个 Source。
+  - Volume：Source 卷映射到本机非系统卷（同一 Source 亦可对应多个不同 Target）；无整盘选项。
+  - 多映射串行 `startDiskRestore` / `startVolumeRestore`（一对多时按 pair 队列）；全部 accepted 后留在 Summary 显示进度。
 - F9 文件备份/恢复（Service V4，`content_kind=2`）：
   - Desktop codec schema 4；kinds 13 BrowseFileSources、14 ListRecoveryPointEntries、
     15 PrepareFileRestore、48 StartFileRestore；UpsertSchedule `file_set` 选择。

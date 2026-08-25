@@ -848,8 +848,8 @@
         <translation>正在等待恢复进度…</translation>
     </message>
     <message id="aegra.restore.summary.finished">
-        <source>Restore completed</source>
-        <translation>恢复已完成</translation>
+        <source>Restore completed successfully</source>
+        <translation>恢复成功</translation>
     </message>
     <message id="aegra.restore.summary.finished_errors">
         <source>Restore finished with errors</source>
@@ -1590,6 +1590,10 @@
     <message id="aegra.restore.select_date_with_backups">
         <source>Select a date with backups</source>
         <translation>选择有备份的日期</translation>
+    </message>
+    <message id="aegra.restore.unmap_target">
+        <source>Remove mapping</source>
+        <translation>取消映射</translation>
     </message>
     <message id="aegra.restore.target_disks">
         <source>Target Disks</source>

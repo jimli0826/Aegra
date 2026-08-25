@@ -663,8 +663,12 @@ WorkerJobService::start_restore(const contracts::StartRestoreCommand& command,
         restore.disk_restore = false;
         restore.source_volume_index = volume_chain.source_volume_index;
         restore.volume_size_policy = record.volume_size_policy;
-        restore.shrink_plan_digest = record.shrink_plan_digest;
-        restore.source_chain_fingerprint = record.chain_fingerprint;
+        // Direct volume restore keeps digest/fingerprint empty. Shrink-only fields are
+        // required together with kAllowNtfsRelocation (contracts::validate_restore_options).
+        if (record.volume_size_policy == contracts::VolumeSizePolicy::kAllowNtfsRelocation) {
+            restore.shrink_plan_digest = record.shrink_plan_digest;
+            restore.source_chain_fingerprint = record.chain_fingerprint;
+        }
     }
     worker.restore = std::move(restore);
 

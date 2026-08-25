@@ -36,8 +36,10 @@ Service / Desktop 控制面：PrepareRestore（kind 9）+ StartRestore（kind 40
    `feasibility=eligible` token（含 `shrink_plan_digest` / 精确容量与 Scratch 上界）；分析器以簇为单位
    搜索确定性规划器可接受的最小边界。Target 低于该边界时返回带 `minimum_target_bytes` 的 provisional，
    不签发可执行计划；
-3. StartRestore 仅接受 eligible；缩容 Job 携带 `volume_size_policy`、`shrink_plan_digest`、
-   `source_chain_fingerprint`；
+3. StartRestore 仅接受 eligible；缩容 Job 携带 `volume_size_policy=allow_ntfs_relocation`、
+   `shrink_plan_digest`、`source_chain_fingerprint`。直接卷恢复（目标容量 ≥ 源逻辑大小）必须保持
+   digest/fingerprint 为空且 `volume_size_policy=require_source_size`，不得把 preflight 链指纹
+   写入 Job（否则 `validate_restore_options` 拒绝）；
 4. Worker 在 `kAllowNtfsRelocation` + 非空 digest 时进入 shrink 状态机（重分析校验 digest →
    Boot 失效 → 前缀恢复 → 复合设备重定位 → Target-only 审计 → Boot commit → 关闭锁卷句柄 →
    CHKDSK → 卷后检）；
@@ -196,6 +198,9 @@ resolve_chain(tip) → base-first Catalog entries
   **空** `SecretRef`（`value` 为空表示无密码，合法，不得被 Job 校验拒绝）。Desktop 当前对整条链
   使用同一 Archive 口令；
 - 成功 `restore.completed`；稳定 `restore.*` message code；
+- Desktop Restore Summary 通过 `ListJobs` active 轮询观察 Job。卷恢复常在 1s 内完成并离开
+  active 集合：必须合并 terminal 快照（Succeeded / `restore.completed`），不得停留在中途
+  Running 百分比。Succeeded 进度固定 100%。
 - `logical_bytes` / `stored_bytes` 为各卷完成处理的逻辑字节之和，`chunk_count` 为完成处理的 Chunk 总数。
 - Worker 日志额外记录 `disk_written_bytes`、`free_skipped_bytes` 和 `free_ranges`，用于区分实际写盘量
   与直接跳过的 FREE 区域；`restored_bytes = disk_written_bytes + free_skipped_bytes`。

@@ -650,9 +650,7 @@ RequestDisposition ServiceClient::handle_start_file_restore_frame(const QByteArr
     emit restoreStartSucceeded();
     //% "File restore started"
     show_toast(qtTrId("aegra.restore.file.started"));
-    if (job_list_available_) {
-        start_job_query();
-    }
+    observe_accepted_restore_job(ack.has_resource_id ? ack.resource_id : QString{});
     return RequestDisposition::kFinished;
 }
 

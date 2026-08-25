@@ -3,6 +3,7 @@
 #include "locale/locale_format.h"
 #include "locale/message_code_map.h"
 
+#include <QSet>
 #include <QVariantMap>
 
 #include <algorithm>
@@ -99,16 +100,39 @@ void JobModel::upsert_job(JobRow row) {
     bump_revision();
 }
 
-void JobModel::replace_active_jobs(QVector<JobRow> active) {
+QStringList JobModel::replace_active_jobs(QVector<JobRow> active) {
+    QSet<QString> fresh_active_ids;
+    fresh_active_ids.reserve(active.size());
+    for (const auto& row : active) {
+        fresh_active_ids.insert(row.job_id);
+    }
+
+    QStringList vanished;
     QVector<JobRow> next;
     next.reserve(rows_.size() + active.size());
+    // Keep terminal rows. Keep active rows missing from this snapshot as a bridge: the job
+    // has typically just become terminal. ServiceClient must merge the terminal page, or
+    // Restore Summary stays on the last Running percent (often ~50% for a sub-second restore).
     for (auto& row : rows_) {
         if (!row_is_active(row.state)) {
             next.push_back(std::move(row));
+            continue;
         }
+        if (fresh_active_ids.contains(row.job_id)) {
+            continue;
+        }
+        vanished.push_back(row.job_id);
+        next.push_back(std::move(row));
     }
     for (auto& row : active) {
-        next.push_back(std::move(row));
+        const auto existing = std::find_if(next.begin(), next.end(), [&](const JobRow& kept) {
+            return kept.job_id == row.job_id;
+        });
+        if (existing != next.end()) {
+            *existing = std::move(row);
+        } else {
+            next.push_back(std::move(row));
+        }
     }
     std::stable_sort(next.begin(), next.end(), [](const JobRow& a, const JobRow& b) {
         if (a.created_utc_ms != b.created_utc_ms) {
@@ -117,6 +141,7 @@ void JobModel::replace_active_jobs(QVector<JobRow> active) {
         return a.job_id < b.job_id;
     });
     set_rows(std::move(next));
+    return vanished;
 }
 
 void JobModel::merge_terminal_jobs(QVector<JobRow> terminals) {

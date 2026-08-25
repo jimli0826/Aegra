@@ -110,9 +110,6 @@ Item {
     property string restoreSessionErrorText: ""
     /// True while workspace Next is waiting on file-restore preflight (capacity check).
     property bool filePreflightPending: false
-    /// NTFS shrink analyze confirmation (volume mode, capability-gated).
-    property bool shrinkConfirmOpen: false
-    property var shrinkConfirmDetails: ({})
     /// Smaller-target mapping waiting for exact, target-bound analysis.
     property var pendingShrinkMapping: null
     /// Target-bound shrink analyses, keyed by source volume index.
@@ -157,9 +154,11 @@ Item {
         return out
     }
 
-    /// Source disk_number (string key) → target disk_number, or -1 when unmapped.
+    /// Source disk_number (string key) → array of target disk_numbers.
+    /// One source may map to many targets; each target still has at most one source.
     property var diskMappings: ({})
-    /// Source volumeIndex (string key) → target sourceId, or "" when unmapped.
+    /// Source volumeIndex (string key) → array of target sourceIds.
+    /// One source volume may map to many target volumes; each target still has at most one source.
     property var volumeMappings: ({})
     /// Bumped on every mapping change so ComboBox/model bindings refresh.
     property int mappingEpoch: 0
@@ -224,16 +223,47 @@ Item {
             serviceClient.loadFileRestoreTargetRoots()
     }
 
+    /// Sticky terminal outcome so Summary keeps "completed" after job rows age out of the
+    /// active poll merge, instead of falling back to "Waiting for restore progress...".
+    property bool restoreSessionOutcomeSuccess: false
+    property bool restoreSessionOutcomeFailed: false
+
     function clearRestoreSession() {
         root.restoreSessionStartMs = 0
         root.restoreJobsSubmitted = false
         root.restoreSessionFailed = false
         root.restoreSessionErrorText = ""
+        root.restoreSessionOutcomeSuccess = false
+        root.restoreSessionOutcomeFailed = false
         root.pendingRestoreQueue = []
         root.multiRestoreActive = false
         root.filePreflightPending = false
-        root.shrinkConfirmOpen = false
-        root.shrinkConfirmDetails = ({})
+    }
+
+    function noteRestoreSessionOutcome() {
+        if (!root.restoreJobsSubmitted && !root.restoreSessionFailed)
+            return
+        if (root.restoreSessionFailed) {
+            root.restoreSessionOutcomeFailed = true
+            return
+        }
+        var st = root.restoreSessionStatus
+        if (st && st.statusKey === "failed") {
+            root.restoreSessionOutcomeFailed = true
+            return
+        }
+        if (st && st.statusKey === "success") {
+            root.restoreSessionOutcomeSuccess = true
+            return
+        }
+        // Active poll drops a just-finished job before terminal seed arrives; progress may
+        // still read 100 with activeCount 0 on a retained/stale row — lock success then.
+        if (st && st.jobCount > 0 && st.activeCount === 0 && st.progressPercent >= 100) {
+            root.restoreSessionOutcomeSuccess = true
+            return
+        }
+        if (root.restoreSessionComplete && !root.restoreProgressFailed)
+            root.restoreSessionOutcomeSuccess = true
     }
 
     function goBackToTypeSelection() {
@@ -331,11 +361,6 @@ Item {
         }
         root.clearRestoreSession()
         root.restoreStep = 2
-        var shrink = root.readyMappedShrinkAnalysis()
-        if (shrink) {
-            root.shrinkConfirmDetails = shrink.details || ({})
-            root.shrinkConfirmOpen = true
-        }
     }
 
     /// Normalize inventory mount letter to "X:" (accepts "X", "X:", "X:\\").
@@ -435,6 +460,8 @@ Item {
     }
 
     readonly property bool restoreSessionComplete: {
+        if (root.restoreSessionOutcomeSuccess || root.restoreSessionOutcomeFailed)
+            return true
         if (!root.onSummaryStep || !root.restoreSessionStarted)
             return false
         if (serviceClient.restoreCommandBusy || root.multiRestoreActive)
@@ -444,7 +471,8 @@ Item {
         var st = root.restoreSessionStatus
         // Wait for job rows to become terminal when the Service lists them.
         if (st.jobCount > 0)
-            return st.allTerminal === true
+            return st.allTerminal === true || st.statusKey === "success"
+                   || st.statusKey === "failed"
         // No job rows: only finish early on an explicit start failure so Back is available.
         return root.restoreSessionFailed
     }
@@ -452,6 +480,8 @@ Item {
     readonly property int restoreProgressPercent: {
         if (!root.restoreSessionStarted)
             return 0
+        if (root.restoreSessionOutcomeSuccess)
+            return 100
         var st = root.restoreSessionStatus
         if (st && st.jobCount > 0)
             return st.progressPercent || 0
@@ -470,15 +500,26 @@ Item {
 
     /// Failed start or terminal job failure — red progress fill.
     readonly property bool restoreProgressFailed: {
-        if (root.restoreSessionFailed)
+        if (root.restoreSessionOutcomeFailed || root.restoreSessionFailed)
             return true
         var st = root.restoreSessionStatus
-        return !!(st && st.anyFailed)
+        return !!(st && (st.anyFailed || st.statusKey === "failed"))
     }
 
     /// Session finished without failure — green progress fill.
-    readonly property bool restoreProgressSucceeded: root.restoreSessionComplete
-            && !root.restoreProgressFailed
+    readonly property bool restoreProgressSucceeded: {
+        if (root.restoreSessionOutcomeSuccess)
+            return true
+        if (root.restoreProgressFailed)
+            return false
+        var st = root.restoreSessionStatus
+        if (st && st.statusKey === "success")
+            return true
+        if (st && st.jobCount > 0 && st.activeCount === 0 && st.progressPercent >= 100
+                && st.statusKey !== "failed")
+            return true
+        return root.restoreSessionComplete && !root.restoreProgressFailed
+    }
 
     readonly property string restoreProgressErrorText: {
         if (root.restoreSessionErrorText && root.restoreSessionErrorText.length > 0)
@@ -504,22 +545,36 @@ Item {
             //% "Review the selection, then start restore."
             return qsTrId("aegra.restore.summary.ready")
         }
-        if (root.restoreSessionComplete) {
-            if (root.restoreProgressFailed)
-                //% "Restore finished with errors"
-                return qsTrId("aegra.restore.summary.finished_errors")
-            //% "Restore completed"
+        var st = root.restoreSessionStatus
+        // progress==100 with no active rows: treat as success even before statusKey catches up.
+        var finishedOk = root.restoreProgressSucceeded
+                || (st && st.jobCount > 0 && st.activeCount === 0
+                    && (st.progressPercent >= 100 || st.statusKey === "success")
+                    && st.statusKey !== "failed")
+        if (finishedOk) {
+            //% "Restore completed successfully"
             return qsTrId("aegra.restore.summary.finished")
         }
-        if (serviceClient.restoreCommandBusy || root.multiRestoreActive)
+        if (root.restoreProgressFailed) {
+            //% "Restore finished with errors"
+            return qsTrId("aegra.restore.summary.finished_errors")
+        }
+        if (serviceClient.restoreCommandBusy || root.multiRestoreActive) {
             //% "Starting restore..."
             return qsTrId("aegra.restore.summary.starting")
-        var st = root.restoreSessionStatus
+        }
+        if (st && st.messageText && st.messageText.length > 0)
+            return st.messageText
         if (st && st.stateText && st.stateText.length > 0) {
             var name = st.sourceName || ""
             if (name.length > 0)
                 return name + " — " + st.stateText
             return st.stateText
+        }
+        // After Restore is clicked, never show the idle "waiting" placeholder.
+        if (root.restoreJobsSubmitted) {
+            //% "Starting restore..."
+            return qsTrId("aegra.restore.summary.starting")
         }
         //% "Waiting for restore progress..."
         return qsTrId("aegra.restore.summary.waiting")
@@ -669,14 +724,16 @@ Item {
         if (root.isVolumeMode) {
             var vmap = root.volumeMappings || {}
             for (var vk in vmap) {
-                if ((vmap[vk] || "").length > 0)
-                    ++n
+                var vt = vmap[vk]
+                if (vt && vt.length)
+                    n += vt.length
             }
         } else {
             var map = root.diskMappings || {}
             for (var k in map) {
-                if (Number(map[k]) >= 0)
-                    ++n
+                var dt = map[k]
+                if (dt && dt.length)
+                    n += dt.length
             }
         }
         return n
@@ -745,7 +802,7 @@ Item {
         return ""
     }
 
-    readonly property color restoreTargetBorder: "#27ae60"
+    readonly property color restoreTargetBorder: "#52c480"
     readonly property color systemDiskBorder: "#e74c3c"
 
     readonly property var backupDates: {
@@ -1006,27 +1063,53 @@ Item {
         root.volumeMappings = ({})
         root.pendingShrinkMapping = null
         root.analyzedShrinkMappings = ({})
-        root.shrinkConfirmOpen = false
-        root.shrinkConfirmDetails = ({})
         root.mappingEpoch++
     }
 
-    function mappedTarget(sourceNum) {
+    function diskTargetList(sourceNum) {
         var _e = root.mappingEpoch
         var map = root.diskMappings || {}
-        var key = String(sourceNum)
-        if (map[key] === undefined || map[key] === null)
-            return -1
-        return Number(map[key])
+        var list = map[String(sourceNum)]
+        return (list && list.length) ? list.slice() : []
     }
 
-    function mappedTargetVolume(sourceVolumeIndex) {
+    function volumeTargetList(sourceVolumeIndex) {
         var _e = root.mappingEpoch
         var map = root.volumeMappings || {}
-        var key = String(sourceVolumeIndex)
-        if (map[key] === undefined || map[key] === null)
-            return ""
-        return String(map[key] || "")
+        var list = map[String(sourceVolumeIndex)]
+        return (list && list.length) ? list.slice() : []
+    }
+
+    /// First mapped target for a source disk, or -1 when unmapped.
+    function mappedTarget(sourceNum) {
+        var list = root.diskTargetList(sourceNum)
+        return list.length > 0 ? Number(list[0]) : -1
+    }
+
+    /// First mapped target volume id for a source volume, or "" when unmapped.
+    function mappedTargetVolume(sourceVolumeIndex) {
+        var list = root.volumeTargetList(sourceVolumeIndex)
+        return list.length > 0 ? String(list[0] || "") : ""
+    }
+
+    function diskListContainsTarget(list, targetNum) {
+        if (!list || !list.length || targetNum < 0)
+            return false
+        for (var i = 0; i < list.length; ++i) {
+            if (Number(list[i]) === Number(targetNum))
+                return true
+        }
+        return false
+    }
+
+    function volumeListContainsTarget(list, targetSourceId) {
+        if (!list || !list.length || !targetSourceId || targetSourceId.length === 0)
+            return false
+        for (var i = 0; i < list.length; ++i) {
+            if (String(list[i] || "") === String(targetSourceId))
+                return true
+        }
+        return false
     }
 
     function isTargetMappedByOther(sourceNum, targetNum) {
@@ -1034,7 +1117,9 @@ Item {
             return false
         var map = root.diskMappings || {}
         for (var k in map) {
-            if (Number(k) !== Number(sourceNum) && Number(map[k]) === Number(targetNum))
+            if (Number(k) === Number(sourceNum))
+                continue
+            if (root.diskListContainsTarget(map[k], targetNum))
                 return true
         }
         return false
@@ -1045,8 +1130,9 @@ Item {
             return false
         var map = root.volumeMappings || {}
         for (var k in map) {
-            if (Number(k) !== Number(sourceVolumeIndex)
-                    && String(map[k] || "") === String(targetSourceId))
+            if (Number(k) === Number(sourceVolumeIndex))
+                continue
+            if (root.volumeListContainsTarget(map[k], targetSourceId))
                 return true
         }
         return false
@@ -1063,7 +1149,7 @@ Item {
             return -1
         var map = root.diskMappings || {}
         for (var k in map) {
-            if (Number(map[k]) === Number(targetNum))
+            if (root.diskListContainsTarget(map[k], targetNum))
                 return Number(k)
         }
         return -1
@@ -1084,10 +1170,14 @@ Item {
             return false
         var map = root.volumeMappings || {}
         for (var k in map) {
-            if (String(map[k] || "") === String(sourceId))
+            if (root.volumeListContainsTarget(map[k], sourceId))
                 return true
         }
         return false
+    }
+
+    function shrinkAnalysisKey(sourceVolumeIndex, targetSourceId) {
+        return String(sourceVolumeIndex) + "\n" + String(targetSourceId || "")
     }
 
     function targetLargeEnoughForSource(sourceNum, targetNum) {
@@ -1194,26 +1284,103 @@ Item {
     function setDiskMapping(sourceNum, targetNum) {
         if (sourceNum < 0)
             return
-        // Invalid targets are rejected silently; drag ghost already shows the reason.
-        if (targetNum >= 0 && root.mappingBlockReason(sourceNum, targetNum).length > 0)
-            return
-        var prev = root.mappedTarget(sourceNum)
-        if (prev >= 0 && prev !== Number(targetNum))
-            root.clearTargetLayoutEdit(prev)
-        if (targetNum >= 0)
-            root.clearTargetLayoutEdit(targetNum)
         var map = Object.assign({}, root.diskMappings || {})
-        map[String(sourceNum)] = targetNum
+        var key = String(sourceNum)
+        var list = (map[key] && map[key].length) ? map[key].slice() : []
+        if (targetNum < 0) {
+            for (var i = 0; i < list.length; ++i)
+                root.clearTargetLayoutEdit(list[i])
+            map[key] = []
+            root.diskMappings = map
+            root.mappingEpoch++
+            return
+        }
+        // Invalid targets are rejected silently; drag ghost already shows the reason.
+        if (root.mappingBlockReason(sourceNum, targetNum).length > 0)
+            return
+        // Same source → same target again: keep existing mapping (no duplicate).
+        if (root.diskListContainsTarget(list, targetNum))
+            return
+        root.clearTargetLayoutEdit(targetNum)
+        list.push(Number(targetNum))
+        map[key] = list
         root.diskMappings = map
         root.mappingEpoch++
     }
 
-    function commitVolumeMapping(sourceVolumeIndex, targetSourceId) {
-        var analyses = Object.assign({}, root.analyzedShrinkMappings || {})
-        delete analyses[String(sourceVolumeIndex)]
-        root.analyzedShrinkMappings = analyses
+    /// Remove one target disk from whichever source currently maps to it.
+    function unmapDiskTarget(targetNum) {
+        if (targetNum === undefined || targetNum === null || Number(targetNum) < 0)
+            return
+        var map = Object.assign({}, root.diskMappings || {})
+        var changed = false
+        for (var k in map) {
+            var list = (map[k] && map[k].length) ? map[k].slice() : []
+            var next = []
+            for (var i = 0; i < list.length; ++i) {
+                if (Number(list[i]) === Number(targetNum))
+                    changed = true
+                else
+                    next.push(Number(list[i]))
+            }
+            map[k] = next
+        }
+        if (!changed)
+            return
+        root.clearTargetLayoutEdit(targetNum)
+        root.diskMappings = map
+        root.mappingEpoch++
+    }
+
+    /// Remove one target volume from whichever source currently maps to it.
+    function unmapVolumeTarget(targetSourceId) {
+        var tid = targetSourceId || ""
+        if (tid.length === 0)
+            return
         var map = Object.assign({}, root.volumeMappings || {})
-        map[String(sourceVolumeIndex)] = targetSourceId || ""
+        var analyses = Object.assign({}, root.analyzedShrinkMappings || {})
+        var changed = false
+        for (var k in map) {
+            var list = (map[k] && map[k].length) ? map[k].slice() : []
+            var next = []
+            for (var i = 0; i < list.length; ++i) {
+                if (String(list[i] || "") === String(tid)) {
+                    changed = true
+                    delete analyses[root.shrinkAnalysisKey(k, tid)]
+                } else {
+                    next.push(String(list[i] || ""))
+                }
+            }
+            map[k] = next
+        }
+        if (!changed)
+            return
+        root.analyzedShrinkMappings = analyses
+        root.volumeMappings = map
+        root.mappingEpoch++
+    }
+
+    function commitVolumeMapping(sourceVolumeIndex, targetSourceId) {
+        var tid = targetSourceId || ""
+        var map = Object.assign({}, root.volumeMappings || {})
+        var key = String(sourceVolumeIndex)
+        var list = (map[key] && map[key].length) ? map[key].slice() : []
+        var analyses = Object.assign({}, root.analyzedShrinkMappings || {})
+        if (tid.length === 0) {
+            for (var i = 0; i < list.length; ++i)
+                delete analyses[root.shrinkAnalysisKey(sourceVolumeIndex, list[i])]
+            map[key] = []
+            root.analyzedShrinkMappings = analyses
+            root.volumeMappings = map
+            root.mappingEpoch++
+            return
+        }
+        if (root.volumeListContainsTarget(list, tid))
+            return
+        delete analyses[root.shrinkAnalysisKey(sourceVolumeIndex, tid)]
+        root.analyzedShrinkMappings = analyses
+        list.push(String(tid))
+        map[key] = list
         root.volumeMappings = map
         root.mappingEpoch++
     }
@@ -1223,8 +1390,6 @@ Item {
             sourceVolumeIndex: Number(sourceVolumeIndex),
             targetSourceId: String(targetSourceId)
         }
-        root.shrinkConfirmOpen = false
-        root.shrinkConfirmDetails = ({})
         var started = serviceClient.analyzeVolumeShrink(
                     sourceVolumeIndex, targetSourceId,
                     root.selectedCheckpointId, root.pendingLayoutPassword)
@@ -1308,7 +1473,7 @@ Item {
         var sources = root.sourceDisks || []
         for (var j = 0; j < sources.length; ++j) {
             var sn = Number(sources[j].diskNumber)
-            map[String(sn)] = -1
+            map[String(sn)] = []
         }
         root.diskMappings = map
         root.mappingEpoch++
@@ -1319,7 +1484,7 @@ Item {
         var sources = root.sourceVolumes || []
         for (var j = 0; j < sources.length; ++j) {
             var vi = Number(sources[j].volumeIndex)
-            map[String(vi)] = ""
+            map[String(vi)] = []
         }
         root.volumeMappings = map
         root.mappingEpoch++
@@ -1329,15 +1494,18 @@ Item {
     property var pendingRestoreQueue: []
     property bool multiRestoreActive: false
 
-    /// All source→target pairs with target >= 0, stable source-disk order.
+    /// All source→target pairs, stable source-disk order (one source may yield many pairs).
     function allMappedPairs() {
         var pairs = []
         var sources = root.sourceDisks || []
         for (var i = 0; i < sources.length; ++i) {
             var sn = Number(sources[i].diskNumber)
-            var tn = root.mappedTarget(sn)
-            if (tn >= 0)
-                pairs.push({ source: sn, target: tn })
+            var targets = root.diskTargetList(sn)
+            for (var t = 0; t < targets.length; ++t) {
+                var tn = Number(targets[t])
+                if (tn >= 0)
+                    pairs.push({ source: sn, target: tn })
+            }
         }
         return pairs
     }
@@ -1347,9 +1515,12 @@ Item {
         var sources = root.sourceVolumes || []
         for (var i = 0; i < sources.length; ++i) {
             var vi = Number(sources[i].volumeIndex)
-            var tid = root.mappedTargetVolume(vi)
-            if (tid && tid.length > 0)
-                pairs.push({ sourceVolumeIndex: vi, targetSourceId: tid })
+            var targets = root.volumeTargetList(vi)
+            for (var t = 0; t < targets.length; ++t) {
+                var tid = String(targets[t] || "")
+                if (tid.length > 0)
+                    pairs.push({ sourceVolumeIndex: vi, targetSourceId: tid })
+            }
         }
         return pairs
     }
@@ -1431,7 +1602,8 @@ Item {
         if (!pair)
             return null
         var analyses = root.analyzedShrinkMappings || ({})
-        var analyzed = analyses[String(pair.sourceVolumeIndex)]
+        var analyzed = analyses[root.shrinkAnalysisKey(
+                                    pair.sourceVolumeIndex, pair.targetSourceId)]
         return !!(analyzed && pair
                    && Number(analyzed.sourceVolumeIndex) === Number(pair.sourceVolumeIndex)
                    && String(analyzed.targetSourceId) === String(pair.targetSourceId))
@@ -1489,33 +1661,18 @@ Item {
         }
         root.commitVolumeMapping(pending.sourceVolumeIndex, pending.targetSourceId)
         var analyses = Object.assign({}, root.analyzedShrinkMappings || {})
-        analyses[String(pending.sourceVolumeIndex)] = {
+        analyses[root.shrinkAnalysisKey(pending.sourceVolumeIndex,
+                                        pending.targetSourceId)] = {
             sourceVolumeIndex: pending.sourceVolumeIndex,
             targetSourceId: pending.targetSourceId,
             details: details || ({})
         }
         root.analyzedShrinkMappings = analyses
-        serviceClient.showToast(root.shrinkCapacityText(details), false)
-        if (root.restoreStep === 2) {
-            root.shrinkConfirmDetails = details || ({})
-            root.shrinkConfirmOpen = true
-        }
+        // Same UX as a normal volume mapping: no shrink detail card or capacity toast.
     }
 
     function rejectAnalyzedShrinkMapping() {
         root.pendingShrinkMapping = null
-        root.shrinkConfirmOpen = false
-        root.shrinkConfirmDetails = ({})
-    }
-
-    function confirmShrinkRestore() {
-        root.shrinkConfirmOpen = false
-        root.beginMappedRestoreQueue()
-    }
-
-    function cancelShrinkConfirm() {
-        root.shrinkConfirmOpen = false
-        root.shrinkConfirmDetails = ({})
     }
 
     function beginRestoreSession() {
@@ -1523,6 +1680,8 @@ Item {
         root.restoreJobsSubmitted = false
         root.restoreSessionFailed = false
         root.restoreSessionErrorText = ""
+        root.restoreSessionOutcomeSuccess = false
+        root.restoreSessionOutcomeFailed = false
         root.filePreflightPending = false
         root.restoreTargetsRefreshed = false
         if (root.restoreStep !== 2)
@@ -1543,10 +1702,18 @@ Item {
     }
 
     onRestoreSessionCompleteChanged: {
+        root.noteRestoreSessionOutcome()
         if (!root.restoreSessionComplete || root.restoreTargetsRefreshed)
             return
         // Brief delay: volumes may still be mounting after Worker bring_online.
         restoreTargetRefreshTimer.restart()
+    }
+
+    Connections {
+        target: serviceClient.jobs
+        function onRevisionChanged() {
+            root.noteRestoreSessionOutcome()
+        }
     }
 
     Timer {
@@ -1736,12 +1903,6 @@ Item {
             return
         if (root.restoreJobsSubmitted && !root.restoreSessionFailed && !root.restoreSessionComplete)
             return
-        var analyzedShrink = root.isVolumeMode ? root.readyMappedShrinkAnalysis() : null
-        if (analyzedShrink) {
-            root.shrinkConfirmDetails = analyzedShrink.details || ({})
-            root.shrinkConfirmOpen = true
-            return
-        }
         root.beginMappedRestoreQueue()
     }
 
@@ -1781,10 +1942,9 @@ Item {
             root.rejectAnalyzedShrinkMapping()
             // Red toast already shown by ServiceClient.
         }
-        function onRestorePreflightProvisional(details) {
+        function onRestorePreflightProvisional() {
             // Direct prepare returned provisional — analysis required (capability path).
-            root.shrinkConfirmOpen = false
-            root.shrinkConfirmDetails = details || ({})
+            // No shrink detail card; mapping completes only after Analyze succeeds.
         }
     }
 
@@ -2518,10 +2678,17 @@ Item {
         width: parent ? parent.width : 100
         height: 68
         radius: 6
-        color: Theme.colorListItem
+        // Mapped targets use a selected fill; source rows stay list-item gray.
+        color: {
+            if (rowRoot.dropHover && rowRoot.dropAccepted)
+                return Theme.colorHover
+            if (rowRoot.highlightAsTarget)
+                return Theme.colorHover
+            return Theme.colorListItem
+        }
         border.width: {
             if (rowRoot.dropHover && rowRoot.dropAccepted) return 2
-            if (rowRoot.highlightAsTarget) return 2
+            if (rowRoot.highlightAsTarget) return 1
             return 0
         }
         border.color: {
@@ -3153,6 +3320,69 @@ Item {
                         font.family: Theme.fontFamily
                     }
                 }
+
+                // Unmap control — only on mapped target rows (right side).
+                Rectangle {
+                    id: diskUnmapBtn
+                    visible: !rowRoot.showMapping && rowRoot.highlightAsTarget
+                    Layout.preferredWidth: 28
+                    Layout.preferredHeight: 28
+                    Layout.alignment: Qt.AlignVCenter
+                    radius: 8
+                    z: 40
+                    color: diskUnmapMouse.containsMouse
+                           ? Theme.colorHoverClose : Theme.colorInput
+                    border.width: 1
+                    border.color: diskUnmapMouse.containsMouse
+                                  ? Theme.colorHoverClose : Theme.colorBorder
+                    //% "Remove mapping"
+                    Accessible.name: qsTrId("aegra.restore.unmap_target")
+                    Canvas {
+                        id: diskUnmapIcon
+                        anchors.centerIn: parent
+                        width: 14
+                        height: 14
+                        antialiasing: true
+                        renderTarget: Canvas.FramebufferObject
+                        renderStrategy: Canvas.Cooperative
+                        readonly property color iconColor: diskUnmapMouse.containsMouse
+                                                           ? "#ffffff" : Theme.colorTextGrey
+                        onIconColorChanged: requestPaint()
+                        onPaint: {
+                            var ctx = getContext("2d")
+                            ctx.reset()
+                            ctx.clearRect(0, 0, width, height)
+                            ctx.strokeStyle = iconColor
+                            ctx.fillStyle = "transparent"
+                            ctx.lineWidth = 1.6
+                            ctx.lineCap = "round"
+                            ctx.lineJoin = "round"
+
+                            // Arrowhead pointing left
+                            ctx.beginPath()
+                            ctx.moveTo(6.2, 1.2)
+                            ctx.lineTo(2.8, 4.2)
+                            ctx.lineTo(6.2, 7.2)
+                            ctx.stroke()
+
+                            // Arc curving back from right
+                            ctx.beginPath()
+                            ctx.moveTo(3.0, 4.2)
+                            ctx.lineTo(8.5, 4.2)
+                            ctx.arc(8.5, 7.7, 3.5, -Math.PI / 2, 0, false)
+                            ctx.lineTo(12.0, 12.0)
+                            ctx.stroke()
+                        }
+                    }
+                    MouseArea {
+                        id: diskUnmapMouse
+                        anchors.fill: parent
+                        z: 41
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.unmapDiskTarget(rowRoot.diskNumber)
+                    }
+                }
             }
         }
     }
@@ -3173,10 +3403,16 @@ Item {
         width: parent ? parent.width : 100
         height: 52
         radius: 6
-        color: Theme.colorListItem
+        color: {
+            if (volRoot.dropHover && volRoot.dropAccepted)
+                return Theme.colorHover
+            if (volRoot.highlightAsTarget)
+                return Theme.colorHover
+            return Theme.colorListItem
+        }
         border.width: {
             if (volRoot.dropHover && volRoot.dropAccepted) return 2
-            if (volRoot.highlightAsTarget) return 2
+            if (volRoot.highlightAsTarget) return 1
             return 0
         }
         border.color: {
@@ -3416,6 +3652,68 @@ Item {
                         color: Theme.colorTextGrey
                         font.pixelSize: 10
                         font.family: Theme.fontFamily
+                    }
+                }
+
+                Rectangle {
+                    id: volUnmapBtn
+                    visible: !volRoot.showMapping && volRoot.highlightAsTarget
+                    Layout.preferredWidth: 28
+                    Layout.preferredHeight: 28
+                    Layout.alignment: Qt.AlignVCenter
+                    radius: 8
+                    z: 40
+                    color: volUnmapMouse.containsMouse
+                           ? Theme.colorHoverClose : Theme.colorInput
+                    border.width: 1
+                    border.color: volUnmapMouse.containsMouse
+                                  ? Theme.colorHoverClose : Theme.colorBorder
+                    //% "Remove mapping"
+                    Accessible.name: qsTrId("aegra.restore.unmap_target")
+                    Canvas {
+                        id: volUnmapIcon
+                        anchors.centerIn: parent
+                        width: 14
+                        height: 14
+                        antialiasing: true
+                        renderTarget: Canvas.FramebufferObject
+                        renderStrategy: Canvas.Cooperative
+                        readonly property color iconColor: volUnmapMouse.containsMouse
+                                                           ? "#ffffff" : Theme.colorTextGrey
+                        onIconColorChanged: requestPaint()
+                        onPaint: {
+                            var ctx = getContext("2d")
+                            ctx.reset()
+                            ctx.clearRect(0, 0, width, height)
+                            ctx.strokeStyle = iconColor
+                            ctx.fillStyle = "transparent"
+                            ctx.lineWidth = 1.6
+                            ctx.lineCap = "round"
+                            ctx.lineJoin = "round"
+
+                            // Arrowhead pointing left
+                            ctx.beginPath()
+                            ctx.moveTo(6.2, 1.2)
+                            ctx.lineTo(2.8, 4.2)
+                            ctx.lineTo(6.2, 7.2)
+                            ctx.stroke()
+
+                            // Arc curving back from right
+                            ctx.beginPath()
+                            ctx.moveTo(3.0, 4.2)
+                            ctx.lineTo(8.5, 4.2)
+                            ctx.arc(8.5, 7.7, 3.5, -Math.PI / 2, 0, false)
+                            ctx.lineTo(12.0, 12.0)
+                            ctx.stroke()
+                        }
+                    }
+                    MouseArea {
+                        id: volUnmapMouse
+                        anchors.fill: parent
+                        z: 41
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.unmapVolumeTarget(volRoot.sourceId)
                     }
                 }
             }
@@ -4034,12 +4332,6 @@ Item {
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 8
-                            Rectangle {
-                                width: 3
-                                height: 16
-                                color: Theme.colorAccentBlue
-                                Layout.alignment: Qt.AlignVCenter
-                            }
                             Text {
                                 text: root.isFileMode
                                       //% "Archive files"
@@ -4382,12 +4674,6 @@ Item {
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 8
-                            Rectangle {
-                                width: 3
-                                height: 16
-                                color: Theme.colorAccentBlue
-                                Layout.alignment: Qt.AlignVCenter
-                            }
                             Text {
                                 text: root.isFileMode
                                       //% "Target folder"
@@ -5282,132 +5568,6 @@ Item {
                     radius: 12
                     color: Theme.colorCard
                     border.width: 1
-                    border.color: Theme.colorAccentBlue
-                    visible: root.shrinkConfirmOpen && root.isVolumeMode
-                    implicitHeight: shrinkConfirmCol.implicitHeight + 32
-
-                    ColumnLayout {
-                        id: shrinkConfirmCol
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.top: parent.top
-                        anchors.margins: 16
-                        spacing: 10
-
-                        Text {
-                            Layout.fillWidth: true
-                            //% "NTFS shrink plan ready"
-                            text: qsTrId("aegra.restore.shrink_confirm_title")
-                            color: Theme.colorTextWhite
-                            font.pixelSize: 14
-                            font.bold: true
-                            font.family: Theme.fontFamily
-                        }
-                        Text {
-                            Layout.fillWidth: true
-                            //% "Source size: %1"
-                            text: qsTrId("aegra.restore.shrink_source_size").arg(
-                                      serviceClient.formatBytes(
-                                          Number(root.shrinkConfirmDetails.logicalSizeBytes) || 0))
-                            color: Theme.colorTextGrey
-                            font.pixelSize: 12
-                            font.family: Theme.fontFamily
-                            wrapMode: Text.WordWrap
-                        }
-                        Text {
-                            Layout.fillWidth: true
-                            //% "Target size: %1"
-                            text: qsTrId("aegra.restore.shrink_target_size").arg(
-                                      serviceClient.formatBytes(
-                                          Number(root.shrinkConfirmDetails.targetCapacityBytes) || 0))
-                            color: Theme.colorTextGrey
-                            font.pixelSize: 12
-                            font.family: Theme.fontFamily
-                            wrapMode: Text.WordWrap
-                        }
-                        Text {
-                            Layout.fillWidth: true
-                            //% "Minimum target: %1"
-                            text: qsTrId("aegra.restore.shrink_minimum_target").arg(
-                                      serviceClient.formatBytes(
-                                          Number(root.shrinkConfirmDetails.minimumTargetBytes) || 0))
-                            color: Theme.colorTextGrey
-                            font.pixelSize: 12
-                            font.family: Theme.fontFamily
-                            wrapMode: Text.WordWrap
-                        }
-                        Text {
-                            Layout.fillWidth: true
-                            //% "Relocation: %1"
-                            text: qsTrId("aegra.restore.shrink_relocation").arg(
-                                      serviceClient.formatBytes(
-                                          Number(root.shrinkConfirmDetails.relocationBytes) || 0))
-                            color: Theme.colorTextGrey
-                            font.pixelSize: 12
-                            font.family: Theme.fontFamily
-                            wrapMode: Text.WordWrap
-                        }
-                        Text {
-                            Layout.fillWidth: true
-                            //% "Scratch upper bound: %1"
-                            text: qsTrId("aegra.restore.shrink_scratch").arg(
-                                      serviceClient.formatBytes(
-                                          Number(root.shrinkConfirmDetails.scratchUpperBoundBytes) || 0))
-                            color: Theme.colorTextGrey
-                            font.pixelSize: 12
-                            font.family: Theme.fontFamily
-                            wrapMode: Text.WordWrap
-                        }
-                        Text {
-                            Layout.fillWidth: true
-                            visible: (root.shrinkConfirmDetails.restrictionCodes || []).length > 0
-                            //% "Restrictions: %1"
-                            text: qsTrId("aegra.restore.shrink_restrictions").arg(
-                                      (root.shrinkConfirmDetails.restrictionCodes || []).join(", "))
-                            color: Theme.colorAccentRed
-                            font.pixelSize: 12
-                            font.family: Theme.fontFamily
-                            wrapMode: Text.WordWrap
-                        }
-                        Text {
-                            Layout.fillWidth: true
-                            //% "If restore fails after writing begins, the target may be unusable. You must run a full restore again."
-                            text: qsTrId("aegra.restore.shrink_retry_warning")
-                            color: Theme.colorAccentRed
-                            font.pixelSize: 12
-                            font.family: Theme.fontFamily
-                            wrapMode: Text.WordWrap
-                        }
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Layout.topMargin: 4
-                            spacing: 12
-                            Item { Layout.fillWidth: true }
-                            AppButton {
-                                Layout.preferredWidth: 100
-                                Layout.preferredHeight: 36
-                                //% "Cancel"
-                                text: qsTrId("aegra.common.cancel")
-                                onClicked: root.cancelShrinkConfirm()
-                            }
-                            AppButton {
-                                Layout.preferredWidth: 120
-                                Layout.preferredHeight: 36
-                                //% "Confirm restore"
-                                text: qsTrId("aegra.restore.shrink_confirm")
-                                primary: true
-                                enabled: !serviceClient.restoreCommandBusy
-                                onClicked: root.confirmShrinkRestore()
-                            }
-                        }
-                    }
-                }
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    radius: 12
-                    color: Theme.colorCard
-                    border.width: 1
                     border.color: Theme.colorBorder
                     implicitHeight: summaryProgressCol.implicitHeight + 32
 
@@ -5528,7 +5688,6 @@ Item {
                          && !root.restoreSessionComplete
                          && !root.restoreJobsSubmitted
                          && !root.restoreSessionRunning
-                         && !root.shrinkConfirmOpen
                 text: {
                     if (serviceClient.restoreCommandBusy)
                         //% "Restoring..."

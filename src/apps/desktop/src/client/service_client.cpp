@@ -11,6 +11,7 @@
 #include <QTimer>
 #include <QUuid>
 
+#include <algorithm>
 #include <utility>
 
 namespace aegra::desktop {
@@ -602,13 +603,23 @@ void ServiceClient::on_locale_changed() {
 }
 
 void ServiceClient::on_job_poll_tick() {
-    if (state_ != State::kReady || !job_list_available_ || !jobs_.has_active_jobs()) {
+    if (state_ != State::kReady || !job_list_available_) {
         update_job_polling();
         return;
     }
     // Non-overlapping: skip while a job query is already in flight.
     if (jobs_loading_ ||
         (!job_request_id_.isEmpty() && coordinator_->has_pending_request(job_request_id_))) {
+        return;
+    }
+    // Prefer terminal merge over another active snapshot: a sub-second restore leaves the
+    // active set while JobModel still holds the last Running percent.
+    if (pending_terminal_job_sync_) {
+        start_terminal_job_seed();
+        return;
+    }
+    if (!jobs_.has_active_jobs()) {
+        update_job_polling();
         return;
     }
     start_job_query();
@@ -639,6 +650,22 @@ JobListQuery ServiceClient::make_terminal_seed_query() const {
     JobListQuery query;
     query.scope = kJobListScopeTerminal;
     query.maximum_results = kJobPageSize;
+    if (awaiting_terminal_job_ids_.isEmpty()) {
+        return query;
+    }
+    qint64 earliest = 0;
+    for (const auto& job_id : awaiting_terminal_job_ids_) {
+        const auto job = jobs_.find_job(job_id);
+        if (!job) {
+            continue;
+        }
+        if (earliest == 0 || job->created_utc_ms < earliest) {
+            earliest = job->created_utc_ms;
+        }
+    }
+    if (earliest > 0) {
+        query.from_utc_ms = (std::max)(earliest - 60'000, qint64{0});
+    }
     return query;
 }
 
@@ -928,13 +955,7 @@ RequestDisposition ServiceClient::handle_job_list_frame(const QByteArray& body) 
     }
 
     if (purpose == JobQueryPurpose::kTerminalSeed) {
-        if (!jobs_baseline_seeded_) {
-            seed_terminal_toast_baseline(rows);
-            jobs_baseline_seeded_ = true;
-        } else {
-            publish_terminal_toasts(rows);
-        }
-        jobs_.merge_terminal_jobs(std::move(rows));
+        apply_terminal_job_seed(std::move(rows));
         pending_jobs_.clear();
         jobs_loading_ = false;
         job_request_id_.clear();
@@ -943,23 +964,15 @@ RequestDisposition ServiceClient::handle_job_list_frame(const QByteArray& body) 
         emit loadingChanged();
         update_job_polling();
         update_active_backup_observe();
-        // After first seed (or toast refresh), always sync active jobs.
-        start_job_query();
+        // After the first seed, or after a completed job was merged, refresh active jobs.
+        // If a vanished job is still unresolved, the poll tick retries terminal seed.
+        if (!pending_terminal_job_sync_) {
+            start_job_query();
+        }
         return RequestDisposition::kFinished;
     }
 
-    // Active snapshot.
-    const bool had_active = jobs_.has_active_jobs();
-    jobs_.replace_active_jobs(std::move(rows));
-    if (had_active && !jobs_.has_active_jobs() && jobs_baseline_seeded_) {
-        QTimer::singleShot(0, this, [this]() {
-            if (state_ == State::kReady && job_list_available_ && !jobs_loading_ &&
-                !task_log_loading_) {
-                start_terminal_job_seed();
-            }
-        });
-    }
-
+    apply_active_job_snapshot(std::move(rows));
     pending_jobs_.clear();
     jobs_loading_ = false;
     job_request_id_.clear();
@@ -968,6 +981,16 @@ RequestDisposition ServiceClient::handle_job_list_frame(const QByteArray& body) 
     emit loadingChanged();
     update_job_polling();
     update_active_backup_observe();
+    if (pending_terminal_job_sync_) {
+        QTimer::singleShot(0, this, [this]() {
+            if (state_ != State::kReady || !job_list_available_ || jobs_loading_ ||
+                task_log_loading_ || !pending_terminal_job_sync_) {
+                update_job_polling();
+                return;
+            }
+            start_terminal_job_seed();
+        });
+    }
     return RequestDisposition::kFinished;
 }
 
@@ -1086,6 +1109,8 @@ void ServiceClient::reset_jobs() {
     jobs_error_code_.clear();
     job_request_id_.clear();
     jobs_baseline_seeded_ = false;
+    pending_terminal_job_sync_ = false;
+    awaiting_terminal_job_ids_.clear();
     toasted_job_keys_.clear();
     job_poll_timer_->stop();
     reset_task_log();
@@ -1194,13 +1219,69 @@ void ServiceClient::update_format_locale() {
 }
 
 void ServiceClient::update_job_polling() {
-    if (state_ == State::kReady && job_list_available_ && jobs_.has_active_jobs()) {
+    if (state_ == State::kReady && job_list_available_ &&
+        (jobs_.has_active_jobs() || pending_terminal_job_sync_)) {
         if (!job_poll_timer_->isActive()) {
             job_poll_timer_->start();
         }
     } else {
         job_poll_timer_->stop();
     }
+}
+
+void ServiceClient::apply_active_job_snapshot(QVector<JobRow> rows) {
+    const auto vanished = jobs_.replace_active_jobs(std::move(rows));
+    for (const auto& job_id : vanished) {
+        awaiting_terminal_job_ids_.insert(job_id);
+    }
+    pending_terminal_job_sync_ = !awaiting_terminal_job_ids_.isEmpty();
+}
+
+void ServiceClient::apply_terminal_job_seed(QVector<JobRow> rows) {
+    if (!jobs_baseline_seeded_) {
+        seed_terminal_toast_baseline(rows);
+        jobs_baseline_seeded_ = true;
+    } else {
+        publish_terminal_toasts(rows);
+    }
+    jobs_.merge_terminal_jobs(std::move(rows));
+    resolve_awaiting_terminal_jobs();
+}
+
+void ServiceClient::resolve_awaiting_terminal_jobs() {
+    QSet<QString> still;
+    still.reserve(awaiting_terminal_job_ids_.size());
+    for (const auto& job_id : awaiting_terminal_job_ids_) {
+        const auto job = jobs_.find_job(job_id);
+        if (!job) {
+            still.insert(job_id);
+            continue;
+        }
+        if (job->state == 1 || job->state == 2 || job->state == 3) {
+            still.insert(job_id);
+        }
+    }
+    awaiting_terminal_job_ids_ = std::move(still);
+    pending_terminal_job_sync_ = !awaiting_terminal_job_ids_.isEmpty();
+}
+
+void ServiceClient::observe_accepted_restore_job(const QString& job_id) {
+    if (!job_id.isEmpty()) {
+        JobRow optimistic;
+        optimistic.job_id = job_id;
+        optimistic.operation = 2;
+        optimistic.state = 2;
+        optimistic.created_utc_ms = QDateTime::currentMSecsSinceEpoch();
+        enrich_job_row(optimistic);
+        jobs_.upsert_job(std::move(optimistic));
+        emit jobsChanged();
+    }
+    if (job_list_available_ && !jobs_loading_ &&
+        (job_request_id_.isEmpty() || !coordinator_->has_pending_request(job_request_id_))) {
+        start_job_query();
+        return;
+    }
+    update_job_polling();
 }
 
 void ServiceClient::seed_terminal_toast_baseline(const QVector<JobRow>& rows) {

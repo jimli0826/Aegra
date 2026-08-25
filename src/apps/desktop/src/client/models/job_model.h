@@ -87,7 +87,9 @@ class JobModel final : public QAbstractListModel {
     /// Insert or replace one job without dropping the rest (optimistic Run feedback).
     void upsert_job(JobRow row);
     /// Replace queued/running/cancelling rows; keep terminal rows (active poll).
-    void replace_active_jobs(QVector<JobRow> active);
+    /// Active rows missing from the snapshot are retained as a bridge and returned so
+    /// ServiceClient can merge the matching terminal ListJobs page.
+    [[nodiscard]] QStringList replace_active_jobs(QVector<JobRow> active);
     /// Upsert terminal rows by job_id (schedule status seed / Task Log merge into ops model).
     void merge_terminal_jobs(QVector<JobRow> terminals);
     void clear();

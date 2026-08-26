@@ -114,3 +114,4 @@ if(WIN32)
 endif()
 
 aegra_configure_target(aegra_desktop)
+aegra_add_version_resource(aegra_desktop "Aegra Image")

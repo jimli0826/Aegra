@@ -24,6 +24,63 @@ constexpr std::int64_t kStateInterrupted = 7;
     return state == kStateQueued || state == kStateRunning || state == kStateCancelling;
 }
 
+[[nodiscard]] bool same_job_identity(const QVector<JobRow>& left,
+                                     const QVector<JobRow>& right) noexcept {
+    if (left.size() != right.size()) {
+        return false;
+    }
+    for (int i = 0; i < left.size(); ++i) {
+        if (left[i].job_id != right[i].job_id) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] int compute_progress_percent(const JobRow& row) noexcept {
+    if (row.state == kStateSucceeded) {
+        return 100;
+    }
+    if (!row.progress_logical_bytes || !row.progress_processed_bytes) {
+        return 0;
+    }
+    const auto logical = *row.progress_logical_bytes;
+    const auto processed = *row.progress_processed_bytes;
+    if (logical <= 0 || processed < 0) {
+        return 0;
+    }
+    if (processed >= logical) {
+        return 100;
+    }
+    std::int64_t percent = 0;
+    constexpr auto kMax = (std::numeric_limits<std::int64_t>::max)();
+    if (processed <= kMax / 100) {
+        percent = (processed * 100) / logical;
+    } else if (logical >= 100) {
+        percent = processed / (logical / 100);
+    } else {
+        percent = (processed * 100) / logical;
+    }
+    if (percent < 0) {
+        return 0;
+    }
+    if (percent > 100) {
+        return 100;
+    }
+    return static_cast<int>(percent);
+}
+
+void preserve_monotonic_progress(JobRow& incoming, const JobRow& existing) {
+    if (!row_is_active(incoming.state) || !row_is_active(existing.state)) {
+        return;
+    }
+    if (compute_progress_percent(incoming) >= compute_progress_percent(existing)) {
+        return;
+    }
+    incoming.progress_logical_bytes = existing.progress_logical_bytes;
+    incoming.progress_processed_bytes = existing.progress_processed_bytes;
+}
+
 void recompute_counts(const QVector<JobRow>& rows, int& running, int& failed, int& succeeded,
                       int& active, int& backup, int& restore, int& verify) {
     running = 0;
@@ -67,6 +124,20 @@ JobModel::JobModel(QObject* parent) : QAbstractListModel(parent) {}
 void JobModel::set_locale_format(LocaleFormat* format) { format_ = format; }
 
 void JobModel::set_rows(QVector<JobRow> rows) {
+    if (same_job_identity(rows_, rows)) {
+        for (int i = 0; i < rows.size(); ++i) {
+            preserve_monotonic_progress(rows[i], rows_[i]);
+        }
+        rows_ = std::move(rows);
+        recompute_counts(rows_, running_count_, failed_count_, succeeded_count_, active_count_,
+                         backup_count_, restore_count_, verify_count_);
+        if (!rows_.isEmpty()) {
+            emit dataChanged(index(0, 0), index(rows_.size() - 1, 0));
+        }
+        emit countsChanged();
+        bump_revision();
+        return;
+    }
     beginResetModel();
     rows_ = std::move(rows);
     recompute_counts(rows_, running_count_, failed_count_, succeeded_count_, active_count_,
@@ -80,6 +151,7 @@ void JobModel::set_rows(QVector<JobRow> rows) {
 void JobModel::upsert_job(JobRow row) {
     for (int i = 0; i < rows_.size(); ++i) {
         if (rows_[i].job_id == row.job_id) {
+            preserve_monotonic_progress(row, rows_[i]);
             rows_[i] = std::move(row);
             const auto idx = index(i, 0);
             emit dataChanged(idx, idx);
@@ -616,37 +688,7 @@ bool JobModel::is_active_state(const std::int64_t state) noexcept {
 }
 
 int JobModel::progress_percent(const JobRow& row) noexcept {
-    if (row.state == kStateSucceeded) {
-        return 100;
-    }
-    if (!row.progress_logical_bytes || !row.progress_processed_bytes) {
-        return 0;
-    }
-    const auto logical = *row.progress_logical_bytes;
-    const auto processed = *row.progress_processed_bytes;
-    if (logical <= 0 || processed < 0 || processed > logical) {
-        return 0;
-    }
-    if (processed == logical) {
-        return 100;
-    }
-    // Overflow-safe percent in [0, 100].
-    std::int64_t percent = 0;
-    constexpr auto kMax = (std::numeric_limits<std::int64_t>::max)();
-    if (processed <= kMax / 100) {
-        percent = (processed * 100) / logical;
-    } else if (logical >= 100) {
-        percent = processed / (logical / 100);
-    } else {
-        percent = (processed * 100) / logical;
-    }
-    if (percent < 0) {
-        return 0;
-    }
-    if (percent > 100) {
-        return 100;
-    }
-    return static_cast<int>(percent);
+    return compute_progress_percent(row);
 }
 
 bool JobModel::progress_visible(const JobRow& row) noexcept {

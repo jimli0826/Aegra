@@ -1,4 +1,5 @@
 /out/
+/installer/out/
 /.vs/
 /.vscode/
 /CMakeUserPresets.json

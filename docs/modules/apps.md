@@ -14,6 +14,8 @@
 - `desktop`：普通用户 GUI。
 - `shell_extension`：Explorer 进程内只读浏览 current V7 `.bkf`（ADR-0023）；Composition Root 装配 Archive/NTFS，不请求 Mount Host。
 
+产品 EXE/DLL 的 Windows File Properties（VERSIONINFO）由 `include/aegra_version.h` 提供，经 `aegra_add_version_resource` 写入目标。版本只在该头文件中修改。
+
 ## Composition Root 规则
 
 - 入口创建具体 Adapter 并注入 Use Case。

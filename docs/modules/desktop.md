@@ -73,8 +73,8 @@ ServiceClient (QML 门面)
   └── FileRecoverModel           # ListRecoveryPointEntries lazy 树（entry_id only）
 ```
 
-- 每个请求有唯一 correlation ID 与 deadline；协议损坏断开并重连，单请求超时只结束对应
-  correlation，不降级健康 Service session。
+- 每个请求有唯一 correlation ID 与 deadline（默认 30 秒；`ArmPeRestore` 10 分钟，与 Service 一致）；
+  协议损坏断开并重连，单请求超时只结束对应 correlation，不降级健康 Service session。
 - 重连后只重新握手并恢复幂等 query（当前为 Repository catalog 分页查询）。
 - 模型只暴露拥有生命周期的数据与展示用角色；QML 不解析 JSON、Service 枚举数值或 message code。
 - Backup 列表 STATUS 通过 `JobModel.latestBackupStatus(scheduleId)` 关联 Job：
@@ -101,6 +101,7 @@ ServiceClient (QML 门面)
 - 发送和接收与 ADR-0011 相同的 4 字节长度帧，最大 1 MiB。
 - `ListJobs` 使用 `scope`：热路径仅 `active`（queued/running/cancelling）轮询；Task Log 使用
   `terminal` + 可选时间窗/`operation`/`state` 过滤。不再在 500ms 轮询中拉全历史。
+  同一组 Job 的进度刷新走 `dataChanged`，不 `reset` 模型，Home 运行中任务进度条只前进不回退。
 - Restore/Backup `CommandAck.resource_id` 立即 upsert 到 `JobModel`。Job 离开 active 集合时保留
   最后一帧进度，并立刻（失败则 500ms 轮询重试）拉取 terminal 页合并终态。不得把已完成的
   restore 停在中途 Running 百分比；Succeeded restore 进度固定 100%。

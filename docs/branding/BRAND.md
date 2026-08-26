@@ -30,6 +30,7 @@
 | 运行时数据 | `%ProgramData%\AegraImage\` |
 | 注册表 | `HKLM\Software\AegraImage` |
 | PE 注入目录 | `Windows\System32\AegraImage\` |
+| Windows VERSIONINFO | `include/aegra_version.h` |
 
 可执行文件使用小写连字符命名，例如 `aegra-service.exe`、`aegra-worker.exe`、`aegra-repository-gateway.exe`。最终安装包命名在发布 ADR 中冻结。
 

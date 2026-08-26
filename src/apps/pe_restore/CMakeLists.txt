@@ -30,6 +30,7 @@ target_link_libraries(
         nlohmann_json::nlohmann_json
 )
 aegra_configure_target(aegra_pe_restore)
+aegra_add_version_resource(aegra_pe_restore "Aegra Image WinPE Restore")
 
 # The service collects the WinPE image payload from its own directory
 # (PeRestoreEnvironment.payload_directory_utf8), same as it resolves the worker.

@@ -23,7 +23,8 @@ namespace aegra::apps::service::detail {
 namespace {
 
 using Clock = std::chrono::steady_clock;
-constexpr auto kRequestDeadline = std::chrono::seconds(30);
+constexpr auto kDefaultRequestDeadline = std::chrono::seconds(30);
+constexpr auto kArmPeRestoreDeadline = std::chrono::minutes(10);
 constexpr std::size_t kLaneCount = 4;
 constexpr std::size_t kMaximumQueuedPerLane = 32;
 
@@ -121,6 +122,15 @@ struct RequestState final {
     default:
         return 0;
     }
+}
+
+[[nodiscard]] Clock::duration
+request_deadline_for(const contracts::ServiceRequestKind kind) noexcept {
+    using Kind = contracts::ServiceRequestKind;
+    if (kind == Kind::kArmPeRestore) {
+        return kArmPeRestoreDeadline;
+    }
+    return kDefaultRequestDeadline;
 }
 
 [[nodiscard]] std::string failure_response(const contracts::ServiceRequest& request,
@@ -228,7 +238,7 @@ class SessionExecutor final {
             }
             {
                 std::lock_guard lock(states_mutex_);
-                (*state)->deadline = Clock::now() + kRequestDeadline;
+                (*state)->deadline = Clock::now() + request_deadline_for((*state)->request.kind);
             }
             auto response = handle_service_message((*state)->encoded, runtime_, session_,
                                                    (*state)->cancellation.get_token());

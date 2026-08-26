@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Burn bootstrapper → AegraImageSetup.exe
+  Chain: official Dokan_x64.msi (permanent) then AegraImage.msi (product).
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+
+  <Bundle
+      Name="AegraImage"
+      Version="$(var.ProductVersion)"
+      Manufacturer="Aegra"
+      UpgradeCode="9D4E8B21-3A7C-4F50-B2E6-1C8A5D9F0B37"
+      IconSourceFile="assets\product.ico"
+      Copyright="Copyright (c) Aegra"
+      AboutUrl="https://github.com/"
+      DisableModify="yes"
+      DisableRemove="no">
+
+    <Variable Name="DELETEDATA" Type="string" Value="" bal:Overridable="yes" />
+
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication
+          Theme="hyperlinkLicense"
+          ThemeFile="assets\HyperlinkTheme.xml"
+          LocalizationFile="assets\loc\en-US\thm.wxl"
+          LicenseUrl=""
+          LicenseFile="assets\License.rtf"
+          LogoFile="assets\logo.png"
+          LogoSideFile="assets\logo_side.png"
+          ShowVersion="yes"
+          SuppressOptionsUI="no"
+          SuppressRepair="yes" />
+
+      <Payload Name="1033\thm.wxl" SourceFile="assets\loc\en-US\thm.wxl" />
+      <Payload Name="2052\thm.wxl" SourceFile="assets\loc\zh-CN\thm.wxl" />
+      <Payload Name="1028\thm.wxl" SourceFile="assets\loc\zh-TW\thm.wxl" />
+      <Payload Name="1041\thm.wxl" SourceFile="assets\loc\ja-JP\thm.wxl" />
+      <Payload Name="1042\thm.wxl" SourceFile="assets\loc\ko-KR\thm.wxl" />
+      <Payload Name="1031\thm.wxl" SourceFile="assets\loc\de-DE\thm.wxl" />
+      <Payload Name="1036\thm.wxl" SourceFile="assets\loc\fr-FR\thm.wxl" />
+      <Payload Name="3082\thm.wxl" SourceFile="assets\loc\es-ES\thm.wxl" />
+      <Payload Name="1046\thm.wxl" SourceFile="assets\loc\pt-BR\thm.wxl" />
+      <Payload Name="1049\thm.wxl" SourceFile="assets\loc\ru-RU\thm.wxl" />
+    </BootstrapperApplication>
+
+    <Chain DisableSystemRestore="no">
+      <MsiPackage
+          Id="DokanLibraryMsi"
+          SourceFile="out\Dokan_x64.msi"
+          DisplayName="Dokan Library"
+          Description="Dokan file system driver for mount"
+          Visible="yes"
+          Permanent="yes"
+          Compressed="yes"
+          Vital="no"
+          ForcePerMachine="yes">
+        <MsiProperty Name="INSTALLDEVFILES" Value="0" />
+      </MsiPackage>
+
+      <MsiPackage
+          Id="AegraImageMsi"
+          SourceFile="out\AegraImage.msi"
+          Visible="no"
+          Compressed="yes"
+          Vital="yes"
+          ForcePerMachine="yes">
+        <MsiProperty Name="INSTALLFOLDER" Value="[InstallFolder]" />
+        <MsiProperty Name="DELETEDATA" Value="[DELETEDATA]" />
+      </MsiPackage>
+    </Chain>
+  </Bundle>
+</Wix>

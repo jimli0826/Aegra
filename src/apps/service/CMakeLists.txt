@@ -82,6 +82,7 @@ target_link_libraries(
             Aegra::ThirdPartySpdlog Shell32
 )
 aegra_configure_target(aegra_service)
+aegra_add_version_resource(aegra_service "Aegra Image Service")
 
 # The WinPE image payload needs the MSVC runtime redistributables (WinPE does not
 # ship them and vcpkg applocal only deploys package DLLs). Copy exactly the

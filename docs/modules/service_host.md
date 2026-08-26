@@ -89,7 +89,8 @@ single reader -> bounded domain lanes -> bounded response queue -> single writer
 
 快速控制面、Repository 读取、文件浏览和命令使用独立串行 lane；一个断网 Repository 调用只占用其 lane，
 不能阻止 Service 继续接收请求或让 Jobs/Schedules/Connections 等快速查询失去响应。响应允许乱序，唯一按
-`request_id` correlation。每条请求自接收起有独立 30 秒 deadline 和取消源；deadline 只生成该请求的
+`request_id` correlation。每条请求自开始执行起有独立 deadline 和取消源（默认 30 秒；
+`ArmPeRestore` 10 分钟，覆盖 WinRE 复制与 DISM 注入）。deadline 只生成该请求的
 `service.request_timeout`，迟到结果被丢弃且 session 保持连接。所有队列有界，只有一个 reader 和一个 writer。
 `TestRepositoryConnection` deadline 还会在发送超时响应前把该 connection 的状态持久化为 Unavailable；
 该状态写入不再次访问 Repository，Desktop 随后的 ListRepositoryConnections 可直接读取最终快照。

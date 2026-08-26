@@ -940,7 +940,8 @@ TTL。PE token 喂给 kind 40 会被其 is_system 复检拒绝，反向同理。
 ### 12.3 kind 51 — ArmPeRestore（Command）
 
 构建/缓存 WinPE 镜像（首次 DISM 1–3 分钟）→ 写跨重启 Pending Job（含密封信封）→
-`bcdedit /bootsequence` 一次性启动。请求 payload（exact 7 字段）：
+`bcdedit /bootsequence` 一次性启动。Service 与 Desktop 对该命令使用 **10 分钟** deadline
+（默认控制面请求仍为 30 秒）。请求 payload（exact 7 字段）：
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |

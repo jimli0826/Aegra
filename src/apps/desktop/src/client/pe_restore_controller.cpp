@@ -15,6 +15,9 @@
 namespace aegra::desktop {
 namespace {
 
+// WinPE image build (copy Winre.wim + DISM inject) commonly takes 1–3 minutes.
+constexpr int kPeArmDeadlineMs = 600'000;
+
 [[nodiscard]] QString message_argument_value(const QJsonObject& root, const QString& name) {
     const auto arguments = root.value(QStringLiteral("message_arguments")).toArray();
     for (const auto& item : arguments) {
@@ -193,7 +196,8 @@ RequestDisposition PeRestoreController::handle_prepare_frame(const QByteArray& b
         pe_ui_locale());
     const auto started = client_.coordinator_->begin_request(
         arm_request_id, arm_body,
-        [this](const QByteArray& frame_body) { return handle_arm_frame(frame_body); });
+        [this](const QByteArray& frame_body) { return handle_arm_frame(frame_body); },
+        kPeArmDeadlineMs);
     if (!started) {
         finish_failure(localize_message_code(QStringLiteral("service.send_failed")));
     }

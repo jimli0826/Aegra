@@ -82,10 +82,10 @@ constexpr qsizetype kMaximumConnections = 1'000;
     }
     const auto logical = *row.progress_logical_bytes;
     const auto processed = *row.progress_processed_bytes;
-    if (logical <= 0 || processed < 0 || processed > logical) {
+    if (logical <= 0 || processed < 0) {
         return 0;
     }
-    if (processed == logical) {
+    if (processed >= logical) {
         return 100;
     }
     return static_cast<int>((processed * 100) / logical);

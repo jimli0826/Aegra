@@ -21,3 +21,13 @@ Windows 构建固定使用 Visual Studio 2026 Insiders 的 x64 编译器、CMake
 ```
 
 脚本先加载 VS 2026 Insiders 的 `VsDevCmd`，不使用系统中的旧版 Visual Studio；构建完成后执行源码规模检查。
+
+## 安装包
+
+WiX 安装程序在 [`installer/`](installer/README.md)。`build.ps1` 会先编译 Release 产物，再按 `installer\payload` 的文件清单打包：
+
+```powershell
+.\installer\build.ps1
+```
+
+产物为 `installer\out\AegraImageSetup.exe`。

@@ -84,6 +84,7 @@ target_link_options(
         "/DELAYLOAD:virtdisk.dll"
 )
 aegra_configure_target(aegra_personal_worker)
+aegra_add_version_resource(aegra_personal_worker "Aegra Image Worker")
 
 # Dokan runtime DLL next to the executable for local runs.
 add_custom_command(

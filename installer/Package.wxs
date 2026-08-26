@@ -1,0 +1,265 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Aegra Image MSI package (WiX v4/v7 schema).
+  Built by installer/build.ps1 → out\AegraImage.msi
+  Service: aegra_service.exe as Windows service AegraService (SCM flag service).
+  Data: %ProgramData%\Aegra (matches Service runtime, not brand path AegraImage).
+  Kernel Dokan is the official Dokan_x64.msi chained in the Bundle.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Package
+      Name="AegraImage"
+      Manufacturer="Aegra"
+      Version="$(var.ProductVersion)"
+      UpgradeCode="5C2A9E71-8B4F-4D16-9E3A-7F1C0B6D2A84"
+      Scope="perMachine"
+      Language="1033"
+      InstallerVersion="500">
+
+    <SummaryInformation
+        Description="Aegra Image — backup, restore, mount and shell extension"
+        Manufacturer="Aegra" />
+
+    <MajorUpgrade
+        AllowSameVersionUpgrades="yes"
+        DowngradeErrorMessage="A newer version of AegraImage is already installed. Setup will now exit."
+        Schedule="afterInstallInitialize" />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Property Id="MSIUSEREALADMINDETECTION" Value="1" />
+    <Property Id="DELETEDATA" Secure="yes" />
+    <Launch Condition="Privileged" Message="AegraImage requires administrator privileges to install." />
+
+    <Feature Id="ProductFeature" Title="AegraImage" Level="1"
+             Description="Desktop, service, worker, WinPE executor, shell extension and runtime."
+             ConfigurableDirectory="INSTALLFOLDER"
+             AllowAdvertise="no"
+             Display="expand">
+      <ComponentGroupRef Id="ProductComponents" />
+      <ComponentRef Id="cmpServerService" />
+      <ComponentRef Id="cmpStartMenuShortcuts" />
+      <ComponentRef Id="cmpDesktopShortcut" />
+      <ComponentRef Id="cmpRegistryShell" />
+      <ComponentRef Id="cmpRegistryApp" />
+      <ComponentRef Id="cmpProgramDataAegra" />
+    </Feature>
+
+    <CustomAction Id="CA_RegisterShell"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand="regsvr32.exe /s &quot;[INSTALLFOLDER]aegra_shell_extension.dll&quot;"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <CustomAction Id="CA_UnregisterShell"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand="regsvr32.exe /s /u &quot;[INSTALLFOLDER]aegra_shell_extension.dll&quot;"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <CustomAction Id="CA_DeleteProgramData"
+                  Directory="System64Folder"
+                  ExeCommand="cmd.exe /c if exist &quot;[CommonAppDataFolder]Aegra&quot; rmdir /s /q &quot;[CommonAppDataFolder]Aegra&quot;"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="CA_UnregisterShell" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot;" />
+      <Custom Action="CA_DeleteProgramData" After="RemoveFiles"
+              Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND (DELETEDATA=&quot;1&quot; OR DELETEDATA=&quot;true&quot; OR DELETEDATA=&quot;True&quot;)" />
+      <Custom Action="CA_RegisterShell" After="InstallFiles" Condition="NOT REMOVE" />
+    </InstallExecuteSequence>
+
+    <UI>
+      <Dialog Id="DeleteDataDlg" Width="370" Height="250" Title="Uninstall AegraImage">
+        <Control Id="Title" Type="Text" X="15" Y="12" Width="340" Height="20" Transparent="yes" NoPrefix="yes"
+                 Text="Uninstall AegraImage" />
+        <Control Id="Description" Type="Text" X="15" Y="40" Width="340" Height="50" Transparent="yes" NoPrefix="yes"
+                 Text="This will remove Aegra Image from your computer. Program files will be deleted." />
+        <Control Id="DataNote" Type="Text" X="15" Y="95" Width="340" Height="30" Transparent="yes" NoPrefix="yes"
+                 Text="Runtime data (database, logs, PE cache) is stored under ProgramData\Aegra and is kept by default." />
+        <Control Id="DeleteDataCheck" Type="CheckBox" X="15" Y="135" Width="340" Height="30"
+                 Property="DELETEDATA" CheckBoxValue="1"
+                 Text="Also delete application data (ProgramData\Aegra)" />
+        <Control Id="Back" Type="PushButton" X="180" Y="220" Width="56" Height="17" Disabled="yes" Text="Back" />
+        <Control Id="Uninstall" Type="PushButton" X="236" Y="220" Width="66" Height="17" Default="yes" Text="Uninstall">
+          <Publish Event="EndDialog" Value="Return" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="306" Y="220" Width="56" Height="17" Cancel="yes" Text="Cancel">
+          <Publish Event="EndDialog" Value="Exit" />
+        </Control>
+      </Dialog>
+
+      <InstallUISequence>
+        <Show Dialog="DeleteDataDlg" Before="ExecuteAction"
+              Condition="Installed AND REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND UILevel &gt; 2" />
+      </InstallUISequence>
+    </UI>
+
+  </Package>
+
+  <Fragment>
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="AegraImage" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="AegraImage" />
+    </StandardDirectory>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+      <Files Include="!(bindpath.Payload)\**">
+        <Exclude Files="!(bindpath.Payload)\aegra_service.exe" />
+      </Files>
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <Component Id="cmpServerService" Directory="INSTALLFOLDER" Guid="A18F3C20-6D4B-4E91-9C7A-2E5B8F0D1A63">
+      <File Id="filAegraService"
+            Source="!(bindpath.Payload)\aegra_service.exe"
+            KeyPath="yes" />
+
+      <ServiceInstall Id="svcAegraService"
+                      Name="AegraService"
+                      DisplayName="Aegra Management Service"
+                      Description="Aegra Image control-plane service"
+                      Type="ownProcess"
+                      Start="auto"
+                      Account="LocalSystem"
+                      ErrorControl="normal"
+                      Arguments="--service"
+                      Vital="yes" />
+
+      <ServiceControl Id="scAegraService"
+                      Name="AegraService"
+                      Start="install"
+                      Stop="both"
+                      Remove="uninstall"
+                      Wait="no" />
+    </Component>
+  </Fragment>
+
+  <Fragment>
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="ProgramDataAegraFolder" Name="Aegra">
+        <Directory Id="ProgramDataLogsFolder" Name="logs" />
+        <Directory Id="ProgramDataPeFolder" Name="pe" />
+      </Directory>
+    </StandardDirectory>
+    <Component Id="cmpProgramDataAegra" Directory="ProgramDataAegraFolder" Guid="07E39286-C1AF-4457-D2D0-8EB14D6370C9">
+      <RegistryValue Root="HKLM"
+                     Key="Software\AegraImage"
+                     Name="ProgramDataFolder"
+                     Type="string"
+                     Value="[ProgramDataAegraFolder]"
+                     KeyPath="yes" />
+      <CreateFolder />
+    </Component>
+  </Fragment>
+
+  <Fragment>
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="cmpStartMenuShortcuts" Guid="B29E4D31-7C5A-4F02-8D8B-3F6C9E1E2B74">
+        <Shortcut Id="scGui"
+                  Name="Aegra Image"
+                  Description="Aegra Image"
+                  Target="[INSTALLFOLDER]aegra_desktop.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <Shortcut Id="scUninstall"
+                  Name="Uninstall Aegra Image"
+                  Description="Remove Aegra Image"
+                  Target="[System64Folder]msiexec.exe"
+                  Arguments="/x [ProductCode]" />
+        <RemoveFolder Id="RemoveAppProgramsFolder" On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\AegraImage"
+                       Name="StartMenuInstalled"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="cmpDesktopShortcut" Guid="C3AF5E42-8D6B-4013-9E9C-4A7D0F2F3C85">
+        <Shortcut Id="scDesktopGui"
+                  Name="Aegra Image"
+                  Description="Aegra Image"
+                  Target="[INSTALLFOLDER]aegra_desktop.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\AegraImage"
+                       Name="DesktopShortcut"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+  </Fragment>
+
+  <Fragment>
+    <Component Id="cmpRegistryApp" Directory="INSTALLFOLDER" Guid="D4B06F53-9E7C-4124-AFAD-5B8E1A304D96">
+      <RegistryKey Root="HKLM" Key="Software\AegraImage">
+        <RegistryValue Name="InstallDir" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+        <RegistryValue Name="Version" Type="string" Value="$(var.ProductVersion)" />
+      </RegistryKey>
+      <RegistryKey Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\aegra_service.exe">
+        <RegistryValue Type="string" Value="[INSTALLFOLDER]aegra_service.exe" />
+        <RegistryValue Name="Path" Type="string" Value="[INSTALLFOLDER]" />
+      </RegistryKey>
+    </Component>
+
+    <Component Id="cmpRegistryShell" Directory="INSTALLFOLDER" Guid="E5C17064-AF8D-4235-B0BE-6C9F2B415EA7">
+      <RegistryValue Root="HKLM"
+                     Key="Software\Classes\.bkf"
+                     Value="Aegra.BackupArchive"
+                     Type="string"
+                     KeyPath="yes" />
+      <RegistryValue Root="HKLM"
+                     Key="Software\Classes\.bkf"
+                     Name="Content Type"
+                     Value="application/x-aegra-image"
+                     Type="string" />
+      <RegistryValue Root="HKLM"
+                     Key="Software\Classes\.bkf"
+                     Name="PerceivedType"
+                     Value="system"
+                     Type="string" />
+
+      <RegistryValue Root="HKLM"
+                     Key="Software\Classes\Aegra.BackupArchive"
+                     Value="Aegra Backup Archive"
+                     Type="string" />
+      <RegistryValue Root="HKLM"
+                     Key="Software\Classes\Aegra.BackupArchive\CLSID"
+                     Value="{8F3C2A1E-6B4D-4E9A-A7C5-1D2E3F4A5B6C}"
+                     Type="string" />
+      <RegistryValue Root="HKLM"
+                     Key="Software\Classes\Aegra.BackupArchive\DefaultIcon"
+                     Value="&quot;[INSTALLFOLDER]aegra_shell_extension.dll&quot;,0"
+                     Type="string" />
+      <RegistryValue Root="HKLM"
+                     Key="Software\Classes\Aegra.BackupArchive\shell\open"
+                     Name="MultiSelectModel"
+                     Value="Document"
+                     Type="string" />
+      <RegistryValue Root="HKLM"
+                     Key="Software\Classes\Aegra.BackupArchive\shell\open\command"
+                     Value="explorer /idlist,%I,%L"
+                     Type="string" />
+      <RegistryValue Root="HKLM"
+                     Key="Software\Classes\Aegra.BackupArchive\shell\open\command"
+                     Name="DelegateExecute"
+                     Value="{11dbb47c-a525-400b-9e80-a54615a090c0}"
+                     Type="string" />
+    </Component>
+  </Fragment>
+
+</Wix>

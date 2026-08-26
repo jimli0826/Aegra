@@ -89,6 +89,7 @@ if(MSVC)
 endif()
 
 aegra_configure_target(aegra_shell_extension)
+aegra_add_version_resource(aegra_shell_extension "Aegra Image Shell Extension")
 
 if(MSVC AND AEGRA_WARNINGS_AS_ERRORS)
     # Keep /W4 from aegra_configure_target but do not fail the MSF-based host on /WX.

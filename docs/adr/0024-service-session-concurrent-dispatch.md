@@ -17,8 +17,9 @@ Provider 对断网 UNC 的同步调用可能长时间不返回，因此一个 Re
 2. reader 只负责收帧、协议校验和入有界队列，不执行 Repository、文件系统或控制面业务。
 3. 请求分到四条独立串行 lane：快速控制面、Repository/Recovery Point 读取、文件浏览、命令。每条 lane
    有界，避免无界线程和内存增长，同时隔离会阻塞的系统调用。
-4. 每条请求拥有独立 cancellation source、30 秒 deadline、`request_id` correlation 和 exactly-once 响应门。
-   deadline 到达立即排队该请求的失败响应并请求协作取消；业务调用迟到时丢弃其结果。
+4. 每条请求拥有独立 cancellation source、默认 30 秒 deadline、`request_id` correlation 和
+   exactly-once 响应门。`ArmPeRestore`（kind 51）为 10 分钟，因为 WinRE 复制与 DISM 注入通常
+   需要 1–3 分钟。deadline 到达立即排队该请求的失败响应并请求协作取消；业务调用迟到时丢弃其结果。
 5. 响应允许乱序，经单 writer 写入 Pipe。业务失败、队列满或 deadline 不关闭 session；只有 Pipe/framing/
    peer close、Service stop 或写失败结束 session。
 6. Desktop 的本地 deadline 通过原请求 handler 注入带相同 `request_id`/kind 的失败响应，只结束对应 UI 域，

@@ -23,6 +23,7 @@
 - [NTFS 缩容 SR10 静态审计](development/NTFS_SHRINK_SR10_STATIC_AUDIT.md)
 - [NTFS 缩容 SR10 人工验证矩阵](development/NTFS_SHRINK_SR10_VERIFICATION_MATRIX.md)
 - [WinPE 离线系统盘恢复设计（Proposed）](architecture/WINPE_OFFLINE_RESTORE.md)
+- [Aegra Image 安装程序（WiX）](../installer/README.md)
 - [WinPE 恢复分阶段开发计划（PE0-PE6，Proposed）](development/WINPE_RESTORE_DEVELOPMENT_PLAN.md)
 - [文件集增量备份历史开发计划](development/FILE_SET_INCREMENTAL_DEVELOPMENT_PLAN.md)
 - [文件集产品上限、稳定码与验证矩阵](development/FILE_SET_PRODUCT_LIMITS_AND_CODES.md)

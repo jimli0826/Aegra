@@ -1,5 +1,6 @@
 @echo off
 setlocal
+cd /d "%~dp0.."
 
 set "AEGRA_CONFIGURATION=%~1"
 if "%AEGRA_CONFIGURATION%"=="" set "AEGRA_CONFIGURATION=Debug"

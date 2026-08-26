@@ -378,11 +378,35 @@ Item {
         radius: 3
         color: Theme.colorProgressTrack
         Rectangle {
-            width: parent.width * Math.max(0, Math.min(1, parent.ratio))
+            id: fill
+            property real shown: 0
+            property bool animate: false
+            width: parent.width * shown
             height: parent.height
             radius: parent.radius
             color: parent.fillColor
-            Behavior on width { NumberAnimation { duration: 700; easing.type: Easing.OutCubic } }
+            Behavior on shown {
+                enabled: fill.animate
+                NumberAnimation { duration: 280; easing.type: Easing.OutCubic }
+            }
+            function applyRatio(next) {
+                const clamped = Math.max(0, Math.min(1, next))
+                if (!animate) {
+                    shown = clamped
+                    return
+                }
+                if (clamped >= shown) {
+                    shown = clamped
+                }
+            }
+            Component.onCompleted: {
+                shown = Math.max(0, Math.min(1, parent.ratio))
+                animate = true
+            }
+            Connections {
+                target: fill.parent
+                function onRatioChanged() { fill.applyRatio(fill.parent.ratio) }
+            }
         }
     }
 

@@ -4,7 +4,10 @@
 #include "client/service_protocol.h"
 #include "locale/message_code_map.h"
 
-#include <QJsonDocument>
+#include <Windows.h>
+#include <reason.h>
+
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QLocale>
 #include <QUuid>
@@ -12,13 +15,72 @@
 namespace aegra::desktop {
 namespace {
 
-[[nodiscard]] QString pe_failure_message_code(const QByteArray& body) {
-    const auto document = QJsonDocument::fromJson(body);
-    if (!document.isObject()) {
-        return QStringLiteral("pe_restore.command_failed");
+[[nodiscard]] QString message_argument_value(const QJsonObject& root, const QString& name) {
+    const auto arguments = root.value(QStringLiteral("message_arguments")).toArray();
+    for (const auto& item : arguments) {
+        const auto object = item.toObject();
+        if (object.value(QStringLiteral("name")).toString() == name) {
+            return object.value(QStringLiteral("value")).toString();
+        }
     }
-    const auto code = document.object().value(QStringLiteral("message_code")).toString();
-    return code.isEmpty() ? QStringLiteral("pe_restore.command_failed") : code;
+    return {};
+}
+
+/// User-visible PE failure: prefer structured arguments over the generic code.
+[[nodiscard]] QString pe_failure_text(const QJsonObject& root) {
+    auto code = root.value(QStringLiteral("message_code")).toString();
+    if (code.isEmpty()) {
+        code = QStringLiteral("pe_restore.command_failed");
+    }
+    if (code == QLatin1String("pe_restore.payload_missing")) {
+        const auto file_name = message_argument_value(root, QStringLiteral("file_name"));
+        auto text = localize_message_code(code);
+        if (!file_name.isEmpty()) {
+            if (text.contains(QLatin1String("%1"))) {
+                return text.arg(file_name);
+            }
+            return QStringLiteral(
+                       "Offline restore payload is missing: %1. Reinstall the application and try again.")
+                .arg(file_name);
+        }
+    }
+    const auto reason = message_argument_value(root, QStringLiteral("reason"));
+    if (!reason.isEmpty()) {
+        return reason;
+    }
+    return localize_message_code(code);
+}
+
+struct TokenHandle final {
+    HANDLE value{nullptr};
+    TokenHandle() = default;
+    ~TokenHandle() {
+        if (value != nullptr) {
+            CloseHandle(value);
+        }
+    }
+    TokenHandle(const TokenHandle&) = delete;
+    TokenHandle& operator=(const TokenHandle&) = delete;
+    TokenHandle(TokenHandle&&) = delete;
+    TokenHandle& operator=(TokenHandle&&) = delete;
+};
+
+[[nodiscard]] bool enable_shutdown_privilege() {
+    TokenHandle token;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+                          &token.value)) {
+        return false;
+    }
+    TOKEN_PRIVILEGES privileges{};
+    privileges.PrivilegeCount = 1;
+    privileges.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+    if (!LookupPrivilegeValueW(nullptr, SE_SHUTDOWN_NAME, &privileges.Privileges[0].Luid)) {
+        return false;
+    }
+    if (!AdjustTokenPrivileges(token.value, FALSE, &privileges, 0, nullptr, nullptr)) {
+        return false;
+    }
+    return GetLastError() != ERROR_NOT_ALL_ASSIGNED;
 }
 
 /// Desktop locale in the "zh-CN" wire form the PE UI expects.
@@ -43,6 +105,7 @@ void PeRestoreController::set_available(const bool available) {
         target_display_.clear();
         archive_password_.clear();
         preflight_token_.clear();
+        set_preparing(false);
     }
     emit stateChanged();
 }
@@ -85,6 +148,7 @@ bool PeRestoreController::start(const int source_disk_number, const int target_d
     preserve_disk_signature_ = preserve_disk_signature;
     auto_expand_last_partition_ = auto_expand_last_partition;
     arm_idempotency_key_ = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    set_preparing(true);
     emit client_.restoreCommandChanged();
 
     const auto target_source_id = QStringLiteral("disk.%1").arg(target_disk_number);
@@ -96,7 +160,7 @@ bool PeRestoreController::start(const int source_disk_number, const int target_d
         request_id, body,
         [this](const QByteArray& frame_body) { return handle_prepare_frame(frame_body); });
     if (!started) {
-        finish_failure(QStringLiteral("service.send_failed"));
+        finish_failure(localize_message_code(QStringLiteral("service.send_failed")));
         return false;
     }
     return true;
@@ -106,18 +170,19 @@ RequestDisposition PeRestoreController::handle_prepare_frame(const QByteArray& b
     const auto request_id = extract_response_request_id(body);
     QJsonObject root;
     if (!parse_response_root(body, request_id, root)) {
+        set_preparing(false);
         return RequestDisposition::kProtocolError;
     }
     RestorePreflightPage preflight;
     if (!parse_restore_preflight_response(root, kPreparePeRestoreRequestKind, preflight)) {
-        finish_failure(pe_failure_message_code(body));
+        finish_failure(pe_failure_text(root));
         return RequestDisposition::kFinished;
     }
     if (preflight.feasibility != kRestoreFeasibilityEligible || !preflight.restore_eligible ||
         preflight.preflight_token.isEmpty()) {
-        finish_failure(preflight.message_code.isEmpty()
-                           ? QStringLiteral("pe_restore.preflight_failed")
-                           : preflight.message_code);
+        finish_failure(localize_message_code(preflight.message_code.isEmpty()
+                                                ? QStringLiteral("pe_restore.preflight_failed")
+                                                : preflight.message_code));
         return RequestDisposition::kFinished;
     }
     preflight_token_ = preflight.preflight_token;
@@ -130,7 +195,7 @@ RequestDisposition PeRestoreController::handle_prepare_frame(const QByteArray& b
         arm_request_id, arm_body,
         [this](const QByteArray& frame_body) { return handle_arm_frame(frame_body); });
     if (!started) {
-        finish_failure(QStringLiteral("service.send_failed"));
+        finish_failure(localize_message_code(QStringLiteral("service.send_failed")));
     }
     return RequestDisposition::kFinished;
 }
@@ -139,28 +204,31 @@ RequestDisposition PeRestoreController::handle_arm_frame(const QByteArray& body)
     const auto request_id = extract_response_request_id(body);
     QJsonObject root;
     if (!parse_response_root(body, request_id, root)) {
+        set_preparing(false);
         return RequestDisposition::kProtocolError;
     }
     if (is_command_failure_response(root, kArmPeRestoreRequestKind)) {
-        finish_failure(pe_failure_message_code(body));
+        finish_failure(pe_failure_text(root));
         return RequestDisposition::kFinished;
     }
     CommandAck ack;
     if (!parse_command_ack_response(root, kArmPeRestoreRequestKind, ack)) {
+        set_preparing(false);
         return RequestDisposition::kProtocolError;
     }
     client_.restore_command_busy_ = false;
     archive_password_.clear();
+    set_preparing(false);
     emit client_.restoreCommandChanged();
-    //% "Offline restore is armed. Restart the computer to begin."
-    client_.show_toast(qtTrId("aegra.restore.pe_armed"));
     emit armSucceeded();
     refresh();
     return RequestDisposition::kFinished;
 }
 
-bool PeRestoreController::cancel() {
+bool PeRestoreController::cancel(const bool silent) {
+    silent_cancel_ = silent;
     if (!client_.connected() || !available_) {
+        silent_cancel_ = false;
         //% "Service is not connected"
         client_.show_toast(qtTrId("aegra.error.service.disconnected"), true);
         return false;
@@ -172,6 +240,7 @@ bool PeRestoreController::cancel() {
         request_id, body,
         [this](const QByteArray& frame_body) { return handle_cancel_frame(frame_body); });
     if (!started) {
+        silent_cancel_ = false;
         client_.show_toast(localize_message_code(QStringLiteral("service.send_failed")), true);
     }
     return started;
@@ -180,17 +249,45 @@ bool PeRestoreController::cancel() {
 RequestDisposition PeRestoreController::handle_cancel_frame(const QByteArray& body) {
     const auto request_id = extract_response_request_id(body);
     QJsonObject root;
+    const auto silent = silent_cancel_;
+    silent_cancel_ = false;
     if (!parse_response_root(body, request_id, root)) {
+        emit cancelFailed(localize_message_code(QStringLiteral("service.protocol_invalid")));
         return RequestDisposition::kProtocolError;
     }
     if (is_command_failure_response(root, kCancelPeRestoreRequestKind)) {
-        client_.show_toast(localize_message_code(pe_failure_message_code(body)), true);
+        const auto message = pe_failure_text(root);
+        if (!silent) {
+            client_.show_toast(message, true);
+        }
+        emit cancelFailed(message);
         return RequestDisposition::kFinished;
     }
-    //% "Pending offline restore was cancelled"
-    client_.show_toast(qtTrId("aegra.restore.pe_cancelled"));
+    if (!silent) {
+        //% "Pending offline restore was cancelled"
+        client_.show_toast(qtTrId("aegra.restore.pe_cancelled"));
+    }
+    emit cancelSucceeded();
     refresh();
     return RequestDisposition::kFinished;
+}
+
+bool PeRestoreController::restart_now() {
+    if (!enable_shutdown_privilege()) {
+        //% "Could not restart the computer. Restart it manually to begin restore."
+        client_.show_toast(qtTrId("aegra.restore.pe_restart_failed"), true);
+        return false;
+    }
+    wchar_t message[] = L"Aegra offline restore";
+    if (!InitiateSystemShutdownExW(
+            nullptr, message, 0, TRUE, TRUE,
+            SHTDN_REASON_MAJOR_OPERATINGSYSTEM | SHTDN_REASON_MINOR_RECONFIG |
+                SHTDN_REASON_FLAG_PLANNED)) {
+        //% "Could not restart the computer. Restart it manually to begin restore."
+        client_.show_toast(qtTrId("aegra.restore.pe_restart_failed"), true);
+        return false;
+    }
+    return true;
 }
 
 void PeRestoreController::refresh() {
@@ -223,12 +320,20 @@ RequestDisposition PeRestoreController::handle_state_frame(const QByteArray& bod
     return RequestDisposition::kFinished;
 }
 
-void PeRestoreController::finish_failure(const QString& message_code) {
+void PeRestoreController::set_preparing(const bool preparing) {
+    if (preparing_ == preparing) {
+        return;
+    }
+    preparing_ = preparing;
+    emit preparingChanged();
+}
+
+void PeRestoreController::finish_failure(const QString& message) {
     client_.restore_command_busy_ = false;
     archive_password_.clear();
     preflight_token_.clear();
+    set_preparing(false);
     emit client_.restoreCommandChanged();
-    const auto message = localize_message_code(message_code);
     client_.show_toast(message, true);
     emit armFailed(message);
 }

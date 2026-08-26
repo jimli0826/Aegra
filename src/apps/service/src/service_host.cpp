@@ -107,6 +107,40 @@ failure(const base::ErrorCode code, std::string request_id = {},
     return response;
 }
 
+[[nodiscard]] bool append_message_argument(contracts::MessageArguments& arguments, std::string name,
+                                           std::string value) {
+    if (name.empty() || value.empty() || value.size() > 256) {
+        return false;
+    }
+    for (const unsigned char character : value) {
+        if (character < 0x20U || character == 0x7FU) {
+            return false;
+        }
+    }
+    arguments.push_back({std::move(name), std::move(value)});
+    return true;
+}
+
+/// Kind 51/52 failures carry a specific code plus arguments so Desktop can show
+/// the actual problem instead of a generic "command failed".
+[[nodiscard]] contracts::ServiceResponse
+pe_restore_command_failure(const base::Error& error, const contracts::ServiceRequest& request) {
+    std::string message_code = "pe_restore.command_failed";
+    contracts::MessageArguments arguments;
+    constexpr std::string_view kMissingPayload = "pe image payload file is missing: ";
+    if (error.message.rfind(kMissingPayload, 0) == 0) {
+        message_code = "pe_restore.payload_missing";
+        (void)append_message_argument(arguments, "file_name",
+                                      error.message.substr(kMissingPayload.size()));
+    } else if (error.message.find("pending pe restore already exists") != std::string::npos) {
+        message_code = "pe_restore.pending_exists";
+    } else {
+        (void)append_message_argument(arguments, "reason", error.message);
+    }
+    return failure(error.code, request.request_id, request.kind, std::move(message_code),
+                   std::move(arguments));
+}
+
 [[nodiscard]] contracts::ServiceInfo make_service_info(const ServiceRuntimeInfo& runtime) {
     contracts::ServiceInfo service;
     service.state = contracts::ServiceState::kReady;
@@ -609,7 +643,10 @@ command_response(const contracts::ServiceRequest& request, const ServiceRuntimeI
             message_code = "restore.command_failed";
         } else if (request.kind == contracts::ServiceRequestKind::kArmPeRestore ||
                    request.kind == contracts::ServiceRequestKind::kCancelPeRestore) {
-            message_code = "pe_restore.command_failed";
+            write_log(runtime, ServiceLogLevel::kWarning, "service.command_failed_detail",
+                      request_detail(request) + "; detail=" + detail);
+            return base::Result<contracts::ServiceResponse>::success(
+                pe_restore_command_failure(result.error(), request));
         } else if (request.kind == contracts::ServiceRequestKind::kMountRecoveryPoint ||
                    request.kind == contracts::ServiceRequestKind::kUnmountSession) {
             message_code = "mount.command_failed";

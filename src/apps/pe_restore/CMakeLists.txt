@@ -45,14 +45,11 @@ if(TARGET aegra_service)
     )
     # WinPE does not ship the MSVC runtime (vcruntime140 / msvcp140 /
     # msvcp140_atomic_wait / ...), and a missing import DLL fails silently there
-    # (hard-error popups are suppressed). Stage exactly the compiler's runtime
-    # redist beside the service so the payload collector injects it into the WIM.
+    # (hard-error popups are suppressed). Stage the Release redist beside the
+    # service; the payload collector requires every listed DLL and never injects
+    # debug CRT.
     if(MSVC)
         set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
-        if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-            set(CMAKE_INSTALL_DEBUG_LIBRARIES TRUE)
-            set(CMAKE_INSTALL_DEBUG_LIBRARIES_ONLY TRUE)
-        endif()
         include(InstallRequiredSystemLibraries)
         foreach(aegra_runtime_dll IN LISTS CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
             add_custom_command(

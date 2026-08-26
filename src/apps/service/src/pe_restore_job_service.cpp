@@ -30,34 +30,21 @@ using worker_job_detail::random_id;
 using worker_job_detail::resolve_archive_absolute_path;
 using worker_job_detail::source_disk_size_from_archive;
 
-/// Payload closure candidates injected beside the executor. The two executables
-/// are required; runtime DLLs ship per build flavor and are included when present.
-struct PayloadCandidate final {
-    const char* file_name;
-    bool required;
-};
-inline constexpr PayloadCandidate kPayloadCandidates[] = {
-    {"aegra_pe_restore.exe", true},
-    {"aegra_personal_worker.exe", true},
-    // vcpkg dependencies of the executor/worker closure.
-    {"libsodium.dll", false},
-    {"zstd.dll", false},
-    {"zlib1.dll", false},
-    // MSVC runtime redist (WinPE ships none of these; staged by CMake).
-    {"vcruntime140.dll", false},
-    {"vcruntime140_1.dll", false},
-    {"msvcp140.dll", false},
-    {"msvcp140_1.dll", false},
-    {"msvcp140_2.dll", false},
-    {"msvcp140_atomic_wait.dll", false},
-    {"msvcp140_codecvt_ids.dll", false},
-    {"concrt140.dll", false},
-    // Debug-CRT flavor for developer builds (never shipped).
-    {"vcruntime140d.dll", false},
-    {"vcruntime140_1d.dll", false},
-    {"msvcp140d.dll", false},
-    {"msvcp140d_atomic_wait.dll", false},
-    {"ucrtbased.dll", false},
+/// Closed payload injected beside the executor. Every entry is required: a
+/// missing file fails Arm before DISM work. No debug CRT and no zlib.
+inline constexpr const char* kPayloadCandidates[] = {
+    "aegra_pe_restore.exe",
+    "aegra_personal_worker.exe",
+    "libsodium.dll",
+    "zstd.dll",
+    "vcruntime140.dll",
+    "vcruntime140_1.dll",
+    "msvcp140.dll",
+    "msvcp140_1.dll",
+    "msvcp140_2.dll",
+    "msvcp140_atomic_wait.dll",
+    "msvcp140_codecvt_ids.dll",
+    "concrt140.dll",
 };
 inline constexpr const char* kExecutorFileName = "aegra_pe_restore.exe";
 
@@ -78,22 +65,19 @@ inline constexpr const char* kExecutorFileName = "aegra_pe_restore.exe";
 [[nodiscard]] base::Result<std::vector<ports::PeImagePayloadFile>>
 collect_payload(const std::string& payload_directory) {
     std::vector<ports::PeImagePayloadFile> payload;
-    for (const auto& candidate : kPayloadCandidates) {
+    for (const char* file_name : kPayloadCandidates) {
         std::string source = payload_directory;
         if (!source.empty() && source.back() != '\\') {
             source.push_back('\\');
         }
-        source += candidate.file_name;
+        source += file_name;
         if (!file_exists_utf8(source)) {
-            if (candidate.required) {
-                std::string message = "pe image payload file is missing: ";
-                message += candidate.file_name;
-                return base::Result<std::vector<ports::PeImagePayloadFile>>::failure(
-                    {base::ErrorCode::kNotFound, std::move(message)});
-            }
-            continue;
+            std::string message = "pe image payload file is missing: ";
+            message += file_name;
+            return base::Result<std::vector<ports::PeImagePayloadFile>>::failure(
+                {base::ErrorCode::kNotFound, std::move(message)});
         }
-        payload.push_back({std::move(source), candidate.file_name});
+        payload.push_back({std::move(source), file_name});
     }
     return base::Result<std::vector<ports::PeImagePayloadFile>>::success(std::move(payload));
 }

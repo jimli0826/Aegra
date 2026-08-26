@@ -66,9 +66,16 @@ AdapterWindowsIpc、AdapterWindowsProcess、AdapterWindowsSystem、nlohmann-json
 
 ## WIM payload 闭包（PE4 接线）
 
-`aegra_pe_restore.exe` + `aegra_personal_worker.exe` + 两者的运行时 DLL 闭包
-（当前 vcpkg 动态三元组：libsodium / zstd 等 + MSVC CRT DLL）。Release 部署前评估
-静态三元组以缩减清单；payload 列表由 `IPeImageBuilder` 请求显式携带，不做隐式发现。
+显式必选清单（`PeRestoreJobService` 的 `kPayloadCandidates`），缺任一文件则 kind 51
+Arm 以 `kNotFound` 失败，不进入 DISM。不做隐式发现，不注入 debug CRT / zlib：
+
+- 执行器：`aegra_pe_restore.exe`、`aegra_personal_worker.exe`
+- vcpkg：`libsodium.dll`、`zstd.dll`
+- MSVC CRT：`vcruntime140.dll`、`vcruntime140_1.dll`、`msvcp140.dll`、
+  `msvcp140_1.dll`、`msvcp140_2.dll`、`msvcp140_atomic_wait.dll`、
+  `msvcp140_codecvt_ids.dll`、`concrt140.dll`
+
+payload 由 `IPeImageBuilder` 请求显式携带。
 
 ## 在线编排：`PeRestorePrepareService`（PE4a，application 层）
 
@@ -90,7 +97,9 @@ AdapterWindowsIpc、AdapterWindowsProcess、AdapterWindowsSystem、nlohmann-json
 
 kind 19/20/51/52 已全链路接线（contracts → codec → executor lane → `service_host` 分发 →
 `PeRestoreJobService` → `PeRestorePrepareService`）；能力位 `restore.pe.prepare/arm/cancel`
-由 `service_main` 在 windows_pe 适配器栈装配成功时声明。逐字段 wire 说明见
+由 `service_main` 在 windows_pe 适配器栈装配成功时声明。Arm 失败把具体原因放进
+`message_arguments`（缺 payload 用 `pe_restore.payload_missing` + `file_name`），Desktop
+展示该原因而不是笼统的 command failed。逐字段 wire 说明见
 [协议 V4 §12](../protocol/SERVICE_CONTROL_PROTOCOL_V4.md)。阶段 C：Service 启动扫描
 `restore_result.v1.json` → 审计事件（`pe_restore.succeeded/failed/cancelled`）→ 清理。
 Desktop 客户端 codec 与 UI 接入属 PE5。

@@ -11,8 +11,11 @@ Button {
 
     focusPolicy: Qt.TabFocus
     implicitHeight: 32
-    implicitWidth: Math.max(90, contentItem.implicitWidth + 24)
-    padding: 12
+    leftPadding: 16
+    rightPadding: 16
+    topPadding: 0
+    bottomPadding: 0
+    implicitWidth: Math.max(90, Math.ceil(contentItem.implicitWidth) + leftPadding + rightPadding + 4)
 
     contentItem: Text {
         text: root.text
@@ -58,7 +61,7 @@ Button {
         MouseArea {
             anchors.fill: parent
             acceptedButtons: Qt.NoButton
-            cursorShape: Qt.PointingHandCursor
+            cursorShape: root.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
         }
     }
 }

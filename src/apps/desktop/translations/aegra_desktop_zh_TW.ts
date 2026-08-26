@@ -1603,6 +1603,50 @@
         <source>Cancel offline restore</source>
         <translation>取消離線還原</translation>
     </message>
+    <message id="aegra.restore.pe_preparing_title">
+        <source>Preparing PE environment</source>
+        <translation>正在準備 PE 環境</translation>
+    </message>
+    <message id="aegra.restore.pe_preparing_body">
+        <source>Building WinPE recovery image. This may take several minutes. Please do not power off.</source>
+        <translation>正在製作 WinPE 復原映像，可能需要幾分鐘，請勿關機斷電。</translation>
+    </message>
+    <message id="aegra.restore.pe_preparing">
+        <source>Preparing PE environment...</source>
+        <translation>正在準備 PE 環境…</translation>
+    </message>
+    <message id="aegra.restore.pe_ready">
+        <source>PE environment is ready. Restart the computer to begin restore.</source>
+        <translation>PE 環境已就緒。請重新啟動電腦開始還原。</translation>
+    </message>
+    <message id="aegra.restore.pe_restart">
+        <source>Restart</source>
+        <translation>重新啟動</translation>
+    </message>
+    <message id="aegra.restore.pe_restart_failed">
+        <source>Could not restart the computer. Restart it manually to begin restore.</source>
+        <translation>無法重新啟動電腦。請手動重新啟動以開始還原。</translation>
+    </message>
+    <message id="aegra.restore.pe_replace_title">
+        <source>Replace pending offline restore?</source>
+        <translation>要覆蓋未完成的離線還原嗎？</translation>
+    </message>
+    <message id="aegra.restore.pe_replace_text">
+        <source>An offline restore is already prepared and waiting for restart. Continuing will replace that preparation.</source>
+        <translation>已有一次離線還原準備完成，尚未重新啟動。繼續將覆蓋這次準備。</translation>
+    </message>
+    <message id="aegra.restore.pe_replace_target">
+        <source>Pending target: %1</source>
+        <translation>目前目標磁碟：%1</translation>
+    </message>
+    <message id="aegra.restore.pe_replace_button">
+        <source>Replace and continue</source>
+        <translation>覆蓋並繼續</translation>
+    </message>
+    <message id="aegra.error.pe_restore.pending_exists">
+        <source>An offline restore is already prepared and waiting for restart</source>
+        <translation>已有一次離線還原準備完成，正在等待重新啟動</translation>
+    </message>
     <message id="aegra.error.pe_restore.preflight_failed">
         <source>Offline restore preflight failed</source>
         <translation>離線還原預檢失敗</translation>
@@ -1610,6 +1654,10 @@
     <message id="aegra.error.pe_restore.command_failed">
         <source>Offline restore command failed</source>
         <translation>離線還原命令失敗</translation>
+    </message>
+    <message id="aegra.error.pe_restore.payload_missing">
+        <source>Offline restore payload is missing: %1. Reinstall the application and try again.</source>
+        <translation>離線還原缺少必要檔案：%1。請嘗試重新安裝軟體後再試。</translation>
     </message>
     <message id="aegra.event.pe_restore.succeeded">
         <source>Offline system-disk restore completed successfully</source>

@@ -110,7 +110,7 @@ target_link_libraries(
 )
 
 if(WIN32)
-    target_link_libraries(aegra_desktop PRIVATE dwmapi uxtheme)
+    target_link_libraries(aegra_desktop PRIVATE dwmapi uxtheme Advapi32)
 endif()
 
 aegra_configure_target(aegra_desktop)

@@ -1603,6 +1603,50 @@
         <source>Cancel offline restore</source>
         <translation>オフライン復元をキャンセル</translation>
     </message>
+    <message id="aegra.restore.pe_preparing_title">
+        <source>Preparing PE environment</source>
+        <translation>PE 環境を準備中</translation>
+    </message>
+    <message id="aegra.restore.pe_preparing_body">
+        <source>Building WinPE recovery image. This may take several minutes. Please do not power off.</source>
+        <translation>WinPE 回復イメージを作成しています。数分かかる場合があります。電源を切らないでください。</translation>
+    </message>
+    <message id="aegra.restore.pe_preparing">
+        <source>Preparing PE environment...</source>
+        <translation>PE 環境を準備中...</translation>
+    </message>
+    <message id="aegra.restore.pe_ready">
+        <source>PE environment is ready. Restart the computer to begin restore.</source>
+        <translation>PE 環境の準備ができました。コンピューターを再起動して復元を開始してください。</translation>
+    </message>
+    <message id="aegra.restore.pe_restart">
+        <source>Restart</source>
+        <translation>再起動</translation>
+    </message>
+    <message id="aegra.restore.pe_restart_failed">
+        <source>Could not restart the computer. Restart it manually to begin restore.</source>
+        <translation>コンピューターを再起動できませんでした。復元を開始するには手動で再起動してください。</translation>
+    </message>
+    <message id="aegra.restore.pe_replace_title">
+        <source>Replace pending offline restore?</source>
+        <translation>準備済みのオフライン復元を置き換えますか？</translation>
+    </message>
+    <message id="aegra.restore.pe_replace_text">
+        <source>An offline restore is already prepared and waiting for restart. Continuing will replace that preparation.</source>
+        <translation>オフライン復元はすでに準備済みで、再起動待ちです。続行するとその準備は置き換えられます。</translation>
+    </message>
+    <message id="aegra.restore.pe_replace_target">
+        <source>Pending target: %1</source>
+        <translation>準備中の対象: %1</translation>
+    </message>
+    <message id="aegra.restore.pe_replace_button">
+        <source>Replace and continue</source>
+        <translation>置き換えて続行</translation>
+    </message>
+    <message id="aegra.error.pe_restore.pending_exists">
+        <source>An offline restore is already prepared and waiting for restart</source>
+        <translation>オフライン復元はすでに準備済みで、再起動待ちです</translation>
+    </message>
     <message id="aegra.error.pe_restore.preflight_failed">
         <source>Offline restore preflight failed</source>
         <translation>オフライン復元の事前チェックに失敗しました</translation>
@@ -1610,6 +1654,10 @@
     <message id="aegra.error.pe_restore.command_failed">
         <source>Offline restore command failed</source>
         <translation>オフライン復元コマンドに失敗しました</translation>
+    </message>
+    <message id="aegra.error.pe_restore.payload_missing">
+        <source>Offline restore payload is missing: %1. Reinstall the application and try again.</source>
+        <translation>オフライン復元のペイロードがありません: %1。アプリケーションを再インストールしてから再試行してください。</translation>
     </message>
     <message id="aegra.event.pe_restore.succeeded">
         <source>Offline system-disk restore completed successfully</source>

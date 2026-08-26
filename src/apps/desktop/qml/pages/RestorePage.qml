@@ -214,6 +214,7 @@ Item {
         root.restoreJobsSubmitted = false
         root.restoreSessionFailed = false
         root.restoreSessionErrorText = ""
+        root.restorePeArmed = false
         root.resetFileRestoreOptions()
         root.applySelectedCheckpoint(null)
         root.checkpointPanelOpen = false
@@ -227,6 +228,8 @@ Item {
     /// active poll merge, instead of falling back to "Waiting for restore progress...".
     property bool restoreSessionOutcomeSuccess: false
     property bool restoreSessionOutcomeFailed: false
+    /// PE image built and one-time boot armed; waiting for the user to restart.
+    property bool restorePeArmed: false
 
     function clearRestoreSession() {
         root.restoreSessionStartMs = 0
@@ -235,6 +238,9 @@ Item {
         root.restoreSessionErrorText = ""
         root.restoreSessionOutcomeSuccess = false
         root.restoreSessionOutcomeFailed = false
+        root.restorePeArmed = false
+        root.peReplaceThenStart = false
+        root.pePendingPair = null
         root.pendingRestoreQueue = []
         root.multiRestoreActive = false
         root.filePreflightPending = false
@@ -460,7 +466,8 @@ Item {
     }
 
     readonly property bool restoreSessionComplete: {
-        if (root.restoreSessionOutcomeSuccess || root.restoreSessionOutcomeFailed)
+        if (root.restorePeArmed || root.restoreSessionOutcomeSuccess
+                || root.restoreSessionOutcomeFailed)
             return true
         if (!root.onSummaryStep || !root.restoreSessionStarted)
             return false
@@ -480,7 +487,7 @@ Item {
     readonly property int restoreProgressPercent: {
         if (!root.restoreSessionStarted)
             return 0
-        if (root.restoreSessionOutcomeSuccess)
+        if (root.restorePeArmed || root.restoreSessionOutcomeSuccess)
             return 100
         var st = root.restoreSessionStatus
         if (st && st.jobCount > 0)
@@ -508,7 +515,7 @@ Item {
 
     /// Session finished without failure — green progress fill.
     readonly property bool restoreProgressSucceeded: {
-        if (root.restoreSessionOutcomeSuccess)
+        if (root.restorePeArmed || root.restoreSessionOutcomeSuccess)
             return true
         if (root.restoreProgressFailed)
             return false
@@ -546,6 +553,14 @@ Item {
             return qsTrId("aegra.restore.summary.ready")
         }
         var st = root.restoreSessionStatus
+        if (serviceClient.peRestore && serviceClient.peRestore.preparing) {
+            //% "Preparing PE environment..."
+            return qsTrId("aegra.restore.pe_preparing")
+        }
+        if (root.restorePeArmed) {
+            //% "PE environment is ready. Restart the computer to begin restore."
+            return qsTrId("aegra.restore.pe_ready")
+        }
         // progress==100 with no active rows: treat as success even before statusKey catches up.
         var finishedOk = root.restoreProgressSucceeded
                 || (st && st.jobCount > 0 && st.activeCount === 0
@@ -1913,7 +1928,13 @@ Item {
                 }
                 root.pePendingPair = pePairs[0]
                 peConfirmDialog.targetText = root.targetDiskLabel(pePairs[0].target)
-                peConfirmDialog.open()
+                serviceClient.peRestore.refresh()
+                if (serviceClient.peRestore.armed) {
+                    peReplaceDialog.targetText = serviceClient.peRestore.targetDisplay || ""
+                    peReplaceDialog.open()
+                } else {
+                    peConfirmDialog.open()
+                }
                 return
             }
         }
@@ -1923,6 +1944,8 @@ Item {
     }
 
     property var pePendingPair: null
+    /// True while replacing an existing pending PE job before starting a new Arm.
+    property bool peReplaceThenStart: false
 
     function isSystemDiskTarget(targetNum) {
         var targets = root.targetDisks || []
@@ -1948,8 +1971,26 @@ Item {
     }
 
     function confirmPeRestore() {
+        if (!root.pePendingPair)
+            return
+        if (serviceClient.peRestore && serviceClient.peRestore.armed) {
+            root.peReplaceThenStart = true
+            if (!serviceClient.peRestore.cancel(true)) {
+                root.peReplaceThenStart = false
+                root.pePendingPair = null
+                root.restoreJobsSubmitted = true
+                root.restoreSessionFailed = true
+                root.restoreSessionErrorText = qsTrId("aegra.error.service.disconnected")
+            }
+            return
+        }
+        root.startConfirmedPeRestore()
+    }
+
+    function startConfirmedPeRestore() {
         var pair = root.pePendingPair
         root.pePendingPair = null
+        root.peReplaceThenStart = false
         if (!pair)
             return
         root.beginRestoreSession()
@@ -2020,10 +2061,29 @@ Item {
     Connections {
         target: serviceClient.peRestore
         function onArmSucceeded() {
-            // Armed: nothing runs until the user restarts. Session shows submitted.
             root.restoreJobsSubmitted = true
+            root.restorePeArmed = true
         }
         function onArmFailed(message) {
+            root.restoreJobsSubmitted = true
+            root.restorePeArmed = false
+            root.restoreSessionFailed = true
+            root.restoreSessionErrorText = message || ""
+        }
+        function onCancelSucceeded() {
+            if (root.peReplaceThenStart) {
+                root.startConfirmedPeRestore()
+                return
+            }
+            root.restorePeArmed = false
+            root.restoreJobsSubmitted = false
+            root.restoreSessionStartMs = 0
+        }
+        function onCancelFailed(message) {
+            if (!root.peReplaceThenStart)
+                return
+            root.peReplaceThenStart = false
+            root.pePendingPair = null
             root.restoreJobsSubmitted = true
             root.restoreSessionFailed = true
             root.restoreSessionErrorText = message || ""
@@ -2178,6 +2238,13 @@ Item {
         id: peConfirmDialog
         parent: Overlay.overlay
         onAccepted: root.confirmPeRestore()
+        onCancelled: root.pePendingPair = null
+    }
+
+    PeRestoreReplaceDialog {
+        id: peReplaceDialog
+        parent: Overlay.overlay
+        onAccepted: peConfirmDialog.open()
         onCancelled: root.pePendingPair = null
     }
 
@@ -3817,56 +3884,6 @@ Item {
         anchors.bottomMargin: 16
         spacing: 12
 
-        // Pending offline (WinPE) restore banner — survives page/app restarts via kind 20.
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: peBannerRow.implicitHeight + 20
-            visible: serviceClient.peRestore.armed
-            radius: 12
-            color: Theme.colorCard
-            border.width: 1
-            border.color: Theme.colorBorder
-
-            RowLayout {
-                id: peBannerRow
-                anchors.fill: parent
-                anchors.leftMargin: 16
-                anchors.rightMargin: 16
-                spacing: 12
-
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: 2
-                    Text {
-                        Layout.fillWidth: true
-                        //% "Offline system-disk restore is armed. Restart the computer to begin."
-                        text: qsTrId("aegra.restore.pe_banner_armed")
-                        color: Theme.colorTextWhite
-                        font.pixelSize: 13
-                        font.bold: true
-                        font.family: Theme.fontFamily
-                        wrapMode: Text.WordWrap
-                    }
-                    Text {
-                        Layout.fillWidth: true
-                        visible: serviceClient.peRestore.targetDisplay.length > 0
-                        //% "Target disk: %1"
-                        text: qsTrId("aegra.restore.pe_confirm_target")
-                                  .arg(serviceClient.peRestore.targetDisplay)
-                        color: Theme.colorTextGrey
-                        font.pixelSize: 12
-                        font.family: Theme.fontFamily
-                        wrapMode: Text.WordWrap
-                    }
-                }
-                AppButton {
-                    //% "Cancel offline restore"
-                    text: qsTrId("aegra.restore.pe_banner_cancel")
-                    onClicked: serviceClient.peRestore.cancel()
-                }
-            }
-        }
-
         // Header row A: stat cards — visible only on step 0
         RowLayout {
             Layout.fillWidth: true
@@ -5201,7 +5218,7 @@ Item {
                     }
 
                     // --- Disk full-disk options (not volume, not file_set) ---
-                    CheckBox {
+                    AppCheckBox {
                         id: preserveBox
                         Layout.fillWidth: true
                         visible: !root.isVolumeMode && !root.isFileMode
@@ -5209,34 +5226,6 @@ Item {
                         text: qsTrId("aegra.restore.preserve_signature")
                         checked: root.preserveSignature
                         onToggled: root.preserveSignature = checked
-                        font.pixelSize: 12
-                        font.family: Theme.fontFamily
-                        spacing: 10
-                        indicator: Rectangle {
-                            implicitWidth: 18
-                            implicitHeight: 18
-                            x: preserveBox.leftPadding
-                            y: parent.height / 2 - height / 2
-                            radius: 3
-                            color: preserveBox.checked ? Theme.colorAccentBlue : Theme.colorInput
-                            border.width: 1
-                            border.color: Theme.colorBorder
-                            Text {
-                                anchors.centerIn: parent
-                                text: preserveBox.checked ? "\u2713" : ""
-                                color: Theme.colorTextWhite
-                                font.pixelSize: 12
-                                font.bold: true
-                            }
-                        }
-                        contentItem: Text {
-                            text: preserveBox.text
-                            color: Theme.colorTextWhite
-                            font: preserveBox.font
-                            leftPadding: preserveBox.indicator.width + preserveBox.spacing
-                            wrapMode: Text.WordWrap
-                            verticalAlignment: Text.AlignVCenter
-                        }
                     }
                     Text {
                         Layout.fillWidth: true
@@ -5282,7 +5271,7 @@ Item {
                     }
 
                     // --- File-set restore options ---
-                    CheckBox {
+                    AppCheckBox {
                         id: restoreSecurityBox
                         Layout.fillWidth: true
                         visible: root.isFileMode
@@ -5290,36 +5279,6 @@ Item {
                         text: qsTrId("aegra.restore.file.restore_security")
                         checked: root.fileRestoreSecurity
                         onToggled: root.fileRestoreSecurity = checked
-                        font.pixelSize: 12
-                        font.family: Theme.fontFamily
-                        spacing: 10
-                        indicator: Rectangle {
-                            implicitWidth: 18
-                            implicitHeight: 18
-                            x: restoreSecurityBox.leftPadding
-                            y: parent.height / 2 - height / 2
-                            radius: 3
-                            color: restoreSecurityBox.checked ? Theme.colorAccentBlue
-                                                              : Theme.colorInput
-                            border.width: 1
-                            border.color: Theme.colorBorder
-                            Text {
-                                anchors.centerIn: parent
-                                text: restoreSecurityBox.checked ? "\u2713" : ""
-                                color: Theme.colorTextWhite
-                                font.pixelSize: 12
-                                font.bold: true
-                            }
-                        }
-                        contentItem: Text {
-                            text: restoreSecurityBox.text
-                            color: Theme.colorTextWhite
-                            font: restoreSecurityBox.font
-                            leftPadding: restoreSecurityBox.indicator.width
-                                         + restoreSecurityBox.spacing
-                            wrapMode: Text.WordWrap
-                            verticalAlignment: Text.AlignVCenter
-                        }
                     }
                     Text {
                         Layout.fillWidth: true
@@ -5733,6 +5692,8 @@ Item {
                         TaskProgressBar {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 10
+                            indeterminate: !!(serviceClient.peRestore
+                                              && serviceClient.peRestore.preparing)
                             value: root.restoreProgressFailed
                                    ? Math.max(root.restoreProgressPercent, 8)
                                    : (root.restoreProgressSucceeded
@@ -5740,6 +5701,8 @@ Item {
                             active: root.restoreProgressActive
                                     || root.restoreProgressFailed
                                     || root.restoreProgressSucceeded
+                                    || !!(serviceClient.peRestore
+                                          && serviceClient.peRestore.preparing)
                             fillColor: root.restoreProgressFillColor
                         }
 
@@ -5747,6 +5710,8 @@ Item {
                             Layout.fillWidth: true
                             horizontalAlignment: Text.AlignRight
                             visible: root.restoreSessionStarted && !root.restoreProgressFailed
+                                     && !(serviceClient.peRestore
+                                          && serviceClient.peRestore.preparing)
                             text: (root.restoreProgressSucceeded
                                    ? 100 : root.restoreProgressPercent) + "%"
                             color: root.restoreProgressSucceeded
@@ -5843,14 +5808,33 @@ Item {
                 onClicked: root.startMappedRestore()
             }
             AppButton {
+                id: summaryCancelPeButton
+                Layout.preferredWidth: 180
+                Layout.preferredHeight: 40
+                visible: root.onSummaryStep && root.restorePeArmed
+                //% "Cancel offline restore"
+                text: qsTrId("aegra.restore.pe_banner_cancel")
+                onClicked: serviceClient.peRestore.cancel()
+            }
+            AppButton {
                 id: summaryDoneButton
                 Layout.preferredWidth: 140
                 Layout.preferredHeight: 40
                 visible: root.onSummaryStep && root.restoreSessionComplete
                 //% "Done"
                 text: qsTrId("aegra.restore.summary.done")
-                primary: true
+                primary: !root.restorePeArmed
                 onClicked: root.goBackToTypeSelection()
+            }
+            AppButton {
+                id: summaryRestartPeButton
+                Layout.preferredWidth: 140
+                Layout.preferredHeight: 40
+                visible: root.onSummaryStep && root.restorePeArmed
+                //% "Restart"
+                text: qsTrId("aegra.restore.pe_restart")
+                primary: true
+                onClicked: serviceClient.peRestore.restart_now()
             }
         }
     }

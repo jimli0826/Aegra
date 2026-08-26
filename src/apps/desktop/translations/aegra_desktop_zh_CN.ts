@@ -1603,6 +1603,50 @@
         <source>Cancel offline restore</source>
         <translation>取消离线恢复</translation>
     </message>
+    <message id="aegra.restore.pe_preparing_title">
+        <source>Preparing PE environment</source>
+        <translation>正在准备 PE 环境</translation>
+    </message>
+    <message id="aegra.restore.pe_preparing_body">
+        <source>Building WinPE recovery image. This may take several minutes. Please do not power off.</source>
+        <translation>正在制作 WinPE 恢复镜像，可能需要几分钟，请勿关机断电。</translation>
+    </message>
+    <message id="aegra.restore.pe_preparing">
+        <source>Preparing PE environment...</source>
+        <translation>正在准备 PE 环境…</translation>
+    </message>
+    <message id="aegra.restore.pe_ready">
+        <source>PE environment is ready. Restart the computer to begin restore.</source>
+        <translation>PE 环境已就绪。请重启计算机开始恢复。</translation>
+    </message>
+    <message id="aegra.restore.pe_restart">
+        <source>Restart</source>
+        <translation>重启</translation>
+    </message>
+    <message id="aegra.restore.pe_restart_failed">
+        <source>Could not restart the computer. Restart it manually to begin restore.</source>
+        <translation>无法重启计算机。请手动重启以开始恢复。</translation>
+    </message>
+    <message id="aegra.restore.pe_replace_title">
+        <source>Replace pending offline restore?</source>
+        <translation>要覆盖未完成的离线恢复吗？</translation>
+    </message>
+    <message id="aegra.restore.pe_replace_text">
+        <source>An offline restore is already prepared and waiting for restart. Continuing will replace that preparation.</source>
+        <translation>已有一次离线恢复准备完成，尚未重启。继续将覆盖这次准备。</translation>
+    </message>
+    <message id="aegra.restore.pe_replace_target">
+        <source>Pending target: %1</source>
+        <translation>当前目标盘：%1</translation>
+    </message>
+    <message id="aegra.restore.pe_replace_button">
+        <source>Replace and continue</source>
+        <translation>覆盖并继续</translation>
+    </message>
+    <message id="aegra.error.pe_restore.pending_exists">
+        <source>An offline restore is already prepared and waiting for restart</source>
+        <translation>已有一次离线恢复准备完成，正在等待重启</translation>
+    </message>
     <message id="aegra.error.pe_restore.preflight_failed">
         <source>Offline restore preflight failed</source>
         <translation>离线恢复预检失败</translation>
@@ -1610,6 +1654,10 @@
     <message id="aegra.error.pe_restore.command_failed">
         <source>Offline restore command failed</source>
         <translation>离线恢复命令失败</translation>
+    </message>
+    <message id="aegra.error.pe_restore.payload_missing">
+        <source>Offline restore payload is missing: %1. Reinstall the application and try again.</source>
+        <translation>离线恢复缺少必要文件：%1。请尝试重新安装软件后再试。</translation>
     </message>
     <message id="aegra.event.pe_restore.succeeded">
         <source>Offline system-disk restore completed successfully</source>

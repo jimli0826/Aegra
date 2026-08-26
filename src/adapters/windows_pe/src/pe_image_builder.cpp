@@ -22,11 +22,11 @@ inline constexpr std::size_t kMaximumPayloadFiles = 64;
 /// returned PeImagePaths; wide feeds Win32 file operations).
 struct ImageLayout final {
     std::wstring image_dir;
-    std::wstring base_wim;
     std::wstring boot_wim;
     std::wstring boot_sdi;
     std::wstring build_id;
     std::wstring mount_dir;
+    std::wstring legacy_base_wim;
     std::string boot_wim_utf8;
     std::string boot_sdi_utf8;
     std::string mount_dir_utf8;
@@ -97,7 +97,8 @@ struct ImageLayout final {
     }
     ImageLayout layout;
     layout.image_dir = root + L"\\" + std::wstring(detail::kImageDirRelative);
-    layout.base_wim = layout.image_dir + L"\\" + std::wstring(detail::kBaseWimFileName);
+    layout.legacy_base_wim =
+        layout.image_dir + L"\\" + std::wstring(detail::kLegacyBaseWimFileName);
     layout.boot_wim = layout.image_dir + L"\\" + std::wstring(detail::kBootWimFileName);
     layout.boot_sdi = layout.image_dir + L"\\" + std::wstring(detail::kBootSdiFileName);
     layout.build_id = layout.image_dir + L"\\" + std::wstring(detail::kBuildIdFileName);
@@ -144,19 +145,6 @@ compute_build_id(const ports::PeImageBuildRequest& request, const std::string& o
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) UTF-8 text view of bytes.
     return std::string(reinterpret_cast<const char*>(content.value().data()),
                        content.value().size());
-}
-
-/// The stored os_build decides whether the cached base WIM is still the host's
-/// WinRE generation (re-copying several hundred MB on every payload change is
-/// wasteful; a new OS build invalidates the base).
-[[nodiscard]] std::string os_build_of(const std::string& build_id_text) {
-    const auto document = nlohmann::json::parse(build_id_text, nullptr, false);
-    if (document.is_discarded() || !document.is_object()) {
-        return {};
-    }
-    const auto found = document.find("os_build");
-    return found != document.end() && found->is_string() ? found->get<std::string>()
-                                                         : std::string();
 }
 
 [[nodiscard]] std::string winpeshl_content(const std::string& executor_target_name,
@@ -209,13 +197,13 @@ class WindowsPeImageBuilder final : public ports::IPeImageBuilder {
         ports::PeImagePaths paths;
         paths.wim_path_utf8 = layout.value().boot_wim_utf8;
         paths.sdi_path_utf8 = layout.value().boot_sdi_utf8;
+        (void)detail::delete_file_if_exists(layout.value().legacy_base_wim);
         const std::string previous_id = stored_build_id(layout.value().build_id);
         if (previous_id == expected_id.value() && detail::file_exists(layout.value().boot_wim) &&
             detail::file_exists(layout.value().boot_sdi)) {
             return Output::success(std::move(paths));
         }
-        if (auto rebuilt = rebuild(request, layout.value(), os_build.value(),
-                                   os_build_of(previous_id), expected_id.value(), cancellation);
+        if (auto rebuilt = rebuild(request, layout.value(), expected_id.value(), cancellation);
             !rebuilt) {
             return Output::failure(rebuilt.error());
         }
@@ -242,29 +230,18 @@ class WindowsPeImageBuilder final : public ports::IPeImageBuilder {
         RemoveDirectoryW(layout.mount_dir.c_str());
     }
 
-    [[nodiscard]] base::Result<void> prepare_boot_files(const ImageLayout& layout,
-                                                        const std::string& current_os_build,
-                                                        const std::string& cached_os_build) {
-        const bool base_reusable = detail::file_exists(layout.base_wim) &&
-                                   detail::file_exists(layout.boot_sdi) &&
-                                   cached_os_build == current_os_build;
-        if (!base_reusable) {
-            auto sources = detail::locate_pe_image_sources(launcher_);
-            if (!sources) {
-                return base::Result<void>::failure(sources.error());
-            }
-            if (auto copied = detail::copy_file_writable(sources.value().winre_wim_path,
-                                                         layout.base_wim, "copy winre.wim");
-                !copied) {
-                return copied;
-            }
-            if (auto copied = detail::copy_file_writable(sources.value().boot_sdi_path,
-                                                         layout.boot_sdi, "copy boot.sdi");
-                !copied) {
-                return copied;
-            }
+    [[nodiscard]] base::Result<void> prepare_boot_files(const ImageLayout& layout) {
+        auto sources = detail::locate_pe_image_sources(launcher_);
+        if (!sources) {
+            return base::Result<void>::failure(sources.error());
         }
-        return detail::copy_file_writable(layout.base_wim, layout.boot_wim, "stage boot.wim");
+        if (auto copied = detail::copy_file_writable(sources.value().winre_wim_path,
+                                                     layout.boot_wim, "copy winre.wim");
+            !copied) {
+            return copied;
+        }
+        return detail::copy_file_writable(sources.value().boot_sdi_path, layout.boot_sdi,
+                                          "copy boot.sdi");
     }
 
     [[nodiscard]] base::Result<void> inject_payload(const ports::PeImageBuildRequest& request,
@@ -295,7 +272,6 @@ class WindowsPeImageBuilder final : public ports::IPeImageBuilder {
 
     [[nodiscard]] base::Result<void>
     rebuild(const ports::PeImageBuildRequest& request, const ImageLayout& layout,
-            const std::string& current_os_build, const std::string& cached_os_build,
             const std::string& expected_id, const base::CancellationToken cancellation) {
         // A failed rebuild must never fake a cache hit.
         if (auto cleared = detail::delete_file_if_exists(layout.build_id); !cleared) {
@@ -305,7 +281,7 @@ class WindowsPeImageBuilder final : public ports::IPeImageBuilder {
         if (auto directories = detail::ensure_directory_exists(layout.image_dir); !directories) {
             return directories;
         }
-        if (auto staged = prepare_boot_files(layout, current_os_build, cached_os_build); !staged) {
+        if (auto staged = prepare_boot_files(layout); !staged) {
             return staged;
         }
         if (auto active = check_cancelled(cancellation); !active) {

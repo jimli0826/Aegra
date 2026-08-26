@@ -1603,6 +1603,50 @@
         <source>Cancel offline restore</source>
         <translation>Cancel offline restore</translation>
     </message>
+    <message id="aegra.restore.pe_preparing_title">
+        <source>Preparing PE environment</source>
+        <translation>Preparing PE environment</translation>
+    </message>
+    <message id="aegra.restore.pe_preparing_body">
+        <source>Building WinPE recovery image. This may take several minutes. Please do not power off.</source>
+        <translation>Building WinPE recovery image. This may take several minutes. Please do not power off.</translation>
+    </message>
+    <message id="aegra.restore.pe_preparing">
+        <source>Preparing PE environment...</source>
+        <translation>Preparing PE environment...</translation>
+    </message>
+    <message id="aegra.restore.pe_ready">
+        <source>PE environment is ready. Restart the computer to begin restore.</source>
+        <translation>PE environment is ready. Restart the computer to begin restore.</translation>
+    </message>
+    <message id="aegra.restore.pe_restart">
+        <source>Restart</source>
+        <translation>Restart</translation>
+    </message>
+    <message id="aegra.restore.pe_restart_failed">
+        <source>Could not restart the computer. Restart it manually to begin restore.</source>
+        <translation>Could not restart the computer. Restart it manually to begin restore.</translation>
+    </message>
+    <message id="aegra.restore.pe_replace_title">
+        <source>Replace pending offline restore?</source>
+        <translation>Replace pending offline restore?</translation>
+    </message>
+    <message id="aegra.restore.pe_replace_text">
+        <source>An offline restore is already prepared and waiting for restart. Continuing will replace that preparation.</source>
+        <translation>An offline restore is already prepared and waiting for restart. Continuing will replace that preparation.</translation>
+    </message>
+    <message id="aegra.restore.pe_replace_target">
+        <source>Pending target: %1</source>
+        <translation>Pending target: %1</translation>
+    </message>
+    <message id="aegra.restore.pe_replace_button">
+        <source>Replace and continue</source>
+        <translation>Replace and continue</translation>
+    </message>
+    <message id="aegra.error.pe_restore.pending_exists">
+        <source>An offline restore is already prepared and waiting for restart</source>
+        <translation>An offline restore is already prepared and waiting for restart</translation>
+    </message>
     <message id="aegra.error.pe_restore.preflight_failed">
         <source>Offline restore preflight failed</source>
         <translation>Offline restore preflight failed</translation>
@@ -1610,6 +1654,10 @@
     <message id="aegra.error.pe_restore.command_failed">
         <source>Offline restore command failed</source>
         <translation>Offline restore command failed</translation>
+    </message>
+    <message id="aegra.error.pe_restore.payload_missing">
+        <source>Offline restore payload is missing: %1. Reinstall the application and try again.</source>
+        <translation>Offline restore payload is missing: %1. Reinstall the application and try again.</translation>
     </message>
     <message id="aegra.event.pe_restore.succeeded">
         <source>Offline system-disk restore completed successfully</source>

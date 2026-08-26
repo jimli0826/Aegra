@@ -9,7 +9,8 @@
 namespace aegra::adapters::windows_pe::detail {
 
 inline constexpr std::wstring_view kImageDirRelative = L"pe\\image";
-inline constexpr std::wstring_view kBaseWimFileName = L"winre_base.wim";
+/// Former source-WIM cache; deleted on sight so a leftover never shadows Recovery.
+inline constexpr std::wstring_view kLegacyBaseWimFileName = L"winre_base.wim";
 inline constexpr std::wstring_view kBootWimFileName = L"boot.wim";
 inline constexpr std::wstring_view kBootSdiFileName = L"boot.sdi";
 inline constexpr std::wstring_view kBuildIdFileName = L"build_id.json";

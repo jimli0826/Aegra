@@ -117,7 +117,6 @@ Desktop 提交恢复
 ```text
 <data_dir>\pe\
   image\
-    winre_base.wim        # 本机 WinRE 原始副本（缓存）
     boot.wim              # 已注入 aegra_pe_restore 的定制镜像
     boot.sdi              # ramdisk 所需 SDI
     build_id.json         # 缓存失效依据（§6.3）
@@ -144,13 +143,15 @@ Desktop 提交恢复
 2. kind 19 PreparePeRestore（Query）：
    - 复用现有链解析 / 容量 / 密码验证逻辑（§7 预检全表）
    - 通过 → 签发 PE 预检 token（复用 restore preflight store 的短期占用语义）
-3. Desktop 展示目标盘身份（序列号 / 容量 / 总线）+ 不可逆确认
+3. Desktop 展示目标盘身份（序列号 / 容量 / 总线）+ 不可逆确认；
+   若已有未消费 Pending（用户上次准备后尚未重启），先确认覆盖再继续
 4. kind 51 ArmPeRestore（Command，携带 token + confirmed=true）：
-   a. IPeImageBuilder::ensure_ready()   —— 缓存命中跳过 DISM（首次 1–3 分钟）
+   a. IPeImageBuilder::ensure_ready()   —— 缓存命中跳过 DISM（首次 1–3 分钟）；
+      Desktop 摘要进度卡显示「正在准备 PE 环境」与不确定进度条，完成后 100% 就绪
    b. 生成 PePendingJobV1 + Secret Envelope，IPePendingJobStore::write_pending()
    c. IOneTimeBootController::arm_once()
    任一步失败 → 逆序回滚（Disarm → 删 pending → 保留镜像缓存），返回稳定错误码
-5. Desktop 提示保存工作 → 用户自行重启（Service 不代发重启）
+5. Desktop 摘要页提供 Restart（用户点击后本机发起重启）；Service 不代发重启
 ```
 
 Application 状态机（`PeRestorePrepareService`）：
@@ -313,17 +314,16 @@ service 与 pe_restore 共同链接）。写入文件采用 UTF-8、原子替换
 
 ```text
 1. build_id 命中且 boot.wim / boot.sdi 存在 → 直接返回
-2. 复制 Winre.wim → winre_base.wim（base 缺失或 OS build 变化时刷新）
-3. winre_base.wim → boot.wim；sdi → boot.sdi
-4. dism /Mount-Wim /WimFile:<boot.wim> /Index:1 /MountDir:<mount>
-5. 创建 mount\Windows\System32\Aegra\
-6. 注入 payload：aegra_pe_restore.exe + 其依赖闭包（CRT 等；见 §9.7 链接策略）
-7. 写 mount\Windows\System32\winpeshl.ini：
+2. 从 Recovery 定位的 Winre.wim 复制为 boot.wim；sdi → boot.sdi（每次重建都从恢复分区取新 WIM）
+3. dism /Mount-Wim /WimFile:<boot.wim> /Index:1 /MountDir:<mount>
+4. 创建 mount\Windows\System32\Aegra\
+5. 注入 payload：显式必选闭包（两个 EXE + libsodium/zstd + Release CRT；缺一即 Arm 失败）
+6. 写 mount\Windows\System32\winpeshl.ini：
      [LaunchApps]
      %SYSTEMROOT%\System32\wpeinit.exe
      %SYSTEMROOT%\System32\Aegra\aegra_pe_restore.exe
-8. dism /Unmount-Wim /MountDir:<mount> /Commit
-9. 写 build_id.json
+7. dism /Unmount-Wim /MountDir:<mount> /Commit
+8. 写 build_id.json
 ```
 
 任何失败路径 **必须** 尝试 `/Unmount-Wim /Discard`（apps.md 安全需求：不残留 DISM 状态）；
@@ -334,7 +334,8 @@ service 与 pe_restore 共同链接）。写入文件采用 UTF-8、原子替换
 字段：产品版本、payload 文件清单及各文件 SHA-256、启动的执行器文件名、宿主 OS build、
 `PePendingJobV1.schema_version`。任一变化 → 强制重建。哈希用 Windows CNG（BCrypt）实现，
 使 `windows_pe` 适配器不引入 libsodium 依赖（加密算法仍全部留在 `crypto_sodium`）。
-缓存的 `winre_base.wim` 仅在宿主 OS build 变化或文件缺失时才从源 WinRE 重新复制。
+不保留 `winre_base.wim`；每次重建都从 Recovery 分区（或 reagentc / System32 回退）复制
+`Winre.wim` → `boot.wim`。残留的 `winre_base.wim` 在 `ensure_ready` 时删除。
 
 ### 6.4 许可与体积
 
@@ -462,7 +463,8 @@ Worker 任务日志与工作目录固定在 **RAM 盘 X:**（`AEGRA_DATA_DIR`）
 ### 9.7 工程约束
 
 - 独立 CMake target `aegra_pe_restore`（apps.md 已预留进程名 `pe_restore`）；子系统 WINDOWS；
-- 静态链接 CRT 与内部模块，目标是 payload 清单只含单 EXE；确需 DLL 时逐一列入 §6.2 清单；
+- 当前 payload 为显式必选闭包（两个 EXE + libsodium/zstd + Release CRT）；缺任一文件
+  则 Arm 失败、不进入 DISM。不注入 debug CRT / zlib。静态三元组缩减清单仍是后续评估项；
 - vcpkg 依赖仅 libsodium / zstd / nlohmann-json（PE 内无 sqlite3）。
 
 ### 9.8 WinPE 磁盘写入不变量（实测定稿，2026-08-26）

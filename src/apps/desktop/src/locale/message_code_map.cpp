@@ -66,6 +66,10 @@ namespace {
          QStringLiteral("aegra.error.pe_restore.preflight_failed")},
         {QStringLiteral("pe_restore.command_failed"),
          QStringLiteral("aegra.error.pe_restore.command_failed")},
+        {QStringLiteral("pe_restore.payload_missing"),
+         QStringLiteral("aegra.error.pe_restore.payload_missing")},
+        {QStringLiteral("pe_restore.pending_exists"),
+         QStringLiteral("aegra.error.pe_restore.pending_exists")},
         {QStringLiteral("pe_restore.succeeded"),
          QStringLiteral("aegra.event.pe_restore.succeeded")},
         {QStringLiteral("pe_restore.failed"),
@@ -295,6 +299,10 @@ QString translation_id_for_message_code(const QString& message_code) {
     qtTrId("aegra.error.service.capability_unavailable");
     //% "Target is too small for this restore"
     qtTrId("aegra.error.restore.target_too_small");
+    //% "Offline restore payload is missing: %1. Reinstall the application and try again."
+    qtTrId("aegra.error.pe_restore.payload_missing");
+    //% "An offline restore is already prepared and waiting for restart"
+    qtTrId("aegra.error.pe_restore.pending_exists");
 }
 
 QString localize_message_code(const QString& message_code) {

@@ -3,9 +3,8 @@ import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import ".."
 
-// Irreversible-confirmation dialog for the WinPE offline system-disk restore
-// (WINPE_OFFLINE_RESTORE design §11): shows the target identity, explains the
-// reboot hand-off, and requires an explicit acknowledgement checkbox.
+// Confirm replacing a pending WinPE hand-off that has not been consumed
+// (user prepared once and has not restarted yet).
 Popup {
     id: root
     modal: true
@@ -31,14 +30,12 @@ Popup {
         border.color: Theme.colorBorder
     }
 
-    onOpened: acknowledgeBox.checked = false
-
     contentItem: ColumnLayout {
         spacing: 12
         Text {
             Layout.fillWidth: true
-            //% "Offline system-disk restore"
-            text: qsTrId("aegra.restore.pe_confirm_title")
+            //% "Replace pending offline restore?"
+            text: qsTrId("aegra.restore.pe_replace_title")
             color: Theme.colorTextWhite
             font.pixelSize: 14
             font.bold: true
@@ -47,8 +44,8 @@ Popup {
         }
         Text {
             Layout.fillWidth: true
-            //% "The system disk cannot be restored while Windows is running. Aegra will prepare a recovery environment; after you restart the computer, the restore runs before Windows starts."
-            text: qsTrId("aegra.restore.pe_confirm_text")
+            //% "An offline restore is already prepared and waiting for restart. Continuing will replace that preparation."
+            text: qsTrId("aegra.restore.pe_replace_text")
             color: Theme.colorTextGrey
             font.pixelSize: 12
             font.family: Theme.fontFamily
@@ -57,18 +54,12 @@ Popup {
         Text {
             Layout.fillWidth: true
             visible: root.targetText.length > 0
-            //% "Target disk: %1"
-            text: qsTrId("aegra.restore.pe_confirm_target").arg(root.targetText)
+            //% "Pending target: %1"
+            text: qsTrId("aegra.restore.pe_replace_target").arg(root.targetText)
             color: Theme.colorTextWhite
             font.pixelSize: 12
             font.family: Theme.fontFamily
             wrapMode: Text.WordWrap
-        }
-        AppCheckBox {
-            id: acknowledgeBox
-            Layout.fillWidth: true
-            //% "I understand that every byte on the target disk will be overwritten and this cannot be undone."
-            text: qsTrId("aegra.restore.pe_confirm_ack")
         }
         RowLayout {
             Layout.fillWidth: true
@@ -83,10 +74,9 @@ Popup {
                 }
             }
             AppButton {
-                //% "Prepare offline restore"
-                text: qsTrId("aegra.restore.pe_confirm_button")
+                //% "Replace and continue"
+                text: qsTrId("aegra.restore.pe_replace_button")
                 primary: true
-                enabled: acknowledgeBox.checked
                 onClicked: {
                     root.accepted()
                     root.close()

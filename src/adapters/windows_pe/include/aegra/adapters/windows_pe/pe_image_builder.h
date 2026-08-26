@@ -16,8 +16,9 @@ struct PeImageBuilderOpenRequest final {
 
 /// DISM/WinRE-based PE image builder (design §6). Locates the host `Winre.wim`
 /// (reagentc → recovery partition scan → `System32\Recovery`) and `boot.sdi`,
-/// injects the payload and `winpeshl.ini`, and caches the result keyed by a
-/// build id (product version, payload SHA-256 set, host OS build, job schema).
+/// copies a fresh WIM from Recovery on every rebuild, injects the payload and
+/// `winpeshl.ini`, and caches the customized result keyed by a build id
+/// (product version, payload SHA-256 set, host OS build, job schema).
 [[nodiscard]] base::Result<std::unique_ptr<ports::IPeImageBuilder>>
 open_pe_image_builder(const PeImageBuilderOpenRequest& request);
 

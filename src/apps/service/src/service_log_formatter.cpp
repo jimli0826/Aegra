@@ -132,6 +132,10 @@ void omit_trace_fields(Json& value) {
         return "Get service settings";
     case contracts::ServiceRequestKind::kListRepositoryDirectories:
         return "List repository directories";
+    case contracts::ServiceRequestKind::kPreparePeRestore:
+        return "Prepare PE restore";
+    case contracts::ServiceRequestKind::kGetPeRestoreState:
+        return "Get PE restore state";
     default:
         return "Unknown query";
     }
@@ -177,6 +181,10 @@ void omit_trace_fields(Json& value) {
         return "Start file restore";
     case contracts::ServiceRequestKind::kUpdateServiceSettings:
         return "Update service settings";
+    case contracts::ServiceRequestKind::kArmPeRestore:
+        return "Arm PE restore";
+    case contracts::ServiceRequestKind::kCancelPeRestore:
+        return "Cancel PE restore";
     default:
         return "Unknown command";
     }

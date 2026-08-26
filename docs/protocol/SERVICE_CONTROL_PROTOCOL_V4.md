@@ -953,7 +953,14 @@ TTL。PE token 喂给 kind 40 会被其 is_system 复检拒绝，反向同理。
 | `locale` | string | PE UI 语言；`""` → en-US |
 
 成功返回 `CommandAcknowledgement`（`resource_id` = PE job uuid）。单占用：已存在未消费
-Pending 时返回 kConflict（先 kind 52 取消）。失败 message code：`pe_restore.command_failed`。
+Pending 时返回 kConflict（先 kind 52 取消）。失败 message code：
+
+- `pe_restore.payload_missing`：WIM payload 闭包缺文件；`message_arguments` 含
+  `{ "name": "file_name", "value": "<dll-or-exe>" }`；
+- `pe_restore.pending_exists`：已有未消费 Pending（须先取消或确认覆盖）；
+- 其它 Arm 失败：`pe_restore.command_failed`，`message_arguments` 含
+  `{ "name": "reason", "value": "<diagnostic>" }`（无密钥/路径）。
+
 非 prompt 模式会重开 tip Archive 复验源盘大小与密码。
 
 ### 12.4 kind 52 — CancelPeRestore（Command）

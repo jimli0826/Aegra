@@ -40,6 +40,29 @@ struct VolumeRestoreChain final {
 
 [[nodiscard]] std::string make_volume_restore_fingerprint(const VolumeRestoreChain& chain);
 
+struct DiskRestoreChain final {
+    std::uint32_t source_disk_number{0};
+    std::uint64_t disk_size_bytes{0};
+    /// Base-first Full → … → tip.
+    std::vector<RestoreChainLayer> layers;
+};
+
+// Durable fingerprint (base-first):
+// diskc|{source_disk}|{disk_size}|{depth}|{key0}|{uuid0}|…|{keyN-1}|{uuidN-1}
+[[nodiscard]] std::string make_disk_restore_fingerprint(const DiskRestoreChain& chain);
+
+[[nodiscard]] base::Result<DiskRestoreChain>
+parse_disk_restore_fingerprint(std::string_view fingerprint);
+
+[[nodiscard]] base::Result<VolumeRestoreChain>
+parse_volume_restore_fingerprint(std::string_view fingerprint);
+
+/// Opens the tip archive (validating the password on encrypted archives) and
+/// returns the manifest size of `source_disk_number`.
+[[nodiscard]] base::Result<std::uint64_t>
+source_disk_size_from_archive(const std::string& archive_path_utf8,
+                              std::uint32_t source_disk_number, const std::string& password);
+
 [[nodiscard]] base::Result<std::vector<personal_repository::CatalogEntry>>
 resolve_restore_chain_entries(ports::IControlPlaneDatabase& control_plane,
                               ports::IRepositoryStorageFactory& storage_factory,

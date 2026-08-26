@@ -7,6 +7,8 @@ add_library(aegra_app_service STATIC
     src/mount_supervisor.cpp
     src/network_aware_storage_factory.cpp
     src/network_share_access.cpp
+    src/pe_restore_job_service.cpp
+    src/pe_secret_sealer.cpp
     src/recovery_point_layout_service.cpp
     src/schedule_engine.cpp
     src/schedule_next_run.cpp
@@ -54,6 +56,7 @@ target_link_libraries(
         Aegra::AdapterWindowsFilesystem
         Aegra::AdapterWindowsSystem
         Aegra::AdapterWindowsDisk
+        Aegra::AdapterWindowsPe
         Aegra::NtfsResize
         nlohmann_json::nlohmann_json
         Advapi32
@@ -75,7 +78,27 @@ target_link_libraries(
     aegra_service
     PRIVATE Aegra::AppService Aegra::AdapterStorageLocal Aegra::AdapterWindowsIpc
             Aegra::AdapterSqlite Aegra::AdapterWindowsDisk Aegra::AdapterWindowsFilesystem
-            Aegra::AdapterWindowsProcess Aegra::AdapterWindowsSystem Aegra::ThirdPartySpdlog
-            Shell32
+            Aegra::AdapterWindowsPe Aegra::AdapterWindowsProcess Aegra::AdapterWindowsSystem
+            Aegra::ThirdPartySpdlog Shell32
 )
 aegra_configure_target(aegra_service)
+
+# The WinPE image payload needs the MSVC runtime redistributables (WinPE does not
+# ship them and vcpkg applocal only deploys package DLLs). Copy exactly the
+# toolchain's own redist set beside the service so the payload collector can
+# inject it. Release CRT only — debug CRT is not redistributable, so Debug builds
+# cannot produce a bootable PE image.
+if(MSVC)
+    set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
+    include(InstallRequiredSystemLibraries)
+    foreach(aegra_crt_dll IN LISTS CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
+        add_custom_command(
+            TARGET aegra_service
+            POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${aegra_crt_dll}"
+                    "$<TARGET_FILE_DIR:aegra_service>"
+            COMMENT "Copy MSVC runtime ${aegra_crt_dll} beside aegra_service"
+        )
+    endforeach()
+endif()

@@ -45,6 +45,11 @@ enum class ServiceRequestKind : std::uint8_t {
     kListRepositoryDirectories = 17,
     /// Exact NTFS shrink preflight; returns RestorePreflight eligible+digest.
     kAnalyzeNtfsShrink = 18,
+    /// WinPE offline restore preflight: same payload as kPrepareRestore but the
+    /// target must be the system disk (ADR-0026 / WINPE_OFFLINE_RESTORE design).
+    kPreparePeRestore = 19,
+    /// Armed state of the pending WinPE restore hand-off.
+    kGetPeRestoreState = 20,
     kAddRepositoryConnection = 32,
     kImportRepositoryConnection = 33,
     kTestRepositoryConnection = 34,
@@ -66,6 +71,10 @@ enum class ServiceRequestKind : std::uint8_t {
     kUpdateServiceSettings = 49,
     /// Validate and connect a repository locator without persisting a connection record.
     kConnectRepositoryLocation = 50,
+    /// Build/cache the WinPE image, write the pending job, arm the one-time boot.
+    kArmPeRestore = 51,
+    /// Disarm the one-time boot and delete the pending WinPE restore hand-off.
+    kCancelPeRestore = 52,
 };
 
 enum class ServiceResponseKind : std::uint8_t {
@@ -96,7 +105,8 @@ using ServiceRequestPayload = std::variant<
     MountRecoveryPointCommand, UpsertScheduleCommand, EventSubscriptionRequest,
     EventAcknowledgement, ExecuteDeletePlanCommand, BrowseFileSourcesRequest,
     RepositoryDirectoryListRequest, ListRecoveryPointEntriesRequest, PrepareFileRestoreRequest,
-    StartFileRestoreCommand, ServiceSettingsQuery, UpdateServiceSettingsCommand>;
+    StartFileRestoreCommand, ServiceSettingsQuery, UpdateServiceSettingsCommand,
+    PeRestoreStateRequest, ArmPeRestoreCommand>;
 
 struct ServiceRequest final {
     std::uint32_t schema_version{kServiceRequestSchemaVersion};
@@ -112,7 +122,7 @@ using ServiceResponsePayload =
                  SourceInventoryPage, JobPage, SchedulePage, AuditEventPage, MountSessionPage,
                  RestorePreflight, RecoveryPointChainResult, DeletePlanSummary, RecoveryPointLayout,
                  CommandAcknowledgement, FileSourceNodePage, RecoveryPointEntryPage,
-                 FileRestorePreflight, ServiceSettings>;
+                 FileRestorePreflight, ServiceSettings, PeRestoreState>;
 
 struct ServiceResponse final {
     std::uint32_t schema_version{kServiceResponseSchemaVersion};

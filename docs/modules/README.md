@@ -27,6 +27,8 @@
 | Repository Catalog 查询 | [personal_repository_catalog_query.md](personal_repository_catalog_query.md) | Scanner、Service 分页查询与 Desktop 列表 |
 | 个人版 Verify | [personal_archive_verify.md](personal_archive_verify.md) | `.bkf` 完整只读认证与解压校验 |
 | Windows 个人版恢复 | [windows_personal_restore.md](windows_personal_restore.md) | 卷恢复；Full/Incremental tip 整盘 disk→disk（Worker + Service + Desktop） |
+| `adapters/windows_pe` | [windows_pe.md](windows_pe.md) | WinPE 离线恢复基础设施：跨重启 Pending Store（PE0）、一次性启动（PE1）、WinRE 镜像构建（PE2） |
+| `apps/pe_restore` | [pe_restore.md](pe_restore.md) | WinPE 恢复执行器（PE3）：UI + mini-supervisor，经 Worker Session 协议驱动整盘恢复 |
 | Windows 文件集备份 | [windows_file_set_backup.md](windows_file_set_backup.md) | schema 4 file_set Full/Incremental；ADR-0020 metadata signature 设计待实施 |
 | Desktop / Service 完成计划 | [../migration/DESKTOP_SERVICE_COMPLETION_PLAN.md](../migration/DESKTOP_SERVICE_COMPLETION_PLAN.md) | UI 国际化、剩余页面迁移、Service 控制面与 agent 分工 |
 | 文件集备份与恢复设计 | [../architecture/FILE_SET_BACKUP_RESTORE.md](../architecture/FILE_SET_BACKUP_RESTORE.md) | 文件/目录保护、V7 Archive、V4 Service、Windows 文件语义与恢复边界 |

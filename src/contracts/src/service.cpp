@@ -106,6 +106,12 @@ template <typename Payload, typename Validator>
     case ServiceRequestKind::kAnalyzeNtfsShrink:
         return validate_payload<RestorePreflightRequest>(request,
                                                          validate_restore_preflight_request);
+    case ServiceRequestKind::kPreparePeRestore:
+        return validate_payload<RestorePreflightRequest>(request,
+                                                         validate_restore_preflight_request);
+    case ServiceRequestKind::kGetPeRestoreState:
+        return validate_payload<PeRestoreStateRequest>(request,
+                                                       validate_pe_restore_state_request);
     default:
         return invalid("service query kind is invalid");
     }
@@ -124,7 +130,10 @@ template <typename Payload, typename Validator>
     case ServiceRequestKind::kCancelJob:
     case ServiceRequestKind::kUnmountSession:
     case ServiceRequestKind::kDeleteSchedule:
+    case ServiceRequestKind::kCancelPeRestore:
         return validate_resource_payload(request);
+    case ServiceRequestKind::kArmPeRestore:
+        return validate_payload<ArmPeRestoreCommand>(request, validate_arm_pe_restore_command);
     case ServiceRequestKind::kStartBackup:
         return validate_payload<StartBackupCommand>(request, validate_start_backup_command);
     case ServiceRequestKind::kStartVerify:
@@ -209,6 +218,10 @@ template <typename Payload, typename Validator>
                                                              validate_file_source_node_page);
     case ServiceRequestKind::kAnalyzeNtfsShrink:
         return validate_response_payload<RestorePreflight>(response, validate_restore_preflight);
+    case ServiceRequestKind::kPreparePeRestore:
+        return validate_response_payload<RestorePreflight>(response, validate_restore_preflight);
+    case ServiceRequestKind::kGetPeRestoreState:
+        return validate_response_payload<PeRestoreState>(response, validate_pe_restore_state);
     default:
         return invalid("service query response kind is invalid");
     }
@@ -239,7 +252,7 @@ template <typename Payload, typename Validator>
 
 bool is_service_query_kind(const ServiceRequestKind kind) noexcept {
     return kind >= ServiceRequestKind::kGetServiceInfo &&
-           kind <= ServiceRequestKind::kAnalyzeNtfsShrink;
+           kind <= ServiceRequestKind::kGetPeRestoreState;
 }
 
 bool is_service_command_kind(const ServiceRequestKind kind) noexcept {
@@ -247,7 +260,9 @@ bool is_service_command_kind(const ServiceRequestKind kind) noexcept {
             kind <= ServiceRequestKind::kExecuteDeletePlan) ||
            kind == ServiceRequestKind::kStartFileRestore ||
            kind == ServiceRequestKind::kUpdateServiceSettings ||
-           kind == ServiceRequestKind::kConnectRepositoryLocation;
+           kind == ServiceRequestKind::kConnectRepositoryLocation ||
+           kind == ServiceRequestKind::kArmPeRestore ||
+           kind == ServiceRequestKind::kCancelPeRestore;
 }
 
 base::Result<void> validate_service_request(const ServiceRequest& request) {

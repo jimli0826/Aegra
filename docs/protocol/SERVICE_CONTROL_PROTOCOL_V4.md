@@ -137,6 +137,9 @@ Job list 的 `progress`：仅合并 Worker 监督器缓存中的真实 progress�
 | 15 | PrepareFileRestore | Query |
 | 16 | GetServiceSettings | Query |
 | 17 | ListRepositoryDirectories | Query |
+| 18 | AnalyzeNtfsShrink | Query |
+| 19 | PreparePeRestore | Query |
+| 20 | GetPeRestoreState | Query |
 | 32 | AddRepositoryConnection | Command |
 | 33 | ImportRepositoryConnection | Command |
 | 34 | TestRepositoryConnection | Command |
@@ -156,6 +159,8 @@ Job list 的 `progress`：仅合并 Worker 监督器缓存中的真实 progress�
 | 48 | StartFileRestore | Command |
 | 49 | UpdateServiceSettings | Command |
 | 50 | ConnectRepositoryLocation | Command |
+| 51 | ArmPeRestore | Command |
+| 52 | CancelPeRestore | Command |
 
 ---
 
@@ -901,7 +906,70 @@ F0 只冻结 wire。实现阶段：
 
 ---
 
-## 12. 维护说明
+## 12. WinPE 离线恢复（kinds 19 / 20 / 51 / 52）
+
+设计权威：[WinPE 离线系统盘恢复设计](../architecture/WINPE_OFFLINE_RESTORE.md)、ADR-0026。
+能力位：`restore.pe.prepare` / `restore.pe.arm` / `restore.pe.cancel`（三者同批声明；缺失时
+四个 kind 均返回 `service.capability_unavailable`）。
+
+### 12.1 kind 19 — PreparePeRestore（Query）
+
+**用途：** 系统盘离线恢复预检。payload 与 kind 9 PrepareRestore **完全相同**
+（`RestorePreflightRequest`），响应同为 `RestorePreflight`；差异在服务端约束：
+
+- `target_source_id` 必须是 `disk.N` 且 `is_system=true`（kind 9 对该目标拒绝，本 kind 要求它）；
+- `volume_size_policy` 必须为 `1`（require_source_size）；
+- 目标磁盘必须有非空序列号（PE 内重匹配依据）且分区风格为 MBR/GPT；
+- 备份链每一层所在物理盘不得包含目标盘（整盘覆盖会摧毁自身数据源）；
+- 加密 Archive 以 `archive_password` 试开 tip 验证。
+
+成功 `message_code = "pe_restore.preflight_ready"`；签发的 token 与 kind 9 同一 store、同一
+TTL。PE token 喂给 kind 40 会被其 is_system 复检拒绝，反向同理。
+
+### 12.2 kind 20 — GetPeRestoreState（Query）
+
+请求 payload：**空对象**（exact 0 字段）。成功 payload（exact 4 字段）：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `armed` | bool | 一次性启动项存在且 bootsequence 指向它 |
+| `job_uuid` | string | 待执行 Pending Job（无则 `""`） |
+| `target_display` | string | 目标盘展示名 |
+| `created_utc_ms` | int64 | Pending Job 写入时间（无则 0） |
+
+### 12.3 kind 51 — ArmPeRestore（Command）
+
+构建/缓存 WinPE 镜像（首次 DISM 1–3 分钟）→ 写跨重启 Pending Job（含密封信封）→
+`bcdedit /bootsequence` 一次性启动。请求 payload（exact 7 字段）：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `preflight_token` | string | 来自 kind 19 |
+| `confirmed` | bool | 必须 `true` |
+| `archive_password` | string | 密封入信封；未加密 `""`；不记日志 |
+| `prompt_for_password` | bool | `true`：不落盘任何密钥材料，PE 内交互输入；与非空密码互斥 |
+| `preserve_disk_signature` | bool | 同 kind 40 语义 |
+| `auto_expand_last_partition` | bool | PE 离线恢复下扩容被 Worker 跳过（记录意图） |
+| `locale` | string | PE UI 语言；`""` → en-US |
+
+成功返回 `CommandAcknowledgement`（`resource_id` = PE job uuid）。单占用：已存在未消费
+Pending 时返回 kConflict（先 kind 52 取消）。失败 message code：`pe_restore.command_failed`。
+非 prompt 模式会重开 tip Archive 复验源盘大小与密码。
+
+### 12.4 kind 52 — CancelPeRestore（Command）
+
+请求 payload：`ResourceRef`（id 内容不参与语义，建议 `"pe-restore"`）。Disarm 一次性启动 +
+擦除删除 Job Key + 删除 Pending Job。幂等：无待恢复时同样成功。
+
+### 12.5 阶段 C 事件
+
+Service 启动时扫描 PE 写回的 `restore_result.v1.json`，经事件通道（kind 7 ListEvents 可见）
+发布 `pe_restore.succeeded` / `pe_restore.failed` / `pe_restore.cancelled`
+（correlation_id = PE job uuid），随后清理 pending 文件与残留启动项。
+
+---
+
+## 13. 维护说明
 
 - 字段变更需要新 schema 或新 ADR；
 - 同步更新 Contracts、Service codec、Desktop codec 与本文；

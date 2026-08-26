@@ -29,6 +29,7 @@ namespace aegra::apps::service {
 
 class IWorkerJobService;
 class MountSupervisor;
+class PeRestoreJobService;
 class RepositoryLocationBrowseRegistry;
 class ScheduleService;
 class WorkerSupervisor;
@@ -71,6 +72,7 @@ struct ServiceRuntimeInfo final {
     application::FileBrowseService* file_browse{nullptr};
     RepositoryLocationBrowseRegistry* repository_location_browse{nullptr};
     IWorkerJobService* worker_jobs{nullptr};
+    PeRestoreJobService* pe_restore{nullptr};
     ScheduleService* schedules{nullptr};
     WorkerSupervisor* worker_supervisor{nullptr};
     MountSupervisor* mount_supervisor{nullptr};

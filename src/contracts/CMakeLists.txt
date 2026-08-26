@@ -1,6 +1,7 @@
 add_library(aegra_contracts STATIC
     src/file_set.cpp
     src/job.cpp
+    src/pe_restore.cpp
     src/progress.cpp
     src/repository_query.cpp
     src/service.cpp

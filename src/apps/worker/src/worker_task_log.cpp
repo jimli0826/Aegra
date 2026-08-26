@@ -1,17 +1,14 @@
 #include "worker_task_log.h"
 
-#include <spdlog/sinks/basic_file_sink.h>
-#include <spdlog/spdlog.h>
-
 #include <Windows.h>
 
-#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdint>
 #include <ctime>
 #include <filesystem>
 #include <limits>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -154,9 +151,15 @@ constexpr std::size_t kFieldKeyWidth = 36;
     return out;
 }
 
-void write_line(spdlog::logger& logger, const spdlog::level::level_enum level,
-                const std::string_view message) {
-    logger.log(level, "{}", message);
+/// "[YYYY-MM-DD HH:MM:SS.mmm] " — same layout the previous spdlog pattern produced.
+[[nodiscard]] std::string line_timestamp() {
+    SYSTEMTIME local{};
+    GetLocalTime(&local);
+    char buffer[40]{};
+    std::snprintf(buffer, sizeof(buffer), "[%04u-%02u-%02u %02u:%02u:%02u.%03u] ", local.wYear,
+                  local.wMonth, local.wDay, local.wHour, local.wMinute, local.wSecond,
+                  local.wMilliseconds);
+    return buffer;
 }
 
 } // namespace
@@ -199,9 +202,42 @@ std::string path_display(const std::filesystem::path& path) {
     return utf8.empty() ? path.string() : utf8;
 }
 
+/// Win32 write-through file log. The previous spdlog/CRT sink lost data in WinPE:
+/// CRT fopen cannot open volume-GUID paths and fflush only reaches the OS cache,
+/// which a hard reset (the only way off the PE failure page) discards. CreateFileW
+/// accepts every path form and FILE_FLAG_WRITE_THROUGH makes each line durable.
 struct WorkerTaskLog::Impl final {
-    std::shared_ptr<spdlog::logger> logger;
+    HANDLE file{INVALID_HANDLE_VALUE};
     std::string path;
+    std::mutex mutex;
+
+    ~Impl() {
+        if (file != INVALID_HANDLE_VALUE) {
+            CloseHandle(file);
+        }
+    }
+
+    void write(const std::string_view level, const std::string_view message) noexcept {
+        if (file == INVALID_HANDLE_VALUE) {
+            return;
+        }
+        try {
+            std::string line = line_timestamp();
+            line += '[';
+            line += level;
+            line += "] ";
+            line += message;
+            line += "\r\n";
+            const std::lock_guard lock(mutex);
+            DWORD written = 0;
+            (void)WriteFile(file, line.data(), static_cast<DWORD>(line.size()), &written, nullptr);
+        } catch (...) {
+        }
+    }
+
+    void info(const std::string_view message) noexcept { write("info ", message); }
+    void warn(const std::string_view message) noexcept { write("warn ", message); }
+    void error(const std::string_view message) noexcept { write("error", message); }
 };
 
 WorkerTaskLog::WorkerTaskLog(std::unique_ptr<Impl> impl) noexcept : impl_(std::move(impl)) {}
@@ -210,17 +246,13 @@ WorkerTaskLog::~WorkerTaskLog() {
     if (g_active_task_log == this) {
         g_active_task_log = nullptr;
     }
-    if (impl_ == nullptr || impl_->logger == nullptr) {
+    if (impl_ == nullptr || impl_->file == INVALID_HANDLE_VALUE) {
         return;
     }
-    try {
-        impl_->logger->info("========================================");
-        impl_->logger->info("Log ended");
-        impl_->logger->info("========================================");
-        impl_->logger->flush();
-        spdlog::drop(impl_->logger->name());
-    } catch (...) {
-    }
+    impl_->info("========================================");
+    impl_->info("Log ended");
+    impl_->info("========================================");
+    FlushFileBuffers(impl_->file);
 }
 
 WorkerTaskLog* WorkerTaskLog::active() noexcept { return g_active_task_log; }
@@ -252,22 +284,20 @@ std::unique_ptr<WorkerTaskLog> WorkerTaskLog::open(const std::string_view operat
         if (path_utf8.empty()) {
             return nullptr;
         }
-        auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path_utf8, true);
-        static std::atomic_uint64_t counter{0};
-        const auto name = "worker_task_" + std::to_string(++counter);
-        auto logger = std::make_shared<spdlog::logger>(name, std::move(sink));
-        logger->set_level(spdlog::level::info);
-        logger->flush_on(spdlog::level::info);
-        // %-5l keeps [info]/[warn]/[error] the same width so field colons stay aligned.
-        logger->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%-5l] %v");
-        logger->info("========================================");
-        logger->info("Aegra Worker Task Log");
-        logger->info("  {} : {}", pad_key("operation"), operation);
-        logger->info("  {} : {}", pad_key("file"), path_utf8);
-        logger->info("========================================");
+        HANDLE file =
+            CreateFileW(file_path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS,
+                        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, nullptr);
+        if (file == INVALID_HANDLE_VALUE) {
+            return nullptr;
+        }
         auto impl = std::make_unique<Impl>();
-        impl->logger = std::move(logger);
+        impl->file = file;
         impl->path = std::move(path_utf8);
+        impl->info("========================================");
+        impl->info("Aegra Worker Task Log");
+        impl->info("  " + pad_key("operation") + " : " + std::string(operation));
+        impl->info("  " + pad_key("file") + " : " + impl->path);
+        impl->info("========================================");
         return std::unique_ptr<WorkerTaskLog>(new WorkerTaskLog(std::move(impl)));
     } catch (...) {
         return nullptr;
@@ -275,53 +305,41 @@ std::unique_ptr<WorkerTaskLog> WorkerTaskLog::open(const std::string_view operat
 }
 
 void WorkerTaskLog::info(const std::string_view message) noexcept {
-    if (impl_ == nullptr || impl_->logger == nullptr) {
-        return;
-    }
-    try {
-        write_line(*impl_->logger, spdlog::level::info, message);
-    } catch (...) {
+    if (impl_ != nullptr) {
+        impl_->info(message);
     }
 }
 
 void WorkerTaskLog::warn(const std::string_view message) noexcept {
-    if (impl_ == nullptr || impl_->logger == nullptr) {
-        return;
-    }
-    try {
-        write_line(*impl_->logger, spdlog::level::warn, message);
-    } catch (...) {
+    if (impl_ != nullptr) {
+        impl_->warn(message);
     }
 }
 
 void WorkerTaskLog::error(const std::string_view message) noexcept {
-    if (impl_ == nullptr || impl_->logger == nullptr) {
-        return;
-    }
-    try {
-        write_line(*impl_->logger, spdlog::level::err, message);
-    } catch (...) {
+    if (impl_ != nullptr) {
+        impl_->error(message);
     }
 }
 
 void WorkerTaskLog::section(const std::string_view title) noexcept {
-    if (impl_ == nullptr || impl_->logger == nullptr) {
+    if (impl_ == nullptr) {
         return;
     }
     try {
-        impl_->logger->info("");
-        impl_->logger->info("[{}]", title);
+        impl_->info("");
+        impl_->info("[" + std::string(title) + "]");
     } catch (...) {
     }
 }
 
 void WorkerTaskLog::field(const std::string_view key, const std::string_view value) noexcept {
-    if (impl_ == nullptr || impl_->logger == nullptr) {
+    if (impl_ == nullptr) {
         return;
     }
     try {
         // Fixed-width key column: "  <key padded to 36> : <value>"
-        impl_->logger->info("  {} : {}", pad_key(key), value);
+        impl_->info("  " + pad_key(key) + " : " + std::string(value));
     } catch (...) {
     }
 }
@@ -339,23 +357,24 @@ void WorkerTaskLog::field_bytes(const std::string_view key, const std::uint64_t 
 }
 
 void WorkerTaskLog::stage_begin(const std::string_view stage) noexcept {
-    if (impl_ == nullptr || impl_->logger == nullptr) {
+    if (impl_ == nullptr) {
         return;
     }
     try {
-        impl_->logger->info("");
-        impl_->logger->info("[Stage: {}] begin", stage);
+        impl_->info("");
+        impl_->info("[Stage: " + std::string(stage) + "] begin");
     } catch (...) {
     }
 }
 
 void WorkerTaskLog::stage_ok(const std::string_view stage,
                              const std::chrono::milliseconds elapsed) noexcept {
-    if (impl_ == nullptr || impl_->logger == nullptr) {
+    if (impl_ == nullptr) {
         return;
     }
     try {
-        impl_->logger->info("[Stage: {}] OK ({})", stage, format_duration_ms(elapsed));
+        impl_->info("[Stage: " + std::string(stage) + "] OK (" + format_duration_ms(elapsed) +
+                    ")");
     } catch (...) {
     }
 }
@@ -363,11 +382,12 @@ void WorkerTaskLog::stage_ok(const std::string_view stage,
 void WorkerTaskLog::stage_fail(const std::string_view stage,
                                const std::chrono::milliseconds elapsed, const base::Error& error,
                                const std::string_view step, const std::string_view hint) noexcept {
-    if (impl_ == nullptr || impl_->logger == nullptr) {
+    if (impl_ == nullptr) {
         return;
     }
     try {
-        impl_->logger->error("[Stage: {}] FAILED ({})", stage, format_duration_ms(elapsed));
+        impl_->error("[Stage: " + std::string(stage) + "] FAILED (" +
+                     format_duration_ms(elapsed) + ")");
         if (!step.empty()) {
             field("step", step);
         }

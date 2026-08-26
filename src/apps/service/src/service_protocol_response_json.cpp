@@ -1149,7 +1149,15 @@ Json encode_response_payload(const contracts::ServiceResponse& response) {
                            encode_mount_session);
     case contracts::ServiceRequestKind::kPrepareRestore:
     case contracts::ServiceRequestKind::kAnalyzeNtfsShrink:
+    case contracts::ServiceRequestKind::kPreparePeRestore:
         return encode_restore_preflight(std::get<contracts::RestorePreflight>(response.payload));
+    case contracts::ServiceRequestKind::kGetPeRestoreState: {
+        const auto& state = std::get<contracts::PeRestoreState>(response.payload);
+        return Json{{"armed", state.armed},
+                    {"job_uuid", state.job_uuid},
+                    {"target_display", state.target_display},
+                    {"created_utc_ms", state.created_utc_ms}};
+    }
     case contracts::ServiceRequestKind::kResolveRecoveryPointChain:
         return encode_chain_result(std::get<contracts::RecoveryPointChainResult>(response.payload));
     case contracts::ServiceRequestKind::kPlanDeleteRecoveryPoints:
@@ -1250,7 +1258,21 @@ parse_response_payload(const contracts::ServiceResponseKind response_kind,
         return parse_page<contracts::MountSessionSummary>(payload, parse_mount_session);
     case contracts::ServiceRequestKind::kPrepareRestore:
     case contracts::ServiceRequestKind::kAnalyzeNtfsShrink:
+    case contracts::ServiceRequestKind::kPreparePeRestore:
         return parse_restore_preflight(payload);
+    case contracts::ServiceRequestKind::kGetPeRestoreState: {
+        constexpr std::array<std::string_view, 4> keys{"armed", "job_uuid", "target_display",
+                                                       "created_utc_ms"};
+        if (!exact_keys(payload, keys)) {
+            throw std::invalid_argument("pe restore state fields are invalid");
+        }
+        contracts::PeRestoreState state;
+        state.armed = payload.at("armed").get<bool>();
+        state.job_uuid = payload.at("job_uuid").get<std::string>();
+        state.target_display = payload.at("target_display").get<std::string>();
+        state.created_utc_ms = payload.at("created_utc_ms").get<std::int64_t>();
+        return state;
+    }
     case contracts::ServiceRequestKind::kResolveRecoveryPointChain:
         return parse_chain_result(payload);
     case contracts::ServiceRequestKind::kPlanDeleteRecoveryPoints:

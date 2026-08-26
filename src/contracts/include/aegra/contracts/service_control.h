@@ -496,6 +496,29 @@ struct StartRestoreCommand final {
     std::vector<RestorePartitionLayoutEdit> partition_layout_edits;
 };
 
+/// kind 51 ArmPeRestore (WINPE_OFFLINE_RESTORE §4.1 / ADR-0026). `preflight_token`
+/// comes from kind 19. `archive_password` (never log) seals into the cross-reboot
+/// envelope; empty for unencrypted archives. `prompt_for_password` keeps secrets off
+/// disk and lets the PE executor prompt. `locale` picks the PE UI language.
+struct ArmPeRestoreCommand final {
+    std::string preflight_token;
+    bool confirmed{false};
+    std::string archive_password;
+    bool prompt_for_password{false};
+    bool preserve_disk_signature{true};
+    bool auto_expand_last_partition{false};
+    std::string locale;
+};
+
+/// kind 20 GetPeRestoreState: parameterless request, armed-state response.
+struct PeRestoreStateRequest final {};
+struct PeRestoreState final {
+    bool armed{false};
+    std::string job_uuid;
+    std::string target_display;
+    std::int64_t created_utc_ms{0};
+};
+
 struct MountRecoveryPointCommand final {
     std::string repository_connection_id;
     std::string recovery_point_id;
@@ -720,6 +743,9 @@ validate_repository_connection_input(const RepositoryConnectionInput& input);
 validate_restore_preflight_request(const RestorePreflightRequest& request);
 [[nodiscard]] base::Result<void> validate_restore_preflight(const RestorePreflight& preflight);
 [[nodiscard]] base::Result<void> validate_start_restore_command(const StartRestoreCommand& command);
+[[nodiscard]] base::Result<void> validate_arm_pe_restore_command(const ArmPeRestoreCommand&);
+[[nodiscard]] base::Result<void> validate_pe_restore_state_request(const PeRestoreStateRequest&);
+[[nodiscard]] base::Result<void> validate_pe_restore_state(const PeRestoreState& state);
 [[nodiscard]] base::Result<void>
 validate_mount_recovery_point_command(const MountRecoveryPointCommand& command);
 [[nodiscard]] base::Result<void>

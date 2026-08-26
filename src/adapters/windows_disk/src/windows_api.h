@@ -55,7 +55,12 @@ class UniqueHandle final {
         break;
     case ERROR_ACCESS_DENIED:
     case ERROR_PRIVILEGE_NOT_HELD:
-        code = base::ErrorCode::kUnauthorized;
+        // A denied/priv-lacking device or raw-disk operation is an I/O/access
+        // failure, never an archive-credential problem (passwords are verified in
+        // the archive/crypto layer). Mapping to kUnauthorized here would surface a
+        // misleading "re-enter the archive password" prompt for e.g. a
+        // write-protected or in-use target disk.
+        code = base::ErrorCode::kIoFailure;
         break;
     case ERROR_OPERATION_ABORTED:
         code = base::ErrorCode::kCancelled;

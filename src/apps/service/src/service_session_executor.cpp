@@ -91,6 +91,7 @@ struct RequestState final {
     case Kind::kPrepareRestore:
     case Kind::kAnalyzeNtfsShrink:
     case Kind::kPrepareFileRestore:
+    case Kind::kPreparePeRestore:
         return 1;
     case Kind::kBrowseFileSources:
     case Kind::kListRepositoryDirectories:
@@ -114,6 +115,8 @@ struct RequestState final {
     case Kind::kExecuteDeletePlan:
     case Kind::kStartFileRestore:
     case Kind::kUpdateServiceSettings:
+    case Kind::kArmPeRestore:
+    case Kind::kCancelPeRestore:
         return 3;
     default:
         return 0;

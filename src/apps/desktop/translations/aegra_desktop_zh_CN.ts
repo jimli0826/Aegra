@@ -1555,6 +1555,74 @@
         <source>— PE only</source>
         <translation>— 仅 PE</translation>
     </message>
+    <message id="aegra.restore.pe_offline_tag">
+        <source>— offline restore (restart required)</source>
+        <translation>— 离线恢复（需重启）</translation>
+    </message>
+    <message id="aegra.restore.pe_capability_missing">
+        <source>Offline system-disk restore is not available on this Service</source>
+        <translation>此 Service 不支持系统盘离线恢复</translation>
+    </message>
+    <message id="aegra.restore.pe_armed">
+        <source>Offline restore is armed. Restart the computer to begin.</source>
+        <translation>离线恢复已就绪，重启计算机即开始。</translation>
+    </message>
+    <message id="aegra.restore.pe_cancelled">
+        <source>Pending offline restore was cancelled</source>
+        <translation>待执行的离线恢复已取消</translation>
+    </message>
+    <message id="aegra.restore.pe_exclusive">
+        <source>Map only the system disk for an offline restore</source>
+        <translation>离线恢复时请仅映射系统盘</translation>
+    </message>
+    <message id="aegra.restore.pe_confirm_title">
+        <source>Offline system-disk restore</source>
+        <translation>系统盘离线恢复</translation>
+    </message>
+    <message id="aegra.restore.pe_confirm_text">
+        <source>The system disk cannot be restored while Windows is running. Aegra will prepare a recovery environment; after you restart the computer, the restore runs before Windows starts.</source>
+        <translation>Windows 运行时无法覆盖系统盘。Aegra 将准备恢复环境；重启计算机后，恢复会在 Windows 启动前执行。</translation>
+    </message>
+    <message id="aegra.restore.pe_confirm_target">
+        <source>Target disk: %1</source>
+        <translation>目标磁盘：%1</translation>
+    </message>
+    <message id="aegra.restore.pe_confirm_ack">
+        <source>I understand that every byte on the target disk will be overwritten and this cannot be undone.</source>
+        <translation>我了解目标磁盘上的所有数据将被覆盖，且无法撤销。</translation>
+    </message>
+    <message id="aegra.restore.pe_confirm_button">
+        <source>Prepare offline restore</source>
+        <translation>准备离线恢复</translation>
+    </message>
+    <message id="aegra.restore.pe_banner_armed">
+        <source>Offline system-disk restore is armed. Restart the computer to begin.</source>
+        <translation>系统盘离线恢复已就绪，重启计算机即开始。</translation>
+    </message>
+    <message id="aegra.restore.pe_banner_cancel">
+        <source>Cancel offline restore</source>
+        <translation>取消离线恢复</translation>
+    </message>
+    <message id="aegra.error.pe_restore.preflight_failed">
+        <source>Offline restore preflight failed</source>
+        <translation>离线恢复预检失败</translation>
+    </message>
+    <message id="aegra.error.pe_restore.command_failed">
+        <source>Offline restore command failed</source>
+        <translation>离线恢复命令失败</translation>
+    </message>
+    <message id="aegra.event.pe_restore.succeeded">
+        <source>Offline system-disk restore completed successfully</source>
+        <translation>系统盘离线恢复已成功完成</translation>
+    </message>
+    <message id="aegra.event.pe_restore.failed">
+        <source>Offline system-disk restore failed</source>
+        <translation>系统盘离线恢复失败</translation>
+    </message>
+    <message id="aegra.event.pe_restore.cancelled">
+        <source>Offline system-disk restore was cancelled; no data was written</source>
+        <translation>系统盘离线恢复已取消，未写入任何数据</translation>
+    </message>
     <message id="aegra.restore.select_checkpoint">
         <source>Select checkpoint</source>
         <translation>选择检查点</translation>

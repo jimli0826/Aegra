@@ -1239,7 +1239,10 @@ Item {
         var targets = root.targetDisks || []
         for (var i = 0; i < targets.length; ++i) {
             if (Number(targets[i].diskNumber) === Number(targetNum)
-                    && targets[i].isSystemDisk === true)
+                    && targets[i].isSystemDisk === true
+                    // Offline (WinPE) restore unlocks the system disk when the
+                    // Service declares restore.pe.*.
+                    && !serviceClient.peRestore.available)
                 //% "System disk restore requires PE (not available online)"
                 return qsTrId("aegra.restore.system_target_blocked")
         }
@@ -1448,9 +1451,12 @@ Item {
             else if (inUse)
                 //% "— in use"
                 lab += "  " + qsTrId("aegra.restore.target_in_use_tag")
-            else if (isSystem)
+            else if (isSystem && !serviceClient.peRestore.available)
                 //% "— PE only"
                 lab += "  " + qsTrId("aegra.restore.pe_only_tag")
+            else if (isSystem)
+                //% "— offline restore (restart required)"
+                lab += "  " + qsTrId("aegra.restore.pe_offline_tag")
             else if (hasArchive)
                 //% "— archive here"
                 lab += "  " + qsTrId("aegra.restore.archive_here_tag")
@@ -1461,7 +1467,8 @@ Item {
                 inUse: inUse,
                 isSystem: isSystem,
                 hasArchive: hasArchive,
-                enabled: !tooSmall && !inUse && !isSystem && !hasArchive
+                enabled: !tooSmall && !inUse && !hasArchive
+                         && (!isSystem || serviceClient.peRestore.available)
             })
         }
         return out
@@ -1890,9 +1897,71 @@ Item {
                 : qsTrId("aegra.restore.map_required")
             return
         }
+        if (!root.isVolumeMode) {
+            // System-disk targets take the offline (WinPE) hand-off and must be the
+            // only mapping: arming reboots the machine, so queueing online jobs
+            // beside it would be lost work.
+            var pePairs = pairs.filter(function(p) { return root.isSystemDiskTarget(p.target) })
+            if (pePairs.length > 0) {
+                if (pairs.length > 1) {
+                    //% "Map only the system disk for an offline restore"
+                    serviceClient.showToast(qsTrId("aegra.restore.pe_exclusive"), true)
+                    root.restoreJobsSubmitted = true
+                    root.restoreSessionFailed = true
+                    root.restoreSessionErrorText = qsTrId("aegra.restore.pe_exclusive")
+                    return
+                }
+                root.pePendingPair = pePairs[0]
+                peConfirmDialog.targetText = root.targetDiskLabel(pePairs[0].target)
+                peConfirmDialog.open()
+                return
+            }
+        }
         root.pendingRestoreQueue = pairs
         root.multiRestoreActive = true
         root.startNextQueuedRestore()
+    }
+
+    property var pePendingPair: null
+
+    function isSystemDiskTarget(targetNum) {
+        var targets = root.targetDisks || []
+        for (var i = 0; i < targets.length; ++i) {
+            if (Number(targets[i].diskNumber) === Number(targetNum)
+                    && targets[i].isSystemDisk === true)
+                return true
+        }
+        return false
+    }
+
+    function targetDiskLabel(targetNum) {
+        var targets = root.targetDisks || []
+        for (var i = 0; i < targets.length; ++i) {
+            if (Number(targets[i].diskNumber) === Number(targetNum)) {
+                var label = targets[i].name || ("Disk " + targetNum)
+                if (targets[i].size)
+                    label += "  (" + targets[i].size + ")"
+                return label
+            }
+        }
+        return "Disk " + targetNum
+    }
+
+    function confirmPeRestore() {
+        var pair = root.pePendingPair
+        root.pePendingPair = null
+        if (!pair)
+            return
+        root.beginRestoreSession()
+        var ok = serviceClient.peRestore.start(pair.source, pair.target,
+                                              root.selectedCheckpointId,
+                                              root.pendingLayoutPassword,
+                                              root.preserveSignature,
+                                              false)
+        if (!ok) {
+            root.restoreJobsSubmitted = true
+            root.restoreSessionFailed = true
+        }
     }
 
     function startMappedRestore() {
@@ -1945,6 +2014,19 @@ Item {
         function onRestorePreflightProvisional() {
             // Direct prepare returned provisional — analysis required (capability path).
             // No shrink detail card; mapping completes only after Analyze succeeds.
+        }
+    }
+
+    Connections {
+        target: serviceClient.peRestore
+        function onArmSucceeded() {
+            // Armed: nothing runs until the user restarts. Session shows submitted.
+            root.restoreJobsSubmitted = true
+        }
+        function onArmFailed(message) {
+            root.restoreJobsSubmitted = true
+            root.restoreSessionFailed = true
+            root.restoreSessionErrorText = message || ""
         }
     }
 
@@ -2090,6 +2172,13 @@ Item {
         parent: Overlay.overlay
         onAccepted: function(password) { root.submitLayoutPassword(password) }
         onCancelled: { root.pendingLayoutPassword = "" }
+    }
+
+    PeRestoreConfirmDialog {
+        id: peConfirmDialog
+        parent: Overlay.overlay
+        onAccepted: root.confirmPeRestore()
+        onCancelled: root.pePendingPair = null
     }
 
     Connections {
@@ -3727,6 +3816,56 @@ Item {
         anchors.rightMargin: 16
         anchors.bottomMargin: 16
         spacing: 12
+
+        // Pending offline (WinPE) restore banner — survives page/app restarts via kind 20.
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: peBannerRow.implicitHeight + 20
+            visible: serviceClient.peRestore.armed
+            radius: 12
+            color: Theme.colorCard
+            border.width: 1
+            border.color: Theme.colorBorder
+
+            RowLayout {
+                id: peBannerRow
+                anchors.fill: parent
+                anchors.leftMargin: 16
+                anchors.rightMargin: 16
+                spacing: 12
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 2
+                    Text {
+                        Layout.fillWidth: true
+                        //% "Offline system-disk restore is armed. Restart the computer to begin."
+                        text: qsTrId("aegra.restore.pe_banner_armed")
+                        color: Theme.colorTextWhite
+                        font.pixelSize: 13
+                        font.bold: true
+                        font.family: Theme.fontFamily
+                        wrapMode: Text.WordWrap
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        visible: serviceClient.peRestore.targetDisplay.length > 0
+                        //% "Target disk: %1"
+                        text: qsTrId("aegra.restore.pe_confirm_target")
+                                  .arg(serviceClient.peRestore.targetDisplay)
+                        color: Theme.colorTextGrey
+                        font.pixelSize: 12
+                        font.family: Theme.fontFamily
+                        wrapMode: Text.WordWrap
+                    }
+                }
+                AppButton {
+                    //% "Cancel offline restore"
+                    text: qsTrId("aegra.restore.pe_banner_cancel")
+                    onClicked: serviceClient.peRestore.cancel()
+                }
+            }
+        }
 
         // Header row A: stat cards — visible only on step 0
         RowLayout {

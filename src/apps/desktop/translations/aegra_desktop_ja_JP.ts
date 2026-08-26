@@ -1555,6 +1555,74 @@
         <source>— PE only</source>
         <translation>— PE のみ</translation>
     </message>
+    <message id="aegra.restore.pe_offline_tag">
+        <source>— offline restore (restart required)</source>
+        <translation>— オフライン復元（再起動が必要）</translation>
+    </message>
+    <message id="aegra.restore.pe_capability_missing">
+        <source>Offline system-disk restore is not available on this Service</source>
+        <translation>この Service ではシステムディスクのオフライン復元を利用できません</translation>
+    </message>
+    <message id="aegra.restore.pe_armed">
+        <source>Offline restore is armed. Restart the computer to begin.</source>
+        <translation>オフライン復元の準備ができました。再起動すると開始します。</translation>
+    </message>
+    <message id="aegra.restore.pe_cancelled">
+        <source>Pending offline restore was cancelled</source>
+        <translation>保留中のオフライン復元をキャンセルしました</translation>
+    </message>
+    <message id="aegra.restore.pe_exclusive">
+        <source>Map only the system disk for an offline restore</source>
+        <translation>オフライン復元ではシステムディスクのみをマッピングしてください</translation>
+    </message>
+    <message id="aegra.restore.pe_confirm_title">
+        <source>Offline system-disk restore</source>
+        <translation>システムディスクのオフライン復元</translation>
+    </message>
+    <message id="aegra.restore.pe_confirm_text">
+        <source>The system disk cannot be restored while Windows is running. Aegra will prepare a recovery environment; after you restart the computer, the restore runs before Windows starts.</source>
+        <translation>Windows の実行中はシステムディスクを復元できません。Aegra が回復環境を準備し、再起動後に Windows の起動前に復元が実行されます。</translation>
+    </message>
+    <message id="aegra.restore.pe_confirm_target">
+        <source>Target disk: %1</source>
+        <translation>対象ディスク：%1</translation>
+    </message>
+    <message id="aegra.restore.pe_confirm_ack">
+        <source>I understand that every byte on the target disk will be overwritten and this cannot be undone.</source>
+        <translation>対象ディスク上のすべてのデータが上書きされ、元に戻せないことを理解しました。</translation>
+    </message>
+    <message id="aegra.restore.pe_confirm_button">
+        <source>Prepare offline restore</source>
+        <translation>オフライン復元を準備</translation>
+    </message>
+    <message id="aegra.restore.pe_banner_armed">
+        <source>Offline system-disk restore is armed. Restart the computer to begin.</source>
+        <translation>システムディスクのオフライン復元の準備ができました。再起動すると開始します。</translation>
+    </message>
+    <message id="aegra.restore.pe_banner_cancel">
+        <source>Cancel offline restore</source>
+        <translation>オフライン復元をキャンセル</translation>
+    </message>
+    <message id="aegra.error.pe_restore.preflight_failed">
+        <source>Offline restore preflight failed</source>
+        <translation>オフライン復元の事前チェックに失敗しました</translation>
+    </message>
+    <message id="aegra.error.pe_restore.command_failed">
+        <source>Offline restore command failed</source>
+        <translation>オフライン復元コマンドに失敗しました</translation>
+    </message>
+    <message id="aegra.event.pe_restore.succeeded">
+        <source>Offline system-disk restore completed successfully</source>
+        <translation>システムディスクのオフライン復元が正常に完了しました</translation>
+    </message>
+    <message id="aegra.event.pe_restore.failed">
+        <source>Offline system-disk restore failed</source>
+        <translation>システムディスクのオフライン復元に失敗しました</translation>
+    </message>
+    <message id="aegra.event.pe_restore.cancelled">
+        <source>Offline system-disk restore was cancelled; no data was written</source>
+        <translation>システムディスクのオフライン復元はキャンセルされ、データは書き込まれていません</translation>
+    </message>
     <message id="aegra.restore.select_checkpoint">
         <source>Select checkpoint</source>
         <translation>チェックポイントを選択</translation>

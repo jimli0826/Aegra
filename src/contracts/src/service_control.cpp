@@ -612,6 +612,35 @@ base::Result<void> validate_start_restore_command(const StartRestoreCommand& com
     return base::Result<void>::success();
 }
 
+base::Result<void> validate_arm_pe_restore_command(const ArmPeRestoreCommand& command) {
+    const std::optional<std::string> token = command.preflight_token;
+    if (!valid_token(token) || !command.confirmed || command.archive_password.size() > 32) {
+        return invalid("arm pe restore command is invalid");
+    }
+    if (command.prompt_for_password && !command.archive_password.empty()) {
+        return invalid("prompt mode must not carry a plaintext password");
+    }
+    if (command.locale.size() > 16) {
+        return invalid("pe restore locale is invalid");
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void> validate_pe_restore_state_request(const PeRestoreStateRequest&) {
+    return base::Result<void>::success();
+}
+
+base::Result<void> validate_pe_restore_state(const PeRestoreState& state) {
+    if (state.job_uuid.size() > 64 || state.target_display.size() > 256 ||
+        state.created_utc_ms < 0) {
+        return invalid("pe restore state is invalid");
+    }
+    if (state.armed && state.job_uuid.empty()) {
+        return invalid("armed pe restore state requires a job uuid");
+    }
+    return base::Result<void>::success();
+}
+
 base::Result<void> validate_mount_recovery_point_command(const MountRecoveryPointCommand& command) {
     constexpr std::size_t kMaximumArchivePasswordBytes = 32;
     if (!valid_stable_value(command.repository_connection_id, kMaximumIdentifierBytes) ||

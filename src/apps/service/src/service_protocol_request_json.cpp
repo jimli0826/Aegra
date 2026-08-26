@@ -697,6 +697,7 @@ Json encode_request_payload(const contracts::ServiceRequest& request) {
             std::get<contracts::MountSessionListRequest>(request.payload));
     case contracts::ServiceRequestKind::kPrepareRestore:
     case contracts::ServiceRequestKind::kAnalyzeNtfsShrink:
+    case contracts::ServiceRequestKind::kPreparePeRestore:
         return encode_restore_preflight_request(
             std::get<contracts::RestorePreflightRequest>(request.payload));
     case contracts::ServiceRequestKind::kResolveRecoveryPointChain:
@@ -770,6 +771,21 @@ Json encode_request_payload(const contracts::ServiceRequest& request) {
     case contracts::ServiceRequestKind::kGetServiceSettings:
         (void)std::get<contracts::ServiceSettingsQuery>(request.payload);
         return Json::object();
+    case contracts::ServiceRequestKind::kGetPeRestoreState:
+        (void)std::get<contracts::PeRestoreStateRequest>(request.payload);
+        return Json::object();
+    case contracts::ServiceRequestKind::kArmPeRestore: {
+        const auto& body = std::get<contracts::ArmPeRestoreCommand>(request.payload);
+        return Json{{"preflight_token", body.preflight_token},
+                    {"confirmed", body.confirmed},
+                    {"archive_password", body.archive_password},
+                    {"prompt_for_password", body.prompt_for_password},
+                    {"preserve_disk_signature", body.preserve_disk_signature},
+                    {"auto_expand_last_partition", body.auto_expand_last_partition},
+                    {"locale", body.locale}};
+    }
+    case contracts::ServiceRequestKind::kCancelPeRestore:
+        return encode_resource_ref(std::get<contracts::ResourceRef>(request.payload));
     case contracts::ServiceRequestKind::kListRepositoryDirectories: {
         const auto& body = std::get<contracts::RepositoryDirectoryListRequest>(request.payload);
         return Json{{"location_token", body.location_token},
@@ -812,6 +828,7 @@ contracts::ServiceRequestPayload parse_request_payload(const contracts::ServiceR
         return parse_mount_list_request(payload);
     case contracts::ServiceRequestKind::kPrepareRestore:
     case contracts::ServiceRequestKind::kAnalyzeNtfsShrink:
+    case contracts::ServiceRequestKind::kPreparePeRestore:
         return parse_restore_preflight_request(payload);
     case contracts::ServiceRequestKind::kResolveRecoveryPointChain:
     case contracts::ServiceRequestKind::kPlanDeleteRecoveryPoints:
@@ -827,6 +844,7 @@ contracts::ServiceRequestPayload parse_request_payload(const contracts::ServiceR
     case contracts::ServiceRequestKind::kCancelJob:
     case contracts::ServiceRequestKind::kUnmountSession:
     case contracts::ServiceRequestKind::kDeleteSchedule:
+    case contracts::ServiceRequestKind::kCancelPeRestore:
         return parse_resource_ref(payload);
     case contracts::ServiceRequestKind::kStartBackup:
         return parse_start_backup(payload);
@@ -908,6 +926,30 @@ contracts::ServiceRequestPayload parse_request_payload(const contracts::ServiceR
             throw std::invalid_argument("service settings query fields are invalid");
         }
         return contracts::ServiceSettingsQuery{};
+    }
+    case contracts::ServiceRequestKind::kGetPeRestoreState: {
+        constexpr std::array<std::string_view, 0> keys{};
+        if (!exact_keys(payload, keys)) {
+            throw std::invalid_argument("pe restore state request fields are invalid");
+        }
+        return contracts::PeRestoreStateRequest{};
+    }
+    case contracts::ServiceRequestKind::kArmPeRestore: {
+        constexpr std::array<std::string_view, 7> keys{
+            "preflight_token",          "confirmed", "archive_password", "prompt_for_password",
+            "preserve_disk_signature",  "auto_expand_last_partition",    "locale"};
+        if (!exact_keys(payload, keys)) {
+            throw std::invalid_argument("arm pe restore fields are invalid");
+        }
+        contracts::ArmPeRestoreCommand command;
+        command.preflight_token = payload.at("preflight_token").get<std::string>();
+        command.confirmed = payload.at("confirmed").get<bool>();
+        command.archive_password = payload.at("archive_password").get<std::string>();
+        command.prompt_for_password = payload.at("prompt_for_password").get<bool>();
+        command.preserve_disk_signature = payload.at("preserve_disk_signature").get<bool>();
+        command.auto_expand_last_partition = payload.at("auto_expand_last_partition").get<bool>();
+        command.locale = payload.at("locale").get<std::string>();
+        return command;
     }
     case contracts::ServiceRequestKind::kListRepositoryDirectories: {
         constexpr std::array<std::string_view, 2> keys{"location_token", "page"};

@@ -46,6 +46,10 @@ inline constexpr int kPrepareFileRestoreRequestKind = 15;
 inline constexpr int kGetServiceSettingsRequestKind = 16;
 inline constexpr int kListRepositoryDirectoriesRequestKind = 17;
 inline constexpr int kAnalyzeNtfsShrinkRequestKind = 18;
+inline constexpr int kPreparePeRestoreRequestKind = 19;
+inline constexpr int kGetPeRestoreStateRequestKind = 20;
+inline constexpr int kArmPeRestoreRequestKind = 51;
+inline constexpr int kCancelPeRestoreRequestKind = 52;
 inline constexpr int kAddRepositoryConnectionRequestKind = 32;
 inline constexpr int kImportRepositoryConnectionRequestKind = 33;
 inline constexpr int kTestRepositoryConnectionRequestKind = 34;
@@ -195,6 +199,14 @@ struct RestorePreflightPage final {
     QString message_code;
 };
 
+/// kind 20 GetPeRestoreState success payload (exact 4 fields).
+struct PeRestoreStatePage final {
+    bool armed{false};
+    QString job_uuid;
+    QString target_display;
+    qint64 created_utc_ms{0};
+};
+
 [[nodiscard]] QByteArray encode_service_info_request(const QString& request_id);
 [[nodiscard]] QByteArray encode_recovery_point_request(
     const QString& request_id, const std::optional<QString>& continuation_token,
@@ -237,6 +249,18 @@ encode_prepare_restore_request(const QString& request_id, const QString& connect
 [[nodiscard]] QByteArray encode_cancel_job_request(const QString& request_id,
                                                    const QString& idempotency_key,
                                                    const QString& job_id);
+/// kind 19: payload identical to PrepareRestore; the target must be the system disk.
+[[nodiscard]] QByteArray encode_prepare_pe_restore_request(
+    const QString& request_id, const QString& connection_id, const QString& recovery_point_id,
+    const QString& target_source_id, int source_disk_number,
+    const QString& archive_password = {});
+[[nodiscard]] QByteArray encode_arm_pe_restore_request(
+    const QString& request_id, const QString& idempotency_key, const QString& preflight_token,
+    const QString& archive_password, bool prompt_for_password, bool preserve_disk_signature,
+    bool auto_expand_last_partition, const QString& locale);
+[[nodiscard]] QByteArray encode_get_pe_restore_state_request(const QString& request_id);
+[[nodiscard]] QByteArray encode_cancel_pe_restore_request(const QString& request_id,
+                                                          const QString& idempotency_key);
 [[nodiscard]] QByteArray encode_repository_connection_input_request(
     const QString& request_id, const QString& idempotency_key, int request_kind,
     const QString& display_name, const QString& locator, const QString& network_username = {},
@@ -350,9 +374,12 @@ encode_plan_delete_recovery_points_request(const QString& request_id, const QStr
                                                               RecoveryPointEntryPage& result);
 [[nodiscard]] bool parse_prepare_file_restore_response(const QJsonObject& root,
                                                        FileRestorePreflightPage& result);
-/// Parses RestorePreflight for PrepareRestore (kind 9) or AnalyzeNtfsShrink (kind 18).
+/// Parses RestorePreflight for PrepareRestore (kind 9), AnalyzeNtfsShrink (kind 18),
+/// or PreparePeRestore (kind 19).
 [[nodiscard]] bool parse_restore_preflight_response(const QJsonObject& root, int expected_kind,
                                                     RestorePreflightPage& result);
+[[nodiscard]] bool parse_pe_restore_state_response(const QJsonObject& root,
+                                                   PeRestoreStatePage& result);
 [[nodiscard]] bool is_browse_file_sources_failure_response(const QJsonObject& root);
 [[nodiscard]] bool is_list_recovery_point_entries_failure_response(const QJsonObject& root);
 [[nodiscard]] bool is_prepare_file_restore_failure_response(const QJsonObject& root);

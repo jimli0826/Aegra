@@ -9,6 +9,8 @@
 #include "aegra/application/source_inventory_query.h"
 #include "aegra/apps/service/mount_supervisor.h"
 #include "aegra/apps/service/schedule_service.h"
+
+#include "pe_restore_job_service.h"
 #include "aegra/apps/service/service_protocol.h"
 #include "aegra/apps/service/service_response_fit.h"
 #include "aegra/apps/service/worker_job_service.h"
@@ -254,6 +256,31 @@ query_response(const contracts::ServiceRequest& request, const ServiceRuntimeInf
                 result.error().code, request.request_id, request.kind, "restore.preflight_failed"));
         }
         response.message_code = result.value().message_code;
+        response.payload = std::move(result).value();
+        return base::Result<contracts::ServiceResponse>::success(std::move(response));
+    }
+    if (request.kind == contracts::ServiceRequestKind::kPreparePeRestore && runtime.pe_restore) {
+        auto result = runtime.pe_restore->prepare_pe_restore(
+            std::get<contracts::RestorePreflightRequest>(request.payload), cancellation);
+        if (!result) {
+            write_log(runtime, ServiceLogLevel::kWarning, "pe_restore.preflight_failed",
+                      result.error().message.empty() ? "prepare pe restore failed"
+                                                     : result.error().message);
+            return base::Result<contracts::ServiceResponse>::success(
+                failure(result.error().code, request.request_id, request.kind,
+                        "pe_restore.preflight_failed"));
+        }
+        response.message_code = result.value().message_code;
+        response.payload = std::move(result).value();
+        return base::Result<contracts::ServiceResponse>::success(std::move(response));
+    }
+    if (request.kind == contracts::ServiceRequestKind::kGetPeRestoreState && runtime.pe_restore) {
+        auto result = runtime.pe_restore->query_state(cancellation);
+        if (!result) {
+            return base::Result<contracts::ServiceResponse>::success(
+                failure(result.error().code, request.request_id, request.kind,
+                        "pe_restore.state_failed"));
+        }
         response.payload = std::move(result).value();
         return base::Result<contracts::ServiceResponse>::success(std::move(response));
     }
@@ -533,6 +560,15 @@ command_response(const contracts::ServiceRequest& request, const ServiceRuntimeI
         result =
             runtime.mount_supervisor->unmount(std::get<contracts::ResourceRef>(request.payload),
                                               *request.idempotency_key, cancellation);
+    } else if (runtime.pe_restore && request.idempotency_key &&
+               request.kind == contracts::ServiceRequestKind::kArmPeRestore) {
+        handled = true;
+        result = runtime.pe_restore->arm_pe_restore(
+            std::get<contracts::ArmPeRestoreCommand>(request.payload), cancellation);
+    } else if (runtime.pe_restore && request.idempotency_key &&
+               request.kind == contracts::ServiceRequestKind::kCancelPeRestore) {
+        handled = true;
+        result = runtime.pe_restore->cancel_pe_restore(cancellation);
     }
     if (!handled)
         return capability_unavailable(request);
@@ -571,6 +607,9 @@ command_response(const contracts::ServiceRequest& request, const ServiceRuntimeI
             message_code = "backup.command_failed";
         } else if (request.kind == contracts::ServiceRequestKind::kStartRestore) {
             message_code = "restore.command_failed";
+        } else if (request.kind == contracts::ServiceRequestKind::kArmPeRestore ||
+                   request.kind == contracts::ServiceRequestKind::kCancelPeRestore) {
+            message_code = "pe_restore.command_failed";
         } else if (request.kind == contracts::ServiceRequestKind::kMountRecoveryPoint ||
                    request.kind == contracts::ServiceRequestKind::kUnmountSession) {
             message_code = "mount.command_failed";
@@ -1028,6 +1067,8 @@ dispatch_service_request(const contracts::ServiceRequest& request,
     case contracts::ServiceRequestKind::kListSourceInventory:
     case contracts::ServiceRequestKind::kPrepareRestore:
     case contracts::ServiceRequestKind::kAnalyzeNtfsShrink:
+    case contracts::ServiceRequestKind::kPreparePeRestore:
+    case contracts::ServiceRequestKind::kGetPeRestoreState:
         response = query_response(request, runtime, cancellation);
         break;
     case contracts::ServiceRequestKind::kResolveRecoveryPointChain:
@@ -1087,6 +1128,8 @@ dispatch_service_request(const contracts::ServiceRequest& request,
         break;
     case contracts::ServiceRequestKind::kMountRecoveryPoint:
     case contracts::ServiceRequestKind::kUnmountSession:
+    case contracts::ServiceRequestKind::kArmPeRestore:
+    case contracts::ServiceRequestKind::kCancelPeRestore:
         response = command_response(request, runtime, session, cancellation);
         break;
     case contracts::ServiceRequestKind::kListEvents:

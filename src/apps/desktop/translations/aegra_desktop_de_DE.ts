@@ -1555,6 +1555,74 @@
         <source>— PE only</source>
         <translation>— nur PE</translation>
     </message>
+    <message id="aegra.restore.pe_offline_tag">
+        <source>— offline restore (restart required)</source>
+        <translation>— Offline-Wiederherstellung (Neustart erforderlich)</translation>
+    </message>
+    <message id="aegra.restore.pe_capability_missing">
+        <source>Offline system-disk restore is not available on this Service</source>
+        <translation>Die Offline-Wiederherstellung des Systemdatenträgers ist auf diesem Service nicht verfügbar</translation>
+    </message>
+    <message id="aegra.restore.pe_armed">
+        <source>Offline restore is armed. Restart the computer to begin.</source>
+        <translation>Die Offline-Wiederherstellung ist vorbereitet. Starten Sie den Computer neu, um zu beginnen.</translation>
+    </message>
+    <message id="aegra.restore.pe_cancelled">
+        <source>Pending offline restore was cancelled</source>
+        <translation>Die ausstehende Offline-Wiederherstellung wurde abgebrochen</translation>
+    </message>
+    <message id="aegra.restore.pe_exclusive">
+        <source>Map only the system disk for an offline restore</source>
+        <translation>Ordnen Sie für eine Offline-Wiederherstellung nur den Systemdatenträger zu</translation>
+    </message>
+    <message id="aegra.restore.pe_confirm_title">
+        <source>Offline system-disk restore</source>
+        <translation>Offline-Wiederherstellung des Systemdatenträgers</translation>
+    </message>
+    <message id="aegra.restore.pe_confirm_text">
+        <source>The system disk cannot be restored while Windows is running. Aegra will prepare a recovery environment; after you restart the computer, the restore runs before Windows starts.</source>
+        <translation>Der Systemdatenträger kann nicht wiederhergestellt werden, während Windows läuft. Aegra bereitet eine Wiederherstellungsumgebung vor; nach dem Neustart wird die Wiederherstellung vor dem Windows-Start ausgeführt.</translation>
+    </message>
+    <message id="aegra.restore.pe_confirm_target">
+        <source>Target disk: %1</source>
+        <translation>Zieldatenträger: %1</translation>
+    </message>
+    <message id="aegra.restore.pe_confirm_ack">
+        <source>I understand that every byte on the target disk will be overwritten and this cannot be undone.</source>
+        <translation>Ich verstehe, dass alle Daten auf dem Zieldatenträger überschrieben werden und dies nicht rückgängig gemacht werden kann.</translation>
+    </message>
+    <message id="aegra.restore.pe_confirm_button">
+        <source>Prepare offline restore</source>
+        <translation>Offline-Wiederherstellung vorbereiten</translation>
+    </message>
+    <message id="aegra.restore.pe_banner_armed">
+        <source>Offline system-disk restore is armed. Restart the computer to begin.</source>
+        <translation>Die Offline-Wiederherstellung des Systemdatenträgers ist vorbereitet. Starten Sie den Computer neu, um zu beginnen.</translation>
+    </message>
+    <message id="aegra.restore.pe_banner_cancel">
+        <source>Cancel offline restore</source>
+        <translation>Offline-Wiederherstellung abbrechen</translation>
+    </message>
+    <message id="aegra.error.pe_restore.preflight_failed">
+        <source>Offline restore preflight failed</source>
+        <translation>Vorprüfung der Offline-Wiederherstellung fehlgeschlagen</translation>
+    </message>
+    <message id="aegra.error.pe_restore.command_failed">
+        <source>Offline restore command failed</source>
+        <translation>Befehl zur Offline-Wiederherstellung fehlgeschlagen</translation>
+    </message>
+    <message id="aegra.event.pe_restore.succeeded">
+        <source>Offline system-disk restore completed successfully</source>
+        <translation>Offline-Wiederherstellung des Systemdatenträgers erfolgreich abgeschlossen</translation>
+    </message>
+    <message id="aegra.event.pe_restore.failed">
+        <source>Offline system-disk restore failed</source>
+        <translation>Offline-Wiederherstellung des Systemdatenträgers fehlgeschlagen</translation>
+    </message>
+    <message id="aegra.event.pe_restore.cancelled">
+        <source>Offline system-disk restore was cancelled; no data was written</source>
+        <translation>Offline-Wiederherstellung des Systemdatenträgers wurde abgebrochen; es wurden keine Daten geschrieben</translation>
+    </message>
     <message id="aegra.restore.select_checkpoint">
         <source>Select checkpoint</source>
         <translation>Prüfpunkt wählen</translation>

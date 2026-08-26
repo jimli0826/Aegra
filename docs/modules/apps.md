@@ -75,7 +75,10 @@ Online Prepare -> Validate -> Build/Cache WinRE -> Write Pending Job
 - PE 镜像只携带 Restore Pipeline、必要 Adapter 和最小 UI，不携带 Qt、Service、PostgreSQL、Dokan 或虚拟化 SDK。
 - 写盘开始后的取消策略必须由 Restore Plan 明确，不允许假装安全取消。
 
-旧设计中明文 JSON 旁放置 JobKey 的方案不直接采用；具体跨重启 Secret Envelope 需要安全 ADR。
+旧设计中明文 JSON 旁放置 JobKey 的方案不直接采用；跨重启 Secret Envelope 与一次性启动的
+安全决策见 [ADR-0026](../adr/0026-winpe-offline-restore-and-secret-envelope.md)（Proposed），
+整体设计见 [WinPE 离线系统盘恢复设计](../architecture/WINPE_OFFLINE_RESTORE.md)，开发顺序见
+[WinPE 恢复分阶段开发计划](../development/WINPE_RESTORE_DEVELOPMENT_PLAN.md)。
 
 ## Shell Extension
 

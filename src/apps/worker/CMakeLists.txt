@@ -70,9 +70,19 @@ target_link_libraries(
         nlohmann_json::nlohmann_json
         delayimp
 )
-# Dokan is only touched in --mount-pipe mode; delay-load keeps backup/restore
-# tasks runnable on machines without dokan2.dll.
-target_link_options(aegra_personal_worker PRIVATE "/DELAYLOAD:dokan2.dll")
+# Delay-load DLLs that the restore path never touches so the worker still loads
+# inside a minimal WinPE image that lacks them:
+#   dokan2.dll  — only --mount-pipe (mount) mode
+#   vssapi.dll  — only the backup snapshot path (windows_vss adapter)
+#   virtdisk.dll — only VHDX attach during mount (dokan adapter)
+# A PE disk restore calls none of these, so their imports are never resolved.
+target_link_options(
+    aegra_personal_worker
+    PRIVATE
+        "/DELAYLOAD:dokan2.dll"
+        "/DELAYLOAD:vssapi.dll"
+        "/DELAYLOAD:virtdisk.dll"
+)
 aegra_configure_target(aegra_personal_worker)
 
 # Dokan runtime DLL next to the executable for local runs.

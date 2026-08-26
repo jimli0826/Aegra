@@ -8,9 +8,11 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <span>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -122,7 +124,38 @@ volume_disk_number(const std::filesystem::path& volume_guid_path) {
 
 } // namespace
 
+namespace {
+
+/// True when running inside WinPE/WinRE (the MiniNT control key only exists there).
+[[nodiscard]] bool running_in_winpe() noexcept {
+    // Explicit signal first: the PE restore executor sets AEGRA_WINPE=1 for its
+    // worker. The registry MiniNT marker is the canonical WinPE detection, but a
+    // WinRE-derived image may lack it, so the env var is the authoritative override
+    // when the caller knows it booted the offline environment.
+    if (::GetEnvironmentVariableW(L"AEGRA_WINPE", nullptr, 0) != 0) {
+        return true;
+    }
+    HKEY key = nullptr;
+    const auto status = RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+                                      L"SYSTEM\\CurrentControlSet\\Control\\MiniNT", 0, KEY_READ,
+                                      &key);
+    if (status != ERROR_SUCCESS) {
+        return false;
+    }
+    RegCloseKey(key);
+    return true;
+}
+
+} // namespace
+
 base::Result<bool> is_system_physical_disk(const std::uint32_t disk_number) {
+    // WinPE boots from a WIM ram disk: X:\ has no mountmgr volume GUID and no
+    // physical disk extents, so the resolution below fails by design. The running
+    // OS cannot occupy any enumerable physical disk there — the answer is a
+    // definite "not the system disk". Online keeps the fail-closed error paths.
+    if (running_in_winpe()) {
+        return base::Result<bool>::success(false);
+    }
     std::array<wchar_t, MAX_PATH + 1> windows_directory{};
     const auto length = GetWindowsDirectoryW(windows_directory.data(),
                                              static_cast<UINT>(windows_directory.size()));
@@ -361,11 +394,132 @@ void online_volumes_on_disk(const std::uint32_t disk_number) noexcept {
     FindVolumeClose(find);
 }
 
-[[nodiscard]] base::Result<void> set_disk_offline_state(const HANDLE handle,
-                                                        const bool offline) {
+class UniqueVolumeFind final {
+  public:
+    explicit UniqueVolumeFind(const HANDLE handle) noexcept : handle_(handle) {}
+    ~UniqueVolumeFind() {
+        if (handle_ != INVALID_HANDLE_VALUE) {
+            FindVolumeClose(handle_);
+        }
+    }
+
+    UniqueVolumeFind(const UniqueVolumeFind&) = delete;
+    UniqueVolumeFind& operator=(const UniqueVolumeFind&) = delete;
+    UniqueVolumeFind(UniqueVolumeFind&&) = delete;
+    UniqueVolumeFind& operator=(UniqueVolumeFind&&) = delete;
+
+    [[nodiscard]] HANDLE get() const noexcept { return handle_; }
+
+  private:
+    HANDLE handle_{INVALID_HANDLE_VALUE};
+};
+
+enum class DiskAttributeLifetime {
+    kSession,
+    kPersistent,
+};
+
+// Forced dismount so PhysicalDrive writes are not blocked by mounted volumes.
+// Lock is best-effort (open files on the volume, including PE logs, are common).
+// Deliberately does NOT issue IOCTL_VOLUME_OFFLINE: on a WinRE-derived WinPE that
+// IOCTL hangs, and the legacy WinPE-proven path never used it — FSCTL_DISMOUNT is
+// what frees the volume for a raw PhysicalDrive rewrite.
+[[nodiscard]] base::Result<void> lock_dismount_offline_volume(const HANDLE volume) {
+    DWORD returned = 0;
+    DeviceIoControl(volume, FSCTL_LOCK_VOLUME, nullptr, 0, nullptr, 0, &returned, nullptr);
+    if (!DeviceIoControl(volume, FSCTL_DISMOUNT_VOLUME, nullptr, 0, nullptr, 0, &returned,
+                         nullptr)) {
+        return base::Result<void>::failure(
+            detail::win32_error(GetLastError(), "FSCTL_DISMOUNT_VOLUME target disk volume"));
+    }
+    return base::Result<void>::success();
+}
+
+[[nodiscard]] base::Result<void>
+dismount_volumes_on_disk(const std::uint32_t disk_number,
+                         const std::function<void(std::string_view)>& breadcrumb) {
+    std::array<wchar_t, MAX_PATH> name{};
+    const auto find = FindFirstVolumeW(name.data(), static_cast<DWORD>(name.size()));
+    if (find == INVALID_HANDLE_VALUE) {
+        const auto error = GetLastError();
+        if (error == ERROR_NO_MORE_FILES) {
+            return base::Result<void>::success();
+        }
+        return base::Result<void>::failure(detail::win32_error(error, "FindFirstVolumeW"));
+    }
+    UniqueVolumeFind guard(find);
+    std::uint32_t index = 0;
+    do {
+        std::wstring open_path(name.data());
+        if (!open_path.empty() && open_path.back() == L'\\') {
+            open_path.pop_back();
+        }
+        if (breadcrumb) {
+            breadcrumb("scan volume " + std::to_string(index++));
+        }
+        if (!volume_is_on_disk(open_path, disk_number)) {
+            continue;
+        }
+        if (breadcrumb) {
+            breadcrumb("match on target; opening");
+        }
+        detail::UniqueHandle volume(CreateFileW(open_path.c_str(), GENERIC_READ | GENERIC_WRITE,
+                                                FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                                                OPEN_EXISTING, 0, nullptr));
+        if (!volume.valid()) {
+            return base::Result<void>::failure(
+                detail::win32_error(GetLastError(), "CreateFileW target disk volume"));
+        }
+        if (breadcrumb) {
+            breadcrumb("lock+dismount");
+        }
+        auto prepared = lock_dismount_offline_volume(volume.get());
+        if (!prepared) {
+            return prepared;
+        }
+        if (breadcrumb) {
+            breadcrumb("volume dismounted");
+        }
+    } while (FindNextVolumeW(guard.get(), name.data(), static_cast<DWORD>(name.size())));
+    const auto next_error = GetLastError();
+    if (next_error != ERROR_NO_MORE_FILES) {
+        return base::Result<void>::failure(detail::win32_error(next_error, "FindNextVolumeW"));
+    }
+    return base::Result<void>::success();
+}
+
+// Defined locally: mountmgr.h publishes unscoped Disabled/Enabled enumerators.
+[[nodiscard]] base::Result<void> disable_mountmgr_automount() {
+    constexpr DWORD kIoctlMountmgrSetAutoMount =
+        CTL_CODE(static_cast<DWORD>('m'), 16, METHOD_BUFFERED,
+                 FILE_READ_ACCESS | FILE_WRITE_ACCESS);
+    struct SetAutoMount final {
+        DWORD new_state;
+    };
+    detail::UniqueHandle manager(CreateFileW(LR"(\\.\MountPointManager)",
+                                             GENERIC_READ | GENERIC_WRITE,
+                                             FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                                             OPEN_EXISTING, 0, nullptr));
+    if (!manager.valid()) {
+        return base::Result<void>::failure(
+            detail::win32_error(GetLastError(), "CreateFileW MountPointManager"));
+    }
+    SetAutoMount request{};
+    request.new_state = 0;
+    DWORD returned = 0;
+    if (!DeviceIoControl(manager.get(), kIoctlMountmgrSetAutoMount, &request, sizeof(request),
+                         nullptr, 0, &returned, nullptr)) {
+        return base::Result<void>::failure(
+            detail::win32_error(GetLastError(), "IOCTL_MOUNTMGR_SET_AUTO_MOUNT disable"));
+    }
+    return base::Result<void>::success();
+}
+
+[[nodiscard]] base::Result<void> set_disk_offline_state(const HANDLE handle, const bool offline,
+                                                        const DiskAttributeLifetime lifetime) {
     SET_DISK_ATTRIBUTES set_attributes{};
     set_attributes.Version = sizeof(set_attributes);
-    set_attributes.Persist = TRUE;
+    set_attributes.Persist = lifetime == DiskAttributeLifetime::kPersistent ? TRUE : FALSE;
     set_attributes.AttributesMask = DISK_ATTRIBUTE_OFFLINE | DISK_ATTRIBUTE_READ_ONLY;
     set_attributes.Attributes = offline ? DISK_ATTRIBUTE_OFFLINE : 0;
     DWORD returned = 0;
@@ -379,15 +533,26 @@ void online_volumes_on_disk(const std::uint32_t disk_number) noexcept {
     return base::Result<void>::success();
 }
 
+[[nodiscard]] base::Result<bool> disk_has_offline_attribute(const HANDLE handle) {
+    GET_DISK_ATTRIBUTES attributes{};
+    DWORD returned = 0;
+    if (!DeviceIoControl(handle, IOCTL_DISK_GET_DISK_ATTRIBUTES, nullptr, 0, &attributes,
+                         sizeof(attributes), &returned, nullptr)) {
+        return base::Result<bool>::failure(
+            detail::win32_error(GetLastError(), "IOCTL_DISK_GET_DISK_ATTRIBUTES after offline"));
+    }
+    return base::Result<bool>::success((attributes.Attributes & DISK_ATTRIBUTE_OFFLINE) != 0);
+}
+
 [[nodiscard]] base::Result<void> clear_offline_with_retry(const HANDLE handle) {
-    auto cleared = set_disk_offline_state(handle, false);
+    auto cleared = set_disk_offline_state(handle, false, DiskAttributeLifetime::kPersistent);
     if (cleared) {
         return cleared;
     }
     // Retry once after property refresh — attribute IOCTL can race with PnP.
     update_disk_properties(handle);
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    return set_disk_offline_state(handle, false);
+    return set_disk_offline_state(handle, false, DiskAttributeLifetime::kPersistent);
 }
 
 [[nodiscard]] base::Result<void> verify_disk_online(const HANDLE handle) {
@@ -435,7 +600,7 @@ base::Result<void> bring_target_disk_online(const std::uint32_t disk_number) {
             detail::win32_error(GetLastError(), "IOCTL_DISK_GET_DISK_ATTRIBUTES online pass"));
     }
     if ((attributes.Attributes & DISK_ATTRIBUTE_OFFLINE) != 0) {
-        auto again = set_disk_offline_state(handle.get(), false);
+        auto again = set_disk_offline_state(handle.get(), false, DiskAttributeLifetime::kPersistent);
         if (!again) {
             return again;
         }
@@ -449,34 +614,73 @@ base::Result<void> bring_target_disk_online(const std::uint32_t disk_number) {
     return base::Result<void>::success();
 }
 
-base::Result<void> set_target_disk_offline(const std::uint32_t disk_number) {
+base::Result<void> set_target_disk_offline(const std::uint32_t disk_number,
+                                           const DiskOfflineTrace& trace) {
+    const auto breadcrumb = [&trace](const std::string_view label) {
+        if (trace) {
+            trace(label);
+        }
+    };
+    breadcrumb("dismount_volumes: begin");
+    auto volumes = dismount_volumes_on_disk(disk_number, breadcrumb);
+    if (!volumes) {
+        breadcrumb("dismount_volumes: failed");
+        return volumes;
+    }
+    breadcrumb("dismount_volumes: ok");
+    const bool winpe = running_in_winpe();
+    breadcrumb(winpe ? "winpe: yes" : "winpe: no");
+    if (winpe) {
+        breadcrumb("disable_automount: begin");
+        auto automount = disable_mountmgr_automount();
+        if (!automount) {
+            // In WinPE the mount manager may be absent or reject the IOCTL; the
+            // dismount above is what actually frees the disk, so continue.
+            breadcrumb("disable_automount: failed (tolerated)");
+        } else {
+            breadcrumb("disable_automount: ok");
+        }
+    }
+    breadcrumb("open_disk: begin");
     auto handle = open_disk_read_write(disk_number);
     if (!handle.valid()) {
+        breadcrumb("open_disk: failed");
         return base::Result<void>::failure(
             detail::win32_error(GetLastError(), "CreateFileW target disk offline"));
     }
-    // Fail-closed: raw PhysicalDrive writes must not proceed while the disk is online.
-    auto set = set_disk_offline_state(handle.get(), true);
+    breadcrumb("open_disk: ok");
+    const auto lifetime =
+        winpe ? DiskAttributeLifetime::kSession : DiskAttributeLifetime::kPersistent;
+    breadcrumb("set_offline: begin");
+    auto set = set_disk_offline_state(handle.get(), true, lifetime);
     if (!set) {
+        breadcrumb("set_offline: retry");
         update_disk_properties(handle.get());
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        set = set_disk_offline_state(handle.get(), true);
-        if (!set) {
+        set = set_disk_offline_state(handle.get(), true, lifetime);
+        if (!set && !winpe) {
+            breadcrumb("set_offline: failed");
             return set;
         }
     }
-    GET_DISK_ATTRIBUTES attributes{};
-    DWORD returned = 0;
-    if (!DeviceIoControl(handle.get(), IOCTL_DISK_GET_DISK_ATTRIBUTES, nullptr, 0, &attributes,
-                         sizeof(attributes), &returned, nullptr)) {
-        return base::Result<void>::failure(
-            detail::win32_error(GetLastError(), "IOCTL_DISK_GET_DISK_ATTRIBUTES after offline"));
+    breadcrumb("check_offline: begin");
+    auto offline = disk_has_offline_attribute(handle.get());
+    if (offline && offline.value()) {
+        breadcrumb("check_offline: offline");
+        return base::Result<void>::success();
     }
-    if ((attributes.Attributes & DISK_ATTRIBUTE_OFFLINE) == 0) {
-        return base::Result<void>::failure(
-            {base::ErrorCode::kIoFailure, "target disk is still online after offline request"});
+    if (winpe) {
+        // WinPE SAN policy OfflineShared re-onlines unique disks. Volumes are
+        // already dismounted and automount is disabled, matching the old
+        // PreparePhysicalDiskForWrite path, so raw writes can proceed.
+        breadcrumb("check_offline: winpe tolerate online");
+        return base::Result<void>::success();
     }
-    return base::Result<void>::success();
+    if (!offline) {
+        return base::Result<void>::failure(offline.error());
+    }
+    return base::Result<void>::failure(
+        {base::ErrorCode::kIoFailure, "target disk is still online after offline request"});
 }
 
 base::Result<std::uint32_t>

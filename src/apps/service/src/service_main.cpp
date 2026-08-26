@@ -3,9 +3,13 @@
 #include "aegra/adapters/windows_disk/windows_disk.h"
 #include "aegra/adapters/windows_filesystem/windows_filesystem.h"
 #include "aegra/adapters/windows_ipc/windows_named_pipe_channel.h"
+#include "aegra/adapters/windows_pe/one_time_boot.h"
+#include "aegra/adapters/windows_pe/pe_image_builder.h"
+#include "aegra/adapters/windows_pe/pe_pending_store.h"
 #include "aegra/adapters/windows_process/windows_process_launcher.h"
 #include "aegra/adapters/windows_system/windows_system.h"
 #include "aegra/application/connected_repository_query.h"
+#include "aegra/application/pe_restore_prepare_service.h"
 #include "aegra/application/file_browse_service.h"
 #include "aegra/application/personal_repository_query.h"
 #include "aegra/application/recovery_point_operations.h"
@@ -26,6 +30,8 @@
 #include "aegra/ports/repository_storage.h"
 #include "network_aware_storage_factory.h"
 #include "network_share_access.h"
+#include "pe_restore_job_service.h"
+#include "pe_secret_sealer.h"
 #include "service_log_formatter.h"
 
 #include <spdlog/sinks/rotating_file_sink.h>
@@ -58,6 +64,7 @@ namespace storage_local = aegra::adapters::storage_local;
 namespace windows_disk = aegra::adapters::windows_disk;
 namespace windows_filesystem = aegra::adapters::windows_filesystem;
 namespace windows_ipc = aegra::adapters::windows_ipc;
+namespace windows_pe = aegra::adapters::windows_pe;
 namespace windows_process = aegra::adapters::windows_process;
 namespace windows_system = aegra::adapters::windows_system;
 
@@ -213,6 +220,13 @@ struct RuntimeComponents final {
     /// Declared after worker_jobs so destruction stops the poll thread first.
     std::unique_ptr<service::ScheduleEngine> schedule_engine;
     std::unique_ptr<service::MountSupervisor> mount_supervisor;
+    // WinPE offline-restore stack (ADR-0026); absent → capability off, kinds 19/20/51/52 rejected.
+    std::unique_ptr<aegra::ports::IPeImageBuilder> pe_image_builder;
+    std::unique_ptr<aegra::ports::IOneTimeBootController> pe_boot_controller;
+    std::unique_ptr<aegra::ports::IPePendingJobStore> pe_pending_store;
+    std::unique_ptr<service::PeSecretSealer> pe_secret_sealer;
+    std::unique_ptr<aegra::application::PeRestorePrepareService> pe_prepare;
+    std::unique_ptr<service::PeRestoreJobService> pe_restore_jobs;
     service::ServiceRuntimeInfo runtime;
 };
 
@@ -487,7 +501,8 @@ create_service_log(const std::filesystem::path& data_dir, const bool service_mod
     return aegra::base::Result<void>::success();
 }
 
-[[nodiscard]] std::vector<std::string> runtime_capabilities(const bool file_browse_enabled) {
+[[nodiscard]] std::vector<std::string> runtime_capabilities(const bool file_browse_enabled,
+                                                            const bool pe_restore_enabled) {
     // Chain/delete stay off until durable delete resume meets S5 Definition of Done.
     // F8 enables file.restore (PrepareFileRestore + StartFileRestore) when browse is available.
     std::vector<std::string> capabilities{
@@ -514,6 +529,11 @@ create_service_log(const std::filesystem::path& data_dir, const bool service_mod
         capabilities.push_back("file.browse");
         capabilities.push_back("file.restore");
         capabilities.push_back("schedule.file_set");
+    }
+    if (pe_restore_enabled) {
+        capabilities.push_back("restore.pe.prepare");
+        capabilities.push_back("restore.pe.arm");
+        capabilities.push_back("restore.pe.cancel");
     }
     std::ranges::sort(capabilities);
     return capabilities;
@@ -750,9 +770,65 @@ create_runtime(const ServiceArguments& arguments) {
     components.mount_supervisor = std::make_unique<service::MountSupervisor>(
         std::move(mount_config), *components.process_launcher, *components.control_plane,
         *components.storage_factory, *components.clock, *components.random);
+    // WinPE offline-restore stack. Non-fatal: a failed open only disables the capability.
+    bool pe_restore_enabled = false;
+    {
+        // The PE hand-off (pending job / result) and image live at the machine-wide
+        // %ProgramData%\Aegra, NOT the service's configurable --data-dir: the PE
+        // executor scans fixed volumes for \ProgramData\Aegra\pe\pending and cannot
+        // discover a per-user LOCALAPPDATA location. bcdedit references the image by
+        // absolute path, so its location is otherwise immaterial.
+        auto pe_machine_dir = environment_directory(L"ProgramData");
+        auto pe_data_dir = pe_machine_dir
+                               ? path_to_utf8(pe_machine_dir.value())
+                               : aegra::base::Result<std::string>::failure(pe_machine_dir.error());
+        auto pe_payload_dir = path_to_utf8(worker_path.value().parent_path());
+        auto pending_store =
+            pe_data_dir ? windows_pe::open_pe_pending_store({pe_data_dir.value()})
+                        : aegra::base::Result<
+                              std::unique_ptr<aegra::ports::IPePendingJobStore>>::failure(
+                              pe_data_dir.error());
+        auto* pe_log = components.logger.get();
+        windows_pe::OneTimeBootControllerOpenRequest boot_request;
+        boot_request.process_launcher = components.process_launcher.get();
+        if (pe_log != nullptr) {
+            boot_request.diagnostic_log = [pe_log](const std::string_view line) {
+                pe_log->write(service::ServiceLogLevel::kInfo, "pe_restore.bcdedit",
+                              std::string(line));
+            };
+        }
+        auto boot_controller = windows_pe::open_one_time_boot_controller(boot_request);
+        auto image_builder =
+            windows_pe::open_pe_image_builder({components.process_launcher.get()});
+        if (pe_payload_dir && pending_store && boot_controller && image_builder) {
+            components.pe_pending_store = std::move(pending_store).value();
+            components.pe_boot_controller = std::move(boot_controller).value();
+            components.pe_image_builder = std::move(image_builder).value();
+            components.pe_secret_sealer = std::make_unique<service::PeSecretSealer>();
+            components.pe_prepare = std::make_unique<aegra::application::PeRestorePrepareService>(
+                *components.pe_image_builder, *components.pe_boot_controller,
+                *components.pe_pending_store, *components.pe_secret_sealer, *components.clock);
+            service::PeRestoreEnvironment pe_environment;
+            pe_environment.data_dir_utf8 = pe_data_dir.value();
+            pe_environment.product_version = AEGRA_APPLICATION_VERSION;
+            pe_environment.payload_directory_utf8 = pe_payload_dir.value();
+            // Diagnostics: AEGRA_PE_DEBUG_SHELL=1 builds the PE image with an
+            // interactive cmd shell for missing-DLL triage on the target machine.
+            pe_environment.debug_shell = ::GetEnvironmentVariableW(L"AEGRA_PE_DEBUG_SHELL", nullptr,
+                                                                   0) != 0;
+            components.pe_restore_jobs = std::make_unique<service::PeRestoreJobService>(
+                *components.source_query, *components.control_plane, *components.storage_factory,
+                *components.pe_prepare, *components.pe_pending_store, *components.clock,
+                *components.random, std::move(pe_environment), components.logger.get());
+            pe_restore_enabled = true;
+        } else if (components.logger != nullptr) {
+            components.logger->write(service::ServiceLogLevel::kWarning,
+                                     "pe_restore.unavailable", "status=stack_open_failed");
+        }
+    }
     components.runtime = {
         .service_version = AEGRA_APPLICATION_VERSION,
-        .capabilities = runtime_capabilities(file_browse_enabled),
+        .capabilities = runtime_capabilities(file_browse_enabled, pe_restore_enabled),
         .logger = components.logger.get(),
         .repository_query = components.repository_query.get(),
         .connected_repository_query = components.connected_query.get(),
@@ -762,12 +838,18 @@ create_runtime(const ServiceArguments& arguments) {
         .file_browse = components.file_browse.get(),
         .repository_location_browse = components.repository_location_browse.get(),
         .worker_jobs = components.worker_jobs.get(),
+        .pe_restore = components.pe_restore_jobs.get(),
         .schedules = components.schedules.get(),
         .worker_supervisor = components.supervisor.get(),
         .mount_supervisor = components.mount_supervisor.get(),
         .control_plane = components.control_plane.get(),
         .storage_factory = components.storage_factory.get(),
     };
+    // Phase C: surface a restore result written by the PE executor on a previous boot,
+    // then clean pending files and any leftover one-time boot entry.
+    if (components.pe_restore_jobs != nullptr) {
+        components.pe_restore_jobs->publish_boot_result_events({});
+    }
     // Start the due-fire thread only after the full runtime is assembled so a partial
     // create_runtime failure never briefly submits work.
     components.schedule_engine->start();

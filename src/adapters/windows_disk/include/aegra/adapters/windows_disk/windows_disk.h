@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -399,9 +400,18 @@ extend_filesystem_to_partition(std::uint32_t disk_number, std::uint64_t start_of
 /// Clears OFFLINE/READ_ONLY attributes so restored volumes can mount (data-disk path).
 [[nodiscard]] base::Result<void> bring_target_disk_online(std::uint32_t disk_number);
 
-/// Set disk OFFLINE so raw PhysicalDrive writes are not blocked by auto-mounted volumes
-/// after GPT/MBR is rewritten (required before volume payload restore).
-[[nodiscard]] base::Result<void> set_target_disk_offline(std::uint32_t disk_number);
+/// Prepare the target for raw PhysicalDrive writes: lock/dismount/offline every
+/// volume on the disk, then request DISK_ATTRIBUTE_OFFLINE. Full Windows is
+/// fail-closed on the OFFLINE bit. WinPE SAN policy OfflineShared keeps unique
+/// disks online, so PE succeeds after volume dismount + automount disable even
+/// when the attribute does not stick (required before volume payload restore).
+/// Optional sub-step breadcrumb sink. Called with a short label before/after each
+/// internal operation so a caller (e.g. the worker task log) can pinpoint a hang or
+/// hard failure inside the multi-IOCTL sequence. Never carries secrets.
+using DiskOfflineTrace = std::function<void(std::string_view)>;
+
+[[nodiscard]] base::Result<void> set_target_disk_offline(std::uint32_t disk_number,
+                                                         const DiskOfflineTrace& trace = {});
 
 /// Resolves which physical disk hosts a file path (for archive-on-target rejection).
 [[nodiscard]] base::Result<std::uint32_t>

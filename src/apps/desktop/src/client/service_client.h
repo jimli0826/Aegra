@@ -7,6 +7,7 @@
 #include "client/models/repository_connection_model.h"
 #include "client/models/schedule_list_model.h"
 #include "client/models/source_inventory_model.h"
+#include "client/service_client_state.h"
 #include "client/service_protocol.h"
 #include "client/service_request_coordinator.h"
 #include "locale/locale_format.h"
@@ -27,6 +28,7 @@ namespace aegra::desktop {
 
 class IpcFrameTransport;
 class LocaleController;
+class PeRestoreController;
 
 // Desktop composition facade over transport, protocol codec, request coordinator, and domain
 // models. Supports concurrent Repository/Job/Inventory/Connection queries and backup commands.
@@ -97,6 +99,8 @@ class ServiceClient final : public QObject {
     Q_PROPERTY(bool restoreStartAvailable READ restoreStartAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool ntfsShrinkAvailable READ ntfsShrinkAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool restoreCommandBusy READ restoreCommandBusy NOTIFY restoreCommandChanged)
+    /// WinPE offline restore surface (armed state, start/cancel); see PeRestoreController.
+    Q_PROPERTY(QObject* peRestore READ peRestore CONSTANT)
     Q_PROPERTY(bool mountStartAvailable READ mountStartAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool mountListAvailable READ mountListAvailable NOTIFY stateChanged)
     Q_PROPERTY(bool mountCommandBusy READ mountCommandBusy NOTIFY mountCommandChanged)
@@ -226,6 +230,7 @@ class ServiceClient final : public QObject {
     [[nodiscard]] bool restoreStartAvailable() const noexcept;
     [[nodiscard]] bool ntfsShrinkAvailable() const noexcept;
     [[nodiscard]] bool restoreCommandBusy() const noexcept;
+    [[nodiscard]] QObject* peRestore() const noexcept;
     [[nodiscard]] bool mountStartAvailable() const noexcept;
     [[nodiscard]] bool mountListAvailable() const noexcept;
     [[nodiscard]] bool mountCommandBusy() const noexcept;
@@ -469,11 +474,7 @@ class ServiceClient final : public QObject {
     void serviceSettingsChanged();
 
   private:
-    enum class State : std::uint8_t {
-        kDisconnected,
-        kConnecting,
-        kReady,
-    };
+    using State = ServiceClientState;
 
     void on_transport_connected();
     void on_transport_disconnected();
@@ -491,11 +492,7 @@ class ServiceClient final : public QObject {
     void observe_accepted_restore_job(const QString& job_id);
     void start_task_log_query(bool append);
     void start_inventory_query();
-    enum class JobQueryPurpose : std::uint8_t {
-        kActive = 1,
-        kTerminalSeed = 2,
-        kTaskLog = 3,
-    };
+    using JobQueryPurpose = ServiceClientJobQueryPurpose;
     [[nodiscard]] JobListQuery make_active_job_query(
         const std::optional<QString>& continuation_token) const;
     [[nodiscard]] JobListQuery make_terminal_seed_query() const;
@@ -608,8 +605,10 @@ class ServiceClient final : public QObject {
     FileBrowseModel file_restore_targets_;
     FileRecoverModel file_recover_entries_;
     RepositoryConnectionModel connections_;
+    friend class PeRestoreController;
     std::unique_ptr<IpcFrameTransport> transport_;
     std::unique_ptr<ServiceRequestCoordinator> coordinator_;
+    std::unique_ptr<PeRestoreController> pe_restore_;
     QTimer* job_poll_timer_{nullptr};
     QTimer* toast_timer_{nullptr};
     QString service_version_;

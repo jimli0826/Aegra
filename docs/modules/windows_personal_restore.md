@@ -104,7 +104,12 @@ Validate restore options required + disk_restore + base-first source_refs + Phys
        resolve + apply partition_layout_edits (UI hints; always re-validate intervals;
          rewrite primary/backup GPT header LBAs for target size)
 -> Phase 2 (irreversible):
-     set_target_disk_offline fail-closed (verify DISK_ATTRIBUTE_OFFLINE)
+     set_target_disk_offline:
+       lock + FSCTL_DISMOUNT_VOLUME + IOCTL_VOLUME_OFFLINE every volume on the disk
+       WinPE: disable mountmgr automount (SAN OfflineShared re-onlines unique disks)
+       IOCTL_DISK_SET_DISK_ATTRIBUTES OFFLINE (Persist=FALSE in WinPE)
+       full Windows: fail-closed unless DISK_ATTRIBUTE_OFFLINE sticks
+       WinPE: proceed after volume dismount even if the disk stays "online"
      delete_target_disk_drive_layout
      rebuild_partition_table_from_raw_layout (complete GPT required; no partial write)
      Remap volume offsets to *resolved* starts

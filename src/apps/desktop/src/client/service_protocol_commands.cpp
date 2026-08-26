@@ -1132,4 +1132,107 @@ QByteArray encode_execute_delete_plan_request(const QString& request_id,
         .toJson(QJsonDocument::Compact);
 }
 
+QByteArray encode_prepare_pe_restore_request(const QString& request_id,
+                                             const QString& connection_id,
+                                             const QString& recovery_point_id,
+                                             const QString& target_source_id,
+                                             const int source_disk_number,
+                                             const QString& archive_password) {
+    const QJsonObject payload{{QStringLiteral("repository_connection_id"), connection_id},
+                              {QStringLiteral("recovery_point_id"), recovery_point_id},
+                              {QStringLiteral("target_source_id"), target_source_id},
+                              {QStringLiteral("source_disk_number"), source_disk_number},
+                              {QStringLiteral("source_volume_index"), 0},
+                              {QStringLiteral("archive_password"), archive_password},
+                              {QStringLiteral("volume_size_policy"),
+                               kVolumeSizePolicyRequireSourceSize}};
+    return QJsonDocument(
+               QJsonObject{
+                   {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
+                   {QStringLiteral("message_type"), 1},
+                   {QStringLiteral("request_id"), request_id},
+                   {QStringLiteral("kind"), kPreparePeRestoreRequestKind},
+                   {QStringLiteral("idempotency_key"), QJsonValue(QJsonValue::Null)},
+                   {QStringLiteral("payload"), payload}})
+        .toJson(QJsonDocument::Compact);
+}
+
+QByteArray encode_arm_pe_restore_request(const QString& request_id, const QString& idempotency_key,
+                                         const QString& preflight_token,
+                                         const QString& archive_password,
+                                         const bool prompt_for_password,
+                                         const bool preserve_disk_signature,
+                                         const bool auto_expand_last_partition,
+                                         const QString& locale) {
+    const QJsonObject payload{
+        {QStringLiteral("preflight_token"), preflight_token},
+        {QStringLiteral("confirmed"), true},
+        {QStringLiteral("archive_password"), archive_password},
+        {QStringLiteral("prompt_for_password"), prompt_for_password},
+        {QStringLiteral("preserve_disk_signature"), preserve_disk_signature},
+        {QStringLiteral("auto_expand_last_partition"), auto_expand_last_partition},
+        {QStringLiteral("locale"), locale}};
+    return QJsonDocument(
+               QJsonObject{
+                   {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
+                   {QStringLiteral("message_type"), 1},
+                   {QStringLiteral("request_id"), request_id},
+                   {QStringLiteral("kind"), kArmPeRestoreRequestKind},
+                   {QStringLiteral("idempotency_key"), idempotency_key},
+                   {QStringLiteral("payload"), payload}})
+        .toJson(QJsonDocument::Compact);
+}
+
+QByteArray encode_get_pe_restore_state_request(const QString& request_id) {
+    return QJsonDocument(
+               QJsonObject{
+                   {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
+                   {QStringLiteral("message_type"), 1},
+                   {QStringLiteral("request_id"), request_id},
+                   {QStringLiteral("kind"), kGetPeRestoreStateRequestKind},
+                   {QStringLiteral("idempotency_key"), QJsonValue(QJsonValue::Null)},
+                   {QStringLiteral("payload"), QJsonObject{}}})
+        .toJson(QJsonDocument::Compact);
+}
+
+QByteArray encode_cancel_pe_restore_request(const QString& request_id,
+                                            const QString& idempotency_key) {
+    const QJsonObject payload{{QStringLiteral("resource_id"), QStringLiteral("pe-restore")}};
+    return QJsonDocument(
+               QJsonObject{
+                   {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
+                   {QStringLiteral("message_type"), 1},
+                   {QStringLiteral("request_id"), request_id},
+                   {QStringLiteral("kind"), kCancelPeRestoreRequestKind},
+                   {QStringLiteral("idempotency_key"), idempotency_key},
+                   {QStringLiteral("payload"), payload}})
+        .toJson(QJsonDocument::Compact);
+}
+
+bool parse_pe_restore_state_response(const QJsonObject& root, PeRestoreStatePage& result) {
+    qint64 kind = 0;
+    qint64 request_kind = 0;
+    qint64 error = 0;
+    if (!integer_in_range(root.value(QStringLiteral("kind")), 1, 1, kind) ||
+        !integer_in_range(root.value(QStringLiteral("request_kind")), kGetPeRestoreStateRequestKind,
+                          kGetPeRestoreStateRequestKind, request_kind) ||
+        !integer_in_range(root.value(QStringLiteral("boundary_error_code")), 0, 0, error) ||
+        !root.value(QStringLiteral("payload")).isObject()) {
+        return false;
+    }
+    const auto payload = root.value(QStringLiteral("payload")).toObject();
+    if (!payload.value(QStringLiteral("armed")).isBool() ||
+        !payload.value(QStringLiteral("job_uuid")).isString() ||
+        !payload.value(QStringLiteral("target_display")).isString() ||
+        !payload.value(QStringLiteral("created_utc_ms")).isDouble()) {
+        return false;
+    }
+    result.armed = payload.value(QStringLiteral("armed")).toBool();
+    result.job_uuid = payload.value(QStringLiteral("job_uuid")).toString();
+    result.target_display = payload.value(QStringLiteral("target_display")).toString();
+    result.created_utc_ms =
+        static_cast<qint64>(payload.value(QStringLiteral("created_utc_ms")).toDouble());
+    return true;
+}
+
 } // namespace aegra::desktop

@@ -29,6 +29,7 @@ set(AEGRA_DESKTOP_SOURCES
     src/client/service_client_file.cpp
     src/client/service_client_mount.cpp
     src/client/service_client_repository.cpp
+    src/client/pe_restore_controller.cpp
     src/client/service_client_restore.cpp
     src/client/service_client_schedule.cpp
     src/client/service_protocol_file.cpp

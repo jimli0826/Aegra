@@ -2,6 +2,8 @@
 
 #include "worker_job_service_detail.h"
 
+#include "aegra/adapters/personal_archive/personal_archive.h"
+#include "aegra/format/manifest.h"
 #include "aegra/personal_repository/catalog_scanner.h"
 #include "aegra/personal_repository/chain_graph.h"
 
@@ -254,6 +256,168 @@ persist_restore_preflight(ports::IControlPlaneDatabase& control_plane, ports::IC
     preflight.warning_codes = std::move(prepared.warning_codes);
     preflight.message_code = std::move(prepared.message_code);
     return base::Result<contracts::RestorePreflight>::success(std::move(preflight));
+}
+
+namespace {
+
+[[nodiscard]] std::vector<std::string_view> split_fingerprint_parts(const std::string_view text) {
+    std::vector<std::string_view> parts;
+    std::size_t start = 0;
+    while (start <= text.size()) {
+        const auto bar = text.find('|', start);
+        if (bar == std::string_view::npos) {
+            parts.push_back(text.substr(start));
+            break;
+        }
+        parts.push_back(text.substr(start, bar - start));
+        start = bar + 1;
+    }
+    return parts;
+}
+
+[[nodiscard]] base::Result<std::vector<RestoreChainLayer>>
+parse_restore_chain_layers(const std::vector<std::string_view>& parts,
+                           const std::size_t depth_index) {
+    if (parts.size() <= depth_index) {
+        return base::Result<std::vector<RestoreChainLayer>>::failure(
+            {base::ErrorCode::kConflict, "restore preflight fingerprint is corrupt"});
+    }
+    std::uint32_t depth = 0;
+    {
+        const auto* begin = parts[depth_index].data();
+        const auto* end = begin + parts[depth_index].size();
+        if (std::from_chars(begin, end, depth).ec != std::errc{} || depth == 0) {
+            return base::Result<std::vector<RestoreChainLayer>>::failure(
+                {base::ErrorCode::kConflict, "restore preflight fingerprint is corrupt"});
+        }
+    }
+    if (parts.size() != depth_index + 1U + static_cast<std::size_t>(depth) * 2U) {
+        return base::Result<std::vector<RestoreChainLayer>>::failure(
+            {base::ErrorCode::kConflict, "restore preflight fingerprint is corrupt"});
+    }
+    std::vector<RestoreChainLayer> layers;
+    layers.reserve(depth);
+    for (std::uint32_t index = 0; index < depth; ++index) {
+        const auto& key = parts[depth_index + 1U + static_cast<std::size_t>(index) * 2U];
+        const auto& uuid = parts[depth_index + 2U + static_cast<std::size_t>(index) * 2U];
+        if (key.empty() || uuid.empty()) {
+            return base::Result<std::vector<RestoreChainLayer>>::failure(
+                {base::ErrorCode::kConflict, "restore preflight fingerprint is corrupt"});
+        }
+        layers.push_back({std::string(key), std::string(uuid)});
+    }
+    return base::Result<std::vector<RestoreChainLayer>>::success(std::move(layers));
+}
+
+template <typename Value>
+[[nodiscard]] base::Result<Value> parse_fingerprint_number(const std::string_view text,
+                                                           const bool reject_zero) {
+    Value value{};
+    const auto* begin = text.data();
+    const auto* end = begin + text.size();
+    if (std::from_chars(begin, end, value).ec != std::errc{} || (reject_zero && value == 0)) {
+        return base::Result<Value>::failure(
+            {base::ErrorCode::kConflict, "restore preflight fingerprint is corrupt"});
+    }
+    return base::Result<Value>::success(value);
+}
+
+} // namespace
+
+std::string make_disk_restore_fingerprint(const DiskRestoreChain& chain) {
+    std::string out = "diskc|" + std::to_string(chain.source_disk_number) + "|" +
+                      std::to_string(chain.disk_size_bytes) + "|" +
+                      std::to_string(chain.layers.size());
+    for (const auto& layer : chain.layers) {
+        out.push_back('|');
+        out.append(layer.archive_key);
+        out.push_back('|');
+        out.append(layer.file_uuid);
+    }
+    return out;
+}
+
+base::Result<DiskRestoreChain> parse_disk_restore_fingerprint(const std::string_view fingerprint) {
+    if (!fingerprint.starts_with("diskc|")) {
+        return base::Result<DiskRestoreChain>::failure(
+            {base::ErrorCode::kConflict, "restore preflight is not a disk restore"});
+    }
+    const auto parts = split_fingerprint_parts(fingerprint);
+    if (parts.size() < 4 || parts[0] != "diskc") {
+        return base::Result<DiskRestoreChain>::failure(
+            {base::ErrorCode::kConflict, "restore preflight fingerprint is corrupt"});
+    }
+    auto source_disk = parse_fingerprint_number<std::uint32_t>(parts[1], false);
+    auto disk_size = parse_fingerprint_number<std::uint64_t>(parts[2], true);
+    if (!source_disk || !disk_size) {
+        return base::Result<DiskRestoreChain>::failure(
+            {base::ErrorCode::kConflict, "restore preflight fingerprint is corrupt"});
+    }
+    auto layers = parse_restore_chain_layers(parts, 3);
+    if (!layers) {
+        return base::Result<DiskRestoreChain>::failure(layers.error());
+    }
+    DiskRestoreChain parsed;
+    parsed.source_disk_number = source_disk.value();
+    parsed.disk_size_bytes = disk_size.value();
+    parsed.layers = std::move(layers).value();
+    return base::Result<DiskRestoreChain>::success(std::move(parsed));
+}
+
+base::Result<VolumeRestoreChain>
+parse_volume_restore_fingerprint(const std::string_view fingerprint) {
+    if (!fingerprint.starts_with("volc|")) {
+        return base::Result<VolumeRestoreChain>::failure(
+            {base::ErrorCode::kConflict, "restore preflight is not a volume restore"});
+    }
+    const auto parts = split_fingerprint_parts(fingerprint);
+    if (parts.size() < 4 || parts[0] != "volc") {
+        return base::Result<VolumeRestoreChain>::failure(
+            {base::ErrorCode::kConflict, "restore preflight fingerprint is corrupt"});
+    }
+    auto volume_index = parse_fingerprint_number<std::uint32_t>(parts[1], false);
+    auto volume_size = parse_fingerprint_number<std::uint64_t>(parts[2], true);
+    if (!volume_index || !volume_size) {
+        return base::Result<VolumeRestoreChain>::failure(
+            {base::ErrorCode::kConflict, "restore preflight fingerprint is corrupt"});
+    }
+    auto layers = parse_restore_chain_layers(parts, 3);
+    if (!layers) {
+        return base::Result<VolumeRestoreChain>::failure(layers.error());
+    }
+    VolumeRestoreChain parsed;
+    parsed.source_volume_index = volume_index.value();
+    parsed.volume_size_bytes = volume_size.value();
+    parsed.layers = std::move(layers).value();
+    return base::Result<VolumeRestoreChain>::success(std::move(parsed));
+}
+
+base::Result<std::uint64_t>
+source_disk_size_from_archive(const std::string& archive_path_utf8,
+                              const std::uint32_t source_disk_number,
+                              const std::string& password) {
+    auto path = path_from_utf8(archive_path_utf8);
+    if (!path) {
+        return base::Result<std::uint64_t>::failure(path.error());
+    }
+    adapters::personal_archive::ArchiveOpenRequest open_request;
+    open_request.source = std::move(path).value();
+    open_request.password = password;
+    auto reader = adapters::personal_archive::PersonalArchiveReader::open(open_request);
+    if (!reader) {
+        return base::Result<std::uint64_t>::failure(reader.error());
+    }
+    for (const auto& disk : reader.value()->manifest().disks) {
+        if (disk.disk_number == source_disk_number) {
+            if (disk.disk_size == 0) {
+                return base::Result<std::uint64_t>::failure(
+                    {base::ErrorCode::kConflict, "source disk size is unavailable"});
+            }
+            return base::Result<std::uint64_t>::success(disk.disk_size);
+        }
+    }
+    return base::Result<std::uint64_t>::failure(
+        {base::ErrorCode::kNotFound, "source disk is not present in archive manifest"});
 }
 
 } // namespace aegra::apps::service::worker_job_detail

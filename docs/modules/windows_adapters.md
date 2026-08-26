@@ -25,12 +25,15 @@ NTFS 小目标卷恢复（ADR-0025）使用 `WindowsRandomAccessBlockDevice`（`
 - 现有 `WindowsBlockSink` 消费者保持兼容，不被迫携带几何/读回语义。
 
 个人版整盘恢复（Full 第一步）使用 `kPhysicalDisk` 模式：只接受 `\\.\PhysicalDriveN`，拒绝系统盘与
-Archive 所在盘；写入前由 `prepare_target_disk_for_raw_restore` 删除现有分区布局；写入后由
+Archive 所在盘；写入前 `set_target_disk_offline` 锁卷卸载目标盘上所有卷并请求
+`DISK_ATTRIBUTE_OFFLINE`，再 `delete_target_disk_drive_layout` 删除现有分区布局；写入后由
 `apply_disk_signature_policy`（可选随机化 MBR/GPT DiskId）、`rebuild_partition_table_from_raw_layout`
 重建 MBR/GPT、`bring_target_disk_online`，以及可选的 `expand_last_data_partition_on_disk`（对齐旧 `PartitionManager::ExtendLastDataPartitionOnDisk` /
 `ExtendVolumeByPath`：先解析末数据分区与卷 GUID，**保持 volume 句柄打开**，
 `IOCTL_DISK_GROW_PARTITION` 后再 `FSCTL_EXTEND_VOLUME(newTotalSectors)`；GPT 末尾预留 1 MiB；
-FAT/exFAT 跳过扩容）。备份侧
+FAT/exFAT 跳过扩容）。WinPE 默认 SAN 策略为 OfflineShared：本地唯一盘无法保持
+`DISK_ATTRIBUTE_OFFLINE`。PE 路径对齐旧 `PreparePhysicalDiskForWrite`——强制卸载目标卷、禁用
+automount，属性未粘滞时不 fail-closed；完整 Windows 数据盘路径仍校验 OFFLINE 位。备份侧
 `inspect_physical_disk_layout` 以 `GENERIC_READ` 打开 `PhysicalDrive` 并尽量采集 `raw_layout`；
 原始扇区读取失败时不阻断卷备份（空 `raw_layout`）。
 

@@ -822,10 +822,19 @@ class PersonalArchiveRestoreTaskBackend final : public IPersonalArchiveRestoreTa
         // Phase 2 (irreversible): offline → delete layout → write table → volume data → online.
         {
             ScopedStage stage(WorkerTaskLog::active(), "set_target_disk_offline");
-            auto offline = adapters::windows_disk::set_target_disk_offline(target_disk.value());
+            // Sub-step breadcrumbs (write-through to the task log) pinpoint a hang or
+            // hard failure inside the multi-IOCTL offline sequence on WinPE.
+            auto* offline_log = WorkerTaskLog::active();
+            auto offline = adapters::windows_disk::set_target_disk_offline(
+                target_disk.value(), [offline_log](const std::string_view label) {
+                    if (offline_log != nullptr) {
+                        offline_log->field("offline_step", label);
+                    }
+                });
             if (!offline) {
                 return fail_restore(stage, offline.error(), "set_offline");
             }
+            stage.note("volumes", "dismounted");
             stage.note("offline", "ok");
         }
         {
@@ -836,18 +845,11 @@ class PersonalArchiveRestoreTaskBackend final : public IPersonalArchiveRestoreTa
                 return fail_restore(stage, deleted.error(), "delete_layout");
             }
         }
-        {
-            ScopedStage stage(WorkerTaskLog::active(), "write_target_partition_table");
-            adapters::windows_disk::RebuildPartitionTableRequest rebuild{
-                target_disk.value(), plan.value().source_disk->bytes_per_sector,
-                plan.value().source_disk->disk_size, &table.value().layout,
-                table.value().partition_style};
-            auto written = adapters::windows_disk::rebuild_partition_table_from_raw_layout(rebuild);
-            if (!written) {
-                return fail_restore(stage, written.error(), "write_mbr_gpt");
-            }
-            stage.note("partition_table", "written");
-        }
+        // Write raw volume data BEFORE creating the partition table. Vista+ disk
+        // write protection rejects raw PhysicalDrive writes to sectors that belong
+        // to a known partition (ERROR_ACCESS_DENIED), so the table must not exist
+        // yet. Writing data onto a table-less disk, then the table last, is the
+        // legacy WinPE-proven order.
         apply_layout_edits_to_volume_targets(plan.value().targets, resolved_edits,
                                              plan.value().source_disk->bytes_per_sector);
         disk_sink =
@@ -862,6 +864,18 @@ class PersonalArchiveRestoreTaskBackend final : public IPersonalArchiveRestoreTa
             return summary;
         }
         disk_sink.value().reset();
+        {
+            ScopedStage stage(WorkerTaskLog::active(), "write_target_partition_table");
+            adapters::windows_disk::RebuildPartitionTableRequest rebuild{
+                target_disk.value(), plan.value().source_disk->bytes_per_sector,
+                plan.value().source_disk->disk_size, &table.value().layout,
+                table.value().partition_style};
+            auto written = adapters::windows_disk::rebuild_partition_table_from_raw_layout(rebuild);
+            if (!written) {
+                return fail_restore(stage, written.error(), "write_mbr_gpt");
+            }
+            stage.note("partition_table", "written");
+        }
         auto finalized = finalize_target_disk_stage(request, *plan.value().source_disk,
                                                     target_disk.value(), resolved_edits);
         if (!finalized) {

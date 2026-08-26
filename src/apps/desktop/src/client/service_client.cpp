@@ -1,6 +1,7 @@
 #include "client/service_client.h"
 
 #include "client/ipc_frame_transport.h"
+#include "client/pe_restore_controller.h"
 #include "client/service_protocol.h"
 #include "client/service_request_coordinator.h"
 #include "locale/locale_controller.h"
@@ -35,6 +36,7 @@ ServiceClient::ServiceClient(QObject* parent)
       connections_(this), schedule_list_(this),
       transport_(std::make_unique<IpcFrameTransport>(QLatin1String(kServicePipeName))),
       coordinator_(std::make_unique<ServiceRequestCoordinator>(*transport_)),
+      pe_restore_(std::make_unique<PeRestoreController>(*this)),
       job_poll_timer_(new QTimer(this)), toast_timer_(new QTimer(this)),
       splash_connect_timer_(new QTimer(this)),
       reconnect_watchdog_(new QTimer(this)) {
@@ -268,6 +270,8 @@ bool ServiceClient::restoreStartAvailable() const noexcept {
 }
 bool ServiceClient::ntfsShrinkAvailable() const noexcept { return ntfs_shrink_available_; }
 bool ServiceClient::restoreCommandBusy() const noexcept { return restore_command_busy_; }
+
+QObject* ServiceClient::peRestore() const noexcept { return pe_restore_.get(); }
 bool ServiceClient::mountStartAvailable() const noexcept {
     return mount_start_available_ && mount_list_available_;
 }
@@ -832,6 +836,7 @@ RequestDisposition ServiceClient::handle_service_info_frame(const QByteArray& bo
     restore_preflight_available_ = capabilities_.contains(QStringLiteral("restore.preflight"));
     restore_start_available_ = capabilities_.contains(QStringLiteral("restore.start"));
     ntfs_shrink_available_ = capabilities_.contains(QStringLiteral("restore.ntfs_shrink.v1"));
+    pe_restore_->set_available(capabilities_.contains(QStringLiteral("restore.pe.arm")));
     mount_list_available_ = capabilities_.contains(QStringLiteral("mount.list"));
     mount_start_available_ = capabilities_.contains(QStringLiteral("mount.start"));
     mount_unmount_available_ = capabilities_.contains(QStringLiteral("mount.unmount"));
@@ -851,6 +856,9 @@ RequestDisposition ServiceClient::handle_service_info_frame(const QByteArray& bo
         }
         if (inventory_available_) {
             start_inventory_query();
+        }
+        if (pe_restore_->available()) {
+            pe_restore_->refresh();
         }
         if (connections_available_) {
             start_connection_query();
@@ -1175,6 +1183,7 @@ void ServiceClient::set_state(const State state, QString error_code) {
             restore_preflight_available_ = false;
             restore_start_available_ = false;
             ntfs_shrink_available_ = false;
+            pe_restore_->set_available(false);
             restore_command_busy_ = false;
             mount_list_available_ = false;
             mount_start_available_ = false;

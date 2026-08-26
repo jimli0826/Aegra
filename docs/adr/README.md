@@ -50,6 +50,9 @@ Service session 并发分派与请求级 deadline 见
 NTFS 小目标卷恢复的模块、Ports、`$LogFile`/Dirty、Boot 提交与 CHKDSK 边界见
 [ADR-0025](0025-ntfs-smaller-target-volume-restore.md)。
 
+WinPE 一次性启动（BCD bootsequence）与跨重启 Secret Envelope（Proposed）见
+[ADR-0026](0026-winpe-offline-restore-and-secret-envelope.md)。
+
 ## 状态
 
 - `Proposed`：讨论中，不构成实现依据。

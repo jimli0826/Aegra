@@ -1043,14 +1043,6 @@
         <source>Next run</source>
         <translation>Nächster Lauf</translation>
     </message>
-    <message id="aegra.backup.locations">
-        <source>Locations</source>
-        <translation>Speicherorte</translation>
-    </message>
-    <message id="aegra.backup.add_location">
-        <source>Add location</source>
-        <translation>Speicherort hinzufügen</translation>
-    </message>
     <message id="aegra.backup.source.volume">
         <source>Volume</source>
         <translation>Volume</translation>
@@ -1132,12 +1124,8 @@
         <translation>So</translation>
     </message>
     <message id="aegra.backup.opt.dedup">
-        <source>Enable volume chunk deduplication</source>
-        <translation>Volume-Chunk-Deduplizierung aktivieren</translation>
-    </message>
-    <message id="aegra.backup.opt.dedup_hint">
-        <source>Same-chunk only within each volume backup; not global or cross-backup</source>
-        <translation>Nur innerhalb desselben physischen Chunks pro Volume-Backup; nicht global oder backup-übergreifend</translation>
+        <source>Enable Deduplication</source>
+        <translation>Deduplizierung aktivieren</translation>
     </message>
     <message id="aegra.repository.dedup.bytes">
         <source>Deduplicated</source>
@@ -1167,17 +1155,17 @@
         <source>Compression</source>
         <translation>Kompression</translation>
     </message>
-    <message id="aegra.backup.comp.none">
-        <source>None</source>
-        <translation>Keine</translation>
+    <message id="aegra.backup.comp.fast">
+        <source>Fast</source>
+        <translation>Schnell</translation>
     </message>
     <message id="aegra.backup.comp.normal">
         <source>Normal</source>
         <translation>Normal</translation>
     </message>
-    <message id="aegra.backup.comp.best">
-        <source>Best</source>
-        <translation>Beste</translation>
+    <message id="aegra.backup.comp.high">
+        <source>High</source>
+        <translation>Hoch</translation>
     </message>
     <message id="aegra.backup.column.status">
         <source>Status</source>
@@ -1348,8 +1336,8 @@
         <translation>Mindestens eine Sicherungsquelle auswählen</translation>
     </message>
     <message id="aegra.backup.schedule.missing_target">
-        <source>Select a repository destination (Locations)</source>
-        <translation>Repository-Ziel (Locations) auswählen</translation>
+        <source>Select a repository destination</source>
+        <translation>Repository-Ziel auswählen</translation>
     </message>
     <message id="aegra.backup.schedule.first_backup_title">
         <source>Start first backup?</source>
@@ -1408,8 +1396,8 @@
         <translation>Nur der Zeitplan wird entfernt. Vorhandene Wiederherstellungspunkte im Repository bleiben erhalten.</translation>
     </message>
     <message id="aegra.backup.destination.empty">
-        <source>No repository connection yet. Add a location in Repository first.</source>
-        <translation>Noch keine Repository-Verbindung. Zuerst unter Repository ein Ziel hinzufügen.</translation>
+        <source>No repository connection yet. Add a repository first.</source>
+        <translation>Noch keine Repository-Verbindung. Fügen Sie zuerst ein Repository hinzu.</translation>
     </message>
     <message id="aegra.backup.credential.service_managed">
         <source>Repository credentials are managed by Service. Passwords are never entered in Desktop.</source>
@@ -2648,8 +2636,8 @@
         <translation>Das ausgewählte Sicherungsziel ist offline und kann keine Sicherungen empfangen. Wählen Sie unten ein Online-Repository aus, um fortzufahren:</translation>
     </message>
     <message id="aegra.backup.offline_dialog_none_available">
-        <source>No online repositories found. Please bring a repository online or add a new location in the Repository page.</source>
-        <translation>Keine Online-Repositorys gefunden. Bringen Sie ein Repository online oder fügen Sie auf der Repository-Seite einen neuen Speicherort hinzu.</translation>
+        <source>No online repositories found. Please bring a repository online or add a new repository in the Repository page.</source>
+        <translation>Keine Online-Repositorys gefunden. Bringen Sie ein Repository online oder fügen Sie auf der Repository-Seite ein neues Repository hinzu.</translation>
     </message>
     <message id="aegra.backup.run.not_connected">
         <source>Service not connected</source>
@@ -2873,6 +2861,98 @@ Offsite-Coldbackup für kritische Volumes</translation>
     <message id="aegra.home.banner.action">
         <source>Go to New Backup Plan</source>
         <translation>Zum neuen Sicherungsplan</translation>
+    </message>
+    <message id="aegra.shell.more">
+        <source>More</source>
+        <translation>Mehr</translation>
+    </message>
+    <message id="aegra.shell.help_feedback">
+        <source>Help and feedback</source>
+        <translation>Hilfe und Feedback</translation>
+    </message>
+    <message id="aegra.shell.about">
+        <source>About</source>
+        <translation>Über Aegra</translation>
+    </message>
+    <message id="aegra.shell.check_updates">
+        <source>Check for updates</source>
+        <translation>Nach Updates suchen</translation>
+    </message>
+    <message id="aegra.about.title">
+        <source>About Aegra</source>
+        <translation>Über Aegra</translation>
+    </message>
+    <message id="aegra.about.built_with">
+        <source>Built with</source>
+        <translation>Erstellt mit</translation>
+    </message>
+    <message id="aegra.about.version_for_windows">
+        <source>Version %1 (%2) for Windows Desktop</source>
+        <translation>Version %1 (%2) für Windows Desktop</translation>
+    </message>
+    <message id="aegra.about.licenses_btn">
+        <source>Licenses</source>
+        <translation>Lizenzen</translation>
+    </message>
+    <message id="aegra.about.licenses_link">
+        <source>Open Source Licenses</source>
+        <translation>Open-Source-Lizenzen</translation>
+    </message>
+    <message id="aegra.about.support">
+        <source>Support</source>
+        <translation>Support</translation>
+    </message>
+    <message id="aegra.about.homepage">
+        <source>Home Page</source>
+        <translation>Startseite</translation>
+    </message>
+    <message id="aegra.about.documentation">
+        <source>Documentation</source>
+        <translation>Dokumentation</translation>
+    </message>
+    <message id="aegra.about.feedback">
+        <source>Feedback</source>
+        <translation>Feedback</translation>
+    </message>
+    <message id="aegra.about.related_links">
+        <source>Related Links</source>
+        <translation>Verwandte Links</translation>
+    </message>
+    <message id="aegra.about.releases">
+        <source>Release Notes</source>
+        <translation>Versionshinweise</translation>
+    </message>
+    <message id="aegra.about.contact">
+        <source>Contact</source>
+        <translation>Kontakt</translation>
+    </message>
+    <message id="aegra.about.already_latest">
+        <source>You are using the latest version of Aegra.</source>
+        <translation>Sie verwenden die neueste Version von Aegra.</translation>
+    </message>
+    <message id="aegra.licenses.title">
+        <source>Open Source Licenses</source>
+        <translation>Open-Source-Lizenzen</translation>
+    </message>
+    <message id="aegra.licenses.subtitle">
+        <source>Open source software used in Aegra:</source>
+        <translation>In Aegra verwendete Open-Source-Software:</translation>
+    </message>
+    <message id="aegra.licenses.about_qt">
+        <source>About Qt</source>
+        <translation>Über Qt</translation>
+    </message>
+    <message id="aegra.licenses.about_qt_title">
+        <source>About Qt Framework</source>
+        <translation>Über das Qt-Framework</translation>
+    </message>
+    <message id="aegra.licenses.about_qt_desc">
+        <source>Aegra is built with Qt %1. Qt is an open-source cross-platform C++ framework licensed under the GNU Lesser General Public License (LGPL) version 3.</source>
+        <translation>Aegra basiert auf Qt %1. Qt ist ein plattformübergreifendes C++-Framework, lizenziert unter der GNU LGPL v3.</translation>
+    </message>
+    <message id="aegra.licenses.licensed_under">
+        <source>Licensed under</source>
+        <translation>Lizenziert unter</translation>
     </message>
 </context>
 </TS>

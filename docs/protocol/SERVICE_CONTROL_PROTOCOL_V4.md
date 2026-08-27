@@ -584,18 +584,26 @@ payload 保持 repository/schedule/job 引用形状；若 Schedule 为 file_set�
 | `trigger` | ScheduleTrigger |
 | `repository_connection_id` | string \| null |
 | `backup_type` | number | file_set 允许 Full(1) 或 Incremental(2)，禁止 Differential |
+| `exclude_page_and_hibernation_files` | bool |
 | `deduplication_enabled` | bool | volume_set 创建默认 true 且创建后冻结；file_set 必须 false |
+| `split_size_bytes` | unsigned integer | volume_set：0 或 128 MiB–1 TiB，创建后冻结；file_set 必须 0 |
+| `compression_level` | unsigned integer | zstd Fast=1、Normal=3、High=9；创建后冻结；两种 content_kind |
 | `protection` | ProtectionSpec | §4.8 |
-| `encryption` | object \| null | 既有形状 |
+| `encryption_enabled` | bool |
+| `archive_password` | string | 仅创建加密 Schedule 时非空；更新必须为空 |
 
 创建 file_set：解析 token → durable selection；规范化/去重；事务写入。  
 更新：保护源冻结；改变 `protection` 选择 → Conflict `schedule.source_frozen`。volume_set 更新不得改变
-`deduplication_enabled`；该字段必须进入幂等请求指纹。Service 将 `backup_type` 一律写为 Incremental。
+`deduplication_enabled`、`split_size_bytes` 或 `compression_level`；这些字段必须进入幂等请求指纹。
+Service 将 `backup_type` 一律写为 Incremental。
 更换 `repository_connection_id` 清空增量 tip。
 
-**列表 ScheduleSummary** 增加：`content_kind`, `deduplication_enabled`, `selection_summaries`（`selection_id`,
+**列表 ScheduleSummary** 增加：`content_kind`, `deduplication_enabled`, `split_size_bytes`,
+`compression_level`,
+`selection_summaries`（`selection_id`,
 `display_label`, `entry_kind`, `recursion`, `display_chain`）。`display_chain` 为 volume-relative UI 名
-（整卷选择则为 `[display_label]`），不是路径。file_set 的 `deduplication_enabled` 固定 false。
+（整卷选择则为 `[display_label]`），不是路径。file_set 的 `deduplication_enabled` 固定 false，
+`split_size_bytes` 固定 0；`compression_level` 两种 content_kind 均可。
 
 ### 7.3 kind 48 — StartFileRestore
 

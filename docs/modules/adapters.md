@@ -59,7 +59,8 @@ Reader 先完整认证并原地解密 VolumeChunk payload，
 V7 `file_set` 由 `PersonalFileArchiveSession`（`IFileBackupSession`）与 `PersonalFileArchiveReader`
 （`IFileRecoveryPointReader`）实现：entry 先写入 index spool，finalize 时写出 leaf index page 与 Footer；
 Index page 使用独立 HKDF info `MYBACKUP-V7-FILE-INDEX-PAGE`。File stream chunk 默认
-`COMPRESSION_ZSTD`：写入时对逻辑 block 做机会性 zstd（压得更小才标 `COMPRESSED`，否则 `RAW`）；
+`COMPRESSION_ZSTD`：写入时对逻辑 block 按 Schedule 的 zstd level（Fast=1、Normal=3、High=9）
+做机会性压缩（压得更小才标 `COMPRESSED`，否则 `RAW`）；
 读取时按 BlockEntry flags 解压。Writer 支持 Full 与 Incremental：
 - Full：`parent_uuid=0`，全部 stream 必须 `content_storage=local`；
 - Incremental：`parent_uuid` 非 0、`CAP_FILE_METADATA_BASELINE` 置位、Manifest 含 fingerprint 与

@@ -37,7 +37,9 @@ source/target、`SecretRef`、trace 和 deadline。`content_kind` 为 `volume_se
 
 Backup Job 还必须拥有 `BackupOptions`：显式 `type`、`file_uuid`、`created_utc_ms`，全量必须拥有不同于
 `file_uuid` 的 `backup_set_uuid`。`deduplication_enabled` 必须显式存在：volume_set 默认 true 并可为 false，
-file_set 必须 false。volume 增量同时拥有 `parent_source_ref`（`parent_credential_ref` 可选）。
+file_set 必须 false。`split_size_bytes` 也必须显式存在：volume_set 为 `0` 或 128 MiB–1 TiB，file_set
+必须为 `0`。`compression_level` 必须显式为 zstd Fast=1、Normal=3 或 High=9（默认 3），两种
+content_kind 均可。volume 增量同时拥有 `parent_source_ref`（`parent_credential_ref` 可选）。
 file_set 允许 Full/Incremental：`selection_fingerprint` 必填；Incremental 可携带 `candidate_parent_uuid`，
 并使用 ADR-0020 的 `mtime_size_v1` metadata baseline；禁止 volume 风格 `parent_source_ref`。Service 在提交
 Worker 前分配持久化身份、创建时间与 selection fingerprint；Worker 不得重新生成 Archive 身份。`SecretRef`
@@ -76,7 +78,8 @@ Volume schedule 创建/更新：
   口令经 Service 用 DPAPI `CRYPTPROTECT_LOCAL_MACHINE` 保护（`pOptionalEntropy` = `schedule_id`）
   并以 Base64 写入 SQLite。`backup_type` 一律存 Incremental；定时与 Run now 请求增量，无父则降 Full。
 - **更新**（有 `schedule_id`）：不得携带 `archive_password`；保护源、
-  `exclude_page_and_hibernation_files`、`deduplication_enabled`、`encryption_enabled` 与保护口令创建后冻结。
+  `exclude_page_and_hibernation_files`、`deduplication_enabled`、`split_size_bytes`、
+  `compression_level`、`encryption_enabled` 与保护口令创建后冻结。
   允许修改 `display_name`、`enabled`、`repository_connection_id`、`trigger`
   （Daily/Weekly/Monthly；Monthly 携带 `day_of_month_mask`）。
   更换 destination 清空 `last_recovery_point_id`（下次增量降 Full）。

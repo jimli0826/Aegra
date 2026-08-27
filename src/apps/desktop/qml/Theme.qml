@@ -45,6 +45,7 @@ QtObject {
 
     property color colorAccentRed: "#FF6F85"
     property color colorAccentBlue: "#248894"
+    property color colorAccentPurple: "#7C6EE6"
     property color colorGreen: "#2CB378"
     // Nav active: CoachPro / index.html primary teal gradient ends
     property color colorMenuActive: "#3798A3"
@@ -144,6 +145,7 @@ QtObject {
             colorListItemAlt: "#24262d",
             colorAccentRed: "#ef4444",
             colorAccentBlue: "#38bdf8",
+            colorAccentPurple: "#8b5cf6",
             colorGreen: "#10b981",
             colorMenuActive: "#1e3a5f",
             colorMenuActiveEnd: "#162a45",
@@ -203,6 +205,7 @@ QtObject {
             colorListItemAlt: "#F5F9FE",
             colorAccentRed: "#EF4444",
             colorAccentBlue: "#2563EB",
+            colorAccentPurple: "#6366F1",
             colorGreen: "#10B981",
             colorMenuActive: "#2E64D8",
             colorMenuActiveEnd: "#1D4ED8",
@@ -262,6 +265,7 @@ QtObject {
             colorListItemAlt: "#DBE9EA",
             colorAccentRed: "#FF6F85",
             colorAccentBlue: "#248894",
+            colorAccentPurple: "#7C6EE6",
             colorGreen: "#2CB378",
             colorMenuActive: "#3798A3",
             colorMenuActiveEnd: "#237A85",
@@ -355,6 +359,8 @@ QtObject {
         colorListItemAlt = p.colorListItemAlt
         colorAccentRed = p.colorAccentRed
         colorAccentBlue = p.colorAccentBlue
+        if (p.colorAccentPurple !== undefined)
+            colorAccentPurple = p.colorAccentPurple
         colorGreen = p.colorGreen
         colorMenuActive = p.colorMenuActive
         if (p.colorMenuActiveEnd !== undefined)

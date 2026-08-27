@@ -894,6 +894,7 @@ DATA→FREE、ZERO→FREE、FREE→ZERO 都必须在当前层显式写对应 Blo
 
 - Header `compression_method`：volume 与 file_set 默认均为 `COMPRESSION_ZSTD`（1）。
 - `COMPRESSION_ZSTD`：每个 BlockEntry 的 stored payload 为独立 zstd frame；
+- Writer 使用 Schedule 冻结的 zstd level（Fast=1、Normal=3、High=9）；level 不写入 Header；
 - volume_set 启用 DEDUP 时先选择 plaintext canonical，再仅对 canonical 执行机会性压缩；
 - file_set 写入为**机会性**压缩：仅当 zstd 输出严格小于逻辑块长度时使用 `COMPRESSED`，否则 `RAW`；
 - 解压后长度必须等于该 entry 的 `logical_size`（RAW 时 `stored_size == logical_size`）；

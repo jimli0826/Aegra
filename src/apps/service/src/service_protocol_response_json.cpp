@@ -649,11 +649,13 @@ parse_recovery_point_source_volume(const Json& payload) {
                 {"next_run_utc_ms", optional_uint64_json(summary.next_run_utc_ms)},
                 {"exclude_page_and_hibernation_files", summary.exclude_page_and_hibernation_files},
                 {"deduplication_enabled", summary.deduplication_enabled},
+                {"split_size_bytes", summary.split_size_bytes},
+                {"compression_level", summary.compression_level},
                 {"encryption_enabled", summary.encryption_enabled}};
 }
 
 [[nodiscard]] contracts::ScheduleSummary parse_schedule(const Json& payload) {
-    constexpr std::array<std::string_view, 13> keys{"schedule_id",
+    constexpr std::array<std::string_view, 15> keys{"schedule_id",
                                                     "display_name",
                                                     "enabled",
                                                     "content_kind",
@@ -665,6 +667,8 @@ parse_recovery_point_source_volume(const Json& payload) {
                                                     "next_run_utc_ms",
                                                     "exclude_page_and_hibernation_files",
                                                     "deduplication_enabled",
+                                                    "split_size_bytes",
+                                                    "compression_level",
                                                     "encryption_enabled"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("schedule summary fields are invalid");
@@ -687,6 +691,8 @@ parse_recovery_point_source_volume(const Json& payload) {
     summary.exclude_page_and_hibernation_files =
         payload.at("exclude_page_and_hibernation_files").get<bool>();
     summary.deduplication_enabled = payload.at("deduplication_enabled").get<bool>();
+    summary.split_size_bytes = unsigned_value<std::uint64_t>(payload, "split_size_bytes");
+    summary.compression_level = unsigned_value<std::uint8_t>(payload, "compression_level");
     summary.encryption_enabled = payload.at("encryption_enabled").get<bool>();
     return summary;
 }

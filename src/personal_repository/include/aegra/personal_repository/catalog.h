@@ -2,6 +2,7 @@
 
 #include "aegra/base/result.h"
 #include "aegra/format/manifest.h"
+#include "aegra/format/personal_archive.h"
 
 #include <cstdint>
 #include <optional>
@@ -16,7 +17,8 @@ inline constexpr std::uint32_t kRepositoryLayoutVersion = 1;
 inline constexpr std::uint32_t kCatalogSchemaVersion = 2;
 inline constexpr std::uint32_t kDeletionSchemaVersion = 1;
 inline constexpr std::uint32_t kPersonalArchiveFormatVersion = 7;
-inline constexpr std::uint32_t kMaximumSplitPartCount = 1'000;
+inline constexpr std::uint32_t kMaximumSplitPartCount =
+    format::personal_archive::kMaximumSplitPartCount;
 inline constexpr std::uint32_t kMaximumRepositoryKeyBytes = 1'024;
 
 inline constexpr std::string_view kCatalogContentKindVolumeSet = "volume_set";

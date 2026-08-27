@@ -514,6 +514,7 @@ struct PersonalArchiveSession::Impl final {
     std::unique_ptr<crypto_sodium::PayloadCipher> payload_cipher;
     bool encryption_enabled{false};
     bool deduplication_enabled{false};
+    int compression_level{3};
     std::array<std::byte, 16> file_uuid{};
     crypto_sodium::KdfParameters kdf;
     std::array<std::byte, crypto_sodium::kMetadataSaltSize> salt{};
@@ -559,9 +560,9 @@ struct PersonalArchiveSession::Impl final {
     }
 
     [[nodiscard]] base::Result<void> open_next_part() {
-        if (parts.size() >= (std::numeric_limits<std::uint32_t>::max)()) {
+        if (parts.size() >= archive::kMaximumSplitPartCount) {
             return base::Result<void>::failure(
-                error(base::ErrorCode::kInsufficientSpace, "archive has too many split parts"));
+                error(base::ErrorCode::kInsufficientSpace, "format.split_part_limit"));
         }
         const auto part_index = static_cast<std::uint32_t>(parts.size());
         auto artifact = make_part_artifact(destination, part_index);
@@ -821,6 +822,7 @@ PersonalArchiveSession::create(const ArchiveCreateRequest& request) {
     implementation->block_size = request.block_size;
     implementation->split_size_bytes = request.split_size_bytes;
     implementation->deduplication_enabled = request.deduplication_enabled;
+    implementation->compression_level = request.compression_level;
     implementation->incremental = baseline_value.has_value();
     implementation->sources.reserve(request.manifest.volumes.size());
     for (std::size_t index = 0; index < request.manifest.volumes.size(); ++index) {
@@ -877,6 +879,7 @@ base::Result<void> PersonalArchiveSession::write_chunk(const ports::ChunkWriteRe
         implementation_->next_archive_chunk_index,
         implementation_->incremental,
         implementation_->deduplication_enabled,
+        implementation_->compression_level,
         &implementation_->block_workers,
     };
     const auto prepare_start = std::chrono::steady_clock::now();

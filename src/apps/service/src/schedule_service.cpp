@@ -157,6 +157,10 @@ make_canonical_uuid(ports::IRandomSource& random, const base::CancellationToken&
     fingerprint += "|";
     fingerprint += command.deduplication_enabled ? "1" : "0";
     fingerprint += "|";
+    fingerprint += std::to_string(command.split_size_bytes);
+    fingerprint += "|";
+    fingerprint += std::to_string(command.compression_level);
+    fingerprint += "|";
     fingerprint += command.encryption_enabled ? "1" : "0";
     fingerprint += "|pwd:";
     fingerprint += password_digest_token(command.archive_password);
@@ -278,6 +282,16 @@ enforce_schedule_update_invariants(const contracts::UpsertScheduleCommand& comma
         return base::Result<void>::failure(
             {base::ErrorCode::kInvalidArgument,
              "schedule deduplication cannot be changed after create"});
+    }
+    if (command.split_size_bytes != existing.split_size_bytes) {
+        return base::Result<void>::failure(
+            {base::ErrorCode::kInvalidArgument,
+             "schedule archive split size cannot be changed after create"});
+    }
+    if (command.compression_level != existing.compression_level) {
+        return base::Result<void>::failure(
+            {base::ErrorCode::kInvalidArgument,
+             "schedule compression level cannot be changed after create"});
     }
     if (command.encryption_enabled != existing.encryption_enabled) {
         return base::Result<void>::failure({base::ErrorCode::kInvalidArgument,
@@ -445,9 +459,12 @@ base::Result<contracts::CommandAcknowledgement> ScheduleService::upsert_schedule
     record.exclude_page_and_hibernation_files = command.exclude_page_and_hibernation_files;
     if (content_kind == contracts::ContentKind::kFileSet) {
         record.deduplication_enabled = false;
+        record.split_size_bytes = 0;
     } else {
         record.deduplication_enabled = command.deduplication_enabled;
+        record.split_size_bytes = command.split_size_bytes;
     }
+    record.compression_level = command.compression_level;
     record.encryption_enabled = command.encryption_enabled;
     record.archive_password_protected = std::move(archive_password_protected);
     record.backup_set_uuid = std::move(backup_set_uuid);

@@ -311,7 +311,7 @@ inline constexpr const char* kSelectScheduleSql =
     "SELECT schedule_id, display_name, enabled, content_kind, source_ids, "
     "repository_connection_id, backup_type, trigger_kind, local_minutes_of_day, weekday_mask, "
     "day_of_month_mask, timezone_id, next_run_utc_ms, exclude_page_and_hibernation_files, "
-    "deduplication_enabled, encryption_enabled, archive_password_protected, backup_set_uuid, "
+    "deduplication_enabled, split_size_bytes, compression_level, encryption_enabled, archive_password_protected, backup_set_uuid, "
     "last_recovery_point_id, created_utc_ms, updated_utc_ms FROM schedules WHERE schedule_id = ?";
 
 [[nodiscard]] std::string

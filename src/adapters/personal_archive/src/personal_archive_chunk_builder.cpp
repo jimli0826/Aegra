@@ -134,13 +134,13 @@ struct PreparedBlock final {
 
 [[nodiscard]] base::Result<void>
 compress_changed_data(PreparedBlock& block, const std::span<const std::byte> plaintext,
-                      BlockWorkerLocal& local) {
+                      BlockWorkerLocal& local, const int compression_level) {
     const auto compress_start = std::chrono::steady_clock::now();
     const auto bound = compression_zstd::compress_bound(plaintext.size());
     if (local.scratch.size() < bound) {
         local.scratch.resize(bound);
     }
-    auto written = local.compressor.compress_into(plaintext, local.scratch);
+    auto written = local.compressor.compress_into(plaintext, local.scratch, compression_level);
     if (!written) {
         return base::Result<void>::failure(written.error());
     }
@@ -202,7 +202,7 @@ compress_changed_data(PreparedBlock& block, const std::span<const std::byte> pla
     if (request.deduplication_enabled) {
         return out;
     }
-    auto compressed = compress_changed_data(out, block, local);
+    auto compressed = compress_changed_data(out, block, local, request.compression_level);
     if (!compressed) {
         out.failed = true;
         out.error = compressed.error();
@@ -440,7 +440,8 @@ compress_canonical_blocks_parallel(const ChunkPreparationRequest& request,
             auto& block = blocks[pending[work]];
             const auto plaintext =
                 request.input.payload.subspan(block.source_offset, block.plaintext_size);
-            auto compressed = compress_changed_data(block, plaintext, local);
+            auto compressed =
+                compress_changed_data(block, plaintext, local, request.compression_level);
             if (!compressed) {
                 block.failed = true;
                 block.error = compressed.error();

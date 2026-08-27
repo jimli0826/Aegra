@@ -34,6 +34,9 @@ V6 允许一个逻辑备份跨多个 `.bkf` 分卷，也允许 Manifest 描述�
    现有语义的 `IRecoveryPointReader`。应用层负责把多个 Source Pipeline 组织为一个事务。
 8. 本阶段实现透明分卷；多 source Port 在实现第二个真实 source use case 时落地，避免提前加入没有
    消费者的抽象。
+9. 产品控制面只为 `volume_set` 暴露分卷。Schedule/Worker Job 使用
+   `split_size_bytes`：`0` 关闭，非零范围为 128 MiB–1 TiB，并在 Schedule 创建后冻结；`file_set`
+   必须为 `0`。Desktop 默认 1 GiB，分卷总数上限为 1000（含首卷）。
 
 ## 备选方案
 
@@ -55,8 +58,6 @@ V6 允许一个逻辑备份跨多个 `.bkf` 分卷，也允许 Manifest 描述�
 
 ## 验证
 
-- Header golden 测试覆盖非分卷、首卷和续卷规则。
-- 端到端测试强制跨多个分卷，验证跨卷 chunk 顺序、ZERO、Sidecar 和恢复字节一致。
-- 损坏输入测试覆盖缺失中间卷、续卷 Header 身份不一致和末卷 Footer 缺失。
-- Abort/发布失败测试验证所有本次 partial 与已发布产物被清理。
-- Debug、Release、clang-tidy、clang-format、规模检查和 `git diff --check` 作为质量门禁。
+- 构建受影响生产目标并运行静态、架构、格式与规模检查。
+- 人工运行小尺寸 volume_set，确认单文件与分卷两条路径，且 Catalog 成员、读取与恢复可发现连续卷。
+- 人工验证缺卷、超过 1000 卷和 file_set 非零分卷参数均被稳定拒绝。

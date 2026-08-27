@@ -41,6 +41,8 @@ struct ArchiveCreateRequest final {
     std::uint32_t block_size{0};
     std::uint32_t chunk_size{0};
     std::uint64_t split_size_bytes{0};
+    /// zstd level for opportunistic payload compression (product: 1/3/9).
+    int compression_level{3};
     ArchiveKdfParameters kdf_parameters;
     std::filesystem::path parent_source;
     // Views are consumed by create(); the session copies only its own password into secure memory.
@@ -64,7 +66,7 @@ struct ArchiveOpenRequest final {
     std::uint64_t maximum_metadata_size{64ULL * 1024ULL * 1024ULL};
     std::uint64_t maximum_chunk_payload_size{1024ULL * 1024ULL * 1024ULL};
     std::uint64_t maximum_chunk_logical_size{1024ULL * 1024ULL * 1024ULL};
-    std::uint32_t maximum_split_parts{10'000};
+    std::uint32_t maximum_split_parts{format::personal_archive::kMaximumSplitPartCount};
     FileArchiveIndexLoad index_load{FileArchiveIndexLoad::kEager};
     /// Enables a bounded depth-one payload prefetch for sequential restore readers.
     bool sequential_payload_prefetch{false};
@@ -162,6 +164,8 @@ struct FileArchiveCreateRequest final {
     std::uint32_t block_size{4096};
     std::uint32_t chunk_size{4U * 1024U * 1024U};
     std::uint64_t split_size_bytes{0};
+    /// zstd level for opportunistic payload compression (product: 1/3/9).
+    int compression_level{3};
     ArchiveKdfParameters kdf_parameters;
 };
 

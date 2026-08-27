@@ -50,9 +50,15 @@ base::Result<void> validate_backup_options(const JobRequest& request) {
     if (!request.backup || !is_known_backup_type(request.backup->type)) {
         return invalid("backup options are required and must have a known type");
     }
+    if (!valid_compression_level(request.backup->compression_level)) {
+        return invalid("backup compression level is invalid");
+    }
     if (request.content_kind == ContentKind::kFileSet) {
         if (request.backup->deduplication_enabled) {
             return invalid("file_set backup cannot enable deduplication");
+        }
+        if (request.backup->split_size_bytes != 0) {
+            return invalid("file_set backup cannot enable archive splitting");
         }
         if (request.backup->type != BackupType::kFull &&
             request.backup->type != BackupType::kIncremental) {
@@ -97,6 +103,9 @@ base::Result<void> validate_backup_options(const JobRequest& request) {
             return fingerprint;
         }
     } else {
+        if (!valid_archive_split_size(request.backup->split_size_bytes)) {
+            return invalid("volume_set archive split size is invalid");
+        }
         if (request.backup->selection_fingerprint ||
             !request.backup->candidate_parent_uuid.empty() || request.backup->service_full_reason) {
             return invalid("volume_set backup cannot carry file selection baseline fields");

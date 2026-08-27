@@ -87,6 +87,7 @@ inline constexpr std::uint32_t kFileBlockSizeAlignment = 4096U;
 inline constexpr std::uint64_t kMaximumChunkPayloadBytes = 512ULL * 1024ULL * 1024ULL;
 inline constexpr std::uint32_t kMaximumBlockEntriesPerChunk = 1'048'576U;
 inline constexpr std::uint32_t kMaximumIndexPagePlainBytes = 1U * 1024U * 1024U;
+inline constexpr std::uint32_t kMaximumSplitPartCount = 1'000U;
 
 enum class CompressionMethod : std::uint8_t {
     kNone = 0,

@@ -12,6 +12,8 @@ Item {
     Accessible.name: qsTrId("aegra.nav.backup")
     /// Request Main to switch to Home after a real backup job is accepted.
     signal navigateHomeRequested()
+    /// Request Main to close this wizard and switch to Repository.
+    signal navigateRepositoryRequested()
 
     // File-tree row icons (icon before name; volume roots use disk glyph).
     Component {
@@ -619,7 +621,7 @@ Item {
             connId = serviceClient.defaultConnectionId() || ""
         if (root.editingScheduleId.length > 0) {
             if (!connId || connId.length === 0) {
-                //% "Select a repository destination (Locations)"
+                //% "Select a repository destination"
                 serviceClient.showToast(qsTrId("aegra.backup.schedule.missing_target"), true)
                 return
             }
@@ -639,7 +641,7 @@ Item {
             return
         }
         if (!connId || connId.length === 0) {
-            //% "Select a repository destination (Locations)"
+            //% "Select a repository destination"
             serviceClient.showToast(qsTrId("aegra.backup.schedule.missing_target"), true)
             return
         }
@@ -647,7 +649,7 @@ Item {
         var frequency = s2 && typeof s2.selectedFrequency === "function"
                         ? s2.selectedFrequency() : (s2 ? s2.frequency : "daily")
         var timeOfDay = s2 && typeof s2.selectedTimeOfDay === "function"
-                        ? s2.selectedTimeOfDay() : "02:00"
+                        ? s2.selectedTimeOfDay() : "12:00"
         if (s2 && typeof s2.validateTimesOfDay === "function") {
             var timeErr = s2.validateTimesOfDay()
             if (timeErr && timeErr.length > 0) {
@@ -669,6 +671,11 @@ Item {
         var excludePage = s2 ? s2.excludePageHibernation : true
         // volume_set only; file_set always false (ADR-0022).
         var enableDedup = filesMode ? false : (s2 ? s2.enableDedup : true)
+        var splitSizeBytes = filesMode ? 0
+                                       : (s2 && typeof s2.selectedSplitSizeBytes === "function"
+                                          ? s2.selectedSplitSizeBytes() : 0)
+        var compressionLevel = s2 && typeof s2.selectedCompressionLevel === "function"
+                               ? s2.selectedCompressionLevel() : 3
         var encryption = s2 ? s2.encryption : false
         var password = s2 ? (s2.password || "") : ""
         var passwordConfirm = s2 ? (s2.passwordConfirm || "") : ""
@@ -693,6 +700,8 @@ Item {
             dayOfMonthMask: dayOfMonthMask,
             excludePage: excludePage,
             enableDedup: enableDedup,
+            splitSizeBytes: splitSizeBytes,
+            compressionLevel: compressionLevel,
             encryption: encryption,
             password: encryption ? password : ""
         }
@@ -709,12 +718,15 @@ Item {
         var monthMask = p.dayOfMonthMask || 0
         if (p.filesMode) {
             ok = serviceClient.createFileSetSchedule(p.connId, p.frequency, p.timeOfDay,
-                                                     p.excludePage, p.encryption, p.password,
+                                                     p.excludePage, p.compressionLevel || 3,
+                                                     p.encryption, p.password,
                                                      !!startFirstBackup, mask, monthMask)
         } else {
             ok = serviceClient.createSchedule(p.sources, p.connId, p.frequency, p.timeOfDay,
-                                              p.excludePage, !!p.enableDedup, p.encryption,
-                                              p.password, !!startFirstBackup, mask, monthMask)
+                                              p.excludePage, !!p.enableDedup,
+                                              p.splitSizeBytes || 0, p.compressionLevel || 3,
+                                              p.encryption, p.password, !!startFirstBackup, mask,
+                                              monthMask)
         }
         if (!ok) {
             //% "Could not save schedule"
@@ -741,10 +753,10 @@ Item {
     }
 
     function formatNextRunLocal(timeOfDay) {
-        var parts = (timeOfDay || "02:00").split(":")
+        var parts = (timeOfDay || "12:00").split(":")
         var h = parseInt(parts[0], 10)
         var m = parseInt(parts[1], 10)
-        if (isNaN(h)) h = 2
+        if (isNaN(h)) h = 12
         if (isNaN(m)) m = 0
         var d = new Date()
         d.setSeconds(0, 0)
@@ -792,7 +804,7 @@ Item {
                         : ((s2 && s2.frequency === "weekly") ? "weekly" : "daily")
         var timeOfDay = s2 && typeof s2.selectedTimeOfDay === "function"
                         ? s2.selectedTimeOfDay()
-                        : (item.timeOfDay || "02:00")
+                        : (item.timeOfDay || "12:00")
         if (s2 && typeof s2.validateTimesOfDay === "function") {
             var editTimeErr = s2.validateTimesOfDay()
             if (editTimeErr && editTimeErr.length > 0) {
@@ -816,6 +828,8 @@ Item {
         var enabled = item.enabled !== false
         var exclude = item.excludePageAndHibernation !== false
         var dedup = item.deduplicationEnabled !== false
+        var splitSizeBytes = item.splitSizeBytes || 0
+        var compressionLevel = item.compressionLevel || 3
         var encryption = !!item.encryptionEnabled
         var sourceIds = serviceClient.sourceIdsForSchedule(sid)
         if (!sourceIds || sourceIds.length === 0)
@@ -827,12 +841,13 @@ Item {
         var ok = false
         if (root.backupMode === "files") {
             ok = serviceClient.updateFileSetSchedule(sid, displayName, enabled, connId, frequency,
-                                                     timeOfDay, exclude, encryption, weekdayMask,
-                                                     dayOfMonthMask)
+                                                     timeOfDay, exclude, compressionLevel,
+                                                     encryption, weekdayMask, dayOfMonthMask)
         } else {
             ok = serviceClient.upsertSchedule(sid, displayName, enabled, sourceIds,
                                               connId, frequency, timeOfDay, exclude, dedup,
-                                              encryption, "", 2, weekdayMask, dayOfMonthMask)
+                                              splitSizeBytes, compressionLevel, encryption, "", 2,
+                                              weekdayMask, dayOfMonthMask)
         }
         if (!ok) {
             serviceClient.showToast(qsTrId("aegra.backup.schedule.update_failed"), true)
@@ -1263,7 +1278,7 @@ Item {
             Text {
                 Layout.fillWidth: true
                 visible: !serviceClient.connections || serviceClient.connections.availableCount === 0
-                //% "No online repositories found. Please bring a repository online or add a new location in the Repository page."
+                //% "No online repositories found. Please bring a repository online or add a new repository in the Repository page."
                 text: qsTrId("aegra.backup.offline_dialog_none_available")
                 color: Theme.colorAccentRed
                 font.pixelSize: 12
@@ -1876,7 +1891,7 @@ Item {
                                     Text {
                                         width: parent.width
                                         text: root.freqLabel(modelData.frequency)
-                                              + " · " + (modelData.timeOfDay || "02:00")
+                                              + " · " + (modelData.timeOfDay || "12:00")
                                         color: Theme.colorTextGrey
                                         font.pixelSize: 13
                                         font.bold: true
@@ -3249,14 +3264,6 @@ Item {
                                     anchors.margins: 16
                                     spacing: 10
 
-                                    Text {
-                                        //% "Locations"
-                                        text: qsTrId("aegra.backup.locations")
-                                        color: Theme.colorTextGrey
-                                        font.pixelSize: 11
-                                        font.family: Theme.fontFamily
-                                    }
-
                                     Rectangle {
                                         Layout.fillWidth: true
                                         Layout.fillHeight: true
@@ -3274,7 +3281,7 @@ Item {
                                             // Real Service repository.connection list only.
                                             model: serviceClient.connections
 
-                                            // Empty Locations: keep Next disabled (canGoNext).
+                                            // Empty destination: keep Next disabled (canGoNext).
                                             Text {
                                                 anchors.centerIn: parent
                                                 width: parent.width - 24
@@ -3282,7 +3289,7 @@ Item {
                                                 wrapMode: Text.WordWrap
                                                 visible: !serviceClient.connections
                                                          || serviceClient.connections.count === 0
-                                                //% "No repository connection yet. Add a location in Repository first."
+                                                //% "No repository connection yet. Add a repository first."
                                                 text: qsTrId("aegra.backup.destination.empty")
                                                 color: Theme.colorTextDim
                                                 font.pixelSize: 12
@@ -3443,9 +3450,9 @@ Item {
                                     }
 
                                     LinkButton {
-                                        //% "Add location"
-                                        text: qsTrId("aegra.backup.add_location")
-                                        onClicked: { /* UI only for now */ }
+                                        //% "Add repository"
+                                        text: qsTrId("aegra.repository.add")
+                                        onClicked: root.navigateRepositoryRequested()
                                     }
                                 }
                             }

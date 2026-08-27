@@ -20,6 +20,12 @@ class LocaleController final : public QObject {
     Q_PROPERTY(QVariantList availableLanguages READ availableLanguages CONSTANT)
     // Desktop theme id: blueExtra (glass default) | dark | light.
     Q_PROPERTY(QString theme READ theme WRITE setTheme NOTIFY themeChanged)
+    Q_PROPERTY(QString productName READ productName CONSTANT)
+    Q_PROPERTY(QString productVersion READ productVersion CONSTANT)
+    Q_PROPERTY(QString copyright READ copyright CONSTANT)
+    Q_PROPERTY(QString qtVersion READ qtVersion CONSTANT)
+    Q_PROPERTY(QString buildDate READ buildDate CONSTANT)
+    Q_PROPERTY(QString architecture READ architecture CONSTANT)
 
   public:
     explicit LocaleController(QQmlEngine* engine, QObject* parent = nullptr);
@@ -30,6 +36,12 @@ class LocaleController final : public QObject {
     [[nodiscard]] QVariantList availableLanguages() const;
     [[nodiscard]] QLocale locale() const;
     [[nodiscard]] QString theme() const;
+    [[nodiscard]] QString productName() const;
+    [[nodiscard]] QString productVersion() const;
+    [[nodiscard]] QString copyright() const;
+    [[nodiscard]] QString qtVersion() const;
+    [[nodiscard]] QString buildDate() const;
+    [[nodiscard]] QString architecture() const;
 
     // Applies a BCP-47 style language tag such as "en_US" or "zh_CN". Invalid values are
     // ignored and the previous language remains active.

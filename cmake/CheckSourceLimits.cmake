@@ -13,6 +13,12 @@ file(
 set(AEGRA_VIOLATIONS "")
 
 foreach(AEGRA_FILE IN LISTS AEGRA_SOURCES)
+    cmake_path(NORMAL_PATH AEGRA_FILE)
+    # Skip in-tree CMake/Qt autogen output (not handwritten production source).
+    if(AEGRA_FILE MATCHES "/build/" OR AEGRA_FILE MATCHES "/CMakeFiles/" OR
+       AEGRA_FILE MATCHES "_autogen/")
+        continue()
+    endif()
     file(READ "${AEGRA_FILE}" AEGRA_CONTENT)
     string(REGEX MATCHALL "\n" AEGRA_NEWLINES "${AEGRA_CONTENT}")
     list(LENGTH AEGRA_NEWLINES AEGRA_LINE_COUNT)

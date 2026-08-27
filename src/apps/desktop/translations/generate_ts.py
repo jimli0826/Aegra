@@ -1593,22 +1593,6 @@ entries = [
         "Nächster Lauf",
     ),
     (
-        "aegra.backup.locations",
-        "Locations",
-        "位置",
-        "位置",
-        "場所",
-        "Speicherorte",
-    ),
-    (
-        "aegra.backup.add_location",
-        "Add location",
-        "添加位置",
-        "新增位置",
-        "場所を追加",
-        "Speicherort hinzufügen",
-    ),
-    (
         "aegra.backup.source.volume",
         "Volume",
         "卷",
@@ -1700,19 +1684,11 @@ entries = [
     ("aegra.backup.weekday.sun", "Sun", "日", "日", "日", "So"),
     (
         "aegra.backup.opt.dedup",
-        "Enable volume chunk deduplication",
-        "启用卷块去重",
-        "啟用卷區塊去重",
-        "ボリューム チャンク重複排除を有効にする",
-        "Volume-Chunk-Deduplizierung aktivieren",
-    ),
-    (
-        "aegra.backup.opt.dedup_hint",
-        "Same-chunk only within each volume backup; not global or cross-backup",
-        "仅在每次卷备份的同一物理块内去重；非全局、非跨备份",
-        "僅在每次卷備份的同一物理區塊內去重；非全域、非跨備份",
-        "各ボリューム バックアップ内の同一チャンクのみ。グローバル／バックアップ横断ではありません",
-        "Nur innerhalb desselben physischen Chunks pro Volume-Backup; nicht global oder backup-übergreifend",
+        "Enable Deduplication",
+        "启用去重",
+        "啟用去重",
+        "重複排除を有効にする",
+        "Deduplizierung aktivieren",
     ),
     (
         "aegra.repository.dedup.bytes",
@@ -1770,9 +1746,9 @@ entries = [
         "圧縮",
         "Kompression",
     ),
-    ("aegra.backup.comp.none", "None", "无", "無", "なし", "Keine"),
+    ("aegra.backup.comp.fast", "Fast", "快速", "快速", "高速", "Schnell"),
     ("aegra.backup.comp.normal", "Normal", "标准", "標準", "標準", "Normal"),
-    ("aegra.backup.comp.best", "Best", "最高", "最佳", "最高", "Beste"),
+    ("aegra.backup.comp.high", "High", "高", "高", "高", "Hoch"),
     (
         "aegra.backup.column.status",
         "Status",
@@ -2055,11 +2031,11 @@ entries = [
     ),
     (
         "aegra.backup.schedule.missing_target",
-        "Select a repository destination (Locations)",
-        "请选择备份目标（Locations 中的 Repository 连接）",
-        "請選擇備份目標（Locations 中的 Repository 連線）",
-        "リポジトリ接続先（Locations）を選択してください",
-        "Repository-Ziel (Locations) auswählen",
+        "Select a repository destination",
+        "请选择 Repository 备份目标",
+        "請選擇 Repository 備份目標",
+        "リポジトリ接続先を選択してください",
+        "Repository-Ziel auswählen",
     ),
     (
         "aegra.backup.schedule.first_backup_title",
@@ -2175,11 +2151,11 @@ entries = [
     ),
     (
         "aegra.backup.destination.empty",
-        "No repository connection yet. Add a location in Repository first.",
-        "尚无 Repository 连接。请先在 Repository 页面添加目标。",
-        "尚無 Repository 連線。請先在 Repository 頁面新增目標。",
-        "リポジトリ接続がありません。先に Repository で接続を追加してください。",
-        "Noch keine Repository-Verbindung. Zuerst unter Repository ein Ziel hinzufügen.",
+        "No repository connection yet. Add a repository first.",
+        "尚无 Repository 连接。请先添加 Repository。",
+        "尚無 Repository 連線。請先新增 Repository。",
+        "リポジトリ接続がありません。先にリポジトリを追加してください。",
+        "Noch keine Repository-Verbindung. Fügen Sie zuerst ein Repository hinzu.",
     ),
     (
         "aegra.backup.credential.service_managed",
@@ -4370,11 +4346,11 @@ entries = [
     ),
     (
         "aegra.backup.offline_dialog_none_available",
-        "No online repositories found. Please bring a repository online or add a new location in the Repository page.",
-        "未找到在线的 Repository。请将某个 Repository 恢复在线，或在 Repository 页面添加新位置。",
-        "找不到線上的 Repository。請將某個 Repository 恢復上線，或在 Repository 頁面新增位置。",
-        "オンラインのリポジトリが見つかりません。リポジトリをオンラインに戻すか、リポジトリページで新しい場所を追加してください。",
-        "Keine Online-Repositorys gefunden. Bringen Sie ein Repository online oder fügen Sie auf der Repository-Seite einen neuen Speicherort hinzu.",
+        "No online repositories found. Please bring a repository online or add a new repository in the Repository page.",
+        "未找到在线的 Repository。请将某个 Repository 恢复在线，或在 Repository 页面添加新的 Repository。",
+        "找不到線上的 Repository。請將某個 Repository 恢復上線，或在 Repository 頁面新增 Repository。",
+        "オンラインのリポジトリが見つかりません。リポジトリをオンラインに戻すか、リポジトリページで新しいリポジトリを追加してください。",
+        "Keine Online-Repositorys gefunden. Bringen Sie ein Repository online oder fügen Sie auf der Repository-Seite ein neues Repository hinzu.",
     ),
     (
         "aegra.backup.run.not_connected",
@@ -4451,6 +4427,92 @@ entries = [
         "最終同期 · たった今",
         "Letzte Synchronisierung · gerade eben",
     ),
+    ("aegra.shell.more", "More", "更多", "更多", "その他", "Mehr"),
+    (
+        "aegra.shell.help_feedback",
+        "Help and feedback",
+        "帮助与反馈",
+        "說明與意見回饋",
+        "ヘルプとフィードバック",
+        "Hilfe und Feedback",
+    ),
+    ("aegra.shell.about", "About", "关于", "關於", "Aegra について", "Über Aegra"),
+    (
+        "aegra.shell.check_updates",
+        "Check for updates",
+        "检查更新",
+        "檢查更新",
+        "更新プログラムを確認",
+        "Nach Updates suchen",
+    ),
+    ("aegra.about.title", "About Aegra", "关于 Aegra", "關於 Aegra", "Aegra について", "Über Aegra"),
+    ("aegra.about.built_with", "Built with", "构建基于", "構建基於", "ビルド基盤", "Erstellt mit"),
+    (
+        "aegra.about.version_for_windows",
+        "Version %1 (%2) for Windows Desktop",
+        "版本 %1 (%2) 适用于 Windows 桌面版",
+        "版本 %1 (%2) 適用於 Windows 桌面版",
+        "バージョン %1 (%2) Windows デスクトップ向け",
+        "Version %1 (%2) für Windows Desktop",
+    ),
+    ("aegra.about.licenses_btn", "Licenses", "开源许可", "開源許可", "ライセンス", "Lizenzen"),
+    (
+        "aegra.about.licenses_link",
+        "Open Source Licenses",
+        "开源软件许可",
+        "開源軟體許可",
+        "オープンソースライセンス",
+        "Open-Source-Lizenzen",
+    ),
+    ("aegra.about.support", "Support", "支持与帮助", "支援與說明", "サポート", "Support"),
+    ("aegra.about.homepage", "Home Page", "官方主页", "官方首頁", "ホームページ", "Startseite"),
+    ("aegra.about.documentation", "Documentation", "使用文档", "使用說明", "ドキュメント", "Dokumentation"),
+    ("aegra.about.feedback", "Feedback", "问题反馈", "問題反饋", "フィードバック", "Feedback"),
+    ("aegra.about.related_links", "Related Links", "相关链接", "相關連結", "関連リンク", "Verwandte Links"),
+    ("aegra.about.releases", "Release Notes", "版本发布", "版本發佈", "リリースノート", "Versionshinweise"),
+    ("aegra.about.contact", "Contact", "联系项目", "聯絡項目", "連絡先", "Kontakt"),
+    (
+        "aegra.about.already_latest",
+        "You are using the latest version of Aegra.",
+        "当前已是最新版本的 Aegra。",
+        "目前已是最新版本的 Aegra。",
+        "最新バージョンの Aegra を使用しています。",
+        "Sie verwenden die neueste Version von Aegra.",
+    ),
+    (
+        "aegra.licenses.title",
+        "Open Source Licenses",
+        "开源软件许可",
+        "開源軟體許可",
+        "オープンソースライセンス",
+        "Open-Source-Lizenzen",
+    ),
+    (
+        "aegra.licenses.subtitle",
+        "Open source software used in Aegra:",
+        "Aegra 使用的开源软件：",
+        "Aegra 使用的開源軟體：",
+        "Aegra で使用されているオープンソースソフトウェア：",
+        "In Aegra verwendete Open-Source-Software:",
+    ),
+    ("aegra.licenses.about_qt", "About Qt", "关于 Qt", "關於 Qt", "Qt について", "Über Qt"),
+    (
+        "aegra.licenses.about_qt_title",
+        "About Qt Framework",
+        "关于 Qt 框架",
+        "關於 Qt 框架",
+        "Qt フレームワークについて",
+        "Über das Qt-Framework",
+    ),
+    (
+        "aegra.licenses.about_qt_desc",
+        "Aegra is built with Qt %1. Qt is an open-source cross-platform C++ framework licensed under the GNU Lesser General Public License (LGPL) version 3.",
+        "Aegra 基于 Qt %1 构建。Qt 是一套跨平台的 C++ 应用程序开发框架，遵循 GNU LGPL v3 开源协议。",
+        "Aegra 基於 Qt %1 構建。Qt 是一套跨平台的 C++ 應用程式開發框架，遵循 GNU LGPL v3 開源協議。",
+        "Aegra は Qt %1 で構築されています。Qt は GNU LGPL v3 の下でライセンスされたクロスプラットフォーム C++ フレームワークです。",
+        "Aegra basiert auf Qt %1. Qt ist ein plattformübergreifendes C++-Framework, lizenziert unter der GNU LGPL v3.",
+    ),
+    ("aegra.licenses.licensed_under", "Licensed under", "开源协议：", "開源協議：", "ライセンス：", "Lizenziert unter"),
 ]
 
 
@@ -4463,6 +4525,36 @@ def esc(value: str) -> str:
     )
 
 
+def render_message(row: tuple[str, ...], language_index: int) -> str:
+    message_id = row[0]
+    source = row[1]
+    translation = row[1 + language_index]
+    return "\n".join(
+        [
+            f'    <message id="{esc(message_id)}">',
+            f"        <source>{esc(source)}</source>",
+            f"        <translation>{esc(translation)}</translation>",
+            "    </message>",
+        ]
+    )
+
+
+def update_existing_ts(path: Path, language_index: int) -> int:
+    content = path.read_text(encoding="utf-8")
+    missing = [
+        row for row in entries if f'<message id="{esc(row[0])}">' not in content
+    ]
+    if not missing:
+        return 0
+    additions = "\n".join(render_message(row, language_index) for row in missing)
+    closing_tag = "</context>"
+    if closing_tag not in content:
+        raise ValueError(f"missing {closing_tag} in {path.name}")
+    content = content.replace(closing_tag, f"{additions}\n{closing_tag}", 1)
+    path.write_text(content, encoding="utf-8")
+    return len(missing)
+
+
 def main() -> None:
     out_dir = Path(__file__).resolve().parent
     languages = [
@@ -4473,6 +4565,11 @@ def main() -> None:
         ("de_DE", 4),
     ]
     for lang_code, index in languages:
+        path = out_dir / f"aegra_desktop_{lang_code}.ts"
+        if path.exists():
+            added = update_existing_ts(path, index)
+            print(f"updated {path.name} ({added} messages added)")
+            continue
         lines = [
             '<?xml version="1.0" encoding="utf-8"?>',
             "<!DOCTYPE TS>",
@@ -4481,16 +4578,9 @@ def main() -> None:
             "    <name></name>",
         ]
         for row in entries:
-            message_id = row[0]
-            source = row[1]
-            translation = row[1 + index]
-            lines.append(f'    <message id="{esc(message_id)}">')
-            lines.append(f"        <source>{esc(source)}</source>")
-            lines.append(f"        <translation>{esc(translation)}</translation>")
-            lines.append("    </message>")
+            lines.append(render_message(row, index))
         lines.append("</context>")
         lines.append("</TS>")
-        path = out_dir / f"aegra_desktop_{lang_code}.ts"
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         print(f"wrote {path.name} ({len(entries)} messages)")
 

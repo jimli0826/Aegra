@@ -253,6 +253,8 @@ QByteArray encode_upsert_schedule_request(const QString& request_id, const QStri
                                           const int weekday_mask, const QString& timezone_id,
                                           const bool exclude_page_and_hibernation_files,
                                           const bool deduplication_enabled,
+                                          const quint64 split_size_bytes,
+                                          const int compression_level,
                                           const bool encryption_enabled,
                                           const QString& archive_password,
                                           const quint32 day_of_month_mask) {
@@ -282,6 +284,8 @@ QByteArray encode_upsert_schedule_request(const QString& request_id, const QStri
         {QStringLiteral("trigger"), trigger},
         {QStringLiteral("exclude_page_and_hibernation_files"), exclude_page_and_hibernation_files},
         {QStringLiteral("deduplication_enabled"), deduplication_enabled},
+        {QStringLiteral("split_size_bytes"), static_cast<qint64>(split_size_bytes)},
+        {QStringLiteral("compression_level"), compression_level},
         {QStringLiteral("encryption_enabled"), encryption_enabled},
         {QStringLiteral("archive_password"), archive_password}};
     return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
@@ -687,7 +691,7 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
                                  "source_ids", "selection_summaries", "repository_connection_id",
                                  "backup_type", "trigger", "next_run_utc_ms",
                                  "exclude_page_and_hibernation_files", "deduplication_enabled",
-                                 "encryption_enabled"})) {
+                                 "split_size_bytes", "compression_level", "encryption_enabled"})) {
         return false;
     }
     const auto schedule_id = object.value(QStringLiteral("schedule_id")).toString();
@@ -706,6 +710,8 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
     QString display_name;
     qint64 content_kind = 0;
     qint64 backup_type = 0;
+    qint64 split_size_bytes = 0;
+    qint64 compression_level = 0;
     const auto summary_array = object.value(QStringLiteral("selection_summaries")).toArray();
     if (!object.value(QStringLiteral("schedule_id")).isString() || !stable_code(schedule_id, 128) ||
         !parse_display_name(object.value(QStringLiteral("display_name")), display_name) ||
@@ -725,9 +731,17 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
         !object.value(QStringLiteral("trigger")).isObject() ||
         !object.value(QStringLiteral("exclude_page_and_hibernation_files")).isBool() ||
         !object.value(QStringLiteral("deduplication_enabled")).isBool() ||
+        !integer_in_range(object.value(QStringLiteral("split_size_bytes")), 0,
+                          1024LL * 1024LL * 1024LL * 1024LL, split_size_bytes) ||
+        !integer_in_range(object.value(QStringLiteral("compression_level")), 1, 9,
+                          compression_level) ||
+        (compression_level != 1 && compression_level != 3 && compression_level != 9) ||
         !object.value(QStringLiteral("encryption_enabled")).isBool() ||
         (content_kind == 2 &&
-         object.value(QStringLiteral("deduplication_enabled")).toBool())) {
+         (object.value(QStringLiteral("deduplication_enabled")).toBool() ||
+          split_size_bytes != 0)) ||
+        (content_kind == 1 && split_size_bytes != 0 &&
+         split_size_bytes < 128LL * 1024LL * 1024LL)) {
         return false;
     }
     QVariantList selection_summaries;
@@ -853,6 +867,8 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
                object.value(QStringLiteral("exclude_page_and_hibernation_files")).toBool()},
               {QStringLiteral("deduplicationEnabled"),
                object.value(QStringLiteral("deduplication_enabled")).toBool()},
+              {QStringLiteral("splitSizeBytes"), split_size_bytes},
+              {QStringLiteral("compressionLevel"), compression_level},
               {QStringLiteral("encryptionEnabled"),
                object.value(QStringLiteral("encryption_enabled")).toBool()},
               {QStringLiteral("lastRun"), QString{}},

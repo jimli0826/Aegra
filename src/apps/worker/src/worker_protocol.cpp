@@ -41,6 +41,18 @@ std::uint64_t required_unsigned(const Json& object, const char* key) {
     return value.get<std::uint64_t>();
 }
 
+[[nodiscard]] std::int32_t required_compression_level(const Json& object) {
+    const auto level = required_unsigned(object, "compression_level");
+    if (level > static_cast<std::uint64_t>((std::numeric_limits<std::int32_t>::max)())) {
+        throw std::out_of_range("worker request backup.compression_level is out of range");
+    }
+    const auto value = static_cast<std::int32_t>(level);
+    if (!contracts::valid_compression_level(value)) {
+        throw std::invalid_argument("worker request backup.compression_level is invalid");
+    }
+    return value;
+}
+
 std::int64_t optional_deadline(const Json& object) {
     const auto iterator = object.find("deadline_utc_ms");
     if (iterator == object.end()) {
@@ -129,6 +141,8 @@ std::optional<contracts::BackupOptions> optional_backup(const Json& root) {
         throw std::invalid_argument("worker request backup.deduplication_enabled is required");
     }
     result.deduplication_enabled = dedup->get<bool>();
+    result.split_size_bytes = required_unsigned(*iterator, "split_size_bytes");
+    result.compression_level = required_compression_level(*iterator);
     result.candidate_parent_uuid = iterator->value("candidate_parent_uuid", std::string{});
     if (iterator->contains("selection_fingerprint") &&
         !iterator->at("selection_fingerprint").is_null()) {

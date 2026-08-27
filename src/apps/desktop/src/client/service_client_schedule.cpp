@@ -23,13 +23,13 @@ constexpr int kMaximumSchedules = 500;
         time_of_day.split(QRegularExpression(QStringLiteral("[,;]")), Qt::SkipEmptyParts);
     for (const auto& chunk : chunks) {
         const auto parts = chunk.trimmed().split(QLatin1Char(':'));
-        int hour = 2;
+        int hour = 12;
         int minute = 0;
         if (!parts.isEmpty()) {
             bool ok = false;
             hour = parts[0].toInt(&ok);
             if (!ok) {
-                hour = 2;
+                hour = 12;
             }
         }
         if (parts.size() > 1) {
@@ -50,7 +50,7 @@ constexpr int kMaximumSchedules = 500;
         }
     }
     if (minutes.isEmpty()) {
-        minutes.push_back(2 * 60);
+        minutes.push_back(12 * 60);
     }
     std::sort(minutes.begin(), minutes.end());
     return minutes;
@@ -92,7 +92,7 @@ constexpr int kMaximumSchedules = 500;
             }
         }
         if (minutes.isEmpty()) {
-            minutes.push_back(2 * 60);
+            minutes.push_back(12 * 60);
         }
         std::sort(minutes.begin(), minutes.end());
     }
@@ -411,6 +411,7 @@ bool ServiceClient::upsertSchedule(const QString& schedule_id, const QString& di
                                    const QString& time_of_day,
                                    const bool exclude_page_and_hibernation_files,
                                    const bool deduplication_enabled,
+                                   const quint64 split_size_bytes, const int compression_level,
                                    const bool encryption_enabled,
                                    const QString& archive_password, const int backup_type,
                                    const int weekday_mask, const unsigned int day_of_month_mask) {
@@ -420,6 +421,16 @@ bool ServiceClient::upsertSchedule(const QString& schedule_id, const QString& di
         return false;
     }
     if (backup_type != kBackupTypeFull && backup_type != kBackupTypeIncremental) {
+        return false;
+    }
+    constexpr quint64 kMinimumSplitSizeBytes = 128ULL * 1024ULL * 1024ULL;
+    constexpr quint64 kMaximumSplitSizeBytes = 1024ULL * 1024ULL * 1024ULL * 1024ULL;
+    if (split_size_bytes != 0 &&
+        (split_size_bytes < kMinimumSplitSizeBytes ||
+         split_size_bytes > kMaximumSplitSizeBytes)) {
+        return false;
+    }
+    if (compression_level != 1 && compression_level != 3 && compression_level != 9) {
         return false;
     }
     // Create may set encryption + password; update must not send password material and must keep
@@ -451,8 +462,8 @@ bool ServiceClient::upsertSchedule(const QString& schedule_id, const QString& di
     const auto body = encode_upsert_schedule_request(
         request_id, idempotency_key, schedule_id, display_name, enabled, source_ids, connection_id,
         backup_type, trigger_kind, local_minutes, weekday_mask, QStringLiteral("UTC"),
-        exclude_page_and_hibernation_files, deduplication_enabled, encryption_enabled,
-        archive_password, day_of_month_mask);
+        exclude_page_and_hibernation_files, deduplication_enabled, split_size_bytes,
+        compression_level, encryption_enabled, archive_password, day_of_month_mask);
     const auto started =
         coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
             return handle_schedule_command_frame(frame_body);
@@ -468,6 +479,7 @@ bool ServiceClient::createSchedule(const QVariantList& sources, const QString& c
                                    const QString& frequency, const QString& time_of_day,
                                    const bool exclude_page_and_hibernation_files,
                                    const bool deduplication_enabled,
+                                   const quint64 split_size_bytes, const int compression_level,
                                    const bool encryption_enabled,
                                    const QString& archive_password,
                                    const bool start_full_backup_after_create,
@@ -494,8 +506,9 @@ bool ServiceClient::createSchedule(const QVariantList& sources, const QString& c
     const auto started =
         upsertSchedule({}, display_names.join(QStringLiteral(", ")), true, source_ids,
                        connection_id, frequency, time_of_day, exclude_page_and_hibernation_files,
-                       deduplication_enabled, encryption_enabled, archive_password,
-                       kBackupTypeIncremental, weekday_mask, day_of_month_mask);
+                       deduplication_enabled, split_size_bytes, compression_level,
+                       encryption_enabled, archive_password, kBackupTypeIncremental, weekday_mask,
+                       day_of_month_mask);
     if (!started) {
         start_full_backup_after_schedule_create_ = false;
     }
@@ -554,6 +567,9 @@ bool ServiceClient::setScheduleEnabled(const QString& schedule_id, const bool en
     }
     const auto exclude = found.value(QStringLiteral("excludePageAndHibernation"), true).toBool();
     const auto dedup = found.value(QStringLiteral("deduplicationEnabled"), true).toBool();
+    const auto split_size_bytes =
+        found.value(QStringLiteral("splitSizeBytes"), 0).toULongLong();
+    const auto compression_level = found.value(QStringLiteral("compressionLevel"), 3).toInt();
     const auto encryption = found.value(QStringLiteral("encryptionEnabled"), false).toBool();
     const auto weekday_mask = found.value(QStringLiteral("weekdayMask"), 0).toInt();
     const auto day_of_month_mask =
@@ -566,13 +582,14 @@ bool ServiceClient::setScheduleEnabled(const QString& schedule_id, const bool en
     bool started = false;
     if (found.value(QStringLiteral("contentKind")).toInt() == 2) {
         started = updateFileSetSchedule(schedule_id, display_name, enabled, connection_id,
-                                        frequency, time_of_day, exclude, encryption, weekday_mask,
-                                        day_of_month_mask);
+                                        frequency, time_of_day, exclude, compression_level,
+                                        encryption, weekday_mask, day_of_month_mask);
     } else {
         started = upsertSchedule(schedule_id, display_name, enabled,
                                  found.value(QStringLiteral("sourceIds")).toList(), connection_id,
-                                 frequency, time_of_day, exclude, dedup, encryption, {},
-                                 kBackupTypeIncremental, weekday_mask, day_of_month_mask);
+                                 frequency, time_of_day, exclude, dedup, split_size_bytes,
+                                 compression_level, encryption, {}, kBackupTypeIncremental,
+                                 weekday_mask, day_of_month_mask);
     }
     if (!started) {
         // upsert/update already cleared busy; restore prior enabled for this row.

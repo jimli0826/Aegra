@@ -190,6 +190,9 @@ struct ResolvedBackupPlan final {
     bool encryption_enabled{false};
     /// volume_set: from schedule (default true); file_set always false.
     bool deduplication_enabled{true};
+    /// volume_set: target archive part size; zero disables splitting. file_set always zero.
+    std::uint64_t split_size_bytes{0};
+    std::int32_t compression_level{contracts::kCompressionLevelNormal};
     std::string backup_set_uuid;
     /// schedules.last_recovery_point_id — sole Incremental parent candidate (no Catalog tip scan).
     std::optional<std::string> last_recovery_point_id;
@@ -223,6 +226,10 @@ struct ResolvedBackupPlan final {
     fingerprint += plan.encryption_enabled ? "1" : "0";
     fingerprint += "|";
     fingerprint += plan.deduplication_enabled ? "1" : "0";
+    fingerprint += "|";
+    fingerprint += std::to_string(plan.split_size_bytes);
+    fingerprint += "|";
+    fingerprint += std::to_string(plan.compression_level);
     return fingerprint;
 }
 
@@ -326,6 +333,10 @@ resolve_backup_plan(ports::IControlPlaneDatabase& control_plane,
     plan.deduplication_enabled = record.content_kind == contracts::ContentKind::kVolumeSet
                                      ? record.deduplication_enabled
                                      : false;
+    plan.split_size_bytes = record.content_kind == contracts::ContentKind::kVolumeSet
+                                ? record.split_size_bytes
+                                : 0;
+    plan.compression_level = record.compression_level;
     plan.backup_set_uuid = record.backup_set_uuid;
     plan.last_recovery_point_id = record.last_recovery_point_id;
     return base::Result<ResolvedBackupPlan>::success(std::move(plan));
@@ -597,6 +608,8 @@ make_backup_options(const BackupOptionsInput& input) {
     backup.exclude_page_and_hibernation_files = input.plan.exclude_page_and_hibernation_files;
     backup.encryption_enabled = input.plan.encryption_enabled;
     backup.deduplication_enabled = input.plan.deduplication_enabled;
+    backup.split_size_bytes = input.plan.split_size_bytes;
+    backup.compression_level = input.plan.compression_level;
     if (!input.parent_resolution.parent) {
         // Full (requested or demoted from Incremental when the parent chain is unusable).
         backup.type = contracts::BackupType::kFull;
@@ -829,6 +842,8 @@ prepare_file_set_backup(const ResolvedBackupPlan& plan, PrepareBackupContext& co
     backup.exclude_page_and_hibernation_files = plan.exclude_page_and_hibernation_files;
     backup.encryption_enabled = plan.encryption_enabled;
     backup.deduplication_enabled = false; // file_set never uses volume DEDUP
+    backup.split_size_bytes = 0;          // file_set does not support archive splitting
+    backup.compression_level = plan.compression_level;
     backup.backup_set_uuid = plan.backup_set_uuid;
     backup.selection_fingerprint = std::move(fingerprint).value();
     std::optional<std::string> parent_id;

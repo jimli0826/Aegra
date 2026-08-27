@@ -32,7 +32,7 @@ After setup, **Apps & Features** shows:
 
 ## Build installer
 
-`build.ps1` compiles the product, copies new binaries into `payload\`, checks the payload file list, then builds WiX. MSI/Setup version defaults to `include/aegra_version.h` (`Major.Minor.Patch.Build`). The same header fills Windows File Properties on every product EXE/DLL.
+`build.ps1` compiles the product, copies new binaries into `payload\`, checks the payload file list, then builds WiX. MSI/Setup version defaults to `include/aegra_version.h` (`Major.Minor.Patch.Build`). The same header fills Windows File Properties on every product EXE/DLL. After a successful package, the script increments `AEGRI_VERSION_BUILD` in that header for the next build.
 
 ```powershell
 cd installer

@@ -74,7 +74,7 @@ Item {
                 out.push({
                     letter: volume.letter,
                     label: volume.name && volume.name.length > 0 ? volume.name : volume.letter,
-                    meta: disk.mediaType + " · " + volume.size,
+                    meta: volume.size,
                     usedRatio: capacity > 0 ? (capacity - free) / capacity : 0,
                     //% "Used %1"
                     usedText: qsTrId("aegra.home.volume.used").arg(serviceClient.formatBytes(Math.max(0, capacity - free))),
@@ -261,15 +261,13 @@ Item {
         property string emoji: ""
         property color gradStart: "#43C59E"
         property color gradEnd: "#2E9E7E"
-        property string footLabel: ""
-        property string footValue: ""
         property int navIndex: -1
         property bool animOn: false
         property int animIndex: 0
         signal navigate(int index)
 
         radius: Theme.radiusCard
-        implicitHeight: 136
+        implicitHeight: 92
         gradient: Gradient {
             GradientStop { position: 0.0; color: statCard.gradStart }
             GradientStop { position: 1.0; color: statCard.gradEnd }
@@ -309,10 +307,11 @@ Item {
         ColumnLayout {
             anchors.fill: parent
             anchors.margins: 16
-            spacing: 6
+            spacing: 0
 
             RowLayout {
                 Layout.fillWidth: true
+                Layout.alignment: Qt.AlignVCenter
                 spacing: 10
 
                 ColumnLayout {
@@ -327,7 +326,7 @@ Item {
                     height: 38
                     radius: 12
                     color: Qt.rgba(1, 1, 1, 0.22)
-                    Layout.alignment: Qt.AlignTop
+                    Layout.alignment: Qt.AlignVCenter
                     transformOrigin: Item.Center
                     Text { anchors.centerIn: parent; text: statCard.emoji; font.pixelSize: 17 }
                     scale: statCard.animOn ? 1.0 : 0.2
@@ -335,17 +334,6 @@ Item {
                     Behavior on scale { NumberAnimation { duration: 680 + statCard.animIndex * 60; easing.type: Easing.OutBack; easing.overshoot: 1.8 } }
                     Behavior on rotation { NumberAnimation { duration: 680 + statCard.animIndex * 60; easing.type: Easing.OutBack; easing.overshoot: 1.8 } }
                 }
-            }
-
-            Item { Layout.fillHeight: true }
-
-            Rectangle { Layout.fillWidth: true; height: 1; color: Qt.rgba(1, 1, 1, 0.35) }
-
-            RowLayout {
-                Layout.fillWidth: true
-                Text { text: statCard.footLabel; color: Qt.rgba(1, 1, 1, 0.85); font.pixelSize: 11; font.family: Theme.fontFamily }
-                Item { Layout.fillWidth: true }
-                Text { text: statCard.footValue; color: "#ffffff"; font.pixelSize: 13; font.bold: true; font.family: Theme.fontFamily }
             }
         }
     }
@@ -452,9 +440,6 @@ Item {
                     emoji: "🛡️"
                     gradStart: Theme.colorMenuActive
                     gradEnd: Theme.colorMenuActiveEnd
-                    //% "Total Recovery Points"
-                    footLabel: qsTrId("aegra.home.stat.recovery_points")
-                    footValue: String(serviceClient.recoveryPointCount)
                 }
 
                 GradientStatCard {
@@ -468,9 +453,6 @@ Item {
                     emoji: "🗄️"
                     gradStart: Theme.colorAccentBlue
                     gradEnd: Qt.darker(Theme.colorAccentBlue, 1.25)
-                    //% "Dedup Ratio"
-                    footLabel: qsTrId("aegra.home.stat.dedup_ratio")
-                    footValue: root.dedupRatioText
                 }
 
                 GradientStatCard {
@@ -484,11 +466,6 @@ Item {
                     emoji: "📊"
                     gradStart: Theme.colorGreen
                     gradEnd: Qt.darker(Theme.colorGreen, 1.3)
-                    //% "Succeeded / Running / Failed"
-                    footLabel: qsTrId("aegra.home.stat.task_breakdown")
-                    footValue: serviceClient.taskLog.succeededCount + " / "
-                               + serviceClient.jobs.activeCount + " / "
-                               + serviceClient.taskLog.failedCount
                     navIndex: 5
                     onNavigate: function(navTo) { root.homeNavigate(navTo) }
                 }
@@ -502,11 +479,8 @@ Item {
                     label: qsTrId("aegra.home.stat.backup_plans")
                     value: String(serviceClient.schedules.length)
                     emoji: "📅"
-                    gradStart: Theme.colorAccentRed
-                    gradEnd: Qt.darker(Theme.colorAccentRed, 1.25)
-                    //% "Enabled %1 · Next backup"
-                    footLabel: qsTrId("aegra.home.stat.enabled_next").arg(root.scheduleEnabledCount)
-                    footValue: root.nextSchedule ? root.nextSchedule.nextRun : "—"
+                    gradStart: Theme.colorAccentPurple
+                    gradEnd: Qt.darker(Theme.colorAccentPurple, 1.25)
                     navIndex: 1
                     onNavigate: function(navTo) { root.homeNavigate(navTo) }
                 }
@@ -1030,29 +1004,26 @@ Item {
                                         }
 
                                         ColumnLayout {
-                                            spacing: 5
+                                            spacing: 4
                                             Layout.fillWidth: true
-                                            Text {
-                                                text: modelData.usedText
-                                                color: Theme.colorTextGrey
-                                                font.pixelSize: 10
-                                                font.family: Theme.fontFamily
+
+                                            PillBadge {
+                                                //% "Protected"
+                                                readonly property string protectedText: qsTrId("aegra.home.badge.protected")
+                                                //% "Unprotected"
+                                                readonly property string unprotectedText: qsTrId("aegra.home.badge.unprotected")
+                                                text: modelData.isProtected ? "✓ " + protectedText : "! " + unprotectedText
+                                                fg: modelData.isProtected ? Theme.colorToastSuccessBorder : Theme.colorToastErrorBorder
+                                                bg: modelData.isProtected ? Theme.colorToastSuccessBg : Theme.colorToastErrorBg
+                                                implicitHeight: 18
+                                                radius: 9
                                             }
+
                                             UsageBar {
                                                 Layout.fillWidth: true
                                                 ratio: root.animStage2 ? modelData.usedRatio : 0
                                                 fillColor: Theme.volumeColor(index)
                                             }
-                                        }
-
-                                        PillBadge {
-                                            //% "Protected"
-                                            readonly property string protectedText: qsTrId("aegra.home.badge.protected")
-                                            //% "Unprotected"
-                                            readonly property string unprotectedText: qsTrId("aegra.home.badge.unprotected")
-                                            text: modelData.isProtected ? "✓ " + protectedText : "! " + unprotectedText
-                                            fg: modelData.isProtected ? Theme.colorToastSuccessBorder : Theme.colorToastErrorBorder
-                                            bg: modelData.isProtected ? Theme.colorToastSuccessBg : Theme.colorToastErrorBg
                                         }
                                     }
                                 }

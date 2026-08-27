@@ -98,6 +98,8 @@ encode_supervisor_job_request(const contracts::JobRequest& request) {
                 request.backup->exclude_page_and_hibernation_files;
             backup["encryption_enabled"] = request.backup->encryption_enabled;
             backup["deduplication_enabled"] = request.backup->deduplication_enabled;
+            backup["split_size_bytes"] = request.backup->split_size_bytes;
+            backup["compression_level"] = request.backup->compression_level;
             if (!request.backup->candidate_parent_uuid.empty()) {
                 backup["candidate_parent_uuid"] = request.backup->candidate_parent_uuid;
             }

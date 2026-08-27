@@ -323,7 +323,8 @@ WindowsFileSetBackupRequest make_backup_request(const contracts::JobRequest& job
         request.chunk_size_bytes = request.block_size_bytes;
     }
     request.memory_budget_bytes = options.memory_budget_bytes;
-    request.split_size_bytes = options.split_size_bytes;
+    request.split_size_bytes = 0;
+    request.compression_level = job.backup->compression_level;
     request.kdf_opslimit = options.kdf_opslimit;
     request.kdf_memlimit_bytes = options.kdf_memlimit_bytes;
     request.created_utc = std::move(created_utc);

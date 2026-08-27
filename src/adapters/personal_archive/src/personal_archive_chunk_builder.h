@@ -40,6 +40,7 @@ struct ChunkPreparationRequest final {
     bool incremental{false};
     /// volume_set single-chunk DEDUP (ADR-0022); never true for file_set.
     bool deduplication_enabled{false};
+    int compression_level{3};
     /// Session-owned pool; required for non-empty non-all-zero preparation.
     BlockWorkerPool* worker_pool{nullptr};
 };

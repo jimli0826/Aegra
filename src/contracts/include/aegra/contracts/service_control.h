@@ -201,17 +201,16 @@ struct ScheduleSummary final {
     std::string display_name;
     bool enabled{false};
     ContentKind content_kind{ContentKind::kVolumeSet};
-    /// volume_set only; empty for file_set.
     std::vector<std::string> source_ids;
-    /// file_set only; empty for volume_set. No paths or volume identities.
     std::vector<FileSelectionSummary> selection_summaries;
     std::string repository_connection_id;
     BackupType backup_type{BackupType::kFull};
     ScheduleTrigger trigger;
     std::optional<std::uint64_t> next_run_utc_ms;
     bool exclude_page_and_hibernation_files{true};
-    /// volume_set: frozen at create (default true); file_set always false.
     bool deduplication_enabled{true};
+    std::uint64_t split_size_bytes{0};
+    std::int32_t compression_level{kCompressionLevelNormal};
     bool encryption_enabled{false};
 };
 
@@ -551,12 +550,7 @@ struct ProtectionSpecInput final {
 };
 
 struct UpsertScheduleCommand final {
-    /// Absent = create; present = update an existing schedule.
-    /// Update mutability (Service enforces against the durable record):
-    /// - Immutable after create: protection source, backup_type,
-    /// exclude_page_and_hibernation_files,
-    ///   deduplication_enabled, encryption_enabled, archive password (DPAPI ciphertext in SQLite).
-    /// - Mutable: display_name, enabled, repository_connection_id, trigger (schedule settings).
+    /// Absent creates; present updates. Service freezes protection and backup options at create.
     std::optional<std::string> schedule_id;
     std::string display_name;
     bool enabled{false};
@@ -565,8 +559,9 @@ struct UpsertScheduleCommand final {
     BackupType backup_type{BackupType::kFull};
     ScheduleTrigger trigger;
     bool exclude_page_and_hibernation_files{true};
-    /// volume_set create default true; frozen after create. file_set must be false.
     bool deduplication_enabled{true};
+    std::uint64_t split_size_bytes{0};
+    std::int32_t compression_level{kCompressionLevelNormal};
     bool encryption_enabled{false};
     /// Create-only when encryption_enabled. Must be empty on update.
     std::string archive_password;

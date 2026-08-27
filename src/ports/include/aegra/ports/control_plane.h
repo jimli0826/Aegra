@@ -21,7 +21,9 @@ namespace aegra::ports {
 // v12: restore_preflight_entry_ids for file_set selective restore preflight.
 // v16: service_settings (job retention months) + terminal job purge support.
 // v20: volume restore size policy / feasibility / shrink plan token bindings (ADR-0025).
-inline constexpr std::uint32_t kControlPlaneSchemaVersion = 20;
+// v21: immutable schedule split_size_bytes for volume archive splitting (ADR-0003).
+// v22: immutable schedule compression_level (zstd Fast=1, Normal=3, High=9).
+inline constexpr std::uint32_t kControlPlaneSchemaVersion = 22;
 
 // ---- Durable records (control-plane only; no plaintext secrets, no RP authority) ----
 
@@ -90,6 +92,10 @@ struct ScheduleRecord final {
     bool exclude_page_and_hibernation_files{true};
     /// volume_set: frozen at create (default true); file_set always false.
     bool deduplication_enabled{true};
+    /// volume_set: frozen at create; zero disables splitting. file_set always zero.
+    std::uint64_t split_size_bytes{0};
+    /// zstd Fast=1, Normal=3, High=9. Frozen at create. Both content kinds.
+    std::int32_t compression_level{contracts::kCompressionLevelNormal};
     bool encryption_enabled{false};
     /// When encryption_enabled: dpapi-lm:<schedule_id>:<base64> (CRYPTPROTECT_LOCAL_MACHINE,
     /// pOptionalEntropy = UTF-8 schedule_id). Empty when encryption is off. Never log.

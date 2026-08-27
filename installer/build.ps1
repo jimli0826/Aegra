@@ -313,6 +313,22 @@ function Get-AegraVersionFromHeader {
     return "$($m.Groups[1].Value).$($n.Groups[1].Value).$($p.Groups[1].Value).$($b.Groups[1].Value)"
 }
 
+function Update-AegraBuildNumber {
+    $hdr = Join-Path $RepoRoot "include\aegra_version.h"
+    if (-not (Test-Path $hdr)) { throw "Missing version header: $hdr" }
+    $t = Get-Content $hdr -Raw
+    $m = [regex]::Match($t, '(#define\s+AEGRI_VERSION_BUILD\s+)(\d+)')
+    if (-not $m.Success) {
+        throw "Could not find AEGRI_VERSION_BUILD in $hdr"
+    }
+    $next = [int]$m.Groups[2].Value + 1
+    $updated = $t.Substring(0, $m.Index) + $m.Groups[1].Value + "$next" +
+        $t.Substring($m.Index + $m.Length)
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($hdr, $updated, $utf8)
+    Write-Host "AEGRI_VERSION_BUILD $($m.Groups[2].Value) -> $next"
+}
+
 function Require-Command([string]$name) {
     if (-not (Get-Command $name -ErrorAction SilentlyContinue)) {
         throw "Required command not found: $name."
@@ -370,6 +386,7 @@ function Invoke-WixPackage {
 
     Write-Host "`n=== Build succeeded ===" -ForegroundColor Green
     Get-ChildItem $OutDir -File | Format-Table Name, Length, LastWriteTime -AutoSize
+    Update-AegraBuildNumber
 }
 
 if ([string]::IsNullOrWhiteSpace($Version)) {

@@ -130,7 +130,7 @@ ServiceClient (QML 门面)
 - 默认窗口为 1080x720，最小 900x600，使用 32px 自绘标题栏和产品图标。
 - 标题栏提供拖动、双击最大化、最小化、最大化/还原和关闭；窗口按钮尺寸保持 36x32。
 - 左侧导航展开宽度 160px，折叠宽度 56px，菜单项高度 40px；顺序保持 Home、Backup、Restore、Mount、
-  Repository、Event Log，底部保留 Settings、Feedback 和折叠开关。
+  Repository、Event Log，底部保留 Settings 和折叠开关；帮助与反馈入口位于右上角更多菜单。
 - 未接入页面和命令可以显示但必须禁用；当前 Repository 页面保持选中。
 - 默认采用旧版 `blueExtra` 深蓝调色板，不自行切换为浅色工作区。后续 Theme 设置接入 Service 前不持久化
   用户主题选择。
@@ -195,6 +195,7 @@ Repository 容量卡片只使用 Service 异步返回的本机 volume inventory 
   Home/Splash/Toast/Loading/Shell 已接入真实生产状态和导航。
 - D3（已完成，按生产功能范围）：Backup 页面与 Inventory/Connection model/codec、`StartBackup`/`CancelJob` 门面；
   Source 仅绑定 Service Inventory 稳定 ID；Target 仅绑定 Repository connection；全量备份真实启动；
+  Target 无可用连接时显示 **Add repository**，关闭当前向导并导航到 Repository 页面；
   增量/差异禁用；Backup Options 支持无密码（不加密 Archive）与加密（向导创建 Schedule 时密码
   1–32 字符交给 UpsertSchedule；`StartBackup` 仅传 `schedule_id` + `backup_type`）；页面进度复用 D2 Job 观察；
   五语言翻译与 Home↔Backup↔Repository 导航已接线。
@@ -215,12 +216,17 @@ Repository 容量卡片只使用 Service 异步返回的本机 volume inventory 
   - Repository connection 可改为其它已连接目标；改目标时确认下次备份为 Full（Service 清 tip）。
   - Schedule settings（Daily/Weekly/Monthly、时间、星期或每月日期）可修改；`enabled` 可切换。
     Monthly 使用 `day_of_month_mask`（可多选 1–31）；当月无该日则顺延到下一个有该日的月份。
-    Time of day 可配置 1–8 个时刻（`local_minutes_of_day`）；禁止重复，任意两时刻间隔 ≥ 30 分钟。
+    Time of day 可配置 1–8 个时刻（`local_minutes_of_day`）；新建默认 12:00；禁止重复，任意两时刻间隔 ≥ 30 分钟。
   - 向导不再提供 Backup type。每次运行默认增量；首次或无父降 Full；菜单 **Run now**（增量）与 **Run full**。
   - Backup options 中除 “完成后关机”（shutdown）可改外，其余（含 exclude pagefile、加密、去重/分卷/压缩
     等向导选项）创建后不可改；Desktop 更新路径必须回传已有冻结字段，不得静默改写加密标志。
-  - ADR-0022 的 `deduplication_enabled` 只在 Volume Set 创建流程显示，默认开启并进入 UpsertSchedule；
-    file_set 固定 false。Recovery Point 详情可显示 Catalog 的去重 blocks/bytes，但不得与压缩率混算。
+  - ADR-0022 的 `deduplication_enabled` 只在 Volume Set 创建流程显示为 **Enable Deduplication**，
+    默认开启并进入 UpsertSchedule；file_set 固定 false。Recovery Point 详情可显示 Catalog 的去重
+    blocks/bytes，但不得与压缩率混算。
+  - **Split image into fixed-size files** 只在 Volume Set 新建流程显示；默认关闭，开启后默认 1 GiB，
+    可选 128–1024 MiB 或 1–1024 GiB。Desktop 发送字节值，Schedule 创建后冻结；file_set 固定为 0。
+  - Compression 为 Fast/Normal/High，分别对应 zstd level **1 / 3 / 9**，新建默认 Normal。
+    Desktop 把整数 `compression_level` 写入 UpsertSchedule；创建后冻结。volume_set 与 file_set 均可配置。
   Backup list、Add、slide-in wizard、真实 Service/SQLite Job、Schedule、多 Volume 单 Archive、取消和聚合进度
   均已具备生产功能。
 - Restore Source Disks：选中 checkpoint 后调用 Service V3 `GetRecoveryPointLayout`（kind 12）。payload 为

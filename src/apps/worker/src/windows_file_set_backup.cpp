@@ -344,6 +344,7 @@ create_file_archive(const WindowsFileSetBackupRequest& request, const format::Ma
     archive_request.block_size = request.block_size_bytes;
     archive_request.chunk_size = request.chunk_size_bytes;
     archive_request.split_size_bytes = request.split_size_bytes;
+    archive_request.compression_level = request.compression_level;
     archive_request.kdf_parameters = {request.kdf_opslimit, request.kdf_memlimit_bytes};
     auto session = personal_archive::PersonalFileArchiveSession::create(archive_request);
     if (!session) {

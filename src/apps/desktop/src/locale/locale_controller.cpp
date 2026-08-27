@@ -1,11 +1,14 @@
 #include "locale/locale_controller.h"
 
+#include "../../../../../include/aegra_version.h"
+
 #include <QCoreApplication>
 #include <QFile>
 #include <QQmlEngine>
 #include <QSettings>
 #include <QTranslator>
 #include <QVariantMap>
+#include <QtGlobal>
 
 namespace aegra::desktop {
 namespace {
@@ -53,6 +56,34 @@ QString LocaleController::languageLabel() const {
         }
     }
     return language_tag_;
+}
+
+QString LocaleController::productName() const {
+    return QStringLiteral(AEGRI_PRODUCT_NAME);
+}
+
+QString LocaleController::productVersion() const {
+    return QStringLiteral(AEGRI_VERSION_STRING);
+}
+
+QString LocaleController::copyright() const {
+    return QStringLiteral(AEGRI_COPYRIGHT);
+}
+
+QString LocaleController::qtVersion() const {
+    return QString::fromLatin1(qVersion());
+}
+
+QString LocaleController::buildDate() const {
+    return QStringLiteral("2026.08.27");
+}
+
+QString LocaleController::architecture() const {
+#if defined(_WIN64) || defined(__x86_64__) || defined(_M_X64)
+    return QStringLiteral("64-bit");
+#else
+    return QStringLiteral("32-bit");
+#endif
 }
 
 QVariantList LocaleController::availableLanguages() const {

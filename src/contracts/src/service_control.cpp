@@ -363,13 +363,17 @@ base::Result<void> validate_schedule_summary(const ScheduleSummary& summary) {
         !valid_optional_wire_integer(summary.next_run_utc_ms)) {
         return invalid("schedule summary is invalid");
     }
+    if (!valid_compression_level(summary.compression_level)) {
+        return invalid("schedule compression level is invalid");
+    }
     if (summary.content_kind == ContentKind::kVolumeSet) {
-        if (!valid_source_ids(summary.source_ids, false) || !summary.selection_summaries.empty()) {
+        if (!valid_source_ids(summary.source_ids, false) || !summary.selection_summaries.empty() ||
+            !valid_archive_split_size(summary.split_size_bytes)) {
             return invalid("volume schedule summary sources are invalid");
         }
     } else {
-        if (summary.deduplication_enabled) {
-            return invalid("file schedule cannot enable deduplication");
+        if (summary.deduplication_enabled || summary.split_size_bytes != 0) {
+            return invalid("file schedule cannot enable deduplication or archive splitting");
         }
         if (!summary.source_ids.empty() || summary.selection_summaries.empty() ||
             summary.selection_summaries.size() > kMaximumFileSelections ||
@@ -664,14 +668,19 @@ base::Result<void> validate_upsert_schedule_command(const UpsertScheduleCommand&
         !known_backup_type(command.backup_type)) {
         return invalid("upsert schedule command is invalid");
     }
+    if (!valid_compression_level(command.compression_level)) {
+        return invalid("schedule compression level is invalid");
+    }
     if (command.protection.content_kind == ContentKind::kFileSet) {
-        if (command.deduplication_enabled) {
-            return invalid("file_set schedule cannot enable deduplication");
+        if (command.deduplication_enabled || command.split_size_bytes != 0) {
+            return invalid("file_set schedule cannot enable deduplication or archive splitting");
         }
         if (command.backup_type != BackupType::kFull &&
             command.backup_type != BackupType::kIncremental) {
             return invalid("file_set schedule requires full or incremental backup type");
         }
+    } else if (!valid_archive_split_size(command.split_size_bytes)) {
+        return invalid("volume_set schedule archive split size is invalid");
     }
     auto protection = validate_protection_spec_input(command.protection, !command.schedule_id);
     if (!protection) {

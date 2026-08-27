@@ -12,7 +12,7 @@ Item {
     property var daysOfWeek: [1]
     property var daysOfMonth: [1]
     /// One or more HH:mm values (max 8). Always a real JS array of "HH:mm" strings.
-    property var timesOfDay: ["02:00"]
+    property var timesOfDay: ["12:00"]
     readonly property int maxTimesOfDay: 8
     /// Minutes between any two times (same calendar day, including wrap past midnight).
     readonly property int minTimeGapMinutes: 30
@@ -52,11 +52,27 @@ Item {
         return (n < 10 ? "0" : "") + n
     }
 
+    function selectedSplitSizeBytes() {
+        if (root.filesMode || !root.splitEnabled)
+            return 0
+        var value = Math.max(root.splitUnit === "MB" ? 128 : 1, root.splitSize)
+        var multiplier = root.splitUnit === "MB" ? 1024 * 1024 : 1024 * 1024 * 1024
+        return value * multiplier
+    }
+
+    function selectedCompressionLevel() {
+        if (root.compression === "fast")
+            return 1
+        if (root.compression === "high")
+            return 9
+        return 3
+    }
+
     function normalizeTimeLabel(value) {
-        var p = ("" + (value || "02:00")).split(":")
+        var p = ("" + (value || "12:00")).split(":")
         var h = parseInt(p[0], 10)
         var m = parseInt(p[1], 10)
-        if (isNaN(h) || h < 0 || h > 23) h = 2
+        if (isNaN(h) || h < 0 || h > 23) h = 12
         if (isNaN(m) || m < 0 || m > 59) m = 0
         m = Math.round(m / 5) * 5
         if (m > 55) m = 55
@@ -105,12 +121,12 @@ Item {
 
     function timeHourAt(index) {
         var list = root.timesOfDay || []
-        return root.normalizeTimeLabel(list[index] || "02:00").split(":")[0]
+        return root.normalizeTimeLabel(list[index] || "12:00").split(":")[0]
     }
 
     function timeMinuteAt(index) {
         var list = root.timesOfDay || []
-        return root.normalizeTimeLabel(list[index] || "02:00").split(":")[1]
+        return root.normalizeTimeLabel(list[index] || "12:00").split(":")[1]
     }
 
     function setTimeAt(index, h, m) {
@@ -120,7 +136,7 @@ Item {
         if (index < 0 || index >= list.length)
             return
         var next = list.slice()
-        next[index] = root.normalizeTimeLabel((h || "02") + ":" + (m || "00"))
+        next[index] = root.normalizeTimeLabel((h || "12") + ":" + (m || "00"))
         var err = root.timesValidationError(next)
         if (err.length > 0) {
             if (typeof serviceClient !== "undefined" && serviceClient)
@@ -166,7 +182,7 @@ Item {
             return root.timeToMinutes(a) - root.timeToMinutes(b)
         })
         if (times.length === 0)
-            times = ["02:00"]
+            times = ["12:00"]
         if (times.length > root.maxTimesOfDay)
             times = times.slice(0, root.maxTimesOfDay)
         return times
@@ -177,7 +193,7 @@ Item {
         var i
         for (i = 0; i < (existing || []).length; ++i)
             occupied[root.timeToMinutes(existing[i])] = true
-        var start = 2 * 60
+        var start = 12 * 60
         if ((existing || []).length > 0) {
             var last = root.timeToMinutes(existing[existing.length - 1])
             start = (last + root.minTimeGapMinutes) % 1440
@@ -344,6 +360,13 @@ Item {
         Qt.callLater(function () { root.timesUiReady = true })
         enableDedup = item.deduplicationEnabled !== false
         excludePageHibernation = item.excludePageAndHibernation !== false
+        var level = parseInt(item.compressionLevel, 10)
+        if (level === 1)
+            compression = "fast"
+        else if (level === 9)
+            compression = "high"
+        else
+            compression = "normal"
         encryption = !!item.encryptionEnabled
         password = ""
         passwordConfirm = ""
@@ -372,7 +395,7 @@ Item {
         daysOfWeek = [1]
         daysOfMonth = [1]
         timesUiReady = false
-        timesOfDay = ["02:00"]
+        timesOfDay = ["12:00"]
         Qt.callLater(function () { root.timesUiReady = true })
         enableDedup = true
         excludePageHibernation = true
@@ -386,7 +409,7 @@ Item {
         compression = "normal"
         if (hourCombo) {
             var hIdx = hourOptions.indexOf(timeHour())
-            hourCombo.currentIndex = hIdx >= 0 ? hIdx : 2
+            hourCombo.currentIndex = hIdx >= 0 ? hIdx : 12
         }
         if (minCombo) {
             var mIdx = minuteOptions.indexOf(timeMinute())
@@ -619,7 +642,7 @@ Item {
                             spacing: 8
                             Repeater {
                                 // Object model keeps row identity stable when appending a time,
-                                // so existing ComboBoxes are not recreated to default 02:00.
+                                // so existing ComboBoxes are not recreated to default 12:00.
                                 model: root.timesOfDay.length
                                 delegate: Row {
                                     spacing: 8
@@ -635,7 +658,7 @@ Item {
                                             var idx = root.hourOptions.indexOf(
                                                         root.timeHourAt(index))
                                             if (idx < 0)
-                                                idx = 2
+                                                idx = 12
                                             if (hourCombo.currentIndex !== idx)
                                                 hourCombo.currentIndex = idx
                                         }
@@ -652,7 +675,7 @@ Item {
                                                 return
                                             root.setTimeAt(
                                                 index,
-                                                root.hourOptions[activatedIndex] || "02",
+                                                root.hourOptions[activatedIndex] || "12",
                                                 root.timeMinuteAt(index))
                                         }
                                         background: Rectangle {
@@ -880,33 +903,20 @@ Item {
                                     onClicked: root.enableDedup = !root.enableDedup
                                 }
                             }
-                            ColumnLayout {
+                            Text {
                                 Layout.fillWidth: true
-                                spacing: 2
-                                Text {
-                                    Layout.fillWidth: true
-                                    //% "Enable volume chunk deduplication"
-                                    text: qsTrId("aegra.backup.opt.dedup")
-                                    color: Theme.colorTextWhite
-                                    font.pixelSize: 13
-                                    font.family: Theme.fontFamily
-                                    wrapMode: Text.WordWrap
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        enabled: !root.editing
-                                        cursorShape: root.editing ? Qt.ArrowCursor
-                                                                  : Qt.PointingHandCursor
-                                        onClicked: root.enableDedup = !root.enableDedup
-                                    }
-                                }
-                                Text {
-                                    Layout.fillWidth: true
-                                    //% "Same-chunk only within each volume backup; not global or cross-backup"
-                                    text: qsTrId("aegra.backup.opt.dedup_hint")
-                                    color: Theme.colorTextDim
-                                    font.pixelSize: 11
-                                    font.family: Theme.fontFamily
-                                    wrapMode: Text.WordWrap
+                                //% "Enable Deduplication"
+                                text: qsTrId("aegra.backup.opt.dedup")
+                                color: Theme.colorTextWhite
+                                font.pixelSize: 13
+                                font.family: Theme.fontFamily
+                                wrapMode: Text.WordWrap
+                                MouseArea {
+                                    anchors.fill: parent
+                                    enabled: !root.editing
+                                    cursorShape: root.editing ? Qt.ArrowCursor
+                                                              : Qt.PointingHandCursor
+                                    onClicked: root.enableDedup = !root.enableDedup
                                 }
                             }
                         }
@@ -962,7 +972,7 @@ Item {
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 10
-                            visible: !root.editing
+                            visible: !root.editing && !root.filesMode
                             Rectangle {
                                 width: 18
                                 height: 18
@@ -1007,7 +1017,7 @@ Item {
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 8
-                            visible: !root.editing
+                            visible: !root.editing && !root.filesMode
                             RowLayout {
                                 Layout.fillWidth: true
                                 spacing: 10
@@ -1068,11 +1078,15 @@ Item {
                                         font.pixelSize: 13
                                         font.family: Theme.fontFamily
                                         activeFocusOnTab: true
-                                        validator: IntValidator { bottom: 1; top: 1024 }
+                                        validator: IntValidator {
+                                            bottom: root.splitUnit === "MB" ? 128 : 1
+                                            top: 1024
+                                        }
                                         text: "" + root.splitSize
                                         onTextChanged: {
                                             var n = parseInt(text, 10)
-                                            if (!isNaN(n) && n >= 1)
+                                            if (!isNaN(n) &&
+                                                    n >= (root.splitUnit === "MB" ? 128 : 1))
                                                 root.splitSize = n
                                         }
                                     }
@@ -1094,8 +1108,12 @@ Item {
                                     MouseArea {
                                         anchors.fill: parent
                                         cursorShape: Qt.PointingHandCursor
-                                        onClicked: root.splitUnit =
-                                                       (root.splitUnit === "GB") ? "MB" : "GB"
+                                        onClicked: {
+                                            root.splitUnit = (root.splitUnit === "GB") ? "MB" : "GB"
+                                            var minimum = root.splitUnit === "MB" ? 128 : 1
+                                            if (root.splitSize < minimum)
+                                                root.splitSize = minimum
+                                        }
                                     }
                                 }
                                 Text {
@@ -1272,9 +1290,9 @@ Item {
                                 spacing: 8
                                 Repeater {
                                     model: [
-                                        { value: "none", label: qsTrId("aegra.backup.comp.none") },
+                                        { value: "fast", label: qsTrId("aegra.backup.comp.fast") },
                                         { value: "normal", label: qsTrId("aegra.backup.comp.normal") },
-                                        { value: "best", label: qsTrId("aegra.backup.comp.best") }
+                                        { value: "high", label: qsTrId("aegra.backup.comp.high") }
                                     ]
                                     delegate: Rectangle {
                                         required property var modelData

@@ -32,6 +32,26 @@ enum class BackupType : std::uint8_t {
     kDifferential = 3,
 };
 
+/// Product limits for volume archive splitting. Zero disables splitting.
+inline constexpr std::uint64_t kMinimumArchiveSplitSizeBytes = 128ULL * 1024ULL * 1024ULL;
+inline constexpr std::uint64_t kMaximumArchiveSplitSizeBytes = 1024ULL * 1024ULL * 1024ULL * 1024ULL;
+
+[[nodiscard]] constexpr bool valid_archive_split_size(const std::uint64_t size_bytes) noexcept {
+    return size_bytes == 0 ||
+           (size_bytes >= kMinimumArchiveSplitSizeBytes &&
+            size_bytes <= kMaximumArchiveSplitSizeBytes);
+}
+
+/// Product zstd levels for schedule compression. Frozen at create.
+inline constexpr std::int32_t kCompressionLevelFast = 1;
+inline constexpr std::int32_t kCompressionLevelNormal = 3;
+inline constexpr std::int32_t kCompressionLevelHigh = 9;
+
+[[nodiscard]] constexpr bool valid_compression_level(const std::int32_t level) noexcept {
+    return level == kCompressionLevelFast || level == kCompressionLevelNormal ||
+           level == kCompressionLevelHigh;
+}
+
 struct BackupOptions final {
     /// Requested backup type (file_set may downgrade Incremental → Full).
     BackupType type{BackupType::kFull};
@@ -46,6 +66,10 @@ struct BackupOptions final {
     /// volume_set: enable single-chunk DEDUP (ADR-0022); default true, frozen on schedule create.
     /// file_set: must be false.
     bool deduplication_enabled{true};
+    /// volume_set only: target archive part size; zero disables splitting.
+    std::uint64_t split_size_bytes{0};
+    /// zstd level: Fast=1, Normal=3, High=9. Frozen on schedule create.
+    std::int32_t compression_level{kCompressionLevelNormal};
     /// When true, archive metadata/payload use AEAD with credential_refs password.
     /// When false, archive is written unencrypted and password must be empty.
     bool encryption_enabled{false};

@@ -269,6 +269,7 @@ Window {
                         id: backupPageComp
                         BackupPage {
                             onNavigateHomeRequested: pageContainer.switchPage(0)
+                            onNavigateRepositoryRequested: pageContainer.switchPage(4)
                         }
                     }
                     Component {
@@ -345,7 +346,7 @@ Window {
             MouseArea {
                 anchors.fill: parent
                 anchors.topMargin: window.canResize ? window.resizeBorder : 0
-                anchors.rightMargin: 200
+                anchors.rightMargin: 236
                 onPressed: window.startSystemMove()
                 onDoubleClicked: {
                     if (window.visibility === Window.Maximized)
@@ -400,6 +401,49 @@ Window {
                     }
                 }
 
+                Rectangle {
+                    id: moreButton
+                    width: 32
+                    height: 28
+                    radius: 8
+                    color: moreMenu.visible || moreMouse.pressed
+                           ? Theme.colorButtonHover
+                           : (moreMouse.containsMouse ? Theme.colorHover : "transparent")
+
+                    NavIcon {
+                        anchors.centerIn: parent
+                        width: 17
+                        height: 17
+                        name: "menu"
+                        color: moreMenu.visible || moreMouse.containsMouse
+                               ? Theme.colorAccentBlue : Theme.colorTextGrey
+                    }
+
+                    MouseArea {
+                        id: moreMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: moreMenu.visible ? moreMenu.close() : moreMenu.open()
+                    }
+
+                    ToolTip.delay: 400
+                    ToolTip.visible: moreMouse.containsMouse && !moreMenu.visible
+                    ToolTip.text: qsTrId("aegra.shell.more")
+
+                    MoreMenu {
+                        id: moreMenu
+                        x: Math.round((moreButton.width - width) / 2)
+                        y: moreButton.height + 6
+                        onAboutClicked: aboutDialog.open()
+                        onHelpFeedbackClicked: Qt.openUrlExternally("https://github.com/jimli0826/Aegra/issues")
+                        onCheckUpdatesClicked: {
+                            if (typeof serviceClient !== "undefined" && serviceClient)
+                                serviceClient.showToast(qsTrId("aegra.about.already_latest"), false)
+                        }
+                    }
+                }
+
                 WindowButton {
                     role: "minimize"
                     onClicked: window.showMinimized()
@@ -446,6 +490,15 @@ Window {
             anchors.top: parent.top
             anchors.topMargin: window.appReady ? 44 : 0
             visible: window.appReady
+        }
+
+        AboutDialog {
+            id: aboutDialog
+            onLicensesRequested: licensesDialog.open()
+        }
+
+        LicensesDialog {
+            id: licensesDialog
         }
     } // shell
 

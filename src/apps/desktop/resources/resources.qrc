@@ -15,6 +15,8 @@
         <file alias="qml/components/AddRepositoryPanel.qml">../qml/components/AddRepositoryPanel.qml</file>
         <file alias="qml/components/AppButton.qml">../qml/components/AppButton.qml</file>
         <file alias="qml/components/AppCheckBox.qml">../qml/components/AppCheckBox.qml</file>
+        <file alias="qml/components/AboutDialog.qml">../qml/components/AboutDialog.qml</file>
+        <file alias="qml/components/LicensesDialog.qml">../qml/components/LicensesDialog.qml</file>
         <file alias="qml/components/BackupPasswordDialog.qml">../qml/components/BackupPasswordDialog.qml</file>
         <file alias="qml/components/PeRestoreConfirmDialog.qml">../qml/components/PeRestoreConfirmDialog.qml</file>
         <file alias="qml/components/PeRestoreReplaceDialog.qml">../qml/components/PeRestoreReplaceDialog.qml</file>
@@ -28,6 +30,7 @@
         <file alias="qml/components/ComboBoxIndicator.qml">../qml/components/ComboBoxIndicator.qml</file>
         <file alias="qml/components/LinkButton.qml">../qml/components/LinkButton.qml</file>
         <file alias="qml/components/LoadingOverlay.qml">../qml/components/LoadingOverlay.qml</file>
+        <file alias="qml/components/MoreMenu.qml">../qml/components/MoreMenu.qml</file>
         <file alias="qml/components/PageHeader.qml">../qml/components/PageHeader.qml</file>
         <file alias="qml/components/ResizeHandle.qml">../qml/components/ResizeHandle.qml</file>
         <file alias="qml/components/SidebarCommand.qml">../qml/components/SidebarCommand.qml</file>

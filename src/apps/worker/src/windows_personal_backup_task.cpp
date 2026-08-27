@@ -221,7 +221,8 @@ WindowsPersonalBackupRequest make_backup_request(
     request.block_size_bytes = options.block_size_bytes;
     request.chunk_size_bytes = options.chunk_size_bytes;
     request.memory_budget_bytes = options.memory_budget_bytes;
-    request.split_size_bytes = options.split_size_bytes;
+    request.split_size_bytes = job.backup->split_size_bytes;
+    request.compression_level = job.backup->compression_level;
     request.kdf_opslimit = options.kdf_opslimit;
     request.kdf_memlimit_bytes = options.kdf_memlimit_bytes;
     request.created_utc = std::move(created_utc);
@@ -320,6 +321,10 @@ void log_backup_request(WorkerTaskLog* log, const contracts::JobRequest& job,
                     request.exclude_page_and_hibernation_files);
     // ADR-0022: volume_set single-chunk DEDUP policy (frozen on schedule).
     log->field_bool("deduplication_enabled", request.deduplication_enabled);
+    if (request.split_size_bytes != 0) {
+        log->field_bytes("split_size", request.split_size_bytes);
+    }
+    log->field_u64("compression_level", static_cast<std::uint64_t>(request.compression_level));
     log->field_bytes("block_size", request.block_size_bytes);
     log->field_bytes("chunk_size", request.chunk_size_bytes);
     log->field_bytes("memory_budget", request.memory_budget_bytes);

@@ -266,6 +266,39 @@ Item {
                 ctx.stroke()
                 break
 
+            case "menu": // menu
+                ctx.beginPath()
+                ctx.moveTo(4, 6)
+                ctx.lineTo(20, 6)
+                ctx.moveTo(4, 12)
+                ctx.lineTo(20, 12)
+                ctx.moveTo(4, 18)
+                ctx.lineTo(20, 18)
+                ctx.stroke()
+                break
+
+            case "help_circle": // circle-help
+                circle(12, 12, 9)
+                ctx.beginPath()
+                ctx.arc(12, 9.5, 3, Math.PI, Math.PI * 0.1, false)
+                ctx.quadraticCurveTo(12, 13, 12, 15)
+                ctx.stroke()
+                ctx.beginPath()
+                ctx.arc(12, 18, 0.8, 0, Math.PI * 2)
+                ctx.fill()
+                break
+
+            case "info": // circle-info
+                circle(12, 12, 9)
+                ctx.beginPath()
+                ctx.moveTo(12, 10.5)
+                ctx.lineTo(12, 17)
+                ctx.stroke()
+                ctx.beginPath()
+                ctx.arc(12, 7, 0.8, 0, Math.PI * 2)
+                ctx.fill()
+                break
+
             default:
                 rrect(5, 5, 14, 14, 2)
                 break

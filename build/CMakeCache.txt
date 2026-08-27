@@ -15,10 +15,10 @@
 ########################
 
 //Build the Qt desktop client
-AEGRA_BUILD_DESKTOP:BOOL=OFF
+AEGRA_BUILD_DESKTOP:BOOL=ON
 
 //Qt installation prefix for the desktop client
-AEGRA_QT_ROOT:PATH=
+AEGRA_QT_ROOT:PATH=C:/Qt6/6.8.3/msvc2022_64
 
 //Treat Aegra compiler warnings as errors
 AEGRA_WARNINGS_AS_ERRORS:BOOL=ON
@@ -138,13 +138,13 @@ CMAKE_PROJECT_NAME:STATIC=Aegra
 CMAKE_PROJECT_SPDX_LICENSE:STATIC=
 
 //Value Computed by CMake
-CMAKE_PROJECT_VERSION:STATIC=0.1.0
+CMAKE_PROJECT_VERSION:STATIC=0.9.0
 
 //Value Computed by CMake
 CMAKE_PROJECT_VERSION_MAJOR:STATIC=0
 
 //Value Computed by CMake
-CMAKE_PROJECT_VERSION_MINOR:STATIC=1
+CMAKE_PROJECT_VERSION_MINOR:STATIC=9
 
 //Value Computed by CMake
 CMAKE_PROJECT_VERSION_PATCH:STATIC=0
@@ -217,6 +217,11 @@ CMAKE_STATIC_LINKER_FLAGS_RELEASE:STRING=
 // during RELWITHDEBINFO builds.
 CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO:STRING=
 
+//Path to a CMake toolchain file, read early in the CMake run,
+// that specifies the compilers, toolchain utilities, and target-platform
+// information used when cross-compiling.
+CMAKE_TOOLCHAIN_FILE:UNINITIALIZED=D:/Work/OpenSource/vcpkg/scripts/buildsystems/vcpkg.cmake
+
 //If this value is on, makefiles will be generated without the
 // .SILENT directive, and all commands will be echoed to the console
 // during the make.  This is useful for debugging only. With Visual
@@ -231,6 +236,8 @@ nlohmann_json_DIR:PATH=nlohmann_json_DIR-NOTFOUND
 # INTERNAL cache entries
 ########################
 
+AEGRA_CMAKE_DIR:INTERNAL=D:/Work/OpenSource/Aegra/cmake
+AEGRA_VERSION_INCLUDE_DIR:INTERNAL=D:/Work/OpenSource/Aegra/cmake/../include
 //ADVANCED property for variable: CMAKE_AR
 CMAKE_AR-ADVANCED:INTERNAL=1
 //This is the directory where this CMakeCache.txt was created

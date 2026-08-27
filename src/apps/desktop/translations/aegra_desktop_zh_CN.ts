@@ -1043,14 +1043,6 @@
         <source>Next run</source>
         <translation>下次运行</translation>
     </message>
-    <message id="aegra.backup.locations">
-        <source>Locations</source>
-        <translation>位置</translation>
-    </message>
-    <message id="aegra.backup.add_location">
-        <source>Add location</source>
-        <translation>添加位置</translation>
-    </message>
     <message id="aegra.backup.source.volume">
         <source>Volume</source>
         <translation>卷</translation>
@@ -1132,12 +1124,8 @@
         <translation>日</translation>
     </message>
     <message id="aegra.backup.opt.dedup">
-        <source>Enable volume chunk deduplication</source>
-        <translation>启用卷块去重</translation>
-    </message>
-    <message id="aegra.backup.opt.dedup_hint">
-        <source>Same-chunk only within each volume backup; not global or cross-backup</source>
-        <translation>仅在每次卷备份的同一物理块内去重；非全局、非跨备份</translation>
+        <source>Enable Deduplication</source>
+        <translation>启用去重</translation>
     </message>
     <message id="aegra.repository.dedup.bytes">
         <source>Deduplicated</source>
@@ -1167,17 +1155,17 @@
         <source>Compression</source>
         <translation>压缩</translation>
     </message>
-    <message id="aegra.backup.comp.none">
-        <source>None</source>
-        <translation>无</translation>
+    <message id="aegra.backup.comp.fast">
+        <source>Fast</source>
+        <translation>快速</translation>
     </message>
     <message id="aegra.backup.comp.normal">
         <source>Normal</source>
         <translation>标准</translation>
     </message>
-    <message id="aegra.backup.comp.best">
-        <source>Best</source>
-        <translation>最高</translation>
+    <message id="aegra.backup.comp.high">
+        <source>High</source>
+        <translation>高</translation>
     </message>
     <message id="aegra.backup.column.status">
         <source>Status</source>
@@ -1348,8 +1336,8 @@
         <translation>请至少选择一个备份源</translation>
     </message>
     <message id="aegra.backup.schedule.missing_target">
-        <source>Select a repository destination (Locations)</source>
-        <translation>请选择备份目标（Locations 中的 Repository 连接）</translation>
+        <source>Select a repository destination</source>
+        <translation>请选择 Repository 备份目标</translation>
     </message>
     <message id="aegra.backup.schedule.first_backup_title">
         <source>Start first backup?</source>
@@ -1408,8 +1396,8 @@
         <translation>仅删除计划任务。仓库中已有的恢复点不会被删除。</translation>
     </message>
     <message id="aegra.backup.destination.empty">
-        <source>No repository connection yet. Add a location in Repository first.</source>
-        <translation>尚无 Repository 连接。请先在 Repository 页面添加目标。</translation>
+        <source>No repository connection yet. Add a repository first.</source>
+        <translation>尚无 Repository 连接。请先添加 Repository。</translation>
     </message>
     <message id="aegra.backup.credential.service_managed">
         <source>Repository credentials are managed by Service. Passwords are never entered in Desktop.</source>
@@ -2648,8 +2636,8 @@
         <translation>所选备份目标已离线，无法接收备份。请在下方选择一个在线的 Repository 以继续：</translation>
     </message>
     <message id="aegra.backup.offline_dialog_none_available">
-        <source>No online repositories found. Please bring a repository online or add a new location in the Repository page.</source>
-        <translation>未找到在线的 Repository。请将某个 Repository 恢复在线，或在 Repository 页面添加新位置。</translation>
+        <source>No online repositories found. Please bring a repository online or add a new repository in the Repository page.</source>
+        <translation>未找到在线的 Repository。请将某个 Repository 恢复在线，或在 Repository 页面添加新的 Repository。</translation>
     </message>
     <message id="aegra.backup.run.not_connected">
         <source>Service not connected</source>
@@ -2873,6 +2861,98 @@ for critical volumes now</source>
     <message id="aegra.home.banner.action">
         <source>Go to New Backup Plan</source>
         <translation>前往新建备份计划</translation>
+    </message>
+    <message id="aegra.shell.more">
+        <source>More</source>
+        <translation>更多</translation>
+    </message>
+    <message id="aegra.shell.help_feedback">
+        <source>Help and feedback</source>
+        <translation>帮助与反馈</translation>
+    </message>
+    <message id="aegra.shell.about">
+        <source>About</source>
+        <translation>关于</translation>
+    </message>
+    <message id="aegra.shell.check_updates">
+        <source>Check for updates</source>
+        <translation>检查更新</translation>
+    </message>
+    <message id="aegra.about.title">
+        <source>About Aegra</source>
+        <translation>关于 Aegra</translation>
+    </message>
+    <message id="aegra.about.built_with">
+        <source>Built with</source>
+        <translation>构建基于</translation>
+    </message>
+    <message id="aegra.about.version_for_windows">
+        <source>Version %1 (%2) for Windows Desktop</source>
+        <translation>版本 %1 (%2) 适用于 Windows 桌面版</translation>
+    </message>
+    <message id="aegra.about.licenses_btn">
+        <source>Licenses</source>
+        <translation>开源许可</translation>
+    </message>
+    <message id="aegra.about.licenses_link">
+        <source>Open Source Licenses</source>
+        <translation>开源软件许可</translation>
+    </message>
+    <message id="aegra.about.support">
+        <source>Support</source>
+        <translation>支持与帮助</translation>
+    </message>
+    <message id="aegra.about.homepage">
+        <source>Home Page</source>
+        <translation>官方主页</translation>
+    </message>
+    <message id="aegra.about.documentation">
+        <source>Documentation</source>
+        <translation>使用文档</translation>
+    </message>
+    <message id="aegra.about.feedback">
+        <source>Feedback</source>
+        <translation>问题反馈</translation>
+    </message>
+    <message id="aegra.about.related_links">
+        <source>Related Links</source>
+        <translation>相关链接</translation>
+    </message>
+    <message id="aegra.about.releases">
+        <source>Release Notes</source>
+        <translation>版本发布</translation>
+    </message>
+    <message id="aegra.about.contact">
+        <source>Contact</source>
+        <translation>联系项目</translation>
+    </message>
+    <message id="aegra.about.already_latest">
+        <source>You are using the latest version of Aegra.</source>
+        <translation>当前已是最新版本的 Aegra。</translation>
+    </message>
+    <message id="aegra.licenses.title">
+        <source>Open Source Licenses</source>
+        <translation>开源软件许可</translation>
+    </message>
+    <message id="aegra.licenses.subtitle">
+        <source>Open source software used in Aegra:</source>
+        <translation>Aegra 使用的开源软件：</translation>
+    </message>
+    <message id="aegra.licenses.about_qt">
+        <source>About Qt</source>
+        <translation>关于 Qt</translation>
+    </message>
+    <message id="aegra.licenses.about_qt_title">
+        <source>About Qt Framework</source>
+        <translation>关于 Qt 框架</translation>
+    </message>
+    <message id="aegra.licenses.about_qt_desc">
+        <source>Aegra is built with Qt %1. Qt is an open-source cross-platform C++ framework licensed under the GNU Lesser General Public License (LGPL) version 3.</source>
+        <translation>Aegra 基于 Qt %1 构建。Qt 是一套跨平台的 C++ 应用程序开发框架，遵循 GNU LGPL v3 开源协议。</translation>
+    </message>
+    <message id="aegra.licenses.licensed_under">
+        <source>Licensed under</source>
+        <translation>开源协议：</translation>
     </message>
 </context>
 </TS>

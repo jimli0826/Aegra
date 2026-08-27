@@ -19,7 +19,6 @@ struct WindowsPersonalBackupTaskOptions final {
     std::uint32_t block_size_bytes{0};
     std::uint32_t chunk_size_bytes{0};
     std::size_t memory_budget_bytes{0};
-    std::uint64_t split_size_bytes{0};
     std::uint64_t kdf_opslimit{3};
     std::uint64_t kdf_memlimit_bytes{256ULL * 1024ULL * 1024ULL};
     std::uint32_t maximum_restore_chain_depth{128};

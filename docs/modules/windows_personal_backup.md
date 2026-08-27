@@ -58,6 +58,7 @@ Archive。Pipeline 失败时 Archive Session 负责 Abort，Composition Root 仍
 - 密码学随机且非零的 file UUID；全量另有互不相同的 backup-set UUID，增量由父 Archive 继承；
 - block/chunk/memory geometry、KDF 参数和可选分卷大小；
 - 显式 `deduplication_enabled`；开启时仅按 ADR-0022 在当前物理 Volume Chunk 内去重；
+- 显式 `compression_level`（zstd Fast=1、Normal=3、High=9），用于机会性 payload 压缩；
 - created UTC、应用版本和 hostname。
 
 成功表示 Archive 已经 Commit。此后 Snapshot 删除失败不能把已发布 Archive 伪装成未提交，因此

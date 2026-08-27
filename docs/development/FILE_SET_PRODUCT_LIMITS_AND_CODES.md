@@ -296,7 +296,8 @@ Full、Incremental、分卷、加密、Verify、Volume/Disk Restore、Catalog re
 | 项 | 默认 |
 | --- | --- |
 | default_chunk_size | 512 MiB |
-| split_size_bytes | 0（不分卷）或用户配置 ≤ 产品上限 |
+| split_size_bytes | volume_set：0（不分卷）或 128 MiB–1 TiB；file_set：0 |
+| compression_level | zstd Fast=1、Normal=3、High=9；默认 3 |
 | browse page default | 50 |
 | event window default | 64 |
 | index spool budget | 8 GiB |

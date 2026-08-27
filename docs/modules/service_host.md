@@ -267,8 +267,10 @@ per-file Archive Credential 映射与 Local Storage 故障恢复验证仍待补�
   `display_name` 为 UTF-8（含中文等非 ASCII 文件名），不再做 ASCII `?` 投影。
 - **Session**：每个 Named Pipe 连接携带 Service 生成的唯一 session id；不读取或认证客户端 SID。
   `UpsertSchedule` 用该 session 解析 file_set selection。
-- **Schedule / Job**：控制面 schema **12**（含 F8 `restore_preflight_entry_ids`）；file_set selections
-  存 `schedule_file_selections`；`StartBackup` 按 `content_kind` 构造 schema 4 Worker Job
+- **Schedule / Job**：控制面 schema **22**；file_set selections 存 `schedule_file_selections`；
+  volume_set 的 `split_size_bytes`（0 或 128 MiB–1 TiB）随 Schedule 持久化并进入幂等指纹，创建后冻结；
+  file_set 固定为 0。`compression_level`（zstd 1/3/9，默认 3）同样创建后冻结，两种 content_kind 均可。
+  `StartBackup` 按 `content_kind` 构造 schema 4 Worker Job
   （file 路径走 `file_source_refs`，Job `source_ids` 仅为 selection UUID）。
 - **Capabilities**（在 volume 根可用时）：`file.browse`、`schedule.file_set`；F8 另声明
   `file.restore`。

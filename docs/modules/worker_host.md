@@ -56,7 +56,7 @@ task log 与 Service 分级日志（`logs/trace.log` 等）同树。
 | `file_restore_target` | object \| null | file_set restore 必填（F8）；其它操作为 null/省略 |
 | `target_ref` | string | Backup/Restore/Export 必填；Verify 为空；file_set restore 为空 |
 | `credential_refs` | string array | 只允许 `SecretRef` 定位符 |
-| `backup` | object | Backup 必填；含 `type`、`deduplication_enabled`；volume 增量含父引用；file_set 含 `selection_fingerprint`，Incremental 可含 `candidate_parent_uuid` |
+| `backup` | object | Backup 必填；含 `type`、`deduplication_enabled`、`split_size_bytes`、`compression_level`；volume 增量含父引用；file_set 含 `selection_fingerprint`，Incremental 可含 `candidate_parent_uuid` |
 | `restore` | object | volume_set Restore **必填**：`disk_restore`、`source_disk_number`、`source_volume_index`、`bring_target_online`、`preserve_disk_signature`、`auto_expand_last_partition`、`volume_size_policy`、`shrink_plan_digest`、`source_chain_fingerprint`（后两者在直接恢复时为空；缩容执行时 digest/fingerprint 必填） |
 | `trace_id` | string | 必填、非空 |
 | `deadline_utc_ms` | signed integer | 可选；`0` 表示无 deadline |
@@ -87,6 +87,10 @@ Worker 明确拒绝 differential。Incremental 必须提供 `parent_source_ref`�
 Secret 存活。多 Volume 增量要求父 Archive 与当前 Job 的有序 Volume 集合一致。
 `backup.deduplication_enabled` 对 volume_set 必须显式给出；Worker 原样传给 Personal Archive Session。
 file_set 设置为 true 时必须在解析后、凭据解析和 Snapshot 前拒绝。
+`backup.split_size_bytes` 同样必须显式给出；volume_set 接受 `0`（单文件）或 128 MiB–1 TiB，Worker
+原样传给 Archive Session；file_set 非零时在凭据解析和 Snapshot 前拒绝。
+`backup.compression_level` 必须显式为 1、3 或 9（zstd Fast/Normal/High）；Worker 原样传给
+Volume 与 File Archive Session 做机会性压缩。
 
 **file_set** Backup（`content_kind=2`）接受 Full/Incremental：`file_source_refs` 1–100 条，`source_refs=[]`，
 `target_ref` 为 Archive 目标；Incremental 可携带 `candidate_parent_uuid` 和 Service 选出的父层引用。Worker

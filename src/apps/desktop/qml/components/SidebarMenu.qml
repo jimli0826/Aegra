@@ -22,7 +22,6 @@ Rectangle {
 
     signal menuClicked(int index)
     signal settingsClicked()
-    signal feedbackClicked()
     signal collapseToggled()
 
     color: "transparent"
@@ -117,24 +116,16 @@ Rectangle {
                 anchors.left: root.collapsed ? undefined : parent.left
                 spacing: 11
 
-                Rectangle {
+                Image {
                     width: 32
                     height: 32
-                    radius: 10
+                    source: "qrc:/Aegra/icons/product.png"
+                    sourceSize.width: 64
+                    sourceSize.height: 64
+                    fillMode: Image.PreserveAspectFit
+                    smooth: true
+                    mipmap: true
                     anchors.verticalCenter: parent.verticalCenter
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: Theme.colorMenuActive }
-                        GradientStop { position: 1.0; color: Theme.colorMenuActiveEnd }
-                    }
-                    Rectangle {
-                        x: 8; y: 7; width: 16; height: 5; radius: 2
-                        color: "transparent"; border.width: 2; border.color: "#ffffff"
-                        rotation: 180
-                    }
-                    Rectangle {
-                        x: 8; y: 20; width: 16; height: 5; radius: 2
-                        color: "transparent"; border.width: 2; border.color: "#ffffff"
-                    }
                 }
 
                 Text {
@@ -216,7 +207,7 @@ Rectangle {
         SidebarNavItem {
             Layout.fillWidth: true
             Layout.preferredHeight: 48
-            Layout.bottomMargin: 6
+            Layout.bottomMargin: 10
             active: root.settingsActive
             itemEnabled: root.settingsEnabled
             iconName: "settings"
@@ -228,22 +219,6 @@ Rectangle {
             ToolTip.visible: root.collapsed && hovered
             //% "Settings"
             ToolTip.text: qsTrId("aegra.nav.settings")
-        }
-
-        SidebarNavItem {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 48
-            Layout.bottomMargin: 10
-            active: false
-            itemEnabled: false
-            iconName: "feedback"
-            //% "Feedback"
-            label: qsTrId("aegra.nav.feedback")
-            showLabel: !root.collapsed
-            ToolTip.delay: 400
-            ToolTip.visible: root.collapsed && hovered
-            //% "Feedback"
-            ToolTip.text: qsTrId("aegra.nav.feedback")
         }
     }
 }

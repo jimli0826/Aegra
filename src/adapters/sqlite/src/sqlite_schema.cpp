@@ -87,6 +87,11 @@ CREATE TABLE IF NOT EXISTS schedules (
         CHECK (exclude_page_and_hibernation_files IN (0, 1)),
     deduplication_enabled INTEGER NOT NULL DEFAULT 1
         CHECK (deduplication_enabled IN (0, 1)),
+    split_size_bytes INTEGER NOT NULL DEFAULT 0
+        CHECK (split_size_bytes = 0 OR
+               split_size_bytes BETWEEN 134217728 AND 1099511627776),
+    compression_level INTEGER NOT NULL DEFAULT 3
+        CHECK (compression_level IN (1, 3, 9)),
     encryption_enabled INTEGER NOT NULL DEFAULT 0
         CHECK (encryption_enabled IN (0, 1)),
     archive_password_protected TEXT NOT NULL DEFAULT '',

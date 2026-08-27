@@ -539,11 +539,13 @@ base::Result<void> validate_schedule_record(const ports::ScheduleRecord& record)
         (record.last_recovery_point_id &&
          !base::is_canonical_uuid(*record.last_recovery_point_id)) ||
         !valid_wire_integer(record.created_utc_ms) || !valid_wire_integer(record.updated_utc_ms) ||
-        record.updated_utc_ms < record.created_utc_ms) {
+        record.updated_utc_ms < record.created_utc_ms ||
+        !contracts::valid_compression_level(record.compression_level)) {
         return invalid("schedule record is invalid");
     }
     if (record.content_kind == contracts::ContentKind::kVolumeSet) {
-        if (!valid_source_ids(record.source_ids, false) || !record.file_selections.empty()) {
+        if (!valid_source_ids(record.source_ids, false) || !record.file_selections.empty() ||
+            !contracts::valid_archive_split_size(record.split_size_bytes)) {
             return invalid("volume schedule sources are invalid");
         }
     } else {
@@ -553,8 +555,8 @@ base::Result<void> validate_schedule_record(const ports::ScheduleRecord& record)
              record.backup_type != contracts::BackupType::kIncremental)) {
             return invalid("file schedule sources are invalid");
         }
-        if (record.deduplication_enabled) {
-            return invalid("file schedule cannot enable deduplication");
+        if (record.deduplication_enabled || record.split_size_bytes != 0) {
+            return invalid("file schedule cannot enable deduplication or archive splitting");
         }
         auto refs = contracts::validate_file_source_refs(record.file_selections);
         if (!refs) {
@@ -837,12 +839,14 @@ base::Result<ports::ScheduleRecord> read_schedule(sqlite3_stmt* const stmt) {
     record.next_run_utc_ms = column_uint64_optional(stmt, 12);
     record.exclude_page_and_hibernation_files = sqlite3_column_int(stmt, 13) != 0;
     record.deduplication_enabled = sqlite3_column_int(stmt, 14) != 0;
-    record.encryption_enabled = sqlite3_column_int(stmt, 15) != 0;
-    record.archive_password_protected = column_text_required(stmt, 16);
-    record.backup_set_uuid = column_text_required(stmt, 17);
-    record.last_recovery_point_id = column_text_optional(stmt, 18);
-    record.created_utc_ms = column_uint64(stmt, 19);
-    record.updated_utc_ms = column_uint64(stmt, 20);
+    record.split_size_bytes = column_uint64(stmt, 15);
+    record.compression_level = sqlite3_column_int(stmt, 16);
+    record.encryption_enabled = sqlite3_column_int(stmt, 17) != 0;
+    record.archive_password_protected = column_text_required(stmt, 18);
+    record.backup_set_uuid = column_text_required(stmt, 19);
+    record.last_recovery_point_id = column_text_optional(stmt, 20);
+    record.created_utc_ms = column_uint64(stmt, 21);
+    record.updated_utc_ms = column_uint64(stmt, 22);
     // file_selections loaded by schedule store after read when content_kind is file_set.
     auto valid = validate_schedule_record(record);
     if (!valid && record.content_kind == contracts::ContentKind::kFileSet &&
@@ -1021,6 +1025,8 @@ contracts::ScheduleSummary to_schedule_summary(const ports::ScheduleRecord& reco
     summary.next_run_utc_ms = record.next_run_utc_ms;
     summary.exclude_page_and_hibernation_files = record.exclude_page_and_hibernation_files;
     summary.deduplication_enabled = record.deduplication_enabled;
+    summary.split_size_bytes = record.split_size_bytes;
+    summary.compression_level = record.compression_level;
     summary.encryption_enabled = record.encryption_enabled;
     return summary;
 }

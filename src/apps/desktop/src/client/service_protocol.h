@@ -275,7 +275,8 @@ encode_repository_connection_resource_request(const QString& request_id,
     const QString& repository_connection_id, int backup_type, int trigger_kind,
     const QList<int>& local_minutes_of_day, int weekday_mask, const QString& timezone_id,
     bool exclude_page_and_hibernation_files = true, bool deduplication_enabled = true,
-    bool encryption_enabled = false, const QString& archive_password = {},
+    quint64 split_size_bytes = 0, int compression_level = 3, bool encryption_enabled = false,
+    const QString& archive_password = {},
     quint32 day_of_month_mask = 0);
 [[nodiscard]] QByteArray encode_delete_schedule_request(const QString& request_id,
                                                         const QString& idempotency_key,
@@ -316,8 +317,8 @@ encode_browse_file_sources_request(const QString& request_id,
     const QString& repository_connection_id, int backup_type, int trigger_kind,
     const QList<int>& local_minutes_of_day, int weekday_mask, const QString& timezone_id,
     bool exclude_page_and_hibernation_files = true, bool deduplication_enabled = false,
-    bool encryption_enabled = false, const QString& archive_password = {},
-    quint32 day_of_month_mask = 0);
+    int compression_level = 3, bool encryption_enabled = false,
+    const QString& archive_password = {}, quint32 day_of_month_mask = 0);
 [[nodiscard]] QByteArray
 encode_plan_delete_recovery_points_request(const QString& request_id, const QString& connection_id,
                                            const QString& recovery_point_id,

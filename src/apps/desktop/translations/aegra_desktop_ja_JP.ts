@@ -1043,14 +1043,6 @@
         <source>Next run</source>
         <translation>次回実行</translation>
     </message>
-    <message id="aegra.backup.locations">
-        <source>Locations</source>
-        <translation>場所</translation>
-    </message>
-    <message id="aegra.backup.add_location">
-        <source>Add location</source>
-        <translation>場所を追加</translation>
-    </message>
     <message id="aegra.backup.source.volume">
         <source>Volume</source>
         <translation>ボリューム</translation>
@@ -1132,12 +1124,8 @@
         <translation>日</translation>
     </message>
     <message id="aegra.backup.opt.dedup">
-        <source>Enable volume chunk deduplication</source>
-        <translation>ボリューム チャンク重複排除を有効にする</translation>
-    </message>
-    <message id="aegra.backup.opt.dedup_hint">
-        <source>Same-chunk only within each volume backup; not global or cross-backup</source>
-        <translation>各ボリューム バックアップ内の同一チャンクのみ。グローバル／バックアップ横断ではありません</translation>
+        <source>Enable Deduplication</source>
+        <translation>重複排除を有効にする</translation>
     </message>
     <message id="aegra.repository.dedup.bytes">
         <source>Deduplicated</source>
@@ -1167,17 +1155,17 @@
         <source>Compression</source>
         <translation>圧縮</translation>
     </message>
-    <message id="aegra.backup.comp.none">
-        <source>None</source>
-        <translation>なし</translation>
+    <message id="aegra.backup.comp.fast">
+        <source>Fast</source>
+        <translation>高速</translation>
     </message>
     <message id="aegra.backup.comp.normal">
         <source>Normal</source>
         <translation>標準</translation>
     </message>
-    <message id="aegra.backup.comp.best">
-        <source>Best</source>
-        <translation>最高</translation>
+    <message id="aegra.backup.comp.high">
+        <source>High</source>
+        <translation>高</translation>
     </message>
     <message id="aegra.backup.column.status">
         <source>Status</source>
@@ -1348,8 +1336,8 @@
         <translation>バックアップソースを1つ以上選択してください</translation>
     </message>
     <message id="aegra.backup.schedule.missing_target">
-        <source>Select a repository destination (Locations)</source>
-        <translation>リポジトリ接続先（Locations）を選択してください</translation>
+        <source>Select a repository destination</source>
+        <translation>リポジトリ接続先を選択してください</translation>
     </message>
     <message id="aegra.backup.schedule.first_backup_title">
         <source>Start first backup?</source>
@@ -1408,8 +1396,8 @@
         <translation>スケジュールのみ削除します。リポジトリ内の既存リカバリポイントは削除されません。</translation>
     </message>
     <message id="aegra.backup.destination.empty">
-        <source>No repository connection yet. Add a location in Repository first.</source>
-        <translation>リポジトリ接続がありません。先に Repository で接続を追加してください。</translation>
+        <source>No repository connection yet. Add a repository first.</source>
+        <translation>リポジトリ接続がありません。先にリポジトリを追加してください。</translation>
     </message>
     <message id="aegra.backup.credential.service_managed">
         <source>Repository credentials are managed by Service. Passwords are never entered in Desktop.</source>
@@ -2648,8 +2636,8 @@
         <translation>選択したバックアップ先はオフラインのため、バックアップを受信できません。続行するには以下からオンラインのリポジトリを選択してください：</translation>
     </message>
     <message id="aegra.backup.offline_dialog_none_available">
-        <source>No online repositories found. Please bring a repository online or add a new location in the Repository page.</source>
-        <translation>オンラインのリポジトリが見つかりません。リポジトリをオンラインに戻すか、リポジトリページで新しい場所を追加してください。</translation>
+        <source>No online repositories found. Please bring a repository online or add a new repository in the Repository page.</source>
+        <translation>オンラインのリポジトリが見つかりません。リポジトリをオンラインに戻すか、リポジトリページで新しいリポジトリを追加してください。</translation>
     </message>
     <message id="aegra.backup.run.not_connected">
         <source>Service not connected</source>
@@ -2873,6 +2861,98 @@ for critical volumes now</source>
     <message id="aegra.home.banner.action">
         <source>Go to New Backup Plan</source>
         <translation>バックアップ計画を新規作成</translation>
+    </message>
+    <message id="aegra.shell.more">
+        <source>More</source>
+        <translation>その他</translation>
+    </message>
+    <message id="aegra.shell.help_feedback">
+        <source>Help and feedback</source>
+        <translation>ヘルプとフィードバック</translation>
+    </message>
+    <message id="aegra.shell.about">
+        <source>About</source>
+        <translation>Aegra について</translation>
+    </message>
+    <message id="aegra.shell.check_updates">
+        <source>Check for updates</source>
+        <translation>更新プログラムを確認</translation>
+    </message>
+    <message id="aegra.about.title">
+        <source>About Aegra</source>
+        <translation>Aegra について</translation>
+    </message>
+    <message id="aegra.about.built_with">
+        <source>Built with</source>
+        <translation>ビルド基盤</translation>
+    </message>
+    <message id="aegra.about.version_for_windows">
+        <source>Version %1 (%2) for Windows Desktop</source>
+        <translation>バージョン %1 (%2) Windows デスクトップ向け</translation>
+    </message>
+    <message id="aegra.about.licenses_btn">
+        <source>Licenses</source>
+        <translation>ライセンス</translation>
+    </message>
+    <message id="aegra.about.licenses_link">
+        <source>Open Source Licenses</source>
+        <translation>オープンソースライセンス</translation>
+    </message>
+    <message id="aegra.about.support">
+        <source>Support</source>
+        <translation>サポート</translation>
+    </message>
+    <message id="aegra.about.homepage">
+        <source>Home Page</source>
+        <translation>ホームページ</translation>
+    </message>
+    <message id="aegra.about.documentation">
+        <source>Documentation</source>
+        <translation>ドキュメント</translation>
+    </message>
+    <message id="aegra.about.feedback">
+        <source>Feedback</source>
+        <translation>フィードバック</translation>
+    </message>
+    <message id="aegra.about.related_links">
+        <source>Related Links</source>
+        <translation>関連リンク</translation>
+    </message>
+    <message id="aegra.about.releases">
+        <source>Release Notes</source>
+        <translation>リリースノート</translation>
+    </message>
+    <message id="aegra.about.contact">
+        <source>Contact</source>
+        <translation>連絡先</translation>
+    </message>
+    <message id="aegra.about.already_latest">
+        <source>You are using the latest version of Aegra.</source>
+        <translation>最新バージョンの Aegra を使用しています。</translation>
+    </message>
+    <message id="aegra.licenses.title">
+        <source>Open Source Licenses</source>
+        <translation>オープンソースライセンス</translation>
+    </message>
+    <message id="aegra.licenses.subtitle">
+        <source>Open source software used in Aegra:</source>
+        <translation>Aegra で使用されているオープンソースソフトウェア：</translation>
+    </message>
+    <message id="aegra.licenses.about_qt">
+        <source>About Qt</source>
+        <translation>Qt について</translation>
+    </message>
+    <message id="aegra.licenses.about_qt_title">
+        <source>About Qt Framework</source>
+        <translation>Qt フレームワークについて</translation>
+    </message>
+    <message id="aegra.licenses.about_qt_desc">
+        <source>Aegra is built with Qt %1. Qt is an open-source cross-platform C++ framework licensed under the GNU Lesser General Public License (LGPL) version 3.</source>
+        <translation>Aegra は Qt %1 で構築されています。Qt は GNU LGPL v3 の下でライセンスされたクロスプラットフォーム C++ フレームワークです。</translation>
+    </message>
+    <message id="aegra.licenses.licensed_under">
+        <source>Licensed under</source>
+        <translation>ライセンス：</translation>
     </message>
 </context>
 </TS>

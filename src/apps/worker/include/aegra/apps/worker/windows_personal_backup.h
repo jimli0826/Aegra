@@ -3,6 +3,7 @@
 #include "aegra/base/cancellation.h"
 #include "aegra/base/error.h"
 #include "aegra/base/result.h"
+#include "aegra/contracts/job.h"
 #include "aegra/pipeline/backup_pipeline.h"
 #include "aegra/ports/progress.h"
 
@@ -38,6 +39,7 @@ struct WindowsPersonalBackupRequest final {
     std::uint32_t chunk_size_bytes{0};
     std::size_t memory_budget_bytes{0};
     std::uint64_t split_size_bytes{0};
+    std::int32_t compression_level{contracts::kCompressionLevelNormal};
     std::uint64_t kdf_opslimit{3};
     std::uint64_t kdf_memlimit_bytes{256ULL * 1024ULL * 1024ULL};
     std::string created_utc;

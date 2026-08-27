@@ -713,6 +713,7 @@ struct PersonalFileArchiveSession::Impl final {
     std::array<std::byte, 16> file_uuid{};
     std::array<std::byte, 16> parent_uuid{};
     std::uint32_t block_size{0};
+    int compression_level{3};
     std::uint64_t next_chunk_index{0};
     std::uint64_t total_block_entries{0};
     std::uint64_t total_payload_size{0};
@@ -791,6 +792,7 @@ PersonalFileArchiveSession::create(const FileArchiveCreateRequest& request) {
     implementation->parent_uuid = request.parent_uuid;
     implementation->backup_type = request.manifest.backup_job.backup_type;
     implementation->block_size = request.block_size;
+    implementation->compression_level = request.compression_level;
 
     archive::EncodedMetadataEnvelopeHeader encoded_envelope{};
     crypto_sodium::ProtectedMetadata metadata;
@@ -957,8 +959,8 @@ PersonalFileArchiveSession::write_entry(const contracts::FileEntryDesc& entry,
 
 [[nodiscard]] base::Result<std::vector<std::byte>>
 store_file_block_payload(const std::span<const std::byte> logical, std::uint8_t& flags,
-                         std::uint32_t& stored_size) {
-    auto compressed = compression_zstd::compress(logical);
+                         std::uint32_t& stored_size, const int compression_level) {
+    auto compressed = compression_zstd::compress(logical, compression_level);
     if (!compressed) {
         return base::Result<std::vector<std::byte>>::failure(compressed.error());
     }
@@ -999,7 +1001,8 @@ PersonalFileArchiveSession::write_stream_chunk(const ports::FileChunkWriteReques
     (void)request.block_flags;
     std::uint8_t flags = archive::kBlockFlagRaw;
     std::uint32_t stored_size = 0;
-    auto stored = store_file_block_payload(request.payload, flags, stored_size);
+    auto stored = store_file_block_payload(request.payload, flags, stored_size,
+                                           implementation_->compression_level);
     if (!stored) {
         return base::Result<std::uint64_t>::failure(stored.error());
     }

@@ -1,5 +1,24 @@
 find_package(nlohmann_json CONFIG REQUIRED)
 
+# Wire codec only: Service Host and AegraCli share this library. It must not
+# depend on Application, SQLite, Worker, or Windows data-plane adapters.
+add_library(aegra_app_service_protocol STATIC
+    src/service_protocol.cpp
+    src/service_protocol_request_json.cpp
+    src/service_protocol_response_json.cpp
+)
+add_library(Aegra::AppServiceProtocol ALIAS aegra_app_service_protocol)
+target_include_directories(
+    aegra_app_service_protocol
+    PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+)
+target_link_libraries(
+    aegra_app_service_protocol
+    PUBLIC Aegra::Base Aegra::Contracts
+    PRIVATE nlohmann_json::nlohmann_json
+)
+aegra_configure_target(aegra_app_service_protocol)
+
 add_library(aegra_app_service STATIC
     src/backup_catalog_registrar.cpp
     src/file_recovery_chain.cpp
@@ -15,9 +34,6 @@ add_library(aegra_app_service STATIC
     src/schedule_service.cpp
     src/service_host.cpp
     src/service_log_formatter.cpp
-    src/service_protocol.cpp
-    src/service_protocol_request_json.cpp
-    src/service_protocol_response_json.cpp
     src/service_response_fit.cpp
     src/service_security_host.cpp
     src/service_session_executor.cpp
@@ -44,6 +60,7 @@ target_compile_definitions(aegra_app_service PRIVATE NOMINMAX WIN32_LEAN_AND_MEA
 target_link_libraries(
     aegra_app_service
     PUBLIC
+        Aegra::AppServiceProtocol
         Aegra::Application
         Aegra::Base
         Aegra::Contracts

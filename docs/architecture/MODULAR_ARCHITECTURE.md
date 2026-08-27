@@ -67,6 +67,7 @@ src/
     ├── hyperv_connector/
     ├── pe_restore/
     ├── desktop/
+    ├── cli/
     └── shell_extension/
 ```
 

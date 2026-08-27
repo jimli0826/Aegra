@@ -67,6 +67,42 @@
         <source>Running</source>
         <translation>运行中</translation>
     </message>
+    <message id="aegra.service.reconnecting">
+        <source>Unable to connect to Aegra Service. Reconnecting...</source>
+        <translation>无法连接到 Aegra Service，正在重新连接...</translation>
+    </message>
+    <message id="aegra.service.diagnose">
+        <source>Diagnose</source>
+        <translation>诊断</translation>
+    </message>
+    <message id="aegra.service.diagnostic.running">
+        <source>Aegra Service is running. Waiting for connection...</source>
+        <translation>Aegra Service 正在运行，正在等待连接...</translation>
+    </message>
+    <message id="aegra.service.diagnostic.start_requested">
+        <source>Aegra Service startup requested. Waiting for connection...</source>
+        <translation>已请求启动 Aegra Service，正在等待连接...</translation>
+    </message>
+    <message id="aegra.service.diagnostic.elevation_requested">
+        <source>Administrator approval requested to start Aegra Service.</source>
+        <translation>已请求管理员批准启动 Aegra Service。</translation>
+    </message>
+    <message id="aegra.service.diagnostic.start_failed">
+        <source>Unable to start Aegra Service.</source>
+        <translation>无法启动 Aegra Service。</translation>
+    </message>
+    <message id="aegra.service.diagnostic.query_failed">
+        <source>Unable to check Aegra Service status.</source>
+        <translation>无法检查 Aegra Service 状态。</translation>
+    </message>
+    <message id="aegra.service.diagnostic.not_installed">
+        <source>Aegra Service is not installed.</source>
+        <translation>未安装 Aegra Service。</translation>
+    </message>
+    <message id="aegra.service.diagnostic.stopping">
+        <source>Aegra Service is stopping. Try diagnostics again shortly.</source>
+        <translation>Aegra Service 正在停止，请稍后再次诊断。</translation>
+    </message>
     <message id="aegra.service.message.ready">
         <source>Service is ready</source>
         <translation>Service 已就绪</translation>

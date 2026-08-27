@@ -14,9 +14,9 @@ struct WindowsServiceInstallRequest final {
     std::string service_name{"AegraService"};
     std::string display_name{"Aegra Management Service"};
     std::string binary_path;
-    // Restart delay applied by recovery policy after unexpected termination.
-    std::uint32_t recovery_delay_ms{5'000};
-    std::uint32_t recovery_reset_period_seconds{86'400};
+    // SCM Recovery: restart immediately on first/second/subsequent crash (0 ms delay).
+    std::uint32_t recovery_delay_ms{0};
+    std::uint32_t recovery_reset_period_seconds{0};
 };
 
 struct WindowsServiceIdentity final {

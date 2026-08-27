@@ -12,6 +12,7 @@
 - `vmware_connector`、`hyperv_connector`：厂商 SDK 隔离。
 - `pe_restore`：WinPE 最小离线恢复程序。
 - `desktop`：普通用户 GUI。
+- `cli`：本机 Service 控制面命令行客户端（`aegra_cli.exe`）；只经 Named Pipe 调用 V4 协议，见 [cli.md](cli.md)。
 - `shell_extension`：Explorer 进程内只读浏览 current V7 `.bkf`（ADR-0023）；Composition Root 装配 Archive/NTFS，不请求 Mount Host。
 
 产品 EXE/DLL 的 Windows File Properties（VERSIONINFO）由 `include/aegra_version.h` 提供，经 `aegra_add_version_resource` 写入目标。版本只在该头文件中修改。
@@ -86,7 +87,8 @@ Online Prepare -> Validate -> Build/Cache WinRE -> Write Pending Job
 
 `aegra_shell_extension` 是 x64 in-process COM DLL（`explorer.exe` 加载）：
 
-- 注册 Aegra 自有 CLSID/ProgID 与 `.bkf` File Root/Folder Junction（仅 HKCU）；
+- 注册 Aegra 自有 CLSID/ProgID 与 `.bkf` File Root/Folder Junction。交互 `regsvr32` 走 HKCR；
+  安装程序把同一套键写到 HKLM（含 `InprocServer32` 与 Shell Extensions Approved）；
 - Root Folder 创建 `ArchiveShellSession`，按认证 `content_kind` 分发：
   - `volume_set` → Volume Random Reader + `NtfsVolumeReader`；
   - `file_set` → `PersonalFileArchiveChainReader` tip Index；

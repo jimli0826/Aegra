@@ -1,5 +1,6 @@
 #include "client/service_client.h"
 #include "locale/locale_controller.h"
+#include "platform/windows_service_diagnostics.h"
 
 #include <QDir>
 #include <QFile>
@@ -221,12 +222,15 @@ int main(int argument_count, char* arguments[]) {
 
     aegra::desktop::LocaleController locale_controller(&engine);
     aegra::desktop::ServiceClient service_client;
+    aegra::desktop::WindowsServiceDiagnostics service_diagnostics;
     service_client.set_locale_controller(&locale_controller);
 
     engine.addImportPath(QStringLiteral("qrc:/Aegra/qml"));
     engine.rootContext()->setContextProperty(QStringLiteral("localeController"),
                                              &locale_controller);
     engine.rootContext()->setContextProperty(QStringLiteral("serviceClient"), &service_client);
+    engine.rootContext()->setContextProperty(QStringLiteral("serviceDiagnostics"),
+                                             &service_diagnostics);
     engine.rootContext()->setContextProperty(QStringLiteral("nativeAcrylicBlur"), false);
     engine.rootContext()->setContextProperty(QStringLiteral("nativeWindowCorners"),
                                              is_windows_11_or_greater());

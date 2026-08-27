@@ -865,45 +865,22 @@ create_listener(const ServiceArguments& arguments) {
          windows_ipc::WindowsNamedPipeAclProfile::kLocalEveryoneControl});
 }
 
-[[nodiscard]] service::ServiceSessionContext session_from_serial(const std::uint64_t serial) {
-    service::ServiceSessionContext session;
-    session.browser_session.session_id = "pipe-session-" + std::to_string(serial);
-    return session;
-}
-
-[[nodiscard]] ServiceExitCode run_once(windows_ipc::WindowsNamedPipeListener& listener,
-                                       const service::ServiceRuntimeInfo& runtime) {
-    auto accepted = listener.accept({});
-    if (!accepted)
-        return ServiceExitCode::kHostFailure;
-    const auto session = session_from_serial(1);
-    auto result = service::run_service_session(*accepted.value(), runtime, session, {}, 1);
+// Interactive mode shares the concurrent host used by the SCM path so Desktop and CLI can hold
+// sessions at the same time. There is no SCM stop in interactive mode, so the host runs with a
+// never-cancelled token until the process is terminated (forever) or one session completes (once).
+[[nodiscard]] ServiceExitCode run_interactive(windows_ipc::WindowsNamedPipeListener& listener,
+                                              const service::ServiceRuntimeInfo& runtime,
+                                              const bool once) {
+    service::ServiceHostOptions options;
+    options.once = once;
+    // --once processes a single request in that single session; forever leaves requests unbounded.
+    options.maximum_requests_per_session = once ? 1 : 0;
+    auto result = service::run_service_host(listener, runtime, options, {});
     if (!result && runtime.logger != nullptr) {
         runtime.logger->write(service::ServiceLogLevel::kError, "service.session_failed",
-                              "mode=once");
+                              once ? "mode=once" : "mode=forever");
     }
     return result ? ServiceExitCode::kSucceeded : ServiceExitCode::kHostFailure;
-}
-
-[[nodiscard]] ServiceExitCode run_forever(windows_ipc::WindowsNamedPipeListener& listener,
-                                          const service::ServiceRuntimeInfo& runtime) {
-    std::uint64_t serial = 1;
-    for (;;) {
-        auto accepted = listener.accept({});
-        if (!accepted) {
-            if (runtime.logger != nullptr) {
-                runtime.logger->write(service::ServiceLogLevel::kError, "service.accept_failed",
-                                      "mode=forever");
-            }
-            return ServiceExitCode::kHostFailure;
-        }
-        const auto session = session_from_serial(serial++);
-        auto result = service::run_service_session(*accepted.value(), runtime, session, {});
-        if (!result && runtime.logger != nullptr) {
-            runtime.logger->write(service::ServiceLogLevel::kWarning, "service.session_failed",
-                                  "mode=forever");
-        }
-    }
 }
 
 [[nodiscard]] aegra::base::Result<ServiceArguments> parse_process_arguments() {
@@ -992,8 +969,7 @@ VOID WINAPI service_main_entry(DWORD, LPWSTR*) noexcept {
         runtime.value().runtime.logger->write(service::ServiceLogLevel::kInfo,
                                               "service.listener_started", "status=listening");
     }
-    return parsed.once ? run_once(*listener.value(), runtime.value().runtime)
-                       : run_forever(*listener.value(), runtime.value().runtime);
+    return run_interactive(*listener.value(), runtime.value().runtime, parsed.once);
 }
 
 } // namespace

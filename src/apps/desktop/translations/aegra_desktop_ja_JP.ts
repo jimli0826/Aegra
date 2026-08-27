@@ -67,6 +67,42 @@
         <source>Running</source>
         <translation>実行中</translation>
     </message>
+    <message id="aegra.service.reconnecting">
+        <source>Unable to connect to Aegra Service. Reconnecting...</source>
+        <translation>Aegra Service に接続できません。再接続しています...</translation>
+    </message>
+    <message id="aegra.service.diagnose">
+        <source>Diagnose</source>
+        <translation>診断</translation>
+    </message>
+    <message id="aegra.service.diagnostic.running">
+        <source>Aegra Service is running. Waiting for connection...</source>
+        <translation>Aegra Service は実行中です。接続を待っています...</translation>
+    </message>
+    <message id="aegra.service.diagnostic.start_requested">
+        <source>Aegra Service startup requested. Waiting for connection...</source>
+        <translation>Aegra Service の起動を要求しました。接続を待っています...</translation>
+    </message>
+    <message id="aegra.service.diagnostic.elevation_requested">
+        <source>Administrator approval requested to start Aegra Service.</source>
+        <translation>Aegra Service の起動に管理者の承認を要求しました。</translation>
+    </message>
+    <message id="aegra.service.diagnostic.start_failed">
+        <source>Unable to start Aegra Service.</source>
+        <translation>Aegra Service を起動できません。</translation>
+    </message>
+    <message id="aegra.service.diagnostic.query_failed">
+        <source>Unable to check Aegra Service status.</source>
+        <translation>Aegra Service の状態を確認できません。</translation>
+    </message>
+    <message id="aegra.service.diagnostic.not_installed">
+        <source>Aegra Service is not installed.</source>
+        <translation>Aegra Service がインストールされていません。</translation>
+    </message>
+    <message id="aegra.service.diagnostic.stopping">
+        <source>Aegra Service is stopping. Try diagnostics again shortly.</source>
+        <translation>Aegra Service は停止中です。しばらくしてから再度診断してください。</translation>
+    </message>
     <message id="aegra.service.message.ready">
         <source>Service is ready</source>
         <translation>Service の準備ができました</translation>

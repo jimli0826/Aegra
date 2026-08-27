@@ -3,7 +3,7 @@
 - 状态：Accepted
 - 日期：2026-08-03
 - 决策者：Aegra 项目
-- 关联模块：contracts、adapters/windows_ipc、apps/service、apps/desktop
+- 关联模块：contracts、adapters/windows_ipc、apps/service、apps/desktop、apps/cli
 
 ## 背景
 

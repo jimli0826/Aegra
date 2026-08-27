@@ -67,6 +67,42 @@
         <source>Running</source>
         <translation>Läuft</translation>
     </message>
+    <message id="aegra.service.reconnecting">
+        <source>Unable to connect to Aegra Service. Reconnecting...</source>
+        <translation>Keine Verbindung zum Aegra Service. Verbindung wird wiederhergestellt...</translation>
+    </message>
+    <message id="aegra.service.diagnose">
+        <source>Diagnose</source>
+        <translation>Diagnose</translation>
+    </message>
+    <message id="aegra.service.diagnostic.running">
+        <source>Aegra Service is running. Waiting for connection...</source>
+        <translation>Aegra Service läuft. Verbindung wird abgewartet...</translation>
+    </message>
+    <message id="aegra.service.diagnostic.start_requested">
+        <source>Aegra Service startup requested. Waiting for connection...</source>
+        <translation>Start von Aegra Service angefordert. Verbindung wird abgewartet...</translation>
+    </message>
+    <message id="aegra.service.diagnostic.elevation_requested">
+        <source>Administrator approval requested to start Aegra Service.</source>
+        <translation>Administratorbestätigung zum Starten von Aegra Service angefordert.</translation>
+    </message>
+    <message id="aegra.service.diagnostic.start_failed">
+        <source>Unable to start Aegra Service.</source>
+        <translation>Aegra Service konnte nicht gestartet werden.</translation>
+    </message>
+    <message id="aegra.service.diagnostic.query_failed">
+        <source>Unable to check Aegra Service status.</source>
+        <translation>Der Status von Aegra Service konnte nicht geprüft werden.</translation>
+    </message>
+    <message id="aegra.service.diagnostic.not_installed">
+        <source>Aegra Service is not installed.</source>
+        <translation>Aegra Service ist nicht installiert.</translation>
+    </message>
+    <message id="aegra.service.diagnostic.stopping">
+        <source>Aegra Service is stopping. Try diagnostics again shortly.</source>
+        <translation>Aegra Service wird beendet. Führen Sie die Diagnose gleich erneut aus.</translation>
+    </message>
     <message id="aegra.service.message.ready">
         <source>Service is ready</source>
         <translation>Service ist bereit</translation>

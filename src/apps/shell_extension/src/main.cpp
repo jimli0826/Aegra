@@ -38,14 +38,9 @@ STDAPI DllRegisterServer() {
     if (FAILED(hr)) {
         return hr;
     }
-    hr = msf::UpdateRegistryConnectExtensionToProgId(IDR_EXTENSION, TRUE,
-                                                     aegra::shell::kFileExtension,
-                                                     aegra::shell::kFileRootProgId);
-    if (FAILED(hr)) {
-        return hr;
-    }
-    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
-    return S_OK;
+    return msf::UpdateRegistryConnectExtensionToProgId(IDR_EXTENSION, TRUE,
+                                                       aegra::shell::kFileExtension,
+                                                       aegra::shell::kFileRootProgId);
 }
 
 #if WDK_NTDDI_VERSION < 0x0A000007
@@ -55,6 +50,5 @@ STDAPI DllUnregisterServer() {
     _Module.DllUnregisterServer();
     std::ignore = msf::UpdateRegistryConnectExtensionToProgId(
         IDR_EXTENSION, FALSE, aegra::shell::kFileExtension, aegra::shell::kFileRootProgId);
-    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
     return S_OK;
 }

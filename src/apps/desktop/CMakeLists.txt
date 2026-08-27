@@ -53,6 +53,8 @@ set(AEGRA_DESKTOP_SOURCES
     src/locale/locale_format.h
     src/locale/message_code_map.cpp
     src/locale/message_code_map.h
+    src/platform/windows_service_diagnostics.cpp
+    src/platform/windows_service_diagnostics.h
 )
 
 set(AEGRA_DESKTOP_TS_FILES
@@ -110,7 +112,7 @@ target_link_libraries(
 )
 
 if(WIN32)
-    target_link_libraries(aegra_desktop PRIVATE dwmapi uxtheme Advapi32)
+    target_link_libraries(aegra_desktop PRIVATE dwmapi uxtheme Advapi32 Shell32)
 endif()
 
 aegra_configure_target(aegra_desktop)

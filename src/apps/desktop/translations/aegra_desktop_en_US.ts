@@ -67,6 +67,42 @@
         <source>Running</source>
         <translation>Running</translation>
     </message>
+    <message id="aegra.service.reconnecting">
+        <source>Unable to connect to Aegra Service. Reconnecting...</source>
+        <translation>Unable to connect to Aegra Service. Reconnecting...</translation>
+    </message>
+    <message id="aegra.service.diagnose">
+        <source>Diagnose</source>
+        <translation>Diagnose</translation>
+    </message>
+    <message id="aegra.service.diagnostic.running">
+        <source>Aegra Service is running. Waiting for connection...</source>
+        <translation>Aegra Service is running. Waiting for connection...</translation>
+    </message>
+    <message id="aegra.service.diagnostic.start_requested">
+        <source>Aegra Service startup requested. Waiting for connection...</source>
+        <translation>Aegra Service startup requested. Waiting for connection...</translation>
+    </message>
+    <message id="aegra.service.diagnostic.elevation_requested">
+        <source>Administrator approval requested to start Aegra Service.</source>
+        <translation>Administrator approval requested to start Aegra Service.</translation>
+    </message>
+    <message id="aegra.service.diagnostic.start_failed">
+        <source>Unable to start Aegra Service.</source>
+        <translation>Unable to start Aegra Service.</translation>
+    </message>
+    <message id="aegra.service.diagnostic.query_failed">
+        <source>Unable to check Aegra Service status.</source>
+        <translation>Unable to check Aegra Service status.</translation>
+    </message>
+    <message id="aegra.service.diagnostic.not_installed">
+        <source>Aegra Service is not installed.</source>
+        <translation>Aegra Service is not installed.</translation>
+    </message>
+    <message id="aegra.service.diagnostic.stopping">
+        <source>Aegra Service is stopping. Try diagnostics again shortly.</source>
+        <translation>Aegra Service is stopping. Try diagnostics again shortly.</translation>
+    </message>
     <message id="aegra.service.message.ready">
         <source>Service is ready</source>
         <translation>Service is ready</translation>

@@ -117,6 +117,10 @@ ServiceClient (QML 门面)
 - Repository Catalog 查询使用 5 秒逐页 deadline；刷新网络 Repository 时不触发全屏 Loading overlay，
   页面导航保持可用。超时只按该 request correlation 进入 Repository 域失败，不断开或重连 Service session。
 - 断线或错误进入 Disconnected 状态，并以有界固定间隔重连；同一时刻最多一个连接尝试。
+- 主界面首次 Ready 后若 Service 断线或仍在重连，Desktop 显示全窗口 Loading 遮罩并阻止页面、导航和
+  命令交互；遮罩提供退出与诊断操作。诊断通过 Windows SCM 查询固定服务 `AegraService`，仅在服务为
+  Stopped 时请求启动；当前用户缺少启动权限时请求管理员批准。Service 重新完成握手进入 Ready 后自动
+  移除遮罩并清除诊断状态。首次连接仍由 Splash/Retry 流程承载。
 - QML 只观察 `connected`、`statusText`、`serviceVersion`、`apiVersion`、`errorText`、
   `repository*` 与 `recoveryPoints` model 等拥有数据的属性。
 - 日志不输出 frame body、路径、凭据或 Service 原始错误文本。

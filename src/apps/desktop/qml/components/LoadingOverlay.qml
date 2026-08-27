@@ -16,6 +16,9 @@ Rectangle {
     }
 
     property string message: ""
+    property bool actionsVisible: false
+    signal quitRequested()
+    signal diagnoseRequested()
 
     //% "Loading"
     Accessible.name: message.length > 0 ? message : qsTrId("aegra.common.loading")
@@ -35,9 +38,12 @@ Rectangle {
     }
 
     Rectangle {
+        id: panel
         anchors.centerIn: parent
-        width: Math.max(160, msgText.implicitWidth + 48)
-        height: 120
+        width: Math.min(root.width - 80,
+                        Math.max(root.actionsVisible ? 420 : 160,
+                                 msgText.implicitWidth + 48))
+        height: root.actionsVisible ? 178 : 120
         radius: Theme.radiusCard
         color: Theme.colorCard
         border.width: 1
@@ -45,6 +51,7 @@ Rectangle {
 
         Column {
             anchors.centerIn: parent
+            width: parent.width - 48
             spacing: 14
 
             Item {
@@ -79,12 +86,35 @@ Rectangle {
 
             Text {
                 id: msgText
-                anchors.horizontalCenter: parent.horizontalCenter
+                width: parent.width
                 //% "Loading"
                 text: root.message.length > 0 ? root.message : qsTrId("aegra.common.loading")
                 color: Theme.colorTextWhite
                 font.pixelSize: 13
                 font.family: Theme.fontFamily
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+            }
+
+            Row {
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: 12
+                visible: root.actionsVisible
+
+                AppButton {
+                    width: 120
+                    //% "Quit"
+                    text: qsTrId("aegra.common.quit")
+                    onClicked: root.quitRequested()
+                }
+
+                AppButton {
+                    width: 120
+                    primary: true
+                    //% "Diagnose"
+                    text: qsTrId("aegra.service.diagnose")
+                    onClicked: root.diagnoseRequested()
+                }
             }
         }
     }

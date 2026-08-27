@@ -23,8 +23,7 @@ namespace {
 [[nodiscard]] bool valid_install_request(const WindowsServiceInstallRequest& request) noexcept {
     return valid_service_name(request.service_name) && !request.display_name.empty() &&
            request.display_name.size() <= 256 && !request.binary_path.empty() &&
-           request.binary_path.size() <= 32'767 && request.recovery_delay_ms > 0 &&
-           request.recovery_reset_period_seconds > 0;
+           request.binary_path.size() <= 32'767;
 }
 
 } // namespace
@@ -154,10 +153,7 @@ base::Result<void> FakeWindowsServiceControlManager::configure_recovery(
         return base::Result<void>::failure(
             base::Error{base::ErrorCode::kNotFound, "service was not found"});
     }
-    if (recovery_delay_ms == 0 || recovery_reset_period_seconds == 0) {
-        return base::Result<void>::failure(
-            base::Error{base::ErrorCode::kInvalidArgument, "recovery policy is invalid"});
-    }
+    (void)recovery_reset_period_seconds;
     entry->identity.recovery_enabled = true;
     entry->identity.recovery_delay_ms = recovery_delay_ms;
     return base::Result<void>::success();

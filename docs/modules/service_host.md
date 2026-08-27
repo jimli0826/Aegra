@@ -3,7 +3,8 @@
 ## 目标与非目标
 
 `apps/service` 是个人版本地控制面的进程入口和协议 Host。阶段 13B 提供 Desktop 握手和个人版 Repository
-Catalog 分页查询，建立后续任务和策略 API 的稳定入口。
+Catalog 分页查询，建立后续任务和策略 API 的稳定入口。本机命令行客户端 `aegra_cli` 使用同一控制 Pipe 与
+V4 codec（`aegra_app_service_protocol`），不链接本 Host。
 
 Service Host 负责 framing、并发 dispatch、deadline、会话生命周期、取消收口，以及正式 Windows Service
 本机 Pipe ACL 边界。
@@ -31,7 +32,7 @@ src/apps/service/
 │   ├── schedule_next_run.h                # next_run 计算与 fire 幂等键
 │   ├── schedule_service.h
 │   ├── service_host.h
-│   ├── service_protocol.h
+│   ├── service_protocol.h                 # V4 JSON codec (shared with CLI)
 │   ├── service_response_fit.h
 │   ├── service_security_host.h
 │   ├── windows_service_control.h
@@ -63,8 +64,10 @@ src/apps/service/
     └── worker_supervisor.cpp
 ```
 
-- `aegra_app_service` / `Aegra::AppService`：依赖 Application、Base、Contracts、Ports、WindowsIpc；
-  PRIVATE nlohmann-json 与 Advapi32。
+- `aegra_app_service_protocol` / `Aegra::AppServiceProtocol`：Service V4 JSON codec。只依赖
+  Base、Contracts 与 nlohmann-json。Service Host 与 `aegra_cli` 共享，不包含 Host 或数据面。
+- `aegra_app_service` / `Aegra::AppService`：依赖 AppServiceProtocol、Application、Base、Contracts、
+  Ports、WindowsIpc；PRIVATE nlohmann-json 与 Advapi32。
 - `aegra_service.exe`：Composition Root，依赖 AppService、SQLite、Local Storage、Windows Disk、
   Windows Filesystem、Windows Process、Windows System 与 Windows IPC Adapter。
 - JSON、Win32、Qt、数据库类型不得进入 Contracts。
@@ -78,7 +81,11 @@ src/apps/service/
 Service 默认监听逻辑名称 `control`，实际 Pipe 名称见 [ADR-0011](../adr/0011-local-service-desktop-ipc.md)。
 协议决策见 [ADR-0013](../adr/0013-service-control-protocol-v3.md)；**每一条 request/response/event 的字段与示例**
 见 [SERVICE_CONTROL_PROTOCOL_V3](../protocol/SERVICE_CONTROL_PROTOCOL_V3.md)。
-`--once` 只接受一个连接并处理一个请求，用于受控诊断；默认模式在会话断开后继续接受连接。
+`--once` 只接受一个连接并处理一个请求，用于受控诊断；默认模式在会话断开后继续接受连接。默认模式下
+`run_service_host` 为每个接受的连接分配一个 `std::jthread`（Pipe 为 `PIPE_UNLIMITED_INSTANCES`，每次
+accept 新建实例），因此 Desktop 长连接与 `aegra_cli` 短连接可同时保持会话，互不阻塞；accept 循环回收已结束的
+会话线程，取消时在 `stop_deadline` 内等待全部会话收口。交互模式（无 `--service`）与 SCM 正式模式共用同一
+`run_service_host`，仅取消源不同。
 
 每个 session 的接收、请求执行和响应写回解耦：
 
@@ -127,6 +134,9 @@ Pipe/framing/peer close、Service stop 或响应写失败才结束 session。请
   在 `stop_deadline` 内收口（非协作 worker 超时失败）。
 - 正式 `--service` 模式在构造 runtime 前进入 `StartServiceCtrlDispatcherW`；两种模式的 Service 控制 Pipe
   都使用 `kLocalEveryoneControl`。Desktop 到 Service 的本地安全模型保持轻量，不承担远程零信任认证。
+- WiX 安装与 `install_windows_service` 将 SCM Recovery 设为首次/二次/后续失败均 Restart the
+  service，`Reset fail count after` 0 days，`Restart service after` 0 minutes。不启用
+  “Enable actions for stops with errors”；仅进程异常退出时由 SCM 立即拉起。
 
 ## Composition 配置
 

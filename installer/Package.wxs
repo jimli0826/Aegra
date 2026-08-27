@@ -3,10 +3,12 @@
   Aegra Image MSI package (WiX v4/v7 schema).
   Built by installer/build.ps1 → out\AegraImage.msi
   Service: aegra_service.exe as Windows service AegraService (SCM flag service).
+  Recovery: restart on first/second/subsequent failure, 0-day reset, 0-minute delay.
   Data: %ProgramData%\Aegra (matches Service runtime, not brand path AegraImage).
   Kernel Dokan is the official Dokan_x64.msi chained in the Bundle.
 -->
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
 
   <Package
       Name="AegraImage"
@@ -33,7 +35,7 @@
     <Launch Condition="Privileged" Message="AegraImage requires administrator privileges to install." />
 
     <Feature Id="ProductFeature" Title="AegraImage" Level="1"
-             Description="Desktop, service, worker, WinPE executor, shell extension and runtime."
+             Description="Desktop, CLI, service, worker, WinPE executor, shell extension and runtime."
              ConfigurableDirectory="INSTALLFOLDER"
              AllowAdvertise="no"
              Display="expand">
@@ -41,23 +43,42 @@
       <ComponentRef Id="cmpServerService" />
       <ComponentRef Id="cmpStartMenuShortcuts" />
       <ComponentRef Id="cmpDesktopShortcut" />
-      <ComponentRef Id="cmpRegistryShell" />
       <ComponentRef Id="cmpRegistryApp" />
       <ComponentRef Id="cmpProgramDataAegra" />
     </Feature>
 
+    <!--
+      Shell registration is owned entirely by DllRegisterServer (regsvr32): the .rgs
+      scripts in the DLL write the .bkf association, ProgId, CLSID and Approved rows,
+      and broadcast SHCNE_ASSOCCHANGED so Explorer refreshes immediately. The MSI
+      authors no Classes rows itself; CA_UnregisterShell reverses everything at
+      uninstall before the files are removed.
+
+      For a deferred EXE custom action, ExeCommand is formatted while MSI builds the
+      execution script. Do not indirect it through [CustomActionData]: the Type 34
+      target then formats to an empty command and MSI reports error 1721. Always use
+      the full path to regsvr32 — Type 34 does not search PATH. Registration is vital
+      (Return="check") so setup cannot silently succeed with an unusable extension.
+    -->
+    <!--
+      Impersonate="yes": run regsvr32 with the installing user's (elevated) token in
+      the user's session, not LocalSystem. The install already requires elevation, so
+      HKLM\Software\Classes writes still succeed, and the SHCNE_ASSOCCHANGED broadcast
+      from DllRegisterServer reaches the logged-on user's Explorer (a session-0 SYSTEM
+      broadcast does not), so icons and the .bkf association refresh immediately.
+    -->
     <CustomAction Id="CA_RegisterShell"
                   Directory="INSTALLFOLDER"
-                  ExeCommand="regsvr32.exe /s &quot;[INSTALLFOLDER]aegra_shell_extension.dll&quot;"
+                  ExeCommand="&quot;[System64Folder]regsvr32.exe&quot; /s &quot;[INSTALLFOLDER]aegra_shell_extension.dll&quot;"
                   Execute="deferred"
-                  Impersonate="no"
-                  Return="ignore" />
+                  Impersonate="yes"
+                  Return="check" />
 
     <CustomAction Id="CA_UnregisterShell"
                   Directory="INSTALLFOLDER"
-                  ExeCommand="regsvr32.exe /s /u &quot;[INSTALLFOLDER]aegra_shell_extension.dll&quot;"
+                  ExeCommand="&quot;[System64Folder]regsvr32.exe&quot; /s /u &quot;[INSTALLFOLDER]aegra_shell_extension.dll&quot;"
                   Execute="deferred"
-                  Impersonate="no"
+                  Impersonate="yes"
                   Return="ignore" />
 
     <CustomAction Id="CA_DeleteProgramData"
@@ -69,9 +90,17 @@
 
     <InstallExecuteSequence>
       <Custom Action="CA_UnregisterShell" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot;" />
+
       <Custom Action="CA_DeleteProgramData" After="RemoveFiles"
               Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND (DELETEDATA=&quot;1&quot; OR DELETEDATA=&quot;true&quot; OR DELETEDATA=&quot;True&quot;)" />
-      <Custom Action="CA_RegisterShell" After="InstallFiles" Condition="NOT REMOVE" />
+
+      <!--
+        Last deferred op before the script commits: files, registry, service and
+        shortcuts are all in place when regsvr32 registers and broadcasts
+        SHCNE_ASSOCCHANGED, and nothing that could still fail runs after it
+        (regsvr32 has no rollback action).
+      -->
+      <Custom Action="CA_RegisterShell" Before="InstallFinalize" Condition="NOT REMOVE" />
     </InstallExecuteSequence>
 
     <UI>
@@ -135,7 +164,15 @@
                       Account="LocalSystem"
                       ErrorControl="normal"
                       Arguments="--service"
-                      Vital="yes" />
+                      Vital="yes">
+        <!-- SCM Recovery: restart immediately on first/second/subsequent crash. -->
+        <util:ServiceConfig
+            FirstFailureActionType="restart"
+            SecondFailureActionType="restart"
+            ThirdFailureActionType="restart"
+            ResetPeriodInDays="0"
+            RestartServiceDelayInSeconds="0" />
+      </ServiceInstall>
 
       <ServiceControl Id="scAegraService"
                       Name="AegraService"
@@ -214,52 +251,12 @@
         <RegistryValue Type="string" Value="[INSTALLFOLDER]aegra_service.exe" />
         <RegistryValue Name="Path" Type="string" Value="[INSTALLFOLDER]" />
       </RegistryKey>
+      <RegistryKey Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\aegra_cli.exe">
+        <RegistryValue Type="string" Value="[INSTALLFOLDER]aegra_cli.exe" />
+        <RegistryValue Name="Path" Type="string" Value="[INSTALLFOLDER]" />
+      </RegistryKey>
     </Component>
 
-    <Component Id="cmpRegistryShell" Directory="INSTALLFOLDER" Guid="E5C17064-AF8D-4235-B0BE-6C9F2B415EA7">
-      <RegistryValue Root="HKLM"
-                     Key="Software\Classes\.bkf"
-                     Value="Aegra.BackupArchive"
-                     Type="string"
-                     KeyPath="yes" />
-      <RegistryValue Root="HKLM"
-                     Key="Software\Classes\.bkf"
-                     Name="Content Type"
-                     Value="application/x-aegra-image"
-                     Type="string" />
-      <RegistryValue Root="HKLM"
-                     Key="Software\Classes\.bkf"
-                     Name="PerceivedType"
-                     Value="system"
-                     Type="string" />
-
-      <RegistryValue Root="HKLM"
-                     Key="Software\Classes\Aegra.BackupArchive"
-                     Value="Aegra Backup Archive"
-                     Type="string" />
-      <RegistryValue Root="HKLM"
-                     Key="Software\Classes\Aegra.BackupArchive\CLSID"
-                     Value="{8F3C2A1E-6B4D-4E9A-A7C5-1D2E3F4A5B6C}"
-                     Type="string" />
-      <RegistryValue Root="HKLM"
-                     Key="Software\Classes\Aegra.BackupArchive\DefaultIcon"
-                     Value="&quot;[INSTALLFOLDER]aegra_shell_extension.dll&quot;,0"
-                     Type="string" />
-      <RegistryValue Root="HKLM"
-                     Key="Software\Classes\Aegra.BackupArchive\shell\open"
-                     Name="MultiSelectModel"
-                     Value="Document"
-                     Type="string" />
-      <RegistryValue Root="HKLM"
-                     Key="Software\Classes\Aegra.BackupArchive\shell\open\command"
-                     Value="explorer /idlist,%I,%L"
-                     Type="string" />
-      <RegistryValue Root="HKLM"
-                     Key="Software\Classes\Aegra.BackupArchive\shell\open\command"
-                     Name="DelegateExecute"
-                     Value="{11dbb47c-a525-400b-9e80-a54615a090c0}"
-                     Type="string" />
-    </Component>
   </Fragment>
 
 </Wix>

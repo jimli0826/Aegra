@@ -53,6 +53,7 @@ Compile steps (unless `-SkipCompile`):
 | Input | Default |
 |-------|---------|
 | Service / worker / PE / CRT | `out\build\vs2026-release\src\apps\service` |
+| CLI | `out\build\vs2026-release\src\apps\cli` |
 | Shell extension | `out\build\vs2026-release\src\apps\shell_extension` |
 | Desktop | `build\Desktop_Qt_6_8_3_MSVC2022_64bit-Release\src\apps\desktop` |
 | Payload baseline | `installer\payload\` |
@@ -67,10 +68,11 @@ All binaries live in that folder (no `ui\` subdirectory):
 | File | Role |
 |------|------|
 | `aegra_desktop.exe` | Desktop GUI (+ Qt runtime: `qml\`, `platforms\`, `imageformats\`, `tls\`) |
+| `aegra_cli.exe` | Local Service control CLI (AegraCli) |
 | `aegra_service.exe` | Windows service **AegraService** (`--service`) |
 | `aegra_personal_worker.exe` | Backup / restore / mount worker |
 | `aegra_pe_restore.exe` | WinPE offline restore executor (injected into boot.wim) |
-| `aegra_shell_extension.dll` | Explorer `.bkf` namespace (regsvr32 on install) |
+| `aegra_shell_extension.dll` | Explorer `.bkf` namespace (HKLM COM + synchronous Shell refresh after registry authoring) |
 | `dokan2.dll`, `libsodium.dll`, `zstd.dll`, `sqlite3.dll` | Runtime |
 | VC++ CRT (`msvcp140*.dll`, `vcruntime140*.dll`) | WinPE payload + host |
 
@@ -85,6 +87,9 @@ Runtime data lives under **`%ProgramData%\Aegra`** (Service default), not Progra
 | Start | Automatic |
 | Account | LocalSystem |
 | Arguments | `--service` |
+| Recovery | Restart the service on first, second, and subsequent failures |
+| Reset fail count after | 0 days |
+| Restart service after | 0 minutes |
 
 ### Mount (Dokan)
 

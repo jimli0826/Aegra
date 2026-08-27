@@ -3,6 +3,8 @@
 ## 目标与非目标
 
 `adapters/windows_ipc` 提供本地 Named Pipe 传输：Worker 父子会话 Client，以及 Service 控制面 Listener。
+Desktop 经 Qt `QLocalSocket` 连接控制 Pipe；`aegra_cli` 经 `WindowsNamedPipeChannel::connect` 连接同一
+`aegra-service-control` Pipe。
 Adapter 只负责连接、监听、framing、取消、Handle 生命周期与显式 ACL；不解析 JSON、不实现
 Service 协议、不启动 SCM。
 

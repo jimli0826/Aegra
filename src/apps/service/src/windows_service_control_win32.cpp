@@ -181,7 +181,7 @@ class WindowsServiceControlManager final : public IWindowsServiceControlManager 
         std::array<SC_ACTION, 3> actions{};
         actions[0] = {SC_ACTION_RESTART, recovery_delay_ms};
         actions[1] = {SC_ACTION_RESTART, recovery_delay_ms};
-        actions[2] = {SC_ACTION_NONE, 0};
+        actions[2] = {SC_ACTION_RESTART, recovery_delay_ms};
         SERVICE_FAILURE_ACTIONSW failure{};
         failure.dwResetPeriod = recovery_reset_period_seconds;
         failure.cActions = static_cast<DWORD>(actions.size());

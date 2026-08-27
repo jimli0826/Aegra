@@ -43,12 +43,14 @@ Window {
     property bool settingsPanelOpen: false
     /// Latched once splash dismisses so main opacity/animation never re-toggles.
     property bool appReady: false
-    // App loading overlay is for heavy blocking commands only.
+    // The blocking overlay also prevents stale UI interaction while the live Service is offline.
     // Exclude: sequential Repository Refresh probes (row-level Loading),
     // background catalog refreshes, and schedule enable/disable row toggles.
     readonly property bool appLoading: {
-        if (!window.appReady || !serviceClient.connected)
+        if (!window.appReady)
             return false
+        if (!serviceClient.connected)
+            return true
         return (serviceClient.repositoryCommandBusy
                     && !serviceClient.repositoryRefreshRunning)
                 || serviceClient.backupCommandBusy
@@ -57,8 +59,13 @@ Window {
                 || serviceClient.scheduleCommandBlocksUi
     }
 
-    // Old Main.qml LoadingOverlay: always the same "Loading" string (never per-page text).
-    readonly property string appLoadingMessage: qsTrId("aegra.common.loading")
+    readonly property string appLoadingMessage: {
+        if (serviceClient.connected)
+            return qsTrId("aegra.common.loading")
+        if (serviceDiagnostics.messageId.length > 0)
+            return qsTrId(serviceDiagnostics.messageId)
+        return qsTrId("aegra.service.reconnecting")
+    }
 
     function centerOnScreen() {
         var scr = window.screen
@@ -101,6 +108,10 @@ Window {
                 window.enterMainUi()
             else if (!window.appReady)
                 window.applySplashSize()
+        }
+        function onStateChanged() {
+            if (serviceClient.connected)
+                serviceDiagnostics.reset()
         }
     }
 
@@ -413,13 +424,20 @@ Window {
             onQuitRequested: window.close()
         }
 
-        // Global loading overlay (old Main.qml): bounded control-plane queries / busy commands.
+        // Global blocking overlay: Service reconnect plus bounded control-plane queries / commands.
         LoadingOverlay {
+            id: loadingOverlay
             anchors.fill: parent
             z: 8000
             visible: window.appLoading
             //% "Loading"
             message: window.appLoadingMessage
+            actionsVisible: window.appReady && !serviceClient.connected
+            onQuitRequested: window.close()
+            onDiagnoseRequested: {
+                serviceDiagnostics.diagnose()
+                serviceClient.reconnect()
+            }
         }
 
         ToastBanner {

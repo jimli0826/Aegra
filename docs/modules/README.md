@@ -24,6 +24,7 @@
 | Service 协议 V4 wire | [../protocol/SERVICE_CONTROL_PROTOCOL_V4.md](../protocol/SERVICE_CONTROL_PROTOCOL_V4.md) | Desktop↔Service 逐条 kind 字段、枚举与示例 JSON（含文件浏览/恢复） |
 | `adapters/windows_ipc` | [windows_ipc.md](windows_ipc.md) | Named Pipe framing、Service ACL 与调用方身份 |
 | `apps/desktop` | [desktop.md](desktop.md) | Qt/QML 客户端、Service 连接与页面迁移边界 |
+| `apps/cli` | [cli.md](cli.md) | 本机 Service 控制面命令行客户端（AegraCli） |
 | Repository Catalog 查询 | [personal_repository_catalog_query.md](personal_repository_catalog_query.md) | Scanner、Service 分页查询与 Desktop 列表 |
 | 个人版 Verify | [personal_archive_verify.md](personal_archive_verify.md) | `.bkf` 完整只读认证与解压校验 |
 | Windows 个人版恢复 | [windows_personal_restore.md](windows_personal_restore.md) | 卷恢复；Full/Incremental tip 整盘 disk→disk（Worker + Service + Desktop） |

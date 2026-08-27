@@ -28,6 +28,7 @@ $VsRoot = "C:\Program Files\Microsoft Visual Studio\18\Insiders"
 $VsDevCmd = Join-Path $VsRoot "Common7\Tools\VsDevCmd.bat"
 $CmakeExe = Join-Path $VsRoot "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
 $ServiceDir = Join-Path $RepoRoot "out\build\vs2026-release\src\apps\service"
+$CliDir = Join-Path $RepoRoot "out\build\vs2026-release\src\apps\cli"
 $ShellDir = Join-Path $RepoRoot "out\build\vs2026-release\src\apps\shell_extension"
 $GuiBuildDir = Join-Path $RepoRoot "build\Desktop_Qt_6_8_3_MSVC2022_64bit-Release"
 $GuiDir = Join-Path $GuiBuildDir "src\apps\desktop"
@@ -36,6 +37,7 @@ $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";
             [System.Environment]::GetEnvironmentVariable("Path", "User")
 
 $script:ProjectBinaries = @(
+    "aegra_cli.exe",
     "aegra_desktop.exe",
     "aegra_pe_restore.exe",
     "aegra_personal_worker.exe",
@@ -45,6 +47,7 @@ $script:ProjectBinaries = @(
 
 function Get-PayloadFileList {
     return @(
+        "aegra_cli.exe",
         "aegra_desktop.exe",
         "aegra_pe_restore.exe",
         "aegra_personal_worker.exe",
@@ -271,6 +274,7 @@ function Copy-IfExists([string]$source, [string]$destinationDir) {
 function Copy-ProjectOutputsToPayload {
     Write-Host "`nCopying compiled outputs into payload..." -ForegroundColor Yellow
     Copy-Required (Join-Path $ServiceDir "aegra_service.exe") $Payload
+    Copy-Required (Join-Path $CliDir "aegra_cli.exe") $Payload
     Copy-Required (Join-Path $ServiceDir "aegra_personal_worker.exe") $Payload
     Copy-Required (Join-Path $ServiceDir "aegra_pe_restore.exe") $Payload
     Copy-Required (Join-Path $ShellDir "aegra_shell_extension.dll") $Payload

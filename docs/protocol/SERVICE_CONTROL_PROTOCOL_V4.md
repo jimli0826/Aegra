@@ -14,7 +14,7 @@
 | Schema | `schema_version = 4` |
 | API | `api_version = 4` |
 | 决策依据 | [ADR-0017](../adr/0017-service-control-protocol-v4.md)、[ADR-0016](../adr/0016-file-set-backup-and-restore-boundary.md)、[ADR-0011](../adr/0011-local-service-desktop-ipc.md)、[ADR-0014](../adr/0014-windows-service-ipc-security.md) |
-| 编解码 | `apps/service`、`apps/desktop`（实现于 F6/F9）；契约 DTO 在 `src/contracts` |
+| 编解码 | `apps/service`（`aegra_app_service_protocol`）、`apps/desktop`（Qt codec）、`apps/cli`（复用 Service codec）；契约 DTO 在 `src/contracts` |
 | 取代 | [SERVICE_CONTROL_PROTOCOL_V3.md](SERVICE_CONTROL_PROTOCOL_V3.md)（开发期文档，生产不实现） |
 
 字段集合为 **精确集合**（`exact_keys`）：多字段、少字段或未知字段一律拒绝。  

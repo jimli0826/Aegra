@@ -41,6 +41,8 @@ struct WorkerJobRequest final {
     std::string request_fingerprint;
     /// Owning schedule for backup jobs; used to advance last_recovery_point_id after Catalog publish.
     std::string schedule_id;
+    /// Snapshot of the owning schedule's post-backup Verify policy at submission.
+    bool verify_after_backup{false};
     std::optional<std::string> backup_archive_key;
     /// Opaque restore preflight token when operation is restore (unique job occupancy).
     std::optional<std::string> preflight_token;

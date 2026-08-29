@@ -20,6 +20,6 @@ target_compile_definitions(aegra_adapter_windows_filesystem PRIVATE NOMINMAX WIN
 target_link_libraries(
     aegra_adapter_windows_filesystem
     PUBLIC Aegra::Base Aegra::Contracts Aegra::Ports Aegra::Format
-    PRIVATE Advapi32 Shell32 Ole32
+    PRIVATE Advapi32 Shell32 Ole32 Wtsapi32
 )
 aegra_configure_target(aegra_adapter_windows_filesystem)

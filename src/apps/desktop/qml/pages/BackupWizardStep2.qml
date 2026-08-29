@@ -36,6 +36,7 @@ Item {
     property string passwordConfirm: ""
     readonly property int passwordMaxLength: 32
     property string compression: "normal"
+    property bool verifyAfterBackup: false
 
     signal backRequested()
     signal createRequested()
@@ -360,6 +361,7 @@ Item {
         Qt.callLater(function () { root.timesUiReady = true })
         enableDedup = item.deduplicationEnabled !== false
         excludePageHibernation = item.excludePageAndHibernation !== false
+        verifyAfterBackup = !!item.verifyAfterBackup
         var level = parseInt(item.compressionLevel, 10)
         if (level === 1)
             compression = "fast"
@@ -407,6 +409,7 @@ Item {
         password = ""
         passwordConfirm = ""
         compression = "normal"
+        verifyAfterBackup = false
         if (hourCombo) {
             var hIdx = hourOptions.indexOf(timeHour())
             hourCombo.currentIndex = hIdx >= 0 ? hIdx : 12
@@ -842,6 +845,7 @@ Item {
                                 onClicked: root.addTimeOfDay()
                             }
                         }
+
                     }
 
                     Item { Layout.fillHeight: true }
@@ -1321,6 +1325,57 @@ Item {
                                             onClicked: root.compression = modelData.value
                                         }
                                     }
+                                }
+                            }
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            Layout.topMargin: 8
+                            //% "Post Backup"
+                            text: qsTrId("aegra.backup.post.title")
+                            color: Theme.colorTextWhite
+                            font.pixelSize: 14
+                            font.bold: true
+                            font.family: Theme.fontFamily
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+                            Rectangle {
+                                Layout.preferredWidth: 18
+                                Layout.preferredHeight: 18
+                                radius: 3
+                                color: root.optionFill(root.verifyAfterBackup)
+                                border.width: root.verifyAfterBackup ? 0 : 1
+                                border.color: root.optionBorder(root.verifyAfterBackup)
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "\u2713"
+                                    color: root.optionMarkColor()
+                                    font.pixelSize: 12
+                                    font.bold: true
+                                    visible: root.verifyAfterBackup
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.verifyAfterBackup = !root.verifyAfterBackup
+                                }
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                //% "Enable verify"
+                                text: qsTrId("aegra.backup.post.verify")
+                                color: Theme.colorTextWhite
+                                font.pixelSize: 13
+                                font.family: Theme.fontFamily
+                                wrapMode: Text.WordWrap
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.verifyAfterBackup = !root.verifyAfterBackup
                                 }
                             }
                         }

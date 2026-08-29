@@ -193,6 +193,7 @@ struct ResolvedBackupPlan final {
     /// volume_set: target archive part size; zero disables splitting. file_set always zero.
     std::uint64_t split_size_bytes{0};
     std::int32_t compression_level{contracts::kCompressionLevelNormal};
+    bool verify_after_backup{false};
     std::string backup_set_uuid;
     /// schedules.last_recovery_point_id — sole Incremental parent candidate (no Catalog tip scan).
     std::optional<std::string> last_recovery_point_id;
@@ -230,6 +231,8 @@ struct ResolvedBackupPlan final {
     fingerprint += std::to_string(plan.split_size_bytes);
     fingerprint += "|";
     fingerprint += std::to_string(plan.compression_level);
+    fingerprint += "|";
+    fingerprint += plan.verify_after_backup ? "1" : "0";
     return fingerprint;
 }
 
@@ -337,6 +340,7 @@ resolve_backup_plan(ports::IControlPlaneDatabase& control_plane,
                                 ? record.split_size_bytes
                                 : 0;
     plan.compression_level = record.compression_level;
+    plan.verify_after_backup = record.verify_after_backup;
     plan.backup_set_uuid = record.backup_set_uuid;
     plan.last_recovery_point_id = record.last_recovery_point_id;
     return base::Result<ResolvedBackupPlan>::success(std::move(plan));
@@ -683,6 +687,7 @@ prepare_volume_backup(const ResolvedBackupPlan& plan, PrepareBackupContext& cont
     request.parent_recovery_point_id = std::move(parent_id);
     request.request_fingerprint = backup_request_fingerprint(plan);
     request.schedule_id = plan.schedule_id;
+    request.verify_after_backup = plan.verify_after_backup;
     request.backup_archive_key = identity.value().archive_key;
     return base::Result<PreparedBackup>::success(
         {std::move(request), std::move(identity).value().job_id});
@@ -899,6 +904,7 @@ prepare_file_set_backup(const ResolvedBackupPlan& plan, PrepareBackupContext& co
     request.parent_recovery_point_id = std::move(parent_id);
     request.request_fingerprint = backup_request_fingerprint(plan);
     request.schedule_id = plan.schedule_id;
+    request.verify_after_backup = plan.verify_after_backup;
     request.backup_archive_key = identity.value().archive_key;
     return base::Result<PreparedBackup>::success(
         {std::move(request), std::move(identity).value().job_id});
@@ -957,6 +963,33 @@ persist_cancel_command(ports::IControlPlaneDatabase& control_plane, ports::ICloc
                                const contracts::StartVerifyCommand& command) noexcept {
     return record.operation == contracts::JobOperation::kVerify &&
            record.request_fingerprint == verify_request_fingerprint(command);
+}
+
+[[nodiscard]] base::Result<contracts::SecretRef>
+volume_verify_credential(const ports::RepositoryConnectionRecord& repository,
+                         const std::string& archive_path_utf8) {
+    // Credential order matches F7 file recovery: an archive that opens with an empty password
+    // is unencrypted; only encrypted archives use the connection default credential.
+    auto path = path_from_utf8(archive_path_utf8);
+    if (!path) {
+        return base::Result<contracts::SecretRef>::failure(path.error());
+    }
+    adapters::personal_archive::ArchiveOpenRequest probe;
+    probe.source = std::move(path).value();
+    auto opened = adapters::personal_archive::PersonalArchiveReader::open(probe);
+    if (opened || opened.error().code != base::ErrorCode::kUnauthorized) {
+        // Non-credential open failures stay with the Worker, which owns verify error mapping.
+        return base::Result<contracts::SecretRef>::success({});
+    }
+    const auto& capabilities = repository.capabilities;
+    const bool allows_connection_secret =
+        std::find(capabilities.begin(), capabilities.end(), "archive.default_credential") !=
+        capabilities.end();
+    if (!allows_connection_secret || !repository.credential_ref) {
+        return base::Result<contracts::SecretRef>::failure(
+            {base::ErrorCode::kUnauthorized, "archive.credential_required"});
+    }
+    return base::Result<contracts::SecretRef>::success(*repository.credential_ref);
 }
 
 [[nodiscard]] base::Result<PreparedBackup>
@@ -1060,17 +1093,6 @@ prepare_verify(const contracts::StartVerifyCommand& command,
                                        cancellation);
     }
     // Volume-set Verify: single tip Archive (existing path).
-    const auto& capabilities = repository.value()->capabilities;
-    const bool allows_connection_secret =
-        std::find(capabilities.begin(), capabilities.end(), "archive.default_credential") !=
-        capabilities.end();
-    std::optional<contracts::SecretRef> credential;
-    if (allows_connection_secret && repository.value()->credential_ref) {
-        credential = *repository.value()->credential_ref;
-    } else if (!repository.value()->credential_ref || !allows_connection_secret) {
-        return base::Result<PreparedBackup>::failure(
-            {base::ErrorCode::kUnauthorized, "archive.credential_required"});
-    }
     auto archive_path =
         resolve_archive_absolute_path(repository.value()->locator, found->archive_main_key);
     auto job_id = random_id("job-", random, cancellation);
@@ -1080,6 +1102,10 @@ prepare_verify(const contracts::StartVerifyCommand& command,
             return base::Result<PreparedBackup>::failure(archive_path.error());
         return base::Result<PreparedBackup>::failure(!job_id ? job_id.error() : trace_id.error());
     }
+    auto credential = volume_verify_credential(*repository.value(), archive_path.value());
+    if (!credential) {
+        return base::Result<PreparedBackup>::failure(credential.error());
+    }
     contracts::JobRequest worker;
     worker.job_id = job_id.value();
     worker.tenant_id = "personal";
@@ -1087,13 +1113,115 @@ prepare_verify(const contracts::StartVerifyCommand& command,
     worker.content_kind = contracts::ContentKind::kVolumeSet;
     worker.source_refs = {archive_path.value()};
     worker.target_ref.clear();
-    worker.credential_refs = {credential.value_or(contracts::SecretRef{})};
+    worker.credential_refs = {std::move(credential).value()};
     worker.trace_id = trace_id.value();
     WorkerJobRequest request;
     request.worker_request = std::move(worker);
     request.source_ids = {command.recovery_point_id};
     request.repository_connection_id = command.repository_connection_id;
     request.request_fingerprint = verify_request_fingerprint(command);
+    return base::Result<PreparedBackup>::success({std::move(request), std::move(job_id).value()});
+}
+
+[[nodiscard]] std::string
+post_backup_verify_fingerprint(const WorkerJobRequest& completed_backup) {
+    return "post-backup-verify|" + completed_backup.worker_request.job_id + "|" +
+           completed_backup.worker_request.backup->file_uuid;
+}
+
+[[nodiscard]] std::string
+post_backup_verify_idempotency_key(const WorkerJobRequest& completed_backup) {
+    // Idempotency keys are stable identifiers ([a-z0-9._:-]); the '|' fingerprint is rejected.
+    return "post-backup-verify:" + completed_backup.worker_request.job_id + ":" +
+           completed_backup.worker_request.backup->file_uuid;
+}
+
+[[nodiscard]] bool same_post_backup_verify(const ports::JobRecord& record,
+                                           const std::string_view fingerprint) noexcept {
+    return record.operation == contracts::JobOperation::kVerify &&
+           record.request_fingerprint == fingerprint;
+}
+
+[[nodiscard]] contracts::SecretRef
+post_backup_credential(const WorkerJobRequest& completed_backup) {
+    if (!completed_backup.worker_request.credential_refs.empty()) {
+        return completed_backup.worker_request.credential_refs.front();
+    }
+    return {};
+}
+
+[[nodiscard]] base::Result<std::vector<std::string>> resolve_post_backup_file_chain_paths(
+    const WorkerJobRequest& completed_backup, ports::IControlPlaneDatabase& control_plane,
+    ports::IRepositoryStorageFactory& storage_factory,
+    const base::CancellationToken cancellation) {
+    const auto& backup = *completed_backup.worker_request.backup;
+    auto layers = resolve_file_set_catalog_chain(control_plane, storage_factory,
+                                                 completed_backup.repository_connection_id,
+                                                 backup.file_uuid, cancellation);
+    if (!layers) {
+        return base::Result<std::vector<std::string>>::failure(layers.error());
+    }
+    auto repository = control_plane.get_repository_connection(
+        completed_backup.repository_connection_id, cancellation);
+    if (!repository || !repository.value()) {
+        return base::Result<std::vector<std::string>>::failure(
+            !repository ? repository.error()
+                        : base::Error{base::ErrorCode::kNotFound,
+                                      "repository connection was not found"});
+    }
+    std::vector<std::string> paths;
+    paths.reserve(layers.value().size());
+    for (const auto& layer : layers.value()) {
+        auto path = resolve_archive_absolute_path(repository.value()->locator,
+                                                  layer.archive_main_key);
+        if (!path) {
+            return base::Result<std::vector<std::string>>::failure(path.error());
+        }
+        paths.push_back(std::move(path).value());
+    }
+    return base::Result<std::vector<std::string>>::success(std::move(paths));
+}
+
+[[nodiscard]] base::Result<PreparedBackup> prepare_post_backup_verify(
+    const WorkerJobRequest& completed_backup, ports::IControlPlaneDatabase& control_plane,
+    ports::IRepositoryStorageFactory& storage_factory, ports::IRandomSource& random,
+    const base::CancellationToken cancellation) {
+    if (!completed_backup.verify_after_backup ||
+        completed_backup.worker_request.operation != contracts::JobOperation::kBackup ||
+        !completed_backup.worker_request.backup ||
+        completed_backup.worker_request.backup->file_uuid.empty()) {
+        return base::Result<PreparedBackup>::failure(
+            {base::ErrorCode::kInvalidArgument, "post-backup Verify request is invalid"});
+    }
+    auto job_id = random_id("job-", random, cancellation);
+    auto trace_id = random_id("trace-", random, cancellation);
+    if (!job_id || !trace_id) {
+        return base::Result<PreparedBackup>::failure(!job_id ? job_id.error() : trace_id.error());
+    }
+    contracts::JobRequest worker;
+    worker.job_id = job_id.value();
+    worker.tenant_id = "personal";
+    worker.operation = contracts::JobOperation::kVerify;
+    worker.content_kind = completed_backup.worker_request.content_kind;
+    worker.trace_id = trace_id.value();
+    const auto credential = post_backup_credential(completed_backup);
+    if (worker.content_kind == contracts::ContentKind::kFileSet) {
+        auto paths = resolve_post_backup_file_chain_paths(completed_backup, control_plane,
+                                                          storage_factory, cancellation);
+        if (!paths) {
+            return base::Result<PreparedBackup>::failure(paths.error());
+        }
+        worker.source_refs = std::move(paths).value();
+        worker.credential_refs.assign(worker.source_refs.size(), credential);
+    } else {
+        worker.source_refs = {completed_backup.worker_request.target_ref};
+        worker.credential_refs = {credential};
+    }
+    WorkerJobRequest request;
+    request.worker_request = std::move(worker);
+    request.source_ids = {completed_backup.worker_request.backup->file_uuid};
+    request.repository_connection_id = completed_backup.repository_connection_id;
+    request.request_fingerprint = post_backup_verify_fingerprint(completed_backup);
     return base::Result<PreparedBackup>::success({std::move(request), std::move(job_id).value()});
 }
 
@@ -1252,6 +1380,51 @@ WorkerJobService::start_verify(const contracts::StartVerifyCommand& command,
     if (!submitted) {
         return reconcile_submission_conflict(control_plane_, idempotency_key, command, same_verify,
                                              submitted.error(), cancellation);
+    }
+    return base::Result<contracts::CommandAcknowledgement>::success(
+        acknowledgement(prepared.value().job_id, contracts::CommandDisposition::kAccepted,
+                        prepared.value().job_id));
+}
+
+base::Result<contracts::CommandAcknowledgement>
+WorkerJobService::start_post_backup_verify(const WorkerJobRequest& completed_backup,
+                                           const base::CancellationToken cancellation) {
+    if (!completed_backup.worker_request.backup) {
+        return base::Result<contracts::CommandAcknowledgement>::failure(
+            {base::ErrorCode::kInvalidArgument, "completed backup identity is missing"});
+    }
+    const auto fingerprint = post_backup_verify_fingerprint(completed_backup);
+    const auto idempotency_key = post_backup_verify_idempotency_key(completed_backup);
+    auto existing = control_plane_.get_job_by_idempotency_key(idempotency_key, cancellation);
+    if (!existing) {
+        return base::Result<contracts::CommandAcknowledgement>::failure(existing.error());
+    }
+    if (existing.value()) {
+        if (!same_post_backup_verify(*existing.value(), fingerprint)) {
+            return base::Result<contracts::CommandAcknowledgement>::failure(
+                {base::ErrorCode::kConflict, "idempotency key request mismatch"});
+        }
+        return base::Result<contracts::CommandAcknowledgement>::success(
+            acknowledgement(existing.value()->job_id, contracts::CommandDisposition::kReplayed,
+                            existing.value()->job_id));
+    }
+    auto prepared = prepare_post_backup_verify(completed_backup, control_plane_, storage_factory_,
+                                               random_, cancellation);
+    if (!prepared) {
+        return base::Result<contracts::CommandAcknowledgement>::failure(prepared.error());
+    }
+    prepared.value().request.idempotency_key = idempotency_key;
+    auto submitted = supervisor_.submit(prepared.value().request, cancellation);
+    if (!submitted) {
+        auto replay = control_plane_.get_job_by_idempotency_key(idempotency_key, cancellation);
+        if (replay && replay.value() &&
+            same_post_backup_verify(*replay.value(), fingerprint)) {
+            return base::Result<contracts::CommandAcknowledgement>::success(
+                acknowledgement(replay.value()->job_id,
+                                contracts::CommandDisposition::kReplayed,
+                                replay.value()->job_id));
+        }
+        return base::Result<contracts::CommandAcknowledgement>::failure(submitted.error());
     }
     return base::Result<contracts::CommandAcknowledgement>::success(
         acknowledgement(prepared.value().job_id, contracts::CommandDisposition::kAccepted,

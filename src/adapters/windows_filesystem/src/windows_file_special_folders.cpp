@@ -1,15 +1,17 @@
 #include "windows_file_special_folders.h"
 
+#include "windows_file_handle.h"
 #include "windows_file_names.h"
 
-#include <Windows.h>
 #include <KnownFolders.h>
 #include <ShlObj.h>
+#include <Windows.h>
+#include <WtsApi32.h>
 #include <objbase.h>
 
-#include <cstring>
-#include <optional>
+#include <memory>
 #include <string_view>
+#include <utility>
 
 namespace aegra::adapters::windows_filesystem::detail {
 namespace {
@@ -25,12 +27,78 @@ const SpecialFolderSpec kSpecialFolders[] = {
     {&FOLDERID_Desktop, "Desktop"},     {&FOLDERID_Downloads, "Downloads"},
     {&FOLDERID_Documents, "Documents"}, {&FOLDERID_Pictures, "Pictures"},
     {&FOLDERID_Music, "Music"},         {&FOLDERID_Videos, "Videos"},
+    {&FOLDERID_SkyDrive, "OneDrive"},
 };
 
-[[nodiscard]] std::wstring known_folder_path(const GUID& folder_id) {
+constexpr DWORD kInvalidSessionId = 0xFFFFFFFFUL;
+
+struct WtsSessionMemoryDeleter final {
+    void operator()(WTS_SESSION_INFOW* memory) const noexcept {
+        if (memory != nullptr) {
+            ::WTSFreeMemory(memory);
+        }
+    }
+};
+
+struct KnownFolderUserContext final {
+    UniqueHandle token;
+    bool available{false};
+};
+
+[[nodiscard]] UniqueHandle query_session_user_token(const DWORD session_id) noexcept {
+    if (session_id == kInvalidSessionId) {
+        return {};
+    }
+    HANDLE token = nullptr;
+    if (::WTSQueryUserToken(session_id, &token) == FALSE) {
+        return {};
+    }
+    return UniqueHandle(token);
+}
+
+[[nodiscard]] UniqueHandle query_active_user_token() noexcept {
+    const DWORD console_session = ::WTSGetActiveConsoleSessionId();
+    auto token = query_session_user_token(console_session);
+    if (token.valid()) {
+        return token;
+    }
+
+    WTS_SESSION_INFOW* raw_sessions = nullptr;
+    DWORD session_count = 0;
+    if (::WTSEnumerateSessionsW(WTS_CURRENT_SERVER_HANDLE, 0, 1, &raw_sessions, &session_count) ==
+        FALSE) {
+        return {};
+    }
+    const std::unique_ptr<WTS_SESSION_INFOW, WtsSessionMemoryDeleter> sessions(raw_sessions);
+    for (DWORD index = 0; index < session_count; ++index) {
+        const auto& session = sessions.get()[index];
+        if (session.State != WTSActive || session.SessionId == console_session) {
+            continue;
+        }
+        token = query_session_user_token(session.SessionId);
+        if (token.valid()) {
+            return token;
+        }
+    }
+    return {};
+}
+
+[[nodiscard]] KnownFolderUserContext resolve_known_folder_user() noexcept {
+    DWORD process_session = 0;
+    if (::ProcessIdToSessionId(::GetCurrentProcessId(), &process_session) != FALSE &&
+        process_session != 0) {
+        // Interactive/debug process: nullptr tells the Shell API to use this process user.
+        return {.available = true};
+    }
+    auto token = query_active_user_token();
+    const bool available = token.valid();
+    return {.token = std::move(token), .available = available};
+}
+
+[[nodiscard]] std::wstring known_folder_path(const GUID& folder_id, const HANDLE user_token) {
     PWSTR raw = nullptr;
     const HRESULT hr =
-        ::SHGetKnownFolderPath(folder_id, KF_FLAG_DEFAULT | KF_FLAG_DONT_VERIFY, nullptr, &raw);
+        ::SHGetKnownFolderPath(folder_id, KF_FLAG_DEFAULT | KF_FLAG_DONT_VERIFY, user_token, &raw);
     if (FAILED(hr) || raw == nullptr) {
         if (raw != nullptr) {
             ::CoTaskMemFree(raw);
@@ -103,8 +171,7 @@ const SpecialFolderSpec kSpecialFolders[] = {
 }
 
 [[nodiscard]] const SnapshotVolumeBinding*
-find_volume_root(const std::vector<SnapshotVolumeBinding>& roots,
-                 const std::wstring& volume_name) {
+find_volume_root(const std::vector<SnapshotVolumeBinding>& roots, const std::wstring& volume_name) {
     if (volume_name.empty()) {
         return nullptr;
     }
@@ -128,7 +195,7 @@ find_volume_root(const std::vector<SnapshotVolumeBinding>& roots,
 }
 
 [[nodiscard]] std::wstring strip_volume_prefix(const std::wstring& absolute_path,
-                                              const std::wstring& volume_name) {
+                                               const std::wstring& volume_name) {
     // Prefer DOS mount point (C:\) so relative components stay user-readable.
     wchar_t mount[MAX_PATH]{};
     if (::GetVolumePathNameW(absolute_path.c_str(), mount, MAX_PATH) == FALSE) {
@@ -138,9 +205,8 @@ find_volume_root(const std::vector<SnapshotVolumeBinding>& roots,
     if (mount_point.empty() || absolute_path.size() < mount_point.size()) {
         return {};
     }
-    if (!equals_ignore_case(
-            std::wstring_view(absolute_path.data(), mount_point.size()),
-            std::wstring_view(mount_point))) {
+    if (!equals_ignore_case(std::wstring_view(absolute_path.data(), mount_point.size()),
+                            std::wstring_view(mount_point))) {
         return {};
     }
     std::wstring relative = absolute_path.substr(mount_point.size());
@@ -156,8 +222,7 @@ split_relative_components(const std::wstring& relative) {
     std::vector<contracts::EncodedName> components;
     std::size_t begin = 0;
     while (begin < relative.size()) {
-        while (begin < relative.size() &&
-               (relative[begin] == L'\\' || relative[begin] == L'/')) {
+        while (begin < relative.size() && (relative[begin] == L'\\' || relative[begin] == L'/')) {
             ++begin;
         }
         if (begin >= relative.size()) {
@@ -181,8 +246,7 @@ split_relative_components(const std::wstring& relative) {
         return false;
     }
     const DWORD attributes = ::GetFileAttributesW(path.c_str());
-    return attributes != INVALID_FILE_ATTRIBUTES &&
-           (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
 } // namespace
@@ -193,9 +257,14 @@ resolve_special_folder_browse_roots(const std::vector<SnapshotVolumeBinding>& vo
     if (volume_roots.empty()) {
         return result;
     }
+    auto user = resolve_known_folder_user();
+    if (!user.available) {
+        return result;
+    }
     result.reserve(sizeof(kSpecialFolders) / sizeof(kSpecialFolders[0]));
     for (const auto& spec : kSpecialFolders) {
-        auto path = known_folder_path(*spec.folder_id);
+        const HANDLE user_token = user.token.valid() ? user.token.get() : nullptr;
+        auto path = known_folder_path(*spec.folder_id, user_token);
         if (path.empty() || !directory_exists(path)) {
             continue;
         }

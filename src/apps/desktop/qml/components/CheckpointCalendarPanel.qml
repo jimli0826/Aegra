@@ -141,8 +141,6 @@ Item {
         width: Math.max(320, parent.width * 0.5)
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        anchors.topMargin: 60
-        anchors.bottomMargin: 0
         property real slideProgress: root.open ? 0 : 1
         x: parent.width - width + slideProgress * width
         color: Theme.colorBg

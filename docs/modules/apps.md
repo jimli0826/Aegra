@@ -12,7 +12,7 @@
 - `vmware_connector`、`hyperv_connector`：厂商 SDK 隔离。
 - `pe_restore`：WinPE 最小离线恢复程序。
 - `desktop`：普通用户 GUI。
-- `cli`：本机 Service 控制面命令行客户端（`aegra_cli.exe`）；只经 Named Pipe 调用 V4 协议，见 [cli.md](cli.md)。
+- `cli`：本机 Service 控制面命令行客户端（`AegraCLI.exe`）；只经 Named Pipe 调用 V4 协议，见 [cli.md](cli.md)。
 - `shell_extension`：Explorer 进程内只读浏览 current V7 `.bkf`（ADR-0023）；Composition Root 装配 Archive/NTFS，不请求 Mount Host。
 
 产品 EXE/DLL 的 Windows File Properties（VERSIONINFO）由 `include/aegra_version.h` 提供，经 `aegra_add_version_resource` 写入目标。版本只在该头文件中修改。
@@ -56,6 +56,10 @@ Header，确认任务身份与 Archive 一致，再以 create-only 语义发布
 `catalog/recovery-points/<file_uuid>.entry`。Catalog 发布失败只记录错误并保留已提交 Archive，后续
 Repository 扫描负责补建。选父与降级细节见
 [personal_repository.md](personal_repository.md#service-增量选父与树完整判定)。
+
+Schedule 开启 `verify_after_backup` 时，Service completion observer 只在 Backup 成功且 Catalog 发布成功后
+把不可变完成快照放入有界队列。独立 dispatcher 复用 Worker Verify 入口；file_set 从 Catalog 解析
+base-first 完整链，volume_set 校验刚提交的 Archive。该后置任务不在 Worker completion 线程内同步启动。
 
 ## WinPE 离线恢复
 
@@ -105,7 +109,7 @@ Online Prepare -> Validate -> Build/Cache WinRE -> Write Pending Job
 
 ## Mount Host
 
-Mount Host 是 `aegra_personal_worker.exe` 的 `--mount-pipe` 运行模式（无独立 EXE），只读打开 Recovery Point，
+Mount Host 是 `AegraWorker.exe` 的 `--mount-pipe` 运行模式（无独立 EXE），只读打开 Recovery Point，
 按请求 `content_kind` 分发（dokan2.dll 延迟加载，缺失时仅 mount 模式失败）：
 
 - `volume_set`：组合 `PersonalArchiveChainReader`、`WholeDiskByteReader`、Dokan/VHDX Adapter，
@@ -121,9 +125,9 @@ Shell Extension 不加载 Dokan/VHDX 实现。
 ### Service 编排（S7）
 
 - `MountSupervisor` 在 `apps/service` 内维护内存态会话表（session_id → host PID、pipe、summary）。
-- Service 通过 `--mount-pipe` 启动 `aegra_personal_worker`，发送 mount 请求 JSON，等待 `mounted`/`failed` 事件后向 Desktop 返回 CommandAcknowledgement。
+- Service 通过 `--mount-pipe` 启动 `AegraWorker.exe`，发送 mount 请求 JSON，等待 `mounted`/`failed` 事件后向 Desktop 返回 CommandAcknowledgement。
 - 能力位：`mount.list`、`mount.start`、`mount.unmount`。协议 kinds：8 / 41 / 42。
-- 可选 CLI：`--mount-host-path <abs>`（调试覆盖）；默认与 Service 同目录的 `aegra_personal_worker.exe`。
+- 可选 CLI：`--mount-host-path <abs>`（调试覆盖）；默认与 Service 同目录的 `AegraWorker.exe`。
 - 请求 JSON 携带 `content_kind`（取自 tip Catalog 条目；缺省 volume_set，向后兼容）。
 - Overlay 根（仅 volume_set）：`<data_dir>/mount_overlays/<session_id>`（Service 已按会话隔离，host 不再二次嵌套）。
   - Dokan 挂载点：`<session>/mnt/`（必须为空目录，与旧 backup host 一致）。

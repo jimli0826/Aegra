@@ -81,7 +81,7 @@ Volume schedule 创建/更新：
   `exclude_page_and_hibernation_files`、`deduplication_enabled`、`split_size_bytes`、
   `compression_level`、`encryption_enabled` 与保护口令创建后冻结。
   允许修改 `display_name`、`enabled`、`repository_connection_id`、`trigger`
-  （Daily/Weekly/Monthly；Monthly 携带 `day_of_month_mask`）。
+  （Daily/Weekly/Monthly；Monthly 携带 `day_of_month_mask`）与 `verify_after_backup`。
   更换 destination 清空 `last_recovery_point_id`（下次增量降 Full）。
 
 file_set schedule（F6）：
@@ -92,6 +92,8 @@ file_set schedule（F6）：
 - **更新**：不得更换 `content_kind` 或重新提交 file selections（`schedule.source_frozen`）；
   加密选项冻结。
 - Desktop 永不发送绝对路径；列表摘要含 `display_label` 与 volume-relative `display_chain`（UI 名，不是路径）。
+
+`verify_after_backup` 默认 false；为 true 时，成功发布 Catalog 后由 Service 提交独立 Verify Job。
 
 Volume Restore：Prepare 必须携带 Repository connection、Recovery Point 和 opaque target source ID；
 Start 只接受 opaque preflight token 且 `confirmed=true`。file_set 恢复使用 kind 15/48，不得走 volume

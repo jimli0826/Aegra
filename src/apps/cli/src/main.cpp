@@ -9,12 +9,12 @@ int wmain(int argc, wchar_t** argv) {
         auto parsed = aegra::apps::cli::parse_args(argc, argv);
         if (!parsed) {
             aegra::apps::cli::write_error_object(parsed.error());
-            aegra::apps::cli::write_error("Use aegra_cli --help for usage.");
+            aegra::apps::cli::write_error("Use AegraCLI --help for usage.");
             return aegra::apps::cli::kExitUsage;
         }
         return aegra::apps::cli::run_command(parsed.value());
     } catch (...) {
-        aegra::apps::cli::write_error("AegraCli failed with an unexpected error.");
+        aegra::apps::cli::write_error("AegraCLI failed with an unexpected error.");
         return aegra::apps::cli::kExitInternal;
     }
 }

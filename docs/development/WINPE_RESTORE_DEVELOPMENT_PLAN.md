@@ -157,7 +157,7 @@ WinPE → 卷 dismount → 删布局 → 数据裸写（27s，23.4 GB，稀疏�
 
 | # | 坑 | 修复 |
 |---|-----|------|
-| 1 | payload 缺 exe | `aegra_pe_restore.exe` POST_BUILD 拷到 service 目录 |
+| 1 | payload 缺 exe | `AegraPEResore.exe` POST_BUILD 拷到 Service 目录 |
 | 2 | VC++ CRT redist WinRE 无 | 注入 vcruntime140/msvcp140/_atomic_wait/vcruntime140_1 |
 | 3 | worker 依赖 VSS/VirtDisk | 延迟加载 |
 | 4 | pending 定位路径 | PE 栈固定用 `%ProgramData%\Aegra`，与 `--data-dir` 解耦 |

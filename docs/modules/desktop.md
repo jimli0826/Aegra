@@ -173,7 +173,7 @@ Repository 容量卡片只使用 Service 异步返回的本机 volume inventory 
 - Service 未运行、启动后连接、Service 退出和重启均能正确更新状态。
 - QML 启动不引用旧 Backend，不绕过 Service 直接操作系统资源。
 - 品牌资源来源和迁移范围可追溯，旧生成物不进入新项目。
-- VS 2026 Insiders + Qt 6.8 构建通过，Desktop 能真实连接 `aegra_service.exe`。
+- VS 2026 Insiders + Qt 6.8 构建通过，`AegraImage.exe` 能真实连接 `AegraService.exe`。
 
 ## 后续迁移
 
@@ -189,6 +189,10 @@ Repository 容量卡片只使用 Service 异步返回的本机 volume inventory 
 - S0 integration：Desktop 私有 codec 使用 V3 Request/Response envelope，仍只消费已声明 capability。
 - D2（已完成，按生产功能范围）：Home 页面、Splash/Retry、Toast、Loading overlay、`JobModel` + `job.list` 分页与有界轮询；
   `ServiceRequestCoordinator` 支持并发 Repository/Job 请求；Home↔Repository 导航可用；
+  Next Scheduled Backup 卡片使用有界的摘要与等分来源/目标布局，长计划名、日期和目标名称在窄列内截断，
+  Volume Set 使用主题化硬盘图标，不允许固定宽度节点横向溢出卡片；SYNC 仅显示主题色文字，不使用红色背景；
+  Local Disk Overview 最多显示三个 Volume 行，更多卷以底部省略号提示；卡片操作显示 Backup Now；
+  未保护状态保留红色警示文字但不使用红色填充背景；
   Backup/Restore/Mount 在 D3/D4/D6 接线前强制禁用（不得仅凭 capability 呈现无操作按钮）；
   进度协议严格校验与溢出安全百分比；首次 Job 快照 toast 基线与可重启 Toast 定时器；
   后台 Job 轮询不触发全屏 Loading overlay，Service Job 状态码映射到五语言稳定文案；
@@ -218,7 +222,7 @@ Repository 容量卡片只使用 Service 异步返回的本机 volume inventory 
     Monthly 使用 `day_of_month_mask`（可多选 1–31）；当月无该日则顺延到下一个有该日的月份。
     Time of day 可配置 1–8 个时刻（`local_minutes_of_day`）；新建默认 12:00；禁止重复，任意两时刻间隔 ≥ 30 分钟。
   - 向导不再提供 Backup type。每次运行默认增量；首次或无父降 Full；菜单 **Run now**（增量）与 **Run full**。
-  - Backup options 中除 “完成后关机”（shutdown）可改外，其余（含 exclude pagefile、加密、去重/分卷/压缩
+  - Backup options 中除 “完成后关机”（shutdown）和 Post Backup Verify 可改外，其余（含 exclude pagefile、加密、去重/分卷/压缩
     等向导选项）创建后不可改；Desktop 更新路径必须回传已有冻结字段，不得静默改写加密标志。
   - ADR-0022 的 `deduplication_enabled` 只在 Volume Set 创建流程显示为 **Enable Deduplication**，
     默认开启并进入 UpsertSchedule；file_set 固定 false。Recovery Point 详情可显示 Catalog 的去重
@@ -227,6 +231,8 @@ Repository 容量卡片只使用 Service 异步返回的本机 volume inventory 
     可选 128–1024 MiB 或 1–1024 GiB。Desktop 发送字节值，Schedule 创建后冻结；file_set 固定为 0。
   - Compression 为 Fast/Normal/High，分别对应 zstd level **1 / 3 / 9**，新建默认 Normal。
     Desktop 把整数 `compression_level` 写入 UpsertSchedule；创建后冻结。volume_set 与 file_set 均可配置。
+  - Options 底部显示 **Post Backup** / **Enable verify**；默认关闭、编辑时可修改。
+    Desktop 以 `verify_after_backup` 持久化，不在 GUI 内直接读取 Archive 或执行 Verify。
   Backup list、Add、slide-in wizard、真实 Service/SQLite Job、Schedule、多 Volume 单 Archive、取消和聚合进度
   均已具备生产功能。
 - Restore Source Disks：选中 checkpoint 后调用 Service V3 `GetRecoveryPointLayout`（kind 12）。payload 为
@@ -256,7 +262,7 @@ Repository 容量卡片只使用 Service 异步返回的本机 volume inventory 
     15 PrepareFileRestore、48 StartFileRestore；UpsertSchedule `file_set` 选择。
   - `FileBrowseModel` / `FileRecoverModel` 只保存 opaque `node_token` / `entry_id`，不本地枚举路径、
     不向 Service 发送绝对路径。
-  - 特殊目录根（Desktop/Downloads/Documents/Pictures/Music/Videos）的 edit rehydrate 使用产品短
+  - 特殊目录根（Desktop/Downloads/Documents/Pictures/Music/Videos/OneDrive）的 edit rehydrate 使用产品短
     label 匹配 browse 根行；不得把卷相对路径链展开进特殊根子树（否则 SOURCE 会列出该目录内容）。
   - Backup 向导 step 0 选 Files 后绑定 `file.browse` lazy 树与 tri-state 勾选；创建
     `createFileSetSchedule`；Schedule 列表展示 `selection_summaries` 安全 label。

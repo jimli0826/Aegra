@@ -225,7 +225,8 @@ bool ServiceClient::createFileSetSchedule(const QString& connection_id, const QS
                                           const QString& archive_password,
                                           const bool start_full_backup_after_create,
                                           const int weekday_mask,
-                                          const unsigned int day_of_month_mask) {
+                                          const unsigned int day_of_month_mask,
+                                          const bool verify_after_backup) {
     if (state_ != State::kReady || !schedules_available_ || !file_browse_available_ ||
         schedule_command_busy_ || connection_id.isEmpty()) {
         return false;
@@ -294,7 +295,7 @@ bool ServiceClient::createFileSetSchedule(const QString& connection_id, const QS
         request_id, idempotency_key, {}, display_name, true, selections, connection_id,
         kBackupTypeIncremental, trigger_kind, local_minutes, weekday_mask, QStringLiteral("UTC"),
         exclude_page_and_hibernation_files, false, compression_level, encryption_enabled,
-        archive_password, day_of_month_mask);
+        archive_password, day_of_month_mask, verify_after_backup);
     const auto started =
         coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
             return handle_schedule_command_frame(frame_body);
@@ -313,7 +314,8 @@ bool ServiceClient::updateFileSetSchedule(const QString& schedule_id, const QStr
                                           const bool exclude_page_and_hibernation_files,
                                           const int compression_level,
                                           const bool encryption_enabled, const int weekday_mask,
-                                          const unsigned int day_of_month_mask) {
+                                          const unsigned int day_of_month_mask,
+                                          const bool verify_after_backup) {
     if (state_ != State::kReady || !schedules_available_ || schedule_command_busy_ ||
         schedule_id.isEmpty() || display_name.isEmpty() || connection_id.isEmpty()) {
         return false;
@@ -365,7 +367,7 @@ bool ServiceClient::updateFileSetSchedule(const QString& schedule_id, const QStr
         request_id, idempotency_key, schedule_id, display_name, enabled, {}, connection_id,
         kBackupTypeIncremental, trigger_kind, local_minutes, weekday_mask, QStringLiteral("UTC"),
         exclude_page_and_hibernation_files, false, compression_level, encryption_enabled, {},
-        day_of_month_mask);
+        day_of_month_mask, verify_after_backup);
     const auto started =
         coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
             return handle_schedule_command_frame(frame_body);

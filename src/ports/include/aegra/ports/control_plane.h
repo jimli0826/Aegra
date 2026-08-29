@@ -23,7 +23,8 @@ namespace aegra::ports {
 // v20: volume restore size policy / feasibility / shrink plan token bindings (ADR-0025).
 // v21: immutable schedule split_size_bytes for volume archive splitting (ADR-0003).
 // v22: immutable schedule compression_level (zstd Fast=1, Normal=3, High=9).
-inline constexpr std::uint32_t kControlPlaneSchemaVersion = 22;
+// v23: mutable post-backup Verify policy.
+inline constexpr std::uint32_t kControlPlaneSchemaVersion = 23;
 
 // ---- Durable records (control-plane only; no plaintext secrets, no RP authority) ----
 
@@ -96,6 +97,8 @@ struct ScheduleRecord final {
     std::uint64_t split_size_bytes{0};
     /// zstd Fast=1, Normal=3, High=9. Frozen at create. Both content kinds.
     std::int32_t compression_level{contracts::kCompressionLevelNormal};
+    /// Submit a separate Verify job after a successful backup Catalog publish.
+    bool verify_after_backup{false};
     bool encryption_enabled{false};
     /// When encryption_enabled: dpapi-lm:<schedule_id>:<base64> (CRYPTPROTECT_LOCAL_MACHINE,
     /// pOptionalEntropy = UTF-8 schedule_id). Empty when encryption is off. Never log.

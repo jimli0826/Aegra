@@ -297,10 +297,10 @@ parse_operation(const std::string_view text) {
 } // namespace
 
 void print_help() {
-    write_line("AegraCli — local Aegra Service control client");
+    write_line("AegraCLI — local Aegra Service control client");
     write_line("");
     write_line("Usage:");
-    write_line("  aegra_cli [global-options] <command> [command-options]");
+    write_line("  AegraCLI [global-options] <command> [command-options]");
     write_line("");
     write_line("Global options:");
     write_line("  --json                  Print Service V4 JSON responses");

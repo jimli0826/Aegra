@@ -92,6 +92,7 @@ set_target_properties(
     PROPERTIES
         AUTOMOC ON
         AUTORCC ON
+        OUTPUT_NAME "AegraImage"
 )
 
 target_include_directories(

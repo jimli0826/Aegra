@@ -256,7 +256,7 @@ V3 codec 只在 S0 contract 合并后由 integration owner 接入。
 **状态：已完成。**
 
 - 从受信任配置构造 Worker 命令行和随机 Pipe 名；默认 Worker 为 Service 可执行文件同目录的
-  `aegra_personal_worker.exe`，`--worker-path` 可覆盖绝对路径。
+  `AegraWorker.exe`，`--worker-path` 可覆盖绝对路径。
 - 完成 Job/Cancel、Progress/Result 会话，持久化状态转换和最终稳定结果。
 - 支持 Desktop 取消、Service 停止、deadline、Worker crash、无 Result 退出和 Pipe 断开。
 - 进程退出码只用于快速分类，权威结果来自合法 `WorkerResponse`；stderr 不作为协议。

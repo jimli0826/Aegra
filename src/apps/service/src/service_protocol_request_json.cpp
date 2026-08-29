@@ -548,12 +548,13 @@ encode_mount_recovery_point(const contracts::MountRecoveryPointCommand& command)
                 {"deduplication_enabled", command.deduplication_enabled},
                 {"split_size_bytes", command.split_size_bytes},
                 {"compression_level", command.compression_level},
+                {"verify_after_backup", command.verify_after_backup},
                 {"encryption_enabled", command.encryption_enabled},
                 {"archive_password", command.archive_password}};
 }
 
 [[nodiscard]] contracts::UpsertScheduleCommand parse_upsert_schedule(const Json& payload) {
-    constexpr std::array<std::string_view, 13> keys{"schedule_id",
+    constexpr std::array<std::string_view, 14> keys{"schedule_id",
                                                     "display_name",
                                                     "enabled",
                                                     "protection",
@@ -564,6 +565,7 @@ encode_mount_recovery_point(const contracts::MountRecoveryPointCommand& command)
                                                     "deduplication_enabled",
                                                     "split_size_bytes",
                                                     "compression_level",
+                                                    "verify_after_backup",
                                                     "encryption_enabled",
                                                     "archive_password"};
     if (!exact_keys(payload, keys)) {
@@ -583,6 +585,7 @@ encode_mount_recovery_point(const contracts::MountRecoveryPointCommand& command)
     command.deduplication_enabled = payload.at("deduplication_enabled").get<bool>();
     command.split_size_bytes = unsigned_value<std::uint64_t>(payload, "split_size_bytes");
     command.compression_level = unsigned_value<std::uint8_t>(payload, "compression_level");
+    command.verify_after_backup = payload.at("verify_after_backup").get<bool>();
     command.encryption_enabled = payload.at("encryption_enabled").get<bool>();
     command.archive_password = payload.at("archive_password").get<std::string>();
     return command;

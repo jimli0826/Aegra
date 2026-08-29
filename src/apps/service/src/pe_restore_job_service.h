@@ -25,7 +25,7 @@ struct PeRestoreEnvironment final {
     /// Service data directory (image + pending live beneath `<data_dir>\pe\`).
     std::string data_dir_utf8;
     std::string product_version;
-    /// Directory holding aegra_pe_restore.exe / aegra_personal_worker.exe and their
+    /// Directory holding AegraPEResore.exe / AegraWorker.exe and their
     /// runtime DLL closure (the service executable's own directory).
     std::string payload_directory_utf8;
     std::string boot_entry_name{"Aegra Recovery"};

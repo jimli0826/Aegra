@@ -285,7 +285,7 @@ class ServiceClient final : public QObject {
                                     quint64 split_size_bytes = 0, int compression_level = 3,
                                     bool encryption_enabled = false,
                                     const QString& archive_password = {}, int backup_type = 2,
-                                    int weekday_mask = 0, unsigned int day_of_month_mask = 0);
+                                    int weekday_mask = 0, unsigned int day_of_month_mask = 0, bool verify_after_backup = false);
     /// Creates one multi-volume schedule; the first Incremental request may demote to Full.
     Q_INVOKABLE bool createSchedule(const QVariantList& sources, const QString& connection_id,
                                     const QString& frequency, const QString& time_of_day,
@@ -295,20 +295,20 @@ class ServiceClient final : public QObject {
                                     bool encryption_enabled = false,
                                     const QString& archive_password = {},
                                     bool start_full_backup_after_create = false,
-                                    int weekday_mask = 0, unsigned int day_of_month_mask = 0);
+                                    int weekday_mask = 0, unsigned int day_of_month_mask = 0, bool verify_after_backup = false);
     /// Creates a file_set schedule from opaque selections; volume deduplication stays disabled.
     Q_INVOKABLE bool createFileSetSchedule(
         const QString& connection_id, const QString& frequency, const QString& time_of_day,
         bool exclude_page_and_hibernation_files = true, int compression_level = 3,
         bool encryption_enabled = false, const QString& archive_password = {},
         bool start_full_backup_after_create = false, int weekday_mask = 0,
-        unsigned int day_of_month_mask = 0);
+        unsigned int day_of_month_mask = 0, bool verify_after_backup = false);
     Q_INVOKABLE bool updateFileSetSchedule(const QString& schedule_id, const QString& display_name,
                                            bool enabled, const QString& connection_id,
                                            const QString& frequency, const QString& time_of_day,
                                            bool exclude_page_and_hibernation_files,
                                            int compression_level, bool encryption_enabled,
-                                           int weekday_mask, unsigned int day_of_month_mask = 0);
+                                           int weekday_mask, unsigned int day_of_month_mask = 0, bool verify_after_backup = false);
     Q_INVOKABLE bool deleteSchedule(const QString& schedule_id);
     Q_INVOKABLE bool setScheduleEnabled(const QString& schedule_id, bool enabled);
     /// Authoritative source_ids for a listed schedule (avoids QML modelData list loss).

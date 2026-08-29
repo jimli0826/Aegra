@@ -25,6 +25,7 @@ namespace aegra::apps::service {
 
 class IServiceLog;
 class WorkerSupervisor;
+struct WorkerJobRequest;
 
 class IWorkerJobService {
   public:
@@ -106,6 +107,10 @@ class WorkerJobService final : public IWorkerJobService {
     start_file_restore(const contracts::StartFileRestoreCommand& command,
                        std::string_view idempotency_key,
                        base::CancellationToken cancellation) override;
+    /// Internal post-action path. Builds a Verify job from a completed backup snapshot.
+    [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
+    start_post_backup_verify(const WorkerJobRequest& completed_backup,
+                             base::CancellationToken cancellation);
     [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
     cancel_job(const contracts::ResourceRef& job, std::string_view idempotency_key,
                base::CancellationToken cancellation) override;

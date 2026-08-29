@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -117,6 +118,32 @@ base::Result<contracts::TaskResult> validated_result(contracts::TaskResult resul
     return base::Result<contracts::TaskResult>::success(std::move(result));
 }
 
+class EmptyPasswordSecret final : public ports::IResolvedSecret {
+  public:
+    [[nodiscard]] std::string_view view() const noexcept override { return {}; }
+};
+
+[[nodiscard]] base::Result<std::unique_ptr<ports::IResolvedSecret>>
+resolve_verify_secret(const contracts::SecretRef& credential,
+                      ports::ICredentialResolver& credentials,
+                      const base::CancellationToken& cancellation) {
+    // Empty SecretRef = unencrypted archive (empty password), matching restore and
+    // file_set verify.
+    if (credential.value.empty()) {
+        return base::Result<std::unique_ptr<ports::IResolvedSecret>>::success(
+            std::make_unique<EmptyPasswordSecret>());
+    }
+    auto resolved = credentials.resolve(credential, cancellation);
+    if (!resolved || resolved.value() == nullptr || resolved.value()->view().empty()) {
+        const auto code = !resolved && resolved.error().code == base::ErrorCode::kCancelled
+                              ? base::ErrorCode::kCancelled
+                              : base::ErrorCode::kUnauthorized;
+        return base::Result<std::unique_ptr<ports::IResolvedSecret>>::failure(
+            {code, !resolved ? resolved.error().message : "archive credential is unavailable"});
+    }
+    return resolved;
+}
+
 void publish_preparing(const contracts::JobRequest& job, ports::IProgressSink* progress) {
     if (progress != nullptr) {
         progress->publish(contracts::make_byte_progress(job.job_id, job.trace_id,
@@ -200,22 +227,19 @@ run_accepted_task(const contracts::JobRequest& job,
     std::unique_ptr<ports::IResolvedSecret> secret;
     {
         ScopedStage stage(task_log.get(), "resolve_credentials");
-        auto resolved = context.credentials.resolve(job.credential_refs.front(), cancellation);
-        if (!resolved || resolved.value() == nullptr || resolved.value()->view().empty()) {
-            const auto code = !resolved && resolved.error().code == base::ErrorCode::kCancelled
-                                  ? base::ErrorCode::kCancelled
-                                  : base::ErrorCode::kUnauthorized;
-            const base::Error error{code, !resolved ? resolved.error().message
-                                                    : "archive credential is unavailable"};
-            stage.fail(error, "resolve_secret", verify_hint_for(code, error.message));
-            auto result = validated_result(failed_result(job, code));
+        auto resolved =
+            resolve_verify_secret(job.credential_refs.front(), context.credentials, cancellation);
+        if (!resolved) {
+            stage.fail(resolved.error(), "resolve_secret",
+                       verify_hint_for(resolved.error().code, resolved.error().message));
+            auto result = validated_result(failed_result(job, resolved.error().code));
             if (result) {
-                log_verify_result(task_log.get(), result.value(), &error, started);
+                log_verify_result(task_log.get(), result.value(), &resolved.error(), started);
             }
             return result;
         }
-        stage.note("password", "present");
         secret = std::move(resolved).value();
+        stage.note("password", secret->view().empty() ? "empty" : "present");
     }
 
     auto verified = backend.run(path_from_utf8(job.source_refs.front()), secret->view(),

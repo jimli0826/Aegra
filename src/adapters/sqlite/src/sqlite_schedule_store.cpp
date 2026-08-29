@@ -47,9 +47,10 @@ base::Result<void> ScheduleStore::upsert(const ports::ScheduleRecord& record,
         "repository_connection_id, backup_type, trigger_kind, local_minutes_of_day, "
         "weekday_mask, day_of_month_mask, timezone_id, next_run_utc_ms, "
         "exclude_page_and_hibernation_files, "
-        "deduplication_enabled, split_size_bytes, compression_level, encryption_enabled, archive_password_protected, backup_set_uuid, "
+        "deduplication_enabled, split_size_bytes, compression_level, verify_after_backup, "
+        "encryption_enabled, archive_password_protected, backup_set_uuid, "
         "last_recovery_point_id, created_utc_ms, updated_utc_ms) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(schedule_id) DO UPDATE SET "
         "display_name=excluded.display_name, enabled=excluded.enabled, "
         "content_kind=excluded.content_kind, source_ids=excluded.source_ids, "
@@ -62,6 +63,7 @@ base::Result<void> ScheduleStore::upsert(const ports::ScheduleRecord& record,
         "deduplication_enabled=excluded.deduplication_enabled, "
         "split_size_bytes=excluded.split_size_bytes, "
         "compression_level=excluded.compression_level, "
+        "verify_after_backup=excluded.verify_after_backup, "
         "encryption_enabled=excluded.encryption_enabled, "
         "archive_password_protected=excluded.archive_password_protected, "
         "backup_set_uuid=excluded.backup_set_uuid, "
@@ -126,23 +128,26 @@ base::Result<void> ScheduleStore::upsert(const ports::ScheduleRecord& record,
     if (auto bound = stmt.bind_int64(17, record.compression_level); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_int64(18, record.encryption_enabled ? 1 : 0); !bound) {
+    if (auto bound = stmt.bind_int64(18, record.verify_after_backup ? 1 : 0); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_text(19, record.archive_password_protected); !bound) {
+    if (auto bound = stmt.bind_int64(19, record.encryption_enabled ? 1 : 0); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_text(20, record.backup_set_uuid); !bound) {
+    if (auto bound = stmt.bind_text(20, record.archive_password_protected); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_text_nullable(21, record.last_recovery_point_id); !bound) {
+    if (auto bound = stmt.bind_text(21, record.backup_set_uuid); !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_int64(22, static_cast<std::int64_t>(record.created_utc_ms));
+    if (auto bound = stmt.bind_text_nullable(22, record.last_recovery_point_id); !bound) {
+        return bound;
+    }
+    if (auto bound = stmt.bind_int64(23, static_cast<std::int64_t>(record.created_utc_ms));
         !bound) {
         return bound;
     }
-    if (auto bound = stmt.bind_int64(23, static_cast<std::int64_t>(record.updated_utc_ms));
+    if (auto bound = stmt.bind_int64(24, static_cast<std::int64_t>(record.updated_utc_ms));
         !bound) {
         return bound;
     }
@@ -222,7 +227,8 @@ ScheduleStore::list(const contracts::ScheduleListRequest& request,
         "SELECT schedule_id, display_name, enabled, content_kind, source_ids, "
         "repository_connection_id, backup_type, trigger_kind, local_minutes_of_day, weekday_mask, "
         "day_of_month_mask, timezone_id, next_run_utc_ms, exclude_page_and_hibernation_files, "
-        "deduplication_enabled, split_size_bytes, compression_level, encryption_enabled, archive_password_protected, backup_set_uuid, "
+        "deduplication_enabled, split_size_bytes, compression_level, verify_after_backup, "
+        "encryption_enabled, archive_password_protected, backup_set_uuid, "
         "last_recovery_point_id, created_utc_ms, updated_utc_ms FROM schedules WHERE 1=1";
     if (request.enabled) {
         sql += " AND enabled = ?";

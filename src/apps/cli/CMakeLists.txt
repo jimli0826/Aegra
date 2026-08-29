@@ -34,6 +34,7 @@ target_link_libraries(
         Aegra::Contracts
 )
 
+set_target_properties(aegra_cli PROPERTIES OUTPUT_NAME "AegraCLI")
 aegra_configure_target(aegra_cli)
 aegra_add_version_resource(aegra_cli "Aegra Image CLI")
 
@@ -45,6 +46,6 @@ if(TARGET aegra_service)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "$<TARGET_FILE:aegra_cli>"
                 "$<TARGET_FILE_DIR:aegra_service>/$<TARGET_FILE_NAME:aegra_cli>"
-        COMMENT "Copy aegra_cli beside aegra_service"
+        COMMENT "Copy AegraCLI beside AegraService"
     )
 endif()

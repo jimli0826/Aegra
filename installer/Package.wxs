@@ -2,7 +2,7 @@
 <!--
   Aegra Image MSI package (WiX v4/v7 schema).
   Built by installer/build.ps1 → out\AegraImage.msi
-  Service: aegra_service.exe as Windows service AegraService (SCM flag service).
+  Service: AegraService.exe as Windows service AegraService (SCM flag service).
   Recovery: restart on first/second/subsequent failure, 0-day reset, 0-minute delay.
   Data: %ProgramData%\Aegra (matches Service runtime, not brand path AegraImage).
   Kernel Dokan is the official Dokan_x64.msi chained in the Bundle.
@@ -144,7 +144,7 @@
   <Fragment>
     <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
       <Files Include="!(bindpath.Payload)\**">
-        <Exclude Files="!(bindpath.Payload)\aegra_service.exe" />
+        <Exclude Files="!(bindpath.Payload)\AegraService.exe" />
       </Files>
     </ComponentGroup>
   </Fragment>
@@ -152,7 +152,7 @@
   <Fragment>
     <Component Id="cmpServerService" Directory="INSTALLFOLDER" Guid="A18F3C20-6D4B-4E91-9C7A-2E5B8F0D1A63">
       <File Id="filAegraService"
-            Source="!(bindpath.Payload)\aegra_service.exe"
+            Source="!(bindpath.Payload)\AegraService.exe"
             KeyPath="yes" />
 
       <ServiceInstall Id="svcAegraService"
@@ -207,7 +207,7 @@
         <Shortcut Id="scGui"
                   Name="Aegra Image"
                   Description="Aegra Image"
-                  Target="[INSTALLFOLDER]aegra_desktop.exe"
+                  Target="[INSTALLFOLDER]AegraImage.exe"
                   WorkingDirectory="INSTALLFOLDER" />
         <Shortcut Id="scUninstall"
                   Name="Uninstall Aegra Image"
@@ -229,7 +229,7 @@
         <Shortcut Id="scDesktopGui"
                   Name="Aegra Image"
                   Description="Aegra Image"
-                  Target="[INSTALLFOLDER]aegra_desktop.exe"
+                  Target="[INSTALLFOLDER]AegraImage.exe"
                   WorkingDirectory="INSTALLFOLDER" />
         <RegistryValue Root="HKCU"
                        Key="Software\AegraImage"
@@ -247,12 +247,12 @@
         <RegistryValue Name="InstallDir" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
         <RegistryValue Name="Version" Type="string" Value="$(var.ProductVersion)" />
       </RegistryKey>
-      <RegistryKey Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\aegra_service.exe">
-        <RegistryValue Type="string" Value="[INSTALLFOLDER]aegra_service.exe" />
+      <RegistryKey Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\AegraService.exe">
+        <RegistryValue Type="string" Value="[INSTALLFOLDER]AegraService.exe" />
         <RegistryValue Name="Path" Type="string" Value="[INSTALLFOLDER]" />
       </RegistryKey>
-      <RegistryKey Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\aegra_cli.exe">
-        <RegistryValue Type="string" Value="[INSTALLFOLDER]aegra_cli.exe" />
+      <RegistryKey Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\AegraCLI.exe">
+        <RegistryValue Type="string" Value="[INSTALLFOLDER]AegraCLI.exe" />
         <RegistryValue Name="Path" Type="string" Value="[INSTALLFOLDER]" />
       </RegistryKey>
     </Component>

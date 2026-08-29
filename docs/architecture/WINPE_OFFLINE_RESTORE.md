@@ -56,7 +56,7 @@
                                ▼
 ┌────────────────────────────────────────────────────────────────────┐
 │ 阶段 B：WinPE（RAM 启动，X:）                                        │
-│ winpeshl → aegra_pe_restore.exe → 卷扫描定位 Job → 完整读入内存      │
+│ winpeshl → AegraPEResore.exe → 卷扫描定位 Job → 完整读入内存        │
 │ → 解封密码 → 重匹配磁盘身份 → 倒计时 → Restore Pipeline → 写 Result │
 │ → 重启                                                              │
 └──────────────────────────────┬─────────────────────────────────────┘
@@ -117,7 +117,7 @@ Desktop 提交恢复
 ```text
 <data_dir>\pe\
   image\
-    boot.wim              # 已注入 aegra_pe_restore 的定制镜像
+    boot.wim              # 已注入 AegraPEResore 的定制镜像
     boot.sdi              # ramdisk 所需 SDI
     build_id.json         # 缓存失效依据（§6.3）
     mount\                # DISM 临时挂载点（用完必须卸载）
@@ -167,7 +167,7 @@ Idle → Validating → BuildingImage → WritingJob → ArmingBoot → Awaiting
 ### 4.2 PE 内主路径（阶段 B）
 
 ```text
-1. WinPE 启动（X: RAM 盘）；winpeshl 启动 wpeinit（PnP/磁盘栈）再启动 aegra_pe_restore.exe
+1. WinPE 启动（X: RAM 盘）；winpeshl 启动 wpeinit（PnP/磁盘栈）再启动 AegraPEResore.exe
 2. 初始化日志（X: 优先）；枚举物理盘与卷
 3. 卷扫描定位 restore_job.v1.json；校验 schema_version / 产品版本
 4. Job 完整读入内存（在任何破坏性动作之前）
@@ -321,7 +321,7 @@ service 与 pe_restore 共同链接）。写入文件采用 UTF-8、原子替换
 6. 写 mount\Windows\System32\winpeshl.ini：
      [LaunchApps]
      %SYSTEMROOT%\System32\wpeinit.exe
-     %SYSTEMROOT%\System32\Aegra\aegra_pe_restore.exe
+     %SYSTEMROOT%\System32\Aegra\AegraPEResore.exe
 7. dism /Unmount-Wim /MountDir:<mount> /Commit
 8. 写 build_id.json
 ```
@@ -410,8 +410,8 @@ OFFLINE` 会被 partmgr 立即重新联机，`GET_DISK_ATTRIBUTES` 仍显示 onl
 
 ### 9.2 数据面复用：Worker 进程 + 会话协议（实现定稿）
 
-`aegra_pe_restore.exe` **不在进程内重建还原编排**，而是完整照搬 Service↔Worker 的既有
-进程架构：`aegra_personal_worker.exe` 一并注入 WIM，PE 执行器作为 mini-supervisor 通过
+`AegraPEResore.exe` **不在进程内重建还原编排**，而是完整照搬 Service↔Worker 的既有
+进程架构：`AegraWorker.exe` 一并注入 WIM，PE 执行器作为 mini-supervisor 通过
 Worker Session 协议（ADR-0008，命名管道 + 版本化 JSON）下发一个 `disk_restore` Job 并
 接收 Progress/Result 事件。理由：
 

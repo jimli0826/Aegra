@@ -252,7 +252,7 @@ QByteArray encode_upsert_file_set_schedule_request(
     const QList<int>& local_minutes_of_day, const int weekday_mask, const QString& timezone_id,
     const bool exclude_page_and_hibernation_files, const bool /*deduplication_enabled*/,
     const int compression_level, const bool encryption_enabled, const QString& archive_password,
-    const quint32 day_of_month_mask) {
+    const quint32 day_of_month_mask, const bool verify_after_backup) {
     QJsonArray selections;
     for (const auto& item : file_selections) {
         const auto map = item.toMap();
@@ -292,6 +292,7 @@ QByteArray encode_upsert_file_set_schedule_request(
         {QStringLiteral("deduplication_enabled"), false},
         {QStringLiteral("split_size_bytes"), 0},
         {QStringLiteral("compression_level"), compression_level},
+        {QStringLiteral("verify_after_backup"), verify_after_backup},
         {QStringLiteral("encryption_enabled"), encryption_enabled},
         {QStringLiteral("archive_password"), archive_password}};
     return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),

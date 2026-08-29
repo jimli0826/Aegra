@@ -3,7 +3,7 @@
 ## 目标与非目标
 
 `apps/service` 是个人版本地控制面的进程入口和协议 Host。阶段 13B 提供 Desktop 握手和个人版 Repository
-Catalog 分页查询，建立后续任务和策略 API 的稳定入口。本机命令行客户端 `aegra_cli` 使用同一控制 Pipe 与
+Catalog 分页查询，建立后续任务和策略 API 的稳定入口。本机命令行客户端 `AegraCLI.exe` 使用同一控制 Pipe 与
 V4 codec（`aegra_app_service_protocol`），不链接本 Host。
 
 Service Host 负责 framing、并发 dispatch、deadline、会话生命周期、取消收口，以及正式 Windows Service
@@ -68,7 +68,7 @@ src/apps/service/
   Base、Contracts 与 nlohmann-json。Service Host 与 `aegra_cli` 共享，不包含 Host 或数据面。
 - `aegra_app_service` / `Aegra::AppService`：依赖 AppServiceProtocol、Application、Base、Contracts、
   Ports、WindowsIpc；PRIVATE nlohmann-json 与 Advapi32。
-- `aegra_service.exe`：Composition Root，依赖 AppService、SQLite、Local Storage、Windows Disk、
+- `AegraService.exe`：Composition Root，依赖 AppService、SQLite、Local Storage、Windows Disk、
   Windows Filesystem、Windows Process、Windows System 与 Windows IPC Adapter。
 - JSON、Win32、Qt、数据库类型不得进入 Contracts。
 
@@ -83,7 +83,7 @@ Service 默认监听逻辑名称 `control`，实际 Pipe 名称见 [ADR-0011](..
 见 [SERVICE_CONTROL_PROTOCOL_V3](../protocol/SERVICE_CONTROL_PROTOCOL_V3.md)。
 `--once` 只接受一个连接并处理一个请求，用于受控诊断；默认模式在会话断开后继续接受连接。默认模式下
 `run_service_host` 为每个接受的连接分配一个 `std::jthread`（Pipe 为 `PIPE_UNLIMITED_INSTANCES`，每次
-accept 新建实例），因此 Desktop 长连接与 `aegra_cli` 短连接可同时保持会话，互不阻塞；accept 循环回收已结束的
+accept 新建实例），因此 Desktop 长连接与 `AegraCLI.exe` 短连接可同时保持会话，互不阻塞；accept 循环回收已结束的
 会话线程，取消时在 `stop_deadline` 内等待全部会话收口。交互模式（无 `--service`）与 SCM 正式模式共用同一
 `run_service_host`，仅取消源不同。
 
@@ -142,7 +142,7 @@ Pipe/framing/peer close、Service stop 或响应写失败才结束 session。请
 
 - `--data-dir` 接受绝对路径。缺省时 Service 模式使用 `%ProgramData%\Aegra`，交互模式使用
   `%LOCALAPPDATA%\Aegra`；控制面数据库为 `<data-dir>\control-plane.db`。
-- `--worker-path` 接受绝对路径。缺省为 `aegra_service.exe` 同目录的 `aegra_personal_worker.exe`，不回退到
+- `--worker-path` 接受绝对路径。缺省为 `AegraService.exe` 同目录的 `AegraWorker.exe`，不回退到
   当前工作目录。
 - Worker session listener 使用独立 `aegra-worker-*` namespace、1 MiB frame limit 和每 session 一个
   `std::jthread`；Service control pipe 继续使用 Service namespace 与 1 MiB frame limit。
@@ -259,19 +259,24 @@ per-file Archive Credential 映射与 Local Storage 故障恢复验证仍待补�
 - **Browse**：`BrowseFileSources` 经 `FileBrowseService` 组合 Windows `IFileSourceBrowser`；
   Service 铸造短期 opaque token（TTL、pipe session 绑定；**每 session 最多 4096**；
   根列表首页清空该 session 旧 token；断线 `clear_session`）。
-  根节点仅包含带盘符的卷（如 `新加卷 (D:)` / `System (C:)`）；无盘符的系统隐藏分区
-  （EFI/MSR/Recovery 等）不进入树。子节点枚举跳过 `HIDDEN|SYSTEM` 与
+  根节点先包含活动交互用户可映射的 Desktop / Downloads / Documents / Pictures / Music / Videos，
+  再包含存在时的 OneDrive，最后按盘符 A: → Z: 包含卷（如 `Local Disk (A:)` /
+  `System (C:)` / `新加卷 (D:)`）；LocalSystem Service 以活动用户 token 解析
+  Known Folder，不使用 SYSTEM profile。无盘符的系统隐藏分区（EFI/MSR/Recovery 等）不进入树。
+  子节点枚举跳过 `HIDDEN|SYSTEM` 与
   `System Volume Information` / `$RECYCLE.BIN` 等系统保护项。
   **Backup 对齐**：`WindowsFileSnapshotView` 递归枚举同样跳过
   `System Volume Information` 与 `$RECYCLE.BIN`（整卷 file_set 选择时不写入 Archive）。
   `display_name` 为 UTF-8（含中文等非 ASCII 文件名），不再做 ASCII `?` 投影。
 - **Session**：每个 Named Pipe 连接携带 Service 生成的唯一 session id；不读取或认证客户端 SID。
   `UpsertSchedule` 用该 session 解析 file_set selection。
-- **Schedule / Job**：控制面 schema **22**；file_set selections 存 `schedule_file_selections`；
+- **Schedule / Job**：控制面 schema **23**；file_set selections 存 `schedule_file_selections`；
   volume_set 的 `split_size_bytes`（0 或 128 MiB–1 TiB）随 Schedule 持久化并进入幂等指纹，创建后冻结；
   file_set 固定为 0。`compression_level`（zstd 1/3/9，默认 3）同样创建后冻结，两种 content_kind 均可。
   `StartBackup` 按 `content_kind` 构造 schema 4 Worker Job
   （file 路径走 `file_source_refs`，Job `source_ids` 仅为 selection UUID）。
+  `verify_after_backup=true` 时，Backup 成功且 Catalog 发布完成后进入有界 Post Backup 队列；队列提交
+  独立 Verify Job，容量暂满时重试。Verify 失败保留为独立终态，不改写已成功的 Backup Job。
 - **Capabilities**（在 volume 根可用时）：`file.browse`、`schedule.file_set`；F8 另声明
   `file.restore`。
 - **Catalog 发布**：`BackupCatalogRegistrar` 按 `content_kind` 写 Catalog V2（file_set 无 sidecar /
@@ -290,7 +295,9 @@ per-file Archive Credential 映射与 Local Storage 故障恢复验证仍待补�
 - **凭证**：先空口令；失败且 connection 声明 `archive.default_credential` 时使用 connection
   SecretRef；请求可带 `archive_secret_ref`。
 - **Verify**：file_set `prepare_verify` 注入 base-first `source_refs`（全链）与匹配
-  `credential_refs`；Worker 经 chain reader 做可恢复性 Verify。
+  `credential_refs`；Worker 经 chain reader 做可恢复性 Verify。volume_set 按同一凭证顺序：
+  先空口令探测（未加密 Archive 直接空凭据），仅加密 Archive 在 connection 声明
+  `archive.default_credential` 时使用 connection SecretRef，否则返回 `archive.credential_required`。
 
 ### F8 / FI8：文件选择性恢复
 

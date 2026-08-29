@@ -52,6 +52,10 @@ Item {
         id: specialVideosIconComponent
         SpecialFolderIcon { size: 16; variant: "videos" }
     }
+    Component {
+        id: specialOneDriveIconComponent
+        SpecialFolderIcon { size: 16; variant: "onedrive" }
+    }
 
     /// Volume roots look like "Label (C:)" / "C:"; special folders use fixed English labels.
     function isVolumeRootLabel(name) {
@@ -66,6 +70,7 @@ Item {
         case "pictures": return specialPicturesIconComponent
         case "music": return specialMusicIconComponent
         case "videos": return specialVideosIconComponent
+        case "onedrive": return specialOneDriveIconComponent
         default: return null
         }
     }
@@ -676,6 +681,7 @@ Item {
                                           ? s2.selectedSplitSizeBytes() : 0)
         var compressionLevel = s2 && typeof s2.selectedCompressionLevel === "function"
                                ? s2.selectedCompressionLevel() : 3
+        var verifyAfterBackup = s2 ? !!s2.verifyAfterBackup : false
         var encryption = s2 ? s2.encryption : false
         var password = s2 ? (s2.password || "") : ""
         var passwordConfirm = s2 ? (s2.passwordConfirm || "") : ""
@@ -702,6 +708,7 @@ Item {
             enableDedup: enableDedup,
             splitSizeBytes: splitSizeBytes,
             compressionLevel: compressionLevel,
+            verifyAfterBackup: verifyAfterBackup,
             encryption: encryption,
             password: encryption ? password : ""
         }
@@ -720,13 +727,14 @@ Item {
             ok = serviceClient.createFileSetSchedule(p.connId, p.frequency, p.timeOfDay,
                                                      p.excludePage, p.compressionLevel || 3,
                                                      p.encryption, p.password,
-                                                     !!startFirstBackup, mask, monthMask)
+                                                     !!startFirstBackup, mask, monthMask,
+                                                     !!p.verifyAfterBackup)
         } else {
             ok = serviceClient.createSchedule(p.sources, p.connId, p.frequency, p.timeOfDay,
                                               p.excludePage, !!p.enableDedup,
                                               p.splitSizeBytes || 0, p.compressionLevel || 3,
                                               p.encryption, p.password, !!startFirstBackup, mask,
-                                              monthMask)
+                                              monthMask, !!p.verifyAfterBackup)
         }
         if (!ok) {
             //% "Could not save schedule"
@@ -830,6 +838,7 @@ Item {
         var dedup = item.deduplicationEnabled !== false
         var splitSizeBytes = item.splitSizeBytes || 0
         var compressionLevel = item.compressionLevel || 3
+        var verifyAfterBackup = s2 ? !!s2.verifyAfterBackup : !!item.verifyAfterBackup
         var encryption = !!item.encryptionEnabled
         var sourceIds = serviceClient.sourceIdsForSchedule(sid)
         if (!sourceIds || sourceIds.length === 0)
@@ -842,12 +851,13 @@ Item {
         if (root.backupMode === "files") {
             ok = serviceClient.updateFileSetSchedule(sid, displayName, enabled, connId, frequency,
                                                      timeOfDay, exclude, compressionLevel,
-                                                     encryption, weekdayMask, dayOfMonthMask)
+                                                     encryption, weekdayMask, dayOfMonthMask,
+                                                     verifyAfterBackup)
         } else {
             ok = serviceClient.upsertSchedule(sid, displayName, enabled, sourceIds,
                                               connId, frequency, timeOfDay, exclude, dedup,
                                               splitSizeBytes, compressionLevel, encryption, "", 2,
-                                              weekdayMask, dayOfMonthMask)
+                                              weekdayMask, dayOfMonthMask, verifyAfterBackup)
         }
         if (!ok) {
             serviceClient.showToast(qsTrId("aegra.backup.schedule.update_failed"), true)
@@ -2301,13 +2311,10 @@ Item {
 
         Rectangle {
             id: wizardPanel
-            // Vertical inset only: clear main caption above, gap at bottom.
-            // Flush to the right edge (no right margin).
-            readonly property int bottomInset: 0
-            readonly property int topInset: 48
+            // Match the scrim vertically and remain flush with the right edge.
+            anchors.top: wizardScrim.top
+            anchors.bottom: wizardScrim.bottom
             width: Math.max(520, Math.min(parent.width * 0.92, parent.width))
-            height: parent.height - topInset - bottomInset
-            y: topInset
             // Off-canvas when closed; slide in flush to the right when open.
             x: root.wizardOpen ? (parent.width - width) : parent.width
             gradient: Gradient {
@@ -3326,11 +3333,6 @@ Item {
                                                     return (modelData && modelData.path)
                                                            ? modelData.path : ""
                                                 }
-                                                readonly property bool locDefault: {
-                                                    if (liveModel)
-                                                        return !!model.isDefault
-                                                    return !!(modelData && modelData.isDefault)
-                                                }
                                                 readonly property bool locAvailable: {
                                                     if (liveModel)
                                                         return !!model.isAvailable
@@ -3410,30 +3412,19 @@ Item {
                                                             elide: Text.ElideMiddle
                                                             visible: locRow.locPath.length > 0
                                                         }
-                                                        Text {
-                                                            width: parent.width
-                                                            text: locRow.locState
-                                                            color: locRow.locAvailable ? Theme.colorGreen : Theme.colorAccentRed
-                                                            font.pixelSize: 10
-                                                            font.family: Theme.fontFamily
-                                                            visible: locRow.locState.length > 0
-                                                        }
                                                     }
 
                                                     Text {
-                                                        text: locRow.locDefault
-                                                              ? "\u2605" : "\u2606"
-                                                        color: locRow.locDefault
-                                                               ? Theme.colorAccentBlue
-                                                               : Theme.colorTextDim
-                                                        font.pixelSize: 14
-                                                        opacity: 0.85
-                                                    }
-                                                    Text {
-                                                        text: "\uD83D\uDDD1"
-                                                        color: Theme.colorTextDim
-                                                        font.pixelSize: 13
-                                                        opacity: 0.5
+                                                        Layout.alignment: Qt.AlignVCenter
+                                                        Layout.maximumWidth: 100
+                                                        text: locRow.locState
+                                                        color: locRow.locAvailable
+                                                               ? Theme.colorGreen
+                                                               : Theme.colorAccentRed
+                                                        font.pixelSize: 10
+                                                        font.family: Theme.fontFamily
+                                                        elide: Text.ElideRight
+                                                        visible: locRow.locState.length > 0
                                                     }
                                                 }
 

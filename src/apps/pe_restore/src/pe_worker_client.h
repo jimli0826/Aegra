@@ -28,7 +28,7 @@ struct PeWorkerOutcome final {
 
 struct PeWorkerSessionRequest final {
     contracts::JobRequest job;
-    /// Absolute path of aegra_personal_worker.exe (injected beside this executable).
+    /// Absolute path of AegraWorker.exe (injected beside this executable).
     std::string worker_executable_path_utf8;
     ports::IProcessLauncher* launcher{nullptr};
     ports::IRandomSource* random{nullptr};
@@ -36,7 +36,7 @@ struct PeWorkerSessionRequest final {
     std::function<void(const PeWorkerProgress&)> on_progress;
 };
 
-/// Runs one restore job through aegra_personal_worker.exe over the worker session
+/// Runs one restore job through AegraWorker.exe over the worker session
 /// protocol (ADR-0008), exactly like the service supervisor: listen on a random
 /// named pipe, spawn `--pipe <name>`, send the job, forward progress events, and
 /// return the terminal outcome. Blocking; returns after the worker process exits.

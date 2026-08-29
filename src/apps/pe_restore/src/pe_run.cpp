@@ -231,7 +231,7 @@ struct FlowState final {
         return {};
     }
     path.resize(separator + 1);
-    path += L"aegra_personal_worker.exe";
+    path += L"AegraWorker.exe";
     const auto required = WideCharToMultiByte(CP_UTF8, 0, path.c_str(), -1, nullptr, 0, nullptr,
                                               nullptr);
     if (required <= 0) {

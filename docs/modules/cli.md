@@ -2,7 +2,7 @@
 
 ## 目标与非目标
 
-`apps/cli` 是本机 Management Service 的命令行客户端（`aegra_cli.exe` / AegraCli）。它只通过版本化 Service 控制协议与 `aegra_service` 交互，用于运维与诊断：列出 Schedule / Job / Repository、立即运行备份任务、取消或等待 Job。
+`apps/cli` 是本机 Management Service 的命令行客户端（`AegraCLI.exe`）。它只通过版本化 Service 控制协议与 `AegraService.exe` 交互，用于运维与诊断：列出 Schedule / Job / Repository、立即运行备份任务、取消或等待 Job。
 
 非目标：
 
@@ -21,7 +21,7 @@ JSON codec 与 Service Host 共享 `aegra_app_service_protocol`，避免 CLI 复
 
 ## 公共接口
 
-进程入口：`aegra_cli [global-options] <noun> <verb> [options]`
+进程入口：`AegraCLI [global-options] <noun> <verb> [options]`
 
 | 命令 | Service kind | 说明 |
 | --- | ---: | --- |

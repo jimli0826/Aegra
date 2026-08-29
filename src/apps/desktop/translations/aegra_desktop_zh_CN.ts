@@ -2748,9 +2748,9 @@
         <source>Local Disk Overview</source>
         <translation>本机磁盘概览</translation>
     </message>
-    <message id="aegra.home.card.new_plan">
-        <source>New Backup Plan</source>
-        <translation>新建备份计划</translation>
+    <message id="aegra.home.card.backup_now">
+        <source>Backup Now</source>
+        <translation>立即备份</translation>
     </message>
     <message id="aegra.home.card.active_mounts">
         <source>Active Mounts</source>
@@ -2953,6 +2953,14 @@ for critical volumes now</source>
     <message id="aegra.licenses.licensed_under">
         <source>Licensed under</source>
         <translation>开源协议：</translation>
+    </message>
+    <message id="aegra.backup.post.title">
+        <source>Post Backup</source>
+        <translation>备份后操作</translation>
+    </message>
+    <message id="aegra.backup.post.verify">
+        <source>Enable verify</source>
+        <translation>启用校验</translation>
     </message>
 </context>
 </TS>

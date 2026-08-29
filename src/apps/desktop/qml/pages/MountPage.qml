@@ -31,6 +31,11 @@ Item {
     property var driveLetterModel: []
     property int driveLetterModelEpoch: 0
 
+    function restartEntranceAnimation() {
+        sourceCardEnter.restart()
+        mountedCardEnter.restart()
+    }
+
     readonly property var sourceDisks: serviceClient.recoveryPointSourceDisks
     readonly property bool sourceLayoutLoading: serviceClient.recoveryPointLayoutLoading
     /// 1 = volume_set, 2 = file_set (from the selected checkpoint item).
@@ -719,7 +724,7 @@ Item {
             radius: 10
             color: rowRoot.checked || sourceRowHover.hovered
                    ? Theme.colorHover : "transparent"
-            border.width: rowRoot.checked ? 1 : 0
+            border.width: 0
             border.color: Theme.colorAccentBlue
         }
 
@@ -816,7 +821,7 @@ Item {
                     id: partsRow
                     anchors.fill: parent
                     anchors.margins: 1
-                    spacing: 0
+                    spacing: 2
                     property var segmentWidths: root.partitionBarWidths(
                                                     rowRoot.displayVolumes,
                                                     partsRow.width,
@@ -831,7 +836,6 @@ Item {
                             property bool isNotBackedUp: modelData
                                                          && modelData.notBackedUp === true
                             property bool isHatchStyle: isUnalloc || isNotBackedUp
-                            property color volumeBaseColor: Theme.volumeColor(index)
                             property real usedRatio: {
                                 if (isHatchStyle || !modelData)
                                     return -1
@@ -857,13 +861,13 @@ Item {
                             color: {
                                 if (isHatchStyle)
                                     return Theme.colorUnallocated
-                                var c = volumeBaseColor
-                                var a = usedRatio >= 0 ? 0.35 : 0.92
+                                var c = Theme.colorAccentBlue
+                                var a = usedRatio >= 0 ? 0.20 : 0.45
                                 return Qt.rgba(c.r, c.g, c.b, a)
                             }
                             border.width: 1
-                            border.color: Theme.colorBorder
-                            clip: true
+                            border.color: Theme.colorAccentBlue
+                            clip: false
 
                             Rectangle {
                                 visible: !isHatchStyle && usedRatio > 0
@@ -871,7 +875,10 @@ Item {
                                 anchors.top: parent.top
                                 anchors.bottom: parent.bottom
                                 width: Math.round(parent.width * Math.min(1, usedRatio))
-                                color: volumeBaseColor
+                                color: {
+                                    var c = Theme.colorAccentBlue
+                                    return Qt.rgba(c.r, c.g, c.b, 0.72)
+                                }
                                 z: 0
                             }
 
@@ -1002,20 +1009,27 @@ Item {
                     border.width: 1
                     border.color: Theme.colorBorder
                     opacity: 0
-                    transform: Translate { id: sourceCardShift; y: 14 }
-                    Component.onCompleted: sourceCardEnter.restart()
+                    scale: 0.95
+                    transform: Translate { id: sourceCardShift; y: 36 }
                     SequentialAnimation {
                         id: sourceCardEnter
                         ParallelAnimation {
                             NumberAnimation {
                                 target: sourceCard; property: "opacity"
-                                from: 0; to: 1; duration: 280
+                                from: 0; to: 1; duration: 380
                                 easing.type: Easing.OutCubic
                             }
                             NumberAnimation {
                                 target: sourceCardShift; property: "y"
-                                from: 14; to: 0; duration: 280
-                                easing.type: Easing.OutCubic
+                                from: 36; to: 0; duration: 520
+                                easing.type: Easing.OutBack
+                                easing.overshoot: 1.25
+                            }
+                            NumberAnimation {
+                                target: sourceCard; property: "scale"
+                                from: 0.95; to: 1; duration: 520
+                                easing.type: Easing.OutBack
+                                easing.overshoot: 1.25
                             }
                         }
                     }
@@ -1245,8 +1259,8 @@ Item {
                 Item {
                     id: diskSplitter
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 5
-                    Layout.minimumHeight: 5
+                    Layout.preferredHeight: 12
+                    Layout.minimumHeight: 12
                     z: 2
                     Rectangle {
                         anchors.centerIn: parent
@@ -1297,21 +1311,28 @@ Item {
                     border.width: 1
                     border.color: Theme.colorBorder
                     opacity: 0
-                    transform: Translate { id: mountedCardShift; y: 14 }
-                    Component.onCompleted: mountedCardEnter.restart()
+                    scale: 0.95
+                    transform: Translate { id: mountedCardShift; y: 36 }
                     SequentialAnimation {
                         id: mountedCardEnter
-                        PauseAnimation { duration: 90 }
+                        PauseAnimation { duration: 180 }
                         ParallelAnimation {
                             NumberAnimation {
                                 target: mountedCard; property: "opacity"
-                                from: 0; to: 1; duration: 280
+                                from: 0; to: 1; duration: 380
                                 easing.type: Easing.OutCubic
                             }
                             NumberAnimation {
                                 target: mountedCardShift; property: "y"
-                                from: 14; to: 0; duration: 280
-                                easing.type: Easing.OutCubic
+                                from: 36; to: 0; duration: 520
+                                easing.type: Easing.OutBack
+                                easing.overshoot: 1.25
+                            }
+                            NumberAnimation {
+                                target: mountedCard; property: "scale"
+                                from: 0.95; to: 1; duration: 520
+                                easing.type: Easing.OutBack
+                                easing.overshoot: 1.25
                             }
                         }
                     }
@@ -1821,12 +1842,18 @@ Item {
     }
 
     Component.onCompleted: {
+        root.restartEntranceAnimation()
         root.refreshDriveLetterModel()
         if (serviceClient.connected) {
             serviceClient.refreshRepository()
             serviceClient.refreshMountSessions()
             root.ensureSourceLayout()
         }
+    }
+
+    onVisibleChanged: {
+        if (visible)
+            root.restartEntranceAnimation()
     }
 
     Connections {

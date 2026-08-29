@@ -841,12 +841,13 @@ base::Result<ports::ScheduleRecord> read_schedule(sqlite3_stmt* const stmt) {
     record.deduplication_enabled = sqlite3_column_int(stmt, 14) != 0;
     record.split_size_bytes = column_uint64(stmt, 15);
     record.compression_level = sqlite3_column_int(stmt, 16);
-    record.encryption_enabled = sqlite3_column_int(stmt, 17) != 0;
-    record.archive_password_protected = column_text_required(stmt, 18);
-    record.backup_set_uuid = column_text_required(stmt, 19);
-    record.last_recovery_point_id = column_text_optional(stmt, 20);
-    record.created_utc_ms = column_uint64(stmt, 21);
-    record.updated_utc_ms = column_uint64(stmt, 22);
+    record.verify_after_backup = sqlite3_column_int(stmt, 17) != 0;
+    record.encryption_enabled = sqlite3_column_int(stmt, 18) != 0;
+    record.archive_password_protected = column_text_required(stmt, 19);
+    record.backup_set_uuid = column_text_required(stmt, 20);
+    record.last_recovery_point_id = column_text_optional(stmt, 21);
+    record.created_utc_ms = column_uint64(stmt, 22);
+    record.updated_utc_ms = column_uint64(stmt, 23);
     // file_selections loaded by schedule store after read when content_kind is file_set.
     auto valid = validate_schedule_record(record);
     if (!valid && record.content_kind == contracts::ContentKind::kFileSet &&
@@ -1027,6 +1028,7 @@ contracts::ScheduleSummary to_schedule_summary(const ports::ScheduleRecord& reco
     summary.deduplication_enabled = record.deduplication_enabled;
     summary.split_size_bytes = record.split_size_bytes;
     summary.compression_level = record.compression_level;
+    summary.verify_after_backup = record.verify_after_backup;
     summary.encryption_enabled = record.encryption_enabled;
     return summary;
 }

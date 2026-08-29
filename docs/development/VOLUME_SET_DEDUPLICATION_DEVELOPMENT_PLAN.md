@@ -477,10 +477,10 @@ aegra_desktop
   - `cmake/CheckSourceLimits.cmake` Debug/Release 均通过
   - `git diff --check` 无 conflict marker；仅 CRLF 规范化警告
 - 生产构建结果（VS 2026 Insiders + Qt 6.8.3）:
-  - **Debug** `vs2026-debug`: `aegra_desktop.exe`、`aegra_service.exe`、
-    `aegra_personal_worker.exe` 等全量目标成功
-  - **Release** `vs2026-release` + Desktop 选项: `aegra_desktop.exe`、
-    `aegra_service.exe`、`aegra_personal_worker.exe` 成功
+  - **Debug** `vs2026-debug`: `AegraImage.exe`、`AegraService.exe`、
+    `AegraWorker.exe` 等全量目标成功
+  - **Release** `vs2026-release` + Desktop 选项: `AegraImage.exe`、
+    `AegraService.exe`、`AegraWorker.exe` 成功
 - 人工矩阵 D01-D20: **未在本会话执行**（需隔离非生产卷/Repository）；
   代码路径与文档已对齐 ADR-0022，运行时验收列为残余工作
 - 最终 DoD 代码侧: 已满足；运行时矩阵与 UI 走查为残余人工项

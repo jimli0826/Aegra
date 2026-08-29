@@ -1,6 +1,6 @@
 # `apps/pe_restore` 模块开发文档
 
-WinPE 内的最小离线恢复执行器（`aegra_pe_restore.exe`，Win32 子系统，全屏深色 UI）。
+WinPE 内的最小离线恢复执行器（`AegraPEResore.exe`，Win32 子系统，全屏深色 UI）。
 设计权威：[WinPE 离线系统盘恢复设计](../architecture/WINPE_OFFLINE_RESTORE.md) §9、
 [ADR-0026](../adr/0026-winpe-offline-restore-and-secret-envelope.md)。当前状态为 **PE3 交付**。
 
@@ -10,20 +10,20 @@ WinPE 内消费其写下的 Pending Job。
 ## 目标与非目标
 
 - 目标：读取跨重启 Pending Job，解封密码，重匹配目标磁盘身份，经 Worker Session 协议
-  驱动 `aegra_personal_worker.exe` 完成整盘恢复，写回 Result 并重启。
+  驱动 `AegraWorker.exe` 完成整盘恢复，写回 Result 并重启。
 - 非目标：链解析（在线定稿）、还原数据面（Worker 进程内）、配置中心（参数全部来自 Job）。
 
 ## 进程架构（mini-supervisor）
 
 ```text
-winpeshl → wpeinit → aegra_pe_restore.exe
+winpeshl → wpeinit → AegraPEResore.exe
                         │ 卷扫描定位 restore_job.v1.json → 完整读入内存
                         │ 信封解封（sealed）/ 交互输入（prompt）→ consume_job_key
                         │ 序列号+容量重匹配 PhysicalDriveN（0/多命中即拒绝）
                         │ 密码 → DPAPI(machine, 本 PE 会话) → dpapi-lm SecretRef
                         ▼
              监听随机命名管道（kWorker 命名空间，1 MiB 帧）
-                        │ spawn aegra_personal_worker.exe --pipe <name>
+                        │ spawn AegraWorker.exe --pipe <name>
                         │ send JobRequest(schema 4, disk_restore,
                         │      bring_target_online=false, require_source_size)
                         │ recv Progress* → UI 进度；recv Result → 终态
@@ -69,7 +69,7 @@ AdapterWindowsIpc、AdapterWindowsProcess、AdapterWindowsSystem、nlohmann-json
 显式必选清单（`PeRestoreJobService` 的 `kPayloadCandidates`），缺任一文件则 kind 51
 Arm 以 `kNotFound` 失败，不进入 DISM。不做隐式发现，不注入 debug CRT / zlib：
 
-- 执行器：`aegra_pe_restore.exe`、`aegra_personal_worker.exe`
+- 执行器：`AegraPEResore.exe`、`AegraWorker.exe`
 - vcpkg：`libsodium.dll`、`zstd.dll`
 - MSVC CRT：`vcruntime140.dll`、`vcruntime140_1.dll`、`msvcp140.dll`、
   `msvcp140_1.dll`、`msvcp140_2.dll`、`msvcp140_atomic_wait.dll`、

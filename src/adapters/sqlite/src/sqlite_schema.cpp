@@ -92,6 +92,8 @@ CREATE TABLE IF NOT EXISTS schedules (
                split_size_bytes BETWEEN 134217728 AND 1099511627776),
     compression_level INTEGER NOT NULL DEFAULT 3
         CHECK (compression_level IN (1, 3, 9)),
+    verify_after_backup INTEGER NOT NULL DEFAULT 0
+        CHECK (verify_after_backup IN (0, 1)),
     encryption_enabled INTEGER NOT NULL DEFAULT 0
         CHECK (encryption_enabled IN (0, 1)),
     archive_password_protected TEXT NOT NULL DEFAULT '',

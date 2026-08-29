@@ -1750,6 +1750,22 @@ entries = [
     ("aegra.backup.comp.normal", "Normal", "标准", "標準", "標準", "Normal"),
     ("aegra.backup.comp.high", "High", "高", "高", "高", "Hoch"),
     (
+        "aegra.backup.post.title",
+        "Post Backup",
+        "备份后操作",
+        "備份後操作",
+        "バックアップ後",
+        "Nach der Sicherung",
+    ),
+    (
+        "aegra.backup.post.verify",
+        "Enable verify",
+        "启用校验",
+        "啟用驗證",
+        "検証を有効にする",
+        "Überprüfung aktivieren",
+    ),
+    (
         "aegra.backup.column.status",
         "Status",
         "状态",

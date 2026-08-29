@@ -30,12 +30,26 @@ Validate Verify Job
 `VerifyPipeline` 负责 descriptor 稳定性、非重叠顺序、payload 大小、取消和进度。增量层允许合法空洞，
 因此 Pipeline 不要求 Chunk 覆盖整个逻辑卷。
 
+Schedule 的 `verify_after_backup` 是 Service 编排策略：Backup 成功并完成 Catalog 发布后，Service 以
+确定性幂等键 `post-backup-verify:<backup job_id>:<file_uuid>`（稳定标识符字符集，区别于含 `|` 的
+request fingerprint）提交独立 Verify Job。容量暂满由有界 dispatcher 重试；提交失败在 Service
+`error.log` 记录错误码与脱敏 detail。Verify 失败单独记录，不回滚或隐藏已提交 Archive。file_set 使用
+Catalog 解析出的 base-first 完整链；未加密备份沿用空凭据（空口令）。
+
+## 任务日志
+
+每个已接受的 Verify Job（包括 Post Backup Verify）都通过 `WorkerTaskLog` 写入独立日志：
+`<data_dir>/logs/verify/YYYYMMDD_HHMMSS[_job-id].log`。日志包含 Job/Request、逐阶段开始与结果，以及
+成功、失败或取消的 `[Result]` 汇总；不得记录密码、SecretRef 或凭据材料。volume_set 与 file_set
+使用同一目录和格式，file_set 额外记录层数、tip entry/stream 数及完整链校验字节数。
+
 ## Job 与结果
 
 - `operation = kVerify`；
 - `source_refs` 恰好包含一个 `.bkf` 路径；
 - `target_ref` 必须为空，因为 Verify 不产生数据目标；
-- `credential_refs` 恰好包含一个口令 SecretRef；
+- `credential_refs` 恰好包含一个口令 SecretRef；空 SecretRef 表示未加密 Archive（空口令），
+  与 Restore 和 file_set Verify 的约定一致；
 - 成功结果使用 `verify.completed`，失败和取消使用稳定的 `verify.*` message code；
 - `logical_bytes` 表示 Archive 描述的源逻辑容量，`stored_bytes` 表示本次成功解码验证的逻辑 payload
   字节，`chunk_count` 表示完成验证的 Chunk 数量。

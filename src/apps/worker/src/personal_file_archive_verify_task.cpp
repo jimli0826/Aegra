@@ -203,6 +203,7 @@ void log_verify_success(WorkerTaskLog* log, const contracts::TaskResult& result,
         std::chrono::steady_clock::now() - started);
     log->section("Result");
     log->field("outcome", "succeeded");
+    log->field("message_code", result.message_code);
     log->field_u64("layers", totals.layer_count);
     log->field_u64("tip_entries", totals.tip_entry_count);
     log->field_u64("tip_streams", totals.tip_stream_count);
@@ -211,16 +212,51 @@ void log_verify_success(WorkerTaskLog* log, const contracts::TaskResult& result,
     log->field("elapsed", format_duration_ms(elapsed));
 }
 
+void log_verify_failure(WorkerTaskLog* log, const contracts::TaskResult& result,
+                        const base::Error& error,
+                        const std::chrono::steady_clock::time_point started) {
+    if (log == nullptr) {
+        return;
+    }
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started);
+    log->section("Result");
+    log->field("outcome",
+               result.outcome == contracts::TaskOutcome::kCancelled ? "cancelled" : "failed");
+    log->field("message_code", result.message_code);
+    log->field("error_code", base::error_code_name(error.code));
+    if (!error.message.empty()) {
+        log->field("error_message", error.message);
+    }
+    const auto hint = verify_hint_for(error.code, error.message);
+    if (!hint.empty()) {
+        log->field("hint", hint);
+    }
+    log->field("elapsed", format_duration_ms(elapsed));
+}
+
 [[nodiscard]] base::Result<contracts::TaskResult>
-run_file_set_verify(const contracts::JobRequest& job, const WindowsPersonalBackupTaskOptions& options,
-                    const WindowsPersonalBackupTaskContext& context,
-                    const base::CancellationToken& cancellation) {
+failed_verify_result(const contracts::JobRequest& job, const base::Error& error, WorkerTaskLog* log,
+                     const std::chrono::steady_clock::time_point started) {
+    auto result = validated_result(failed_result(job, error.code));
+    if (result) {
+        log_verify_failure(log, result.value(), error, started);
+    }
+    return result;
+}
+
+[[nodiscard]] base::Result<contracts::TaskResult> run_file_set_verify(
+    const contracts::JobRequest& job, const WindowsPersonalBackupTaskOptions& options,
+    const WindowsPersonalBackupTaskContext& context, const base::CancellationToken& cancellation) {
     auto task_log = WorkerTaskLog::open("verify", job.job_id);
+    WorkerTaskLogScope log_scope(task_log.get());
     const auto started = std::chrono::steady_clock::now();
     log_verify_request(task_log.get(), job, options);
     if (cancellation.stop_requested() ||
         (job.deadline_utc_ms > 0 && context.clock.now_utc_ms() >= job.deadline_utc_ms)) {
-        return validated_result(failed_result(job, base::ErrorCode::kCancelled));
+        const base::Error error{base::ErrorCode::kCancelled,
+                                "file_set verify cancelled before start"};
+        return failed_verify_result(job, error, task_log.get(), started);
     }
     publish_progress(job, context.progress, contracts::TaskPhase::kPreparing, 0, 0,
                      "verify.preparing");
@@ -232,7 +268,7 @@ run_file_set_verify(const contracts::JobRequest& job, const WindowsPersonalBacku
         if (!resolved) {
             stage.fail(resolved.error(), "resolve_secret",
                        verify_hint_for(resolved.error().code, resolved.error().message));
-            return validated_result(failed_result(job, resolved.error().code));
+            return failed_verify_result(job, resolved.error(), task_log.get(), started);
         }
         stage.note_u64("layers", resolved.value().size());
         secrets = std::move(resolved).value();
@@ -257,7 +293,7 @@ run_file_set_verify(const contracts::JobRequest& job, const WindowsPersonalBacku
         if (!opened) {
             stage.fail(opened.error(), "PersonalFileArchiveChainReader::open",
                        verify_hint_for(opened.error().code, opened.error().message));
-            return validated_result(failed_result(job, opened.error().code));
+            return failed_verify_result(job, opened.error(), task_log.get(), started);
         }
         chain = std::move(opened).value();
         stage.note_u64("layers", chain->layer_count());
@@ -278,7 +314,7 @@ run_file_set_verify(const contracts::JobRequest& job, const WindowsPersonalBacku
         if (!verified) {
             stage.fail(verified.error(), "verify_recoverability",
                        verify_hint_for(verified.error().code, verified.error().message));
-            return validated_result(failed_result(job, verified.error().code));
+            return failed_verify_result(job, verified.error(), task_log.get(), started);
         }
         totals = std::move(verified).value();
         stage.note_u64("layers", totals.layer_count);

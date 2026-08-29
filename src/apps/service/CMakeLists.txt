@@ -1,6 +1,6 @@
 find_package(nlohmann_json CONFIG REQUIRED)
 
-# Wire codec only: Service Host and AegraCli share this library. It must not
+# Wire codec only: Service Host and AegraCLI share this library. It must not
 # depend on Application, SQLite, Worker, or Windows data-plane adapters.
 add_library(aegra_app_service_protocol STATIC
     src/service_protocol.cpp
@@ -28,6 +28,7 @@ add_library(aegra_app_service STATIC
     src/network_share_access.cpp
     src/pe_restore_job_service.cpp
     src/pe_secret_sealer.cpp
+    src/post_backup_verifier.cpp
     src/recovery_point_layout_service.cpp
     src/schedule_engine.cpp
     src/schedule_next_run.cpp
@@ -98,6 +99,7 @@ target_link_libraries(
             Aegra::AdapterWindowsPe Aegra::AdapterWindowsProcess Aegra::AdapterWindowsSystem
             Aegra::ThirdPartySpdlog Shell32
 )
+set_target_properties(aegra_service PROPERTIES OUTPUT_NAME "AegraService")
 aegra_configure_target(aegra_service)
 aegra_add_version_resource(aegra_service "Aegra Image Service")
 
@@ -116,7 +118,7 @@ if(MSVC)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     "${aegra_crt_dll}"
                     "$<TARGET_FILE_DIR:aegra_service>"
-            COMMENT "Copy MSVC runtime ${aegra_crt_dll} beside aegra_service"
+            COMMENT "Copy MSVC runtime ${aegra_crt_dll} beside AegraService"
         )
     endforeach()
 endif()

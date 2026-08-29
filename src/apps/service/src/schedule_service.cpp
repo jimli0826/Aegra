@@ -161,6 +161,8 @@ make_canonical_uuid(ports::IRandomSource& random, const base::CancellationToken&
     fingerprint += "|";
     fingerprint += std::to_string(command.compression_level);
     fingerprint += "|";
+    fingerprint += command.verify_after_backup ? "1" : "0";
+    fingerprint += "|";
     fingerprint += command.encryption_enabled ? "1" : "0";
     fingerprint += "|pwd:";
     fingerprint += password_digest_token(command.archive_password);
@@ -465,6 +467,7 @@ base::Result<contracts::CommandAcknowledgement> ScheduleService::upsert_schedule
         record.split_size_bytes = command.split_size_bytes;
     }
     record.compression_level = command.compression_level;
+    record.verify_after_backup = command.verify_after_backup;
     record.encryption_enabled = command.encryption_enabled;
     record.archive_password_protected = std::move(archive_password_protected);
     record.backup_set_uuid = std::move(backup_set_uuid);

@@ -48,6 +48,10 @@ Item {
         id: restoreSpecialVideosIcon
         SpecialFolderIcon { size: 16; variant: "videos" }
     }
+    Component {
+        id: restoreSpecialOneDriveIcon
+        SpecialFolderIcon { size: 16; variant: "onedrive" }
+    }
 
     function isVolumeRootLabel(name) {
         var text = String(name || "")
@@ -62,6 +66,7 @@ Item {
             case "pictures": return restoreSpecialPicturesIcon
             case "music": return restoreSpecialMusicIcon
             case "videos": return restoreSpecialVideosIcon
+            case "onedrive": return restoreSpecialOneDriveIcon
             default:
                 return isVolumeRootLabel(displayName)
                        ? restoreVolumeIconComponent
@@ -3178,7 +3183,7 @@ Item {
                         id: partsRow
                         anchors.fill: parent
                         anchors.margins: 1
-                        spacing: 0
+                        spacing: 2
                         // Recomputed when the bar resizes or volumes change.
                         property var segmentWidths: root.partitionBarWidths(
                                                         rowRoot.displayVolumes,
@@ -3248,7 +3253,8 @@ Item {
                                     var a = usedRatio >= 0 ? 0.20 : 0.45
                                     return Qt.rgba(c.r, c.g, c.b, a)
                                 }
-                                border.width: 0
+                                border.width: 1
+                                border.color: Theme.colorAccentBlue
                                 // Keep used-fill clipped; edge grips sit on the outer boundary.
                                 clip: false
 

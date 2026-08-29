@@ -51,7 +51,7 @@ Item {
         return (logical / stored).toFixed(2) + " : 1"
     }
 
-    /// Volumes with a mount letter from the inventory tree, capped for the overview card.
+    /// Volumes with a mount letter from the inventory tree.
     readonly property var homeVolumes: {
         var out = []
         var protectedIds = {}
@@ -62,10 +62,10 @@ Item {
                 protectedIds[ids[j]] = true
         }
         var tree = serviceClient.sources.disksTree
-        for (var d = 0; d < tree.length && out.length < 4; d++) {
+        for (var d = 0; d < tree.length; d++) {
             var disk = tree[d]
             var volumes = disk.volumes
-            for (var v = 0; v < volumes.length && out.length < 4; v++) {
+            for (var v = 0; v < volumes.length; v++) {
                 var volume = volumes[v]
                 if (!volume.letter)
                     continue
@@ -84,6 +84,8 @@ Item {
         }
         return out
     }
+    readonly property var overviewVolumes: homeVolumes.slice(0, 3)
+    readonly property bool hasMoreOverviewVolumes: homeVolumes.length > overviewVolumes.length
 
     function frequencyText(frequency) {
         var f = (frequency || "").toLowerCase()
@@ -193,7 +195,8 @@ Item {
 
     // Paired row heights so left/right column cards line up.
     readonly property real contentRow1Height:
-        Math.max(186, 70 + Math.max(1, homeVolumes.length) * 58)
+        Math.max(186, 70 + Math.max(1, overviewVolumes.length) * 58
+                 + (hasMoreOverviewVolumes ? 20 : 0))
     readonly property real contentRow2Height:
         Math.max(66 + Math.max(1, serviceClient.jobs.activeCount) * 66,
                  70 + Math.max(1, serviceClient.mountSessions.length) * 54)
@@ -355,6 +358,55 @@ Item {
             font.pixelSize: 10
             font.bold: true
             font.family: Theme.fontFamily
+        }
+    }
+
+    // Compact endpoint used by the next-schedule flow. The flexible width and
+    // elided label keep both endpoints inside the narrow dashboard column.
+    component BackupEndpoint: Rectangle {
+        id: endpoint
+        property string iconName: "hard_drive"
+        property string label: ""
+
+        Layout.fillWidth: true
+        Layout.minimumWidth: 0
+        Layout.preferredWidth: 1
+        implicitHeight: 54
+        radius: 12
+        color: Theme.colorInput
+        border.width: 1
+        border.color: Theme.colorBorder
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 6
+            spacing: 3
+
+            NavIcon {
+                name: endpoint.iconName
+                color: Theme.colorAccentBlue
+                Layout.preferredWidth: 18
+                Layout.preferredHeight: 18
+                Layout.alignment: Qt.AlignHCenter
+            }
+
+            Text {
+                id: endpointLabel
+                Layout.fillWidth: true
+                text: endpoint.label
+                color: Theme.colorTextWhite
+                font.pixelSize: 12
+                font.bold: true
+                font.family: Theme.fontFamily
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+                maximumLineCount: 1
+
+                HoverHandler { id: endpointHover }
+                ToolTip.visible: endpointHover.hovered && endpointLabel.truncated
+                ToolTip.delay: 500
+                ToolTip.text: endpointLabel.text
+            }
         }
     }
 
@@ -520,28 +572,70 @@ Item {
                             anchors.bottomMargin: 18
                             anchors.leftMargin: 22
                             anchors.rightMargin: 22
-                            spacing: 14
+                            spacing: 8
                             visible: root.nextSchedule !== null
 
-                            Item { Layout.fillHeight: true }
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 26
+                                radius: 13
+                                color: Theme.colorHover
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 10
+                                    anchors.rightMargin: 10
+                                    spacing: 7
+
+                                    NavIcon {
+                                        name: "backup"
+                                        color: Theme.colorAccentBlue
+                                        Layout.preferredWidth: 14
+                                        Layout.preferredHeight: 14
+                                    }
+                                    Text {
+                                        id: nextScheduleName
+                                        Layout.fillWidth: true
+                                        Layout.minimumWidth: 0
+                                        text: root.nextSchedule ? root.nextSchedule.displayName : ""
+                                        color: Theme.colorAccentBlue
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                        font.family: Theme.fontFamily
+                                        elide: Text.ElideRight
+                                        maximumLineCount: 1
+
+                                        HoverHandler { id: scheduleNameHover }
+                                        ToolTip.visible: scheduleNameHover.hovered
+                                                         && nextScheduleName.truncated
+                                        ToolTip.delay: 500
+                                        ToolTip.text: nextScheduleName.text
+                                    }
+                                    Text {
+                                        text: root.backupTypeLabel(root.nextSchedule)
+                                        color: Theme.colorAccentBlue
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                        font.family: Theme.fontFamily
+                                    }
+                                }
+                            }
 
                             RowLayout {
-                                Layout.alignment: Qt.AlignHCenter
-                                spacing: 10
-                                PillBadge {
-                                    text: "🛡️ " + (root.nextSchedule ? root.nextSchedule.displayName : "")
-                                          + " · " + root.backupTypeLabel(root.nextSchedule)
-                                    implicitHeight: 24
-                                    radius: 12
-                                }
+                                Layout.fillWidth: true
+                                spacing: 6
+
                                 Text {
+                                    Layout.fillWidth: true
+                                    Layout.minimumWidth: 0
                                     text: root.nextSchedule
                                           ? root.nextSchedule.nextRun + " · " + root.frequencyText(root.nextSchedule.frequency)
                                           : ""
                                     color: Theme.colorTextGrey
-                                    font.pixelSize: 12
+                                    font.pixelSize: 11
                                     font.family: Theme.fontFamily
-                                    Layout.alignment: Qt.AlignVCenter
+                                    elide: Text.ElideRight
+                                    maximumLineCount: 1
                                 }
                                 PillBadge {
                                     visible: root.nextSchedule !== null && root.nextSchedule.encryptionEnabled === true
@@ -560,81 +654,39 @@ Item {
                             // Source -> SYNC -> Target
                             RowLayout {
                                 Layout.fillWidth: true
-                                Layout.alignment: Qt.AlignHCenter
-                                spacing: 16
+                                spacing: 8
 
-                                Item { Layout.fillWidth: true }
-
-                                Rectangle {
-                                    width: 170
-                                    height: 52
-                                    radius: 14
-                                    color: Theme.colorInput
-                                    border.width: 1
-                                    border.color: Theme.colorBorder
-                                    Row {
-                                        anchors.centerIn: parent
-                                        spacing: 10
-                                        Text { text: "💾"; font.pixelSize: 20; anchors.verticalCenter: parent.verticalCenter }
-                                        Text {
-                                            text: root.sourceLettersText(root.nextSchedule)
-                                            color: Theme.colorTextWhite
-                                            font.pixelSize: 14
-                                            font.bold: true
-                                            font.family: Theme.fontFamily
-                                            anchors.verticalCenter: parent.verticalCenter
-                                        }
-                                    }
+                                BackupEndpoint {
+                                    iconName: root.nextSchedule && root.nextSchedule.contentKind === 2
+                                              ? "folder" : "hard_drive"
+                                    label: root.sourceLettersText(root.nextSchedule)
                                 }
 
-                                Rectangle {
-                                    width: 38
-                                    height: 38
-                                    radius: 19
+                                Item {
+                                    Layout.preferredWidth: 34
+                                    Layout.preferredHeight: 34
+                                    Layout.minimumWidth: 34
+                                    Layout.maximumWidth: 34
                                     scale: root.animStage2 ? 1.0 : 0.3
                                     Behavior on scale { NumberAnimation { duration: 500; easing.type: Easing.OutBack; easing.overshoot: 1.5 } }
-                                    gradient: Gradient {
-                                        GradientStop { position: 0.0; color: "#FF7B8B" }
-                                        GradientStop { position: 1.0; color: "#EE6476" }
-                                    }
                                     Text {
                                         anchors.centerIn: parent
                                         text: "SYNC"
-                                        color: "#ffffff"
-                                        font.pixelSize: 10
+                                        color: Theme.colorAccentRed
+                                        font.pixelSize: 9
                                         font.bold: true
                                         font.family: Theme.fontFamily
                                     }
                                 }
 
-                                Rectangle {
-                                    width: 170
-                                    height: 52
-                                    radius: 14
-                                    color: Theme.colorInput
-                                    border.width: 1
-                                    border.color: Theme.colorBorder
-                                    Row {
-                                        anchors.centerIn: parent
-                                        spacing: 10
-                                        Text { text: "🗄️"; font.pixelSize: 20; anchors.verticalCenter: parent.verticalCenter }
-                                        Text {
-                                            text: root.nextSchedule && root.nextSchedule.destinationName
-                                                  //% "Default Repository"
-                                                  ? root.nextSchedule.destinationName : qsTrId("aegra.home.repo.default_name")
-                                            color: Theme.colorTextWhite
-                                            font.pixelSize: 14
-                                            font.bold: true
-                                            font.family: Theme.fontFamily
-                                            anchors.verticalCenter: parent.verticalCenter
-                                        }
-                                    }
+                                BackupEndpoint {
+                                    iconName: "repository"
+                                    label: root.nextSchedule && root.nextSchedule.destinationName
+                                           //% "Default Repository"
+                                           ? root.nextSchedule.destinationName
+                                           : qsTrId("aegra.home.repo.default_name")
                                 }
-
-                                Item { Layout.fillWidth: true }
                             }
-
-                            Item { Layout.fillHeight: true }
                         }
 
                         // Empty state: no enabled schedule with a next run
@@ -928,8 +980,8 @@ Item {
                         implicitHeight: root.contentRow1Height
                         //% "Local Disk Overview"
                         title: qsTrId("aegra.home.card.disk_overview")
-                        //% "New Backup Plan"
-                        actionText: qsTrId("aegra.home.card.new_plan")
+                        //% "Backup Now"
+                        actionText: qsTrId("aegra.home.card.backup_now")
                         onActionClicked: root.homeNavigate(1)
                         animOn: root.animStage2
 
@@ -949,7 +1001,7 @@ Item {
                             }
 
                             Repeater {
-                                model: root.homeVolumes
+                                model: root.overviewVolumes
                                 delegate: Item {
                                     required property var modelData
                                     required property int index
@@ -1014,7 +1066,7 @@ Item {
                                                 readonly property string unprotectedText: qsTrId("aegra.home.badge.unprotected")
                                                 text: modelData.isProtected ? "✓ " + protectedText : "! " + unprotectedText
                                                 fg: modelData.isProtected ? Theme.colorToastSuccessBorder : Theme.colorToastErrorBorder
-                                                bg: modelData.isProtected ? Theme.colorToastSuccessBg : Theme.colorToastErrorBg
+                                                bg: modelData.isProtected ? Theme.colorToastSuccessBg : Theme.colorCardEnd
                                                 implicitHeight: 18
                                                 radius: 9
                                             }
@@ -1027,6 +1079,19 @@ Item {
                                         }
                                     }
                                 }
+                            }
+
+                            Text {
+                                visible: root.hasMoreOverviewVolumes
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 16
+                                text: "…"
+                                color: Theme.colorTextDim
+                                font.pixelSize: 18
+                                font.bold: true
+                                font.family: Theme.fontFamily
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
                             }
                         }
                     }

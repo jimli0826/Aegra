@@ -83,6 +83,7 @@ target_link_options(
         "/DELAYLOAD:vssapi.dll"
         "/DELAYLOAD:virtdisk.dll"
 )
+set_target_properties(aegra_personal_worker PROPERTIES OUTPUT_NAME "AegraWorker")
 aegra_configure_target(aegra_personal_worker)
 aegra_add_version_resource(aegra_personal_worker "Aegra Image Worker")
 
@@ -93,10 +94,10 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_SOURCE_DIR}/third_party/dokan/bin/dokan2.dll"
             "$<TARGET_FILE_DIR:aegra_personal_worker>/dokan2.dll"
-    COMMENT "Copy dokan2.dll beside aegra_personal_worker"
+    COMMENT "Copy dokan2.dll beside AegraWorker"
 )
 
-# Service resolves the worker beside aegra_service.exe (resolve_sibling_executable).
+# Service resolves AegraWorker beside AegraService (resolve_sibling_executable).
 # worker is configured after service, so wire the copy from this target.
 if(TARGET aegra_service)
     add_dependencies(aegra_service aegra_personal_worker)
@@ -109,6 +110,6 @@ if(TARGET aegra_service)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${CMAKE_SOURCE_DIR}/third_party/dokan/bin/dokan2.dll"
                 "$<TARGET_FILE_DIR:aegra_service>/dokan2.dll"
-        COMMENT "Copy aegra_personal_worker and dokan2.dll beside aegra_service"
+        COMMENT "Copy AegraWorker and dokan2.dll beside AegraService"
     )
 endif()

@@ -211,6 +211,8 @@ struct ScheduleSummary final {
     bool deduplication_enabled{true};
     std::uint64_t split_size_bytes{0};
     std::int32_t compression_level{kCompressionLevelNormal};
+    /// When true, Service submits a separate Verify job after a successful Catalog publish.
+    bool verify_after_backup{false};
     bool encryption_enabled{false};
 };
 
@@ -562,6 +564,7 @@ struct UpsertScheduleCommand final {
     bool deduplication_enabled{true};
     std::uint64_t split_size_bytes{0};
     std::int32_t compression_level{kCompressionLevelNormal};
+    bool verify_after_backup{false};
     bool encryption_enabled{false};
     /// Create-only when encryption_enabled. Must be empty on update.
     std::string archive_password;

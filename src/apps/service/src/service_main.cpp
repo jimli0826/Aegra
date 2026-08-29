@@ -17,6 +17,7 @@
 #include "aegra/application/source_inventory_query.h"
 #include "aegra/apps/service/backup_catalog_registrar.h"
 #include "aegra/apps/service/mount_supervisor.h"
+#include "aegra/apps/service/post_backup_verifier.h"
 #include "aegra/apps/service/schedule_engine.h"
 #include "aegra/apps/service/schedule_execution_coordinator.h"
 #include "aegra/apps/service/schedule_service.h"
@@ -215,6 +216,8 @@ struct RuntimeComponents final {
     std::unique_ptr<service::RepositoryLocationBrowseRegistry> repository_location_browse;
     std::unique_ptr<service::WorkerSupervisor> supervisor;
     std::unique_ptr<service::WorkerJobService> worker_jobs;
+    /// Declared after worker_jobs so the dispatcher stops before its facade is destroyed.
+    std::shared_ptr<service::PostBackupVerifier> post_backup_verifier;
     std::unique_ptr<service::ScheduleExecutionCoordinator> schedule_coordinator;
     std::unique_ptr<service::ScheduleService> schedules;
     /// Declared after worker_jobs so destruction stops the poll thread first.
@@ -357,14 +360,14 @@ resolve_sibling_executable(const std::optional<std::filesystem::path>& explicit_
 
 [[nodiscard]] aegra::base::Result<std::filesystem::path>
 resolve_worker_path(const ServiceArguments& arguments) {
-    return resolve_sibling_executable(arguments.worker_path, L"aegra_personal_worker.exe");
+    return resolve_sibling_executable(arguments.worker_path, L"AegraWorker.exe");
 }
 
 // Mount sessions run in the worker executable (--mount-pipe mode);
 // --mount-host-path remains as a debugging override.
 [[nodiscard]] aegra::base::Result<std::filesystem::path>
 resolve_mount_host_path(const ServiceArguments& arguments) {
-    return resolve_sibling_executable(arguments.mount_host_path, L"aegra_personal_worker.exe");
+    return resolve_sibling_executable(arguments.mount_host_path, L"AegraWorker.exe");
 }
 
 [[nodiscard]] aegra::base::Result<std::string> path_to_utf8(const std::filesystem::path& path) {
@@ -568,6 +571,14 @@ create_service_log(const std::filesystem::path& data_dir, const bool service_mod
     return (letter >= 'A' && letter <= 'Z') || (letter >= 'a' && letter <= 'z');
 }
 
+[[nodiscard]] unsigned char drive_letter_sort_key(const std::string_view mount) noexcept {
+    if (!is_drive_letter_mount(mount)) {
+        return 0xFFU;
+    }
+    return static_cast<unsigned char>(
+        std::toupper(static_cast<unsigned char>(mount.front())));
+}
+
 /// UI label for file browse roots: "Label (D:)" or "D:" when the label is empty.
 [[nodiscard]] std::string
 browse_root_display_name(const aegra::ports::SourceInventoryRecord& source) {
@@ -589,9 +600,15 @@ build_browse_roots(aegra::ports::ISourceInventory& inventory) {
         return aegra::base::Result<std::vector<windows_filesystem::SnapshotVolumeBinding>>::failure(
             sources.error());
     }
+    auto& inventory_sources = sources.value();
+    std::stable_sort(inventory_sources.begin(), inventory_sources.end(),
+                     [](const auto& left, const auto& right) {
+                         return drive_letter_sort_key(left.mount_letter) <
+                                drive_letter_sort_key(right.mount_letter);
+                     });
     std::vector<windows_filesystem::SnapshotVolumeBinding> roots;
-    roots.reserve(sources.value().size());
-    for (const auto& source : sources.value()) {
+    roots.reserve(inventory_sources.size());
+    for (const auto& source : inventory_sources) {
         // File browse only exposes volumes with a drive letter. Hidden system partitions
         // (EFI, MSR, Recovery, unmounted) have empty mount_letter and stay out of the tree.
         if (source.source_id.rfind("vol.", 0) != 0 || source.stable_key.empty() ||
@@ -674,21 +691,28 @@ create_runtime(const ServiceArguments& arguments) {
             *components.random);
     components.backup_catalog_registrar = std::make_shared<service::BackupCatalogRegistrar>(
         *components.control_plane, *components.storage_factory);
+    components.post_backup_verifier =
+        std::make_shared<service::PostBackupVerifier>(components.logger.get());
     service::WorkerSupervisorConfig supervisor_config;
     supervisor_config.worker_executable_path = std::move(worker_path_utf8).value();
     // Job lifecycle runs async after backup.start is accepted — log terminal outcomes to file.
     auto* log = components.logger.get();
     auto* jobs_db = components.control_plane.get();
     auto catalog_registrar = components.backup_catalog_registrar;
+    std::weak_ptr<service::PostBackupVerifier> post_backup_verifier =
+        components.post_backup_verifier;
     components.supervisor = std::make_unique<service::WorkerSupervisor>(
         std::move(supervisor_config), *components.process_launcher, *components.control_plane,
         *components.clock, *components.random, service::SupervisorProgressCallback{},
-        [log, jobs_db, catalog_registrar](const service::WorkerJobRequest& request,
-                                          const aegra::contracts::ServiceJobState final_state,
-                                          const aegra::contracts::WorkerResponse* response) {
+        [log, jobs_db, catalog_registrar,
+         post_backup_verifier](const service::WorkerJobRequest& request,
+                               const aegra::contracts::ServiceJobState final_state,
+                               const aegra::contracts::WorkerResponse* response) {
             const auto& job_id = request.worker_request.job_id;
+            bool catalog_ready = false;
             if (response != nullptr && catalog_registrar != nullptr) {
                 auto registered = catalog_registrar->publish(request, *response, {});
+                catalog_ready = registered.has_value();
                 if (!registered && log != nullptr) {
                     std::string failure = "Catalog publication failed for job ";
                     failure += job_id;
@@ -697,6 +721,21 @@ create_runtime(const ServiceArguments& arguments) {
                         aegra::base::error_code_name(registered.error().code));
                     log->write(service::ServiceLogLevel::kError,
                                "repository.catalog_publish_failed", failure);
+                }
+            }
+            const bool backup_succeeded =
+                response != nullptr && response->task_result &&
+                (response->task_result->outcome ==
+                     aegra::contracts::TaskOutcome::kSucceeded ||
+                 response->task_result->outcome ==
+                     aegra::contracts::TaskOutcome::kSucceededWithWarning);
+            if (catalog_ready && backup_succeeded && request.verify_after_backup) {
+                const auto verifier = post_backup_verifier.lock();
+                if ((!verifier || !verifier->enqueue(request)) && log != nullptr) {
+                    std::string failure = "Post-backup Verify queue is unavailable for job ";
+                    failure += job_id;
+                    log->write(service::ServiceLogLevel::kError,
+                               "post_backup.verify_queue_unavailable", failure);
                 }
             }
             if (log == nullptr) {
@@ -755,6 +794,7 @@ create_runtime(const ServiceArguments& arguments) {
         *components.source_query, *components.control_plane, *components.storage_factory,
         *components.supervisor, *components.clock, *components.random,
         components.file_browse.get(), components.logger.get());
+    components.post_backup_verifier->start(*components.worker_jobs);
     components.repository_location_browse =
         std::make_unique<service::RepositoryLocationBrowseRegistry>();
     components.schedule_coordinator = std::make_unique<service::ScheduleExecutionCoordinator>();

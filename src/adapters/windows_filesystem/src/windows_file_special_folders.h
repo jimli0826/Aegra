@@ -16,8 +16,8 @@ struct SpecialFolderBrowseRoot final {
     std::string display_name;
 };
 
-/// Resolves the six Explorer quick-access folders against authorized volume roots.
-/// Folders that cannot be mapped to a root (missing path, other volume) are omitted.
+/// Resolves the active interactive user's Explorer quick-access folders against authorized
+/// volume roots. Folders that cannot be mapped to a root (missing path, other volume) are omitted.
 [[nodiscard]] std::vector<SpecialFolderBrowseRoot>
 resolve_special_folder_browse_roots(const std::vector<SnapshotVolumeBinding>& volume_roots);
 

@@ -2748,9 +2748,9 @@
         <source>Local Disk Overview</source>
         <translation>ローカルディスク概要</translation>
     </message>
-    <message id="aegra.home.card.new_plan">
-        <source>New Backup Plan</source>
-        <translation>新規バックアップ計画</translation>
+    <message id="aegra.home.card.backup_now">
+        <source>Backup Now</source>
+        <translation>今すぐバックアップ</translation>
     </message>
     <message id="aegra.home.card.active_mounts">
         <source>Active Mounts</source>
@@ -2953,6 +2953,14 @@ for critical volumes now</source>
     <message id="aegra.licenses.licensed_under">
         <source>Licensed under</source>
         <translation>ライセンス：</translation>
+    </message>
+    <message id="aegra.backup.post.title">
+        <source>Post Backup</source>
+        <translation>バックアップ後</translation>
+    </message>
+    <message id="aegra.backup.post.verify">
+        <source>Enable verify</source>
+        <translation>検証を有効にする</translation>
     </message>
 </context>
 </TS>

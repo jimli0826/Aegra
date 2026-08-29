@@ -21,7 +21,7 @@
 | Backup 阶段 | `resolve_credentials` → `prepare_sources`（VSS/raw、bitmap、pagefile 排除）→ `create_archive` → `backup_pipeline`（按卷） |
 | Restore 阶段 | 直接卷：`resolve_credentials` → `open_chain_reader` → `open_volume_reader` → `open_volume_sink` → `restore_pipeline`；缩容卷：`analyze_shrink_plan`（校验 digest，记录源/目标容量与簇数）→ `prepare_scratch_directory` → `open_scratch_store` → `invalidate_boot` → 前缀 `restore_pipeline` → ordinary/critical relocate → Target-only audit → 持锁 Boot commit → 关闭原始句柄 → CHKDSK/postcheck；整盘：`plan_disk_volumes` → `prepare_target_disk`+`open_disk_sink` → `restore_pipeline` → `rebuild_partition_table` |
 | Restore Request | `mode` 为 `volume` / `volume_shrink` / `disk`；`volume_size_policy` 写可读名（`require_source_size` / `allow_ntfs_relocation`）；仅缩容时输出 `shrink_plan_digest` 与 `source_chain_fingerprint` |
-| Verify 阶段 | `resolve_credentials` → `open_archive` → `verify_pipeline` |
+| Verify 阶段 | volume_set：`resolve_credentials` → `open_archive` → `verify_pipeline`；file_set：`resolve_credentials` → `open_chain` → `verify_recoverability`；成功、失败和取消均写 `[Result]` 汇总 |
 | 禁止 | 密码、SecretRef 明文、凭据材料；可记 `password=present|empty` 或层计数 |
 
 Worker 任务日志允许记录诊断所需的源/目标路径、Volume GUID、卷标、主机名和 Archive 信息，但不得记录
@@ -35,7 +35,7 @@ Service 在 composition root 设置 `AEGRA_DATA_DIR`，Worker 子进程通过环
 task log 与 Service 分级日志（`logs/trace.log` 等）同树。
 
 当前消息使用 UTF-8 JSON。JSON 依赖只存在于 `apps/worker`，`contracts` 保持与传输技术无关。
-`aegra_personal_worker.exe` 无参数时从 stdin 读取一个最大 1 MiB 的 Job，stdout 只写最终响应；正式父进程
+`AegraWorker.exe` 无参数时从 stdin 读取一个最大 1 MiB 的 Job，stdout 只写最终响应；正式父进程
 监督使用 `--pipe <logical-name>` 双向会话。运行时系统能力与凭据部署见
 [ADR-0007](../adr/0007-windows-worker-system-capabilities.md)，会话与 framing 见
 [ADR-0008](../adr/0008-worker-session-named-pipe-protocol.md)。
@@ -106,8 +106,11 @@ security/ADS 标志），`target_ref` 为空、`source_refs` 恰好一个 `.bkf`
 `f1|{volume_identity}|{path_blob}`、校验 Volume GUID 在线且可写、打开 `WindowsFileTreeSink`，经
 `FileSetRestorePipeline` 选择性恢复。TaskResult 使用 `file_restore.*` message code（含 partial）。
 
-Verify Job 的 `operation` 为 `3`，`source_refs` 恰好一个 `.bkf`，`target_ref` 为空；Worker 会完整读取并
+Verify Job 的 `operation` 为 `3`，`source_refs` 恰好一个 `.bkf`，`target_ref` 为空；未加密 Archive 的
+`credential_refs` 为空字符串（空口令），与 Restore 一致。Worker 会完整读取并
 认证每个 Chunk，不创建目标文件。成功结果使用 `verify.completed`，错误使用脱敏的 `verify.*` code。
+Post Backup Verify 仍是普通、独立的 Verify Job；Worker 不接收 Schedule 策略，也不把 Verify 内嵌进
+Backup Job。file_set 后置校验由 Service 注入 base-first 完整链。
 
 Restore Job 的 `operation` 为 `2`，`credential_refs` 必须与 `source_refs` 同长度且逐层对应
 （未加密层为空字符串）。volume_set Restore **必须**携带 `restore` 对象（contracts / Worker

@@ -29,6 +29,7 @@ target_link_libraries(
         Aegra::AdapterWindowsSystem
         nlohmann_json::nlohmann_json
 )
+set_target_properties(aegra_pe_restore PROPERTIES OUTPUT_NAME "AegraPEResore")
 aegra_configure_target(aegra_pe_restore)
 aegra_add_version_resource(aegra_pe_restore "Aegra Image WinPE Restore")
 
@@ -42,7 +43,7 @@ if(TARGET aegra_service)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "$<TARGET_FILE:aegra_pe_restore>"
                 "$<TARGET_FILE_DIR:aegra_service>/$<TARGET_FILE_NAME:aegra_pe_restore>"
-        COMMENT "Copy aegra_pe_restore beside aegra_service"
+        COMMENT "Copy AegraPEResore beside AegraService"
     )
     # WinPE does not ship the MSVC runtime (vcruntime140 / msvcp140 /
     # msvcp140_atomic_wait / ...), and a missing import DLL fails silently there
@@ -59,7 +60,7 @@ if(TARGET aegra_service)
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
                         "${aegra_runtime_dll}"
                         "$<TARGET_FILE_DIR:aegra_service>/"
-                COMMENT "Stage MSVC runtime beside aegra_service for the PE payload"
+                COMMENT "Stage MSVC runtime beside AegraService for the PE payload"
             )
         endforeach()
     endif()

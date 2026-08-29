@@ -57,7 +57,7 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
 
 ## Schema 与不变量
 
-- `schema_meta.version` 当前为 `22`（`ports::kControlPlaneSchemaVersion`；v21 增加分卷大小，v22 增加压缩级别）。产品未发布：
+- `schema_meta.version` 当前为 `23`（`ports::kControlPlaneSchemaVersion`；v21 增加分卷大小，v22 增加压缩级别，v23 增加备份后 Verify 策略）。产品未发布：
   - 新库 `CREATE IF NOT EXISTS` 即为当前完整表结构，再写入当前 version；
   - **不提供** 历史 schema 的 `ALTER` 迁移或兼容读取；旧开发库必须删除后重建；
   - 非 0 且非当前版本 → `kUnsupportedVersion`。
@@ -82,7 +82,7 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
   `schedule_id`、**请求的** `backup_type`（非降级后的 effective 类型）、`content_kind`、
   volume `source_ids` 或 file `selection_id` 列表、`repository_connection_id`、exclude、encryption；
   volume 还必须覆盖 `deduplication_enabled` 与 `split_size_bytes`；
-  两种 content_kind 都必须覆盖 `compression_level`；
+  两种 content_kind 都必须覆盖 `compression_level` 与 `verify_after_backup`；
   重放时只比指纹，不从 effective Job 状态猜 demote。有 `idempotency_key` 时指纹不得为空。
 - `jobs` FI7 结果投影（schema 13）：`result_requested_backup_type`、`result_effective_backup_type`、
   `result_effective_parent_uuid`、`result_incremental_downgrade_reason`。终端 transition 从 TaskResult
@@ -94,8 +94,11 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
   `schedules.split_size_bytes` 与 `schedules.compression_level` 必填；file_set 的去重与分卷
   分别固定为 false 与 0。`compression_level` 为 zstd Fast=1、Normal=3、High=9，两种
   content_kind 均可配置，默认 3。volume_set 的 `split_size_bytes` 为 0 或 128 MiB–1 TiB。
-  upsert command 的 idempotency fingerprint 必须包含这些选项与 `archive_password` 的不可逆摘要
+  upsert command 的 idempotency fingerprint 必须包含这些选项、`verify_after_backup` 与
+  `archive_password` 的不可逆摘要
   （不存明文）。
+- `schedules.verify_after_backup` 必填、默认 false，允许更新；每次 Backup 启动时快照到内存请求，
+  成功发布 Catalog 后提交独立 Verify Job。
 - `schedules.archive_password_protected`：加密 Schedule 为 `dpapi-lm:<schedule_id>:<base64>`
   （DPAPI `CRYPTPROTECT_LOCAL_MACHINE`，`pOptionalEntropy` = UTF-8 `schedule_id`）；未加密必须为空串。
   **不**返回给 Desktop `ScheduleSummary`。
@@ -105,10 +108,10 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
     `compression_level`、`encryption_enabled`；加密时 `archive_password_protected`
     创建后不可改、不可清空、不可关闭加密。file_set 更新不得携带新 `file_selections`。
   - **可修改**：`display_name`、`enabled`、`repository_connection_id`（可换其它 Repository connection）、
-    `trigger`（频率/时间/星期等 Schedule settings）。
+    `trigger`（频率/时间/星期等 Schedule settings）、`verify_after_backup`。
   - **`backup_type`**：创建与更新都写入 Incremental。不是用户策略；Run now / 定时请求增量，首次或 tip 空则降 Full。
     用户 Run full 只影响那一次 `StartBackup`。
-  - **Backup options**：除未来的 “完成后关机”（shutdown）外，其它选项均为创建时固定；当前持久化选项为
+  - **Backup options**：`verify_after_backup` 可改；除未来的 “完成后关机”（shutdown）外，其它选项均为创建时固定；当前持久化选项为
     `exclude_page_and_hibernation_files`、`deduplication_enabled`、`split_size_bytes`、
     `compression_level` 与 `encryption_enabled`，更新时不得变更。
   - 更新请求不得携带 `archive_password`；加密口令只在创建时 DPAPI 保护后写入 SQLite。

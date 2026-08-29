@@ -2748,9 +2748,9 @@
         <source>Local Disk Overview</source>
         <translation>Lokale Datenträger</translation>
     </message>
-    <message id="aegra.home.card.new_plan">
-        <source>New Backup Plan</source>
-        <translation>Neuer Sicherungsplan</translation>
+    <message id="aegra.home.card.backup_now">
+        <source>Backup Now</source>
+        <translation>Jetzt sichern</translation>
     </message>
     <message id="aegra.home.card.active_mounts">
         <source>Active Mounts</source>
@@ -2953,6 +2953,14 @@ Offsite-Coldbackup für kritische Volumes</translation>
     <message id="aegra.licenses.licensed_under">
         <source>Licensed under</source>
         <translation>Lizenziert unter</translation>
+    </message>
+    <message id="aegra.backup.post.title">
+        <source>Post Backup</source>
+        <translation>Nach der Sicherung</translation>
+    </message>
+    <message id="aegra.backup.post.verify">
+        <source>Enable verify</source>
+        <translation>Überprüfung aktivieren</translation>
     </message>
 </context>
 </TS>

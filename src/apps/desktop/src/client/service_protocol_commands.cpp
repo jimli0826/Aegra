@@ -257,7 +257,8 @@ QByteArray encode_upsert_schedule_request(const QString& request_id, const QStri
                                           const int compression_level,
                                           const bool encryption_enabled,
                                           const QString& archive_password,
-                                          const quint32 day_of_month_mask) {
+                                          const quint32 day_of_month_mask,
+                                          const bool verify_after_backup) {
     QJsonArray minutes_json;
     for (const auto minute : local_minutes_of_day) {
         minutes_json.push_back(minute);
@@ -286,6 +287,7 @@ QByteArray encode_upsert_schedule_request(const QString& request_id, const QStri
         {QStringLiteral("deduplication_enabled"), deduplication_enabled},
         {QStringLiteral("split_size_bytes"), static_cast<qint64>(split_size_bytes)},
         {QStringLiteral("compression_level"), compression_level},
+        {QStringLiteral("verify_after_backup"), verify_after_backup},
         {QStringLiteral("encryption_enabled"), encryption_enabled},
         {QStringLiteral("archive_password"), archive_password}};
     return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
@@ -691,7 +693,8 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
                                  "source_ids", "selection_summaries", "repository_connection_id",
                                  "backup_type", "trigger", "next_run_utc_ms",
                                  "exclude_page_and_hibernation_files", "deduplication_enabled",
-                                 "split_size_bytes", "compression_level", "encryption_enabled"})) {
+                                 "split_size_bytes", "compression_level", "verify_after_backup",
+                                 "encryption_enabled"})) {
         return false;
     }
     const auto schedule_id = object.value(QStringLiteral("schedule_id")).toString();
@@ -736,6 +739,7 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
         !integer_in_range(object.value(QStringLiteral("compression_level")), 1, 9,
                           compression_level) ||
         (compression_level != 1 && compression_level != 3 && compression_level != 9) ||
+        !object.value(QStringLiteral("verify_after_backup")).isBool() ||
         !object.value(QStringLiteral("encryption_enabled")).isBool() ||
         (content_kind == 2 &&
          (object.value(QStringLiteral("deduplication_enabled")).toBool() ||
@@ -869,6 +873,8 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
                object.value(QStringLiteral("deduplication_enabled")).toBool()},
               {QStringLiteral("splitSizeBytes"), split_size_bytes},
               {QStringLiteral("compressionLevel"), compression_level},
+              {QStringLiteral("verifyAfterBackup"),
+               object.value(QStringLiteral("verify_after_backup")).toBool()},
               {QStringLiteral("encryptionEnabled"),
                object.value(QStringLiteral("encryption_enabled")).toBool()},
               {QStringLiteral("lastRun"), QString{}},

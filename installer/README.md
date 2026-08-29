@@ -67,11 +67,11 @@ All binaries live in that folder (no `ui\` subdirectory):
 
 | File | Role |
 |------|------|
-| `aegra_desktop.exe` | Desktop GUI (+ Qt runtime: `qml\`, `platforms\`, `imageformats\`, `tls\`) |
-| `aegra_cli.exe` | Local Service control CLI (AegraCli) |
-| `aegra_service.exe` | Windows service **AegraService** (`--service`) |
-| `aegra_personal_worker.exe` | Backup / restore / mount worker |
-| `aegra_pe_restore.exe` | WinPE offline restore executor (injected into boot.wim) |
+| `AegraImage.exe` | Desktop GUI (+ Qt runtime: `qml\`, `platforms\`, `imageformats\`, `tls\`) |
+| `AegraCLI.exe` | Local Service control CLI |
+| `AegraService.exe` | Windows service **AegraService** (`--service`) |
+| `AegraWorker.exe` | Backup / restore / mount worker |
+| `AegraPEResore.exe` | WinPE offline restore executor (injected into boot.wim) |
 | `aegra_shell_extension.dll` | Explorer `.bkf` namespace (HKLM COM + synchronous Shell refresh after registry authoring) |
 | `dokan2.dll`, `libsodium.dll`, `zstd.dll`, `sqlite3.dll` | Runtime |
 | VC++ CRT (`msvcp140*.dll`, `vcruntime140*.dll`) | WinPE payload + host |

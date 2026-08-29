@@ -33,8 +33,8 @@ using worker_job_detail::source_disk_size_from_archive;
 /// Closed payload injected beside the executor. Every entry is required: a
 /// missing file fails Arm before DISM work. No debug CRT and no zlib.
 inline constexpr const char* kPayloadCandidates[] = {
-    "aegra_pe_restore.exe",
-    "aegra_personal_worker.exe",
+    "AegraPEResore.exe",
+    "AegraWorker.exe",
     "libsodium.dll",
     "zstd.dll",
     "vcruntime140.dll",
@@ -46,7 +46,7 @@ inline constexpr const char* kPayloadCandidates[] = {
     "msvcp140_codecvt_ids.dll",
     "concrt140.dll",
 };
-inline constexpr const char* kExecutorFileName = "aegra_pe_restore.exe";
+inline constexpr const char* kExecutorFileName = "AegraPEResore.exe";
 
 [[nodiscard]] bool file_exists_utf8(const std::string& path_utf8) {
     const auto required =

@@ -37,21 +37,27 @@ $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";
             [System.Environment]::GetEnvironmentVariable("Path", "User")
 
 $script:ProjectBinaries = @(
+    "AegraCLI.exe",
+    "AegraImage.exe",
+    "AegraPEResore.exe",
+    "AegraWorker.exe",
+    "AegraService.exe",
+    "aegra_shell_extension.dll",
+    # Remove stale outputs produced before the executable rename.
     "aegra_cli.exe",
     "aegra_desktop.exe",
     "aegra_pe_restore.exe",
     "aegra_personal_worker.exe",
-    "aegra_service.exe",
-    "aegra_shell_extension.dll"
+    "aegra_service.exe"
 )
 
 function Get-PayloadFileList {
     return @(
-        "aegra_cli.exe",
-        "aegra_desktop.exe",
-        "aegra_pe_restore.exe",
-        "aegra_personal_worker.exe",
-        "aegra_service.exe",
+        "AegraCLI.exe",
+        "AegraImage.exe",
+        "AegraPEResore.exe",
+        "AegraWorker.exe",
+        "AegraService.exe",
         "aegra_shell_extension.dll",
         "concrt140.dll",
         "D3Dcompiler_47.dll",
@@ -273,12 +279,12 @@ function Copy-IfExists([string]$source, [string]$destinationDir) {
 
 function Copy-ProjectOutputsToPayload {
     Write-Host "`nCopying compiled outputs into payload..." -ForegroundColor Yellow
-    Copy-Required (Join-Path $ServiceDir "aegra_service.exe") $Payload
-    Copy-Required (Join-Path $CliDir "aegra_cli.exe") $Payload
-    Copy-Required (Join-Path $ServiceDir "aegra_personal_worker.exe") $Payload
-    Copy-Required (Join-Path $ServiceDir "aegra_pe_restore.exe") $Payload
+    Copy-Required (Join-Path $ServiceDir "AegraService.exe") $Payload
+    Copy-Required (Join-Path $CliDir "AegraCLI.exe") $Payload
+    Copy-Required (Join-Path $ServiceDir "AegraWorker.exe") $Payload
+    Copy-Required (Join-Path $ServiceDir "AegraPEResore.exe") $Payload
     Copy-Required (Join-Path $ShellDir "aegra_shell_extension.dll") $Payload
-    Copy-Required (Join-Path $GuiDir "aegra_desktop.exe") $Payload
+    Copy-Required (Join-Path $GuiDir "AegraImage.exe") $Payload
 
     $companion = @(
         "dokan2.dll",

@@ -502,7 +502,7 @@ std::string file_component_display_label(const EncodedName& name) {
 bool is_file_special_folder_display_label(const std::string_view label) noexcept {
     // Keep in sync with WindowsFileSourceBrowser special-folder roots (fixed English labels).
     return label == "Desktop" || label == "Downloads" || label == "Documents" ||
-           label == "Pictures" || label == "Music" || label == "Videos";
+           label == "Pictures" || label == "Music" || label == "Videos" || label == "OneDrive";
 }
 
 std::vector<std::string> file_selection_display_chain(const FileSourceRef& ref) {

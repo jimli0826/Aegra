@@ -624,7 +624,8 @@ namespace {
 [[nodiscard]] bool is_special_folder_root_name(const QString& name) noexcept {
     return name == QLatin1String("Desktop") || name == QLatin1String("Downloads") ||
            name == QLatin1String("Documents") || name == QLatin1String("Pictures") ||
-           name == QLatin1String("Music") || name == QLatin1String("Videos");
+           name == QLatin1String("Music") || name == QLatin1String("Videos") ||
+           name == QLatin1String("OneDrive");
 }
 
 [[nodiscard]] bool is_complete_locked_match(const QStringList& names,

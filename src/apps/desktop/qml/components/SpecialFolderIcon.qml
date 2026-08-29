@@ -1,9 +1,10 @@
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
+import ".."
 
 /**
  * Compact glyphs for Explorer-style special folders on the file backup source tree.
- * variant: desktop | downloads | documents | pictures | music | videos
+ * variant: desktop | downloads | documents | pictures | music | videos | onedrive
  */
 Item {
     id: root
@@ -33,6 +34,7 @@ Item {
         case "pictures": return "#38BDF8"
         case "music": return "#F97316"
         case "videos": return "#A855F7"
+        case "onedrive": return Theme.colorAccentBlue
         default: return "#64748B"
         }
     }
@@ -287,6 +289,42 @@ Item {
             onWidthChanged: requestPaint()
             onHeightChanged: requestPaint()
             Component.onCompleted: requestPaint()
+        }
+    }
+
+    // OneDrive: cloud
+    Item {
+        visible: String(root.variant).toLowerCase() === "onedrive"
+        anchors.centerIn: parent
+        width: root.size * 0.78
+        height: root.size * 0.58
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: parent.height * 0.5
+            radius: height / 2
+            color: root.accent
+        }
+        Rectangle {
+            anchors.left: parent.left
+            anchors.leftMargin: parent.width * 0.12
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: parent.height * 0.18
+            width: parent.width * 0.42
+            height: width
+            radius: width / 2
+            color: root.accent
+        }
+        Rectangle {
+            anchors.right: parent.right
+            anchors.rightMargin: parent.width * 0.1
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: parent.height * 0.12
+            width: parent.width * 0.5
+            height: width
+            radius: width / 2
+            color: root.accent
         }
     }
 }

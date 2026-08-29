@@ -107,7 +107,8 @@ page 和 Sidecar key，并使用 XChaCha20-Poly1305 detached tag；内容散列�
 Target：`aegra_adapter_windows_filesystem` / `Aegra::AdapterWindowsFilesystem`。
 
 依赖：`Aegra::Format`（platform_metadata envelope 编解码）、`Advapi32`（security descriptor I/O）、
-`Shell32`/`Ole32`（`SHGetKnownFolderPath` 解析用户特殊目录）。
+`Shell32`/`Ole32`（`SHGetKnownFolderPath` 解析用户特殊目录）和 `Wtsapi32`（Service 获取活动交互会话的
+用户 token）。
 
 - `WindowsFileSnapshotView`：接收 composition root 注入的 snapshot root 映射（不创建 VSS）；分页枚举
   selection、no-follow 打开、主数据流读取；支持 NTFS/ReFS/FAT32，拒绝其它文件系统与 EFS。NTFS/ReFS
@@ -137,9 +138,12 @@ Target：`aegra_adapter_windows_filesystem` / `Aegra::AdapterWindowsFilesystem`�
     不为 file_set Incremental 创建、查询或读取 USN Journal；历史 USN reader 及其 CMake source 已删除。
 - `WindowsFileSourceBrowser`：Service 浏览用 opaque node token；不向调用方返回路径；reparse/sparse
   节点标记 `kUnsupported` 且不可选。根列表（`parent_node_token=null`）先返回当前用户可映射的特殊目录
-  （Desktop / Downloads / Documents / Pictures / Music / Videos，Explorer 顺序），再返回授权盘符卷。
+  （Desktop / Downloads / Documents / Pictures / Music / Videos，以及存在时的 OneDrive），再返回授权
+  盘符卷。
   特殊目录经 `SHGetKnownFolderPath` 解析，并绑定到已授权 volume 的 `volume_identity` + 相对组件；
-  无法映射到授权卷或目录不存在时省略该项。Desktop 仍只看到 token 与 display_name，不接收绝对路径。
+  交互进程使用当前进程用户；Session 0 Service 通过活动控制台会话（无可用 token 时再检查活动 RDP
+  会话）的显式用户 token 解析，不对整个 Service 线程做 impersonation。无法取得活动用户、无法映射到
+  授权卷或目录不存在时省略该项。Desktop 仍只看到 token 与 display_name，不接收绝对路径。
 
 ## 通用规则
 

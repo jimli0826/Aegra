@@ -282,6 +282,43 @@ struct WindowsPhysicalDiskLayout final {
     WindowsRawDiskLayout raw_layout;
 };
 
+enum class WindowsFirmwareMode : std::uint8_t {
+    kBios = 1,
+    kUefi = 2,
+};
+
+enum class WindowsOsArchitecture : std::uint8_t {
+    kUnsupported = 0,
+    kX64 = 1,
+};
+
+enum class WindowsSecurityState : std::uint8_t {
+    kUnknown = 0,
+    kDisabled = 1,
+    kEnabled = 2,
+};
+
+enum class WindowsHardwareState : std::uint8_t {
+    kUnknown = 0,
+    kAbsent = 1,
+    kPresent = 2,
+};
+
+/// Running Windows boot-environment facts. Security probes are best-effort and remain unknown
+/// when Windows does not expose an authoritative answer without recovery-key access.
+struct WindowsBootEnvironment final {
+    std::filesystem::path windows_volume_guid_path;
+    WindowsFirmwareMode firmware_mode{WindowsFirmwareMode::kBios};
+    WindowsOsArchitecture os_architecture{WindowsOsArchitecture::kUnsupported};
+    std::string os_build;
+    WindowsSecurityState secure_boot_state{WindowsSecurityState::kUnknown};
+    WindowsHardwareState tpm_state{WindowsHardwareState::kUnknown};
+    WindowsSecurityState bitlocker_state{WindowsSecurityState::kUnknown};
+};
+
+/// Resolves the running Windows volume plus firmware/OS/security facts without mutating the host.
+[[nodiscard]] base::Result<WindowsBootEnvironment> inspect_windows_boot_environment();
+
 /// Opens \\.\PhysicalDrive{N} and reads size, style, model, partitions, and raw_layout.
 [[nodiscard]] base::Result<WindowsPhysicalDiskLayout>
 inspect_physical_disk_layout(std::uint32_t disk_number);

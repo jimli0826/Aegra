@@ -23,6 +23,10 @@ constexpr qsizetype kMaximumJobs = 10'000;
 // Active-job poll: keep short so file restore/backup percent can move between quantums.
 // Idle polling is off (timer only runs while has_active_jobs()).
 constexpr int kJobPollIntervalMilliseconds = 500;
+// Post-backup verify/boot check are submitted by the Service up to tens of
+// seconds after the previous job ends; keep sampling within this window.
+constexpr qint64 kPostBackupWatchMilliseconds = 120'000;
+constexpr qint64 kGraceJobQueryIntervalMilliseconds = 2'000;
 
 [[nodiscard]] QString job_toast_key(const JobRow& row) {
     return row.job_id + QLatin1Char('|') + QString::number(row.state);
@@ -122,6 +126,12 @@ QString ServiceClient::statusText() const {
 QString ServiceClient::serviceVersion() const { return service_version_; }
 quint32 ServiceClient::apiVersion() const noexcept { return api_version_; }
 QStringList ServiceClient::capabilities() const { return capabilities_; }
+bool ServiceClient::virtualBoxInstalled() const noexcept {
+    return capabilities_.contains(QStringLiteral("boot_check.hypervisor.virtualbox.installed"));
+}
+bool ServiceClient::hyperVInstalled() const noexcept {
+    return capabilities_.contains(QStringLiteral("boot_check.hypervisor.hyperv.installed"));
+}
 
 QString ServiceClient::errorText() const {
     return error_code_.isEmpty() ? QString{} : localize_message_code(error_code_);
@@ -623,8 +633,17 @@ void ServiceClient::on_job_poll_tick() {
         return;
     }
     if (!jobs_.has_active_jobs()) {
-        update_job_polling();
-        return;
+        const auto now_ms = QDateTime::currentMSecsSinceEpoch();
+        if (now_ms >= job_chain_watch_deadline_ms_) {
+            update_job_polling();
+            return;
+        }
+        // Grace window: sample slower than the active cadence while waiting for
+        // the Service to submit the next post-backup job.
+        if (now_ms - last_grace_job_query_ms_ < kGraceJobQueryIntervalMilliseconds) {
+            return;
+        }
+        last_grace_job_query_ms_ = now_ms;
     }
     start_job_query();
 }
@@ -792,6 +811,8 @@ void ServiceClient::refreshTaskLog(const int time_index, const int type_index,
         query.operation = 2; // restore
     } else if (type_index == 3) {
         query.operation = 3; // verify
+    } else if (type_index == 4) {
+        query.operation = 5; // boot check
     }
     if (status_index == 1) {
         query.state = 4; // succeeded
@@ -1229,7 +1250,8 @@ void ServiceClient::update_format_locale() {
 
 void ServiceClient::update_job_polling() {
     if (state_ == State::kReady && job_list_available_ &&
-        (jobs_.has_active_jobs() || pending_terminal_job_sync_)) {
+        (jobs_.has_active_jobs() || pending_terminal_job_sync_ ||
+         QDateTime::currentMSecsSinceEpoch() < job_chain_watch_deadline_ms_)) {
         if (!job_poll_timer_->isActive()) {
             job_poll_timer_->start();
         }
@@ -1244,6 +1266,12 @@ void ServiceClient::apply_active_job_snapshot(QVector<JobRow> rows) {
         awaiting_terminal_job_ids_.insert(job_id);
     }
     pending_terminal_job_sync_ = !awaiting_terminal_job_ids_.isEmpty();
+    if (!vanished.isEmpty()) {
+        // A job just left the active set; the post-backup chain may submit the
+        // next one (verify, then boot check) shortly.
+        job_chain_watch_deadline_ms_ =
+            QDateTime::currentMSecsSinceEpoch() + kPostBackupWatchMilliseconds;
+    }
 }
 
 void ServiceClient::apply_terminal_job_seed(QVector<JobRow> rows) {

@@ -80,6 +80,8 @@ validate_repository_connection_record(const ports::RepositoryConnectionRecord& r
 [[nodiscard]] base::Result<void>
 validate_restore_preflight_record(const ports::RestorePreflightRecord& record);
 [[nodiscard]] base::Result<void>
+validate_post_backup_plan_record(const ports::PostBackupPlanRecord& record);
+[[nodiscard]] base::Result<void>
 validate_job_transition(const ports::JobStateTransition& transition);
 
 [[nodiscard]] base::Result<void> exec_sql(sqlite3* db, const char* sql);
@@ -95,6 +97,7 @@ read_repository_connection(sqlite3_stmt* stmt);
 [[nodiscard]] base::Result<ports::CommandRecord> read_command(sqlite3_stmt* stmt);
 [[nodiscard]] base::Result<ports::RestorePreflightRecord>
 read_restore_preflight(sqlite3_stmt* stmt);
+[[nodiscard]] base::Result<ports::PostBackupPlanRecord> read_post_backup_plan(sqlite3_stmt* stmt);
 
 [[nodiscard]] contracts::RepositoryConnectionSummary
 to_connection_summary(const ports::RepositoryConnectionRecord& record);
@@ -224,6 +227,23 @@ class RestorePreflightStore final : public ports::IRestorePreflightStore {
     const bool* unit_of_work_active_{nullptr};
 };
 
+class PostBackupPlanStore final : public ports::IPostBackupPlanStore {
+  public:
+    explicit PostBackupPlanStore(SqliteControlPlaneState& state,
+                                 const bool* unit_of_work_active = nullptr) noexcept;
+    [[nodiscard]] base::Result<void> upsert(const ports::PostBackupPlanRecord& record,
+                                            base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<std::optional<ports::PostBackupPlanRecord>>
+    get(std::string_view backup_job_id, base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<std::vector<ports::PostBackupPlanRecord>>
+    claim_incomplete(const ports::PostBackupPlanClaimRequest& request,
+                     base::CancellationToken cancellation) override;
+
+  private:
+    SqliteControlPlaneState& state_;
+    const bool* unit_of_work_active_{nullptr};
+};
+
 class ControlPlaneUnitOfWork final : public ports::IControlPlaneUnitOfWork {
   public:
     // write_lock must own state->mutex for the full unit-of-work lifetime.
@@ -237,6 +257,7 @@ class ControlPlaneUnitOfWork final : public ports::IControlPlaneUnitOfWork {
     [[nodiscard]] ports::ICommandStore& commands() noexcept override;
     [[nodiscard]] ports::IRestorePreflightStore& restore_preflights() noexcept override;
     [[nodiscard]] ports::IServiceSettingsStore& service_settings() noexcept override;
+    [[nodiscard]] ports::IPostBackupPlanStore& post_backup_plans() noexcept override;
     [[nodiscard]] base::Result<void> commit(base::CancellationToken cancellation) override;
     void rollback() noexcept override;
 
@@ -253,6 +274,7 @@ class ControlPlaneUnitOfWork final : public ports::IControlPlaneUnitOfWork {
     CommandStore commands_;
     RestorePreflightStore restore_preflights_;
     ServiceSettingsStore service_settings_;
+    PostBackupPlanStore post_backup_plans_;
 };
 
 // Opaque continuation: v1|<scope>|<filter>|<created_utc_ms>|<id>, bound to list kind + filters.
@@ -303,6 +325,13 @@ inline constexpr const char* kSelectJobSql =
     "result_incremental_downgrade_reason, schedule_id "
     "FROM jobs WHERE job_id = ?";
 
+inline constexpr const char* kSelectPostBackupPlanSql =
+    "SELECT backup_job_id, schedule_id, recovery_point_id, repository_connection_id, "
+    "verify_required, boot_check_required, boot_check_hypervisor, verify_state, verify_job_id, verify_message_code, "
+    "verify_attempts, boot_check_state, boot_check_job_id, boot_check_message_code, "
+    "boot_check_attempts, claim_owner, lease_expires_utc_ms, created_utc_ms, updated_utc_ms "
+    "FROM post_backup_plans";
+
 inline constexpr const char* kSelectCommandSql =
     "SELECT idempotency_key, request_fingerprint, command_id, resource_id, created_utc_ms "
     "FROM commands WHERE idempotency_key = ?";
@@ -312,6 +341,7 @@ inline constexpr const char* kSelectScheduleSql =
     "repository_connection_id, backup_type, trigger_kind, local_minutes_of_day, weekday_mask, "
     "day_of_month_mask, timezone_id, next_run_utc_ms, exclude_page_and_hibernation_files, "
     "deduplication_enabled, split_size_bytes, compression_level, verify_after_backup, "
+    "boot_check_after_backup, boot_check_hypervisor, "
     "encryption_enabled, archive_password_protected, backup_set_uuid, "
     "last_recovery_point_id, created_utc_ms, updated_utc_ms FROM schedules WHERE schedule_id = ?";
 

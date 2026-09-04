@@ -17,6 +17,9 @@ enum class JobOperation : std::uint8_t {
     kRestore = 2,
     kVerify = 3,
     kExport = 4,
+    /// Post-backup boot check run. Recorded by the Service coordinator for the
+    /// task log; never a worker request (`validate_job_request` rejects it).
+    kBootCheck = 5,
 };
 
 /// Opaque credential handle. Empty `value` means no password (unencrypted archive).

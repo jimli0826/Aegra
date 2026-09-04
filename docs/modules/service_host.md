@@ -275,8 +275,20 @@ per-file Archive Credential 映射与 Local Storage 故障恢复验证仍待补�
   file_set 固定为 0。`compression_level`（zstd 1/3/9，默认 3）同样创建后冻结，两种 content_kind 均可。
   `StartBackup` 按 `content_kind` 构造 schema 4 Worker Job
   （file 路径走 `file_source_refs`，Job `source_ids` 仅为 selection UUID）。
-  `verify_after_backup=true` 时，Backup 成功且 Catalog 发布完成后进入有界 Post Backup 队列；队列提交
-  独立 Verify Job，容量暂满时重试。Verify 失败保留为独立终态，不改写已成功的 Backup Job。
+  `verify_after_backup=true` 时，Backup 提交即在 `post_backup_plans` 写入 durable plan（与
+  JobRecord 同事务）；`PostBackupCoordinator` 以 claim/lease 轮询（15s，完成回调即时 kick）在
+  Backup 成功且 Catalog 发布后按确定性幂等键提交独立 Verify Job（凭据取 Schedule 密文引用，
+  加密备份无需 connection 默认凭据），Service 重启后重扫未完成 plan 继续推进；容量暂满与
+  Catalog 尚未可见时保持 pending 重试（有界 attempts）。Verify 失败保留为独立终态，不改写已
+  成功的 Backup Job；Backup 非成功终态时动作记 skipped。Schedule 开启 `boot_check_after_backup`
+  （volume_set）时，Verify 成功后 coordinator 经 `BootCheckSupervisor`（并发 1、45 分钟 run
+  budget、超时 terminate）以兄弟路径拉起 `AegraBootCheck.exe --request <staging file>`，
+  从 Catalog 解析 base-first 卷链并按 Schedule 密文引用注入凭据，stdout 的 WorkerResponse 回填
+  plan 的 boot_check 动作；Verify 失败预置 `bootcheck.verify_prerequisite_failed`，Host 缺失记
+  `post_backup.boot_check_unavailable`，重启丢失的运行按 attempts（上限 3）重派。
+- Schedule 的 `boot_check_hypervisor` 在 Backup Job 提交时快照到 durable plan，并进入 BootCheck Job
+  schema 2；Host 只运行指定平台。Service 启动时以 capability 发布 VirtualBox/Hyper-V 安装状态，
+  Desktop 不直接查询注册表、SCM 或 PowerShell。
 - **Capabilities**（在 volume 根可用时）：`file.browse`、`schedule.file_set`；F8 另声明
   `file.restore`。
 - **Catalog 发布**：`BackupCatalogRegistrar` 按 `content_kind` 写 Catalog V2（file_set 无 sidecar /

@@ -27,14 +27,18 @@ Validate Verify Job
 
 `PersonalArchiveReader::open()` 完成 Header、metadata、分卷、Chunk 结构和 Footer 校验；
 `IRecoveryPointReader::read_chunk()` 完成每个 Chunk 的密文认证、解压、ZERO/DEDUP 展开与输出范围校验。
-`VerifyPipeline` 负责 descriptor 稳定性、非重叠顺序、payload 大小、取消和进度。增量层允许合法空洞，
+`VerifyPipeline` 负责 descriptor 稳定性、非重叠顺序、payload 大小、取消和进度。顺序校验按
+`source_index` 分段：每个 source 是一段连续运行（不得交错），其逻辑地址空间从 0 重新开始，与
+Archive 层形状一致；所有 Chunk 逻辑字节总和不得超过 Reader 的逻辑容量。增量层允许合法空洞，
 因此 Pipeline 不要求 Chunk 覆盖整个逻辑卷。
 
-Schedule 的 `verify_after_backup` 是 Service 编排策略：Backup 成功并完成 Catalog 发布后，Service 以
-确定性幂等键 `post-backup-verify:<backup job_id>:<file_uuid>`（稳定标识符字符集，区别于含 `|` 的
-request fingerprint）提交独立 Verify Job。容量暂满由有界 dispatcher 重试；提交失败在 Service
-`error.log` 记录错误码与脱敏 detail。Verify 失败单独记录，不回滚或隐藏已提交 Archive。file_set 使用
-Catalog 解析出的 base-first 完整链；未加密备份沿用空凭据（空口令）。
+Schedule 的 `verify_after_backup` 是 Service 编排策略：Backup 提交时把动作写入 durable
+`post_backup_plans`（与 JobRecord 同事务），`PostBackupCoordinator` 在 Backup 成功并完成 Catalog
+发布后以确定性幂等键 `post-backup-verify:<backup job_id>:<file_uuid>`（稳定标识符字符集，区别于含
+`|` 的 request fingerprint）提交独立 Verify Job；Service 重启后重扫 plan 重放同一幂等键。Verify
+请求从 Catalog 重建：file_set 使用 base-first 完整链，volume_set 使用 tip Archive；凭据取
+Schedule 的 dpapi-lm 密文引用（未加密备份为空凭据/空口令）。容量暂满保持 pending 重试；提交失败
+在 Service `error.log` 记录错误码与脱敏 detail。Verify 失败单独记录，不回滚或隐藏已提交 Archive。
 
 ## 任务日志
 

@@ -39,6 +39,8 @@ class ServiceClient final : public QObject {
     Q_PROPERTY(QString serviceVersion READ serviceVersion NOTIFY stateChanged)
     Q_PROPERTY(quint32 apiVersion READ apiVersion NOTIFY stateChanged)
     Q_PROPERTY(QStringList capabilities READ capabilities NOTIFY stateChanged)
+    Q_PROPERTY(bool virtualBoxInstalled READ virtualBoxInstalled NOTIFY stateChanged)
+    Q_PROPERTY(bool hyperVInstalled READ hyperVInstalled NOTIFY stateChanged)
     Q_PROPERTY(QString errorText READ errorText NOTIFY stateChanged)
     Q_PROPERTY(bool repositoryConfigured READ repositoryConfigured NOTIFY repositoryChanged)
     Q_PROPERTY(bool repositoryLoading READ repositoryLoading NOTIFY repositoryChanged)
@@ -157,6 +159,8 @@ class ServiceClient final : public QObject {
     [[nodiscard]] QString serviceVersion() const;
     [[nodiscard]] quint32 apiVersion() const noexcept;
     [[nodiscard]] QStringList capabilities() const;
+    [[nodiscard]] bool virtualBoxInstalled() const noexcept;
+    [[nodiscard]] bool hyperVInstalled() const noexcept;
     [[nodiscard]] QString errorText() const;
     [[nodiscard]] bool repositoryConfigured() const noexcept;
     [[nodiscard]] bool repositoryLoading() const noexcept;
@@ -285,7 +289,10 @@ class ServiceClient final : public QObject {
                                     quint64 split_size_bytes = 0, int compression_level = 3,
                                     bool encryption_enabled = false,
                                     const QString& archive_password = {}, int backup_type = 2,
-                                    int weekday_mask = 0, unsigned int day_of_month_mask = 0, bool verify_after_backup = false);
+                                    int weekday_mask = 0, unsigned int day_of_month_mask = 0,
+                                    bool verify_after_backup = false,
+                                    bool boot_check_after_backup = false,
+                                    int boot_check_hypervisor = 0);
     /// Creates one multi-volume schedule; the first Incremental request may demote to Full.
     Q_INVOKABLE bool createSchedule(const QVariantList& sources, const QString& connection_id,
                                     const QString& frequency, const QString& time_of_day,
@@ -295,7 +302,10 @@ class ServiceClient final : public QObject {
                                     bool encryption_enabled = false,
                                     const QString& archive_password = {},
                                     bool start_full_backup_after_create = false,
-                                    int weekday_mask = 0, unsigned int day_of_month_mask = 0, bool verify_after_backup = false);
+                                    int weekday_mask = 0, unsigned int day_of_month_mask = 0,
+                                    bool verify_after_backup = false,
+                                    bool boot_check_after_backup = false,
+                                    int boot_check_hypervisor = 0);
     /// Creates a file_set schedule from opaque selections; volume deduplication stays disabled.
     Q_INVOKABLE bool createFileSetSchedule(
         const QString& connection_id, const QString& frequency, const QString& time_of_day,
@@ -789,6 +799,10 @@ class ServiceClient final : public QObject {
     bool toast_visible_{false};
     bool jobs_baseline_seeded_{false};
     bool pending_terminal_job_sync_{false};
+    /// Post-backup chain grace: keep sampling the active list after a job ends so
+    /// Service-submitted verify/boot check jobs surface without a UI trigger.
+    qint64 job_chain_watch_deadline_ms_{0};
+    qint64 last_grace_job_query_ms_{0};
     QSet<QString> awaiting_terminal_job_ids_;
     QTimer* splash_connect_timer_{nullptr};
     QString pending_splash_error_code_;

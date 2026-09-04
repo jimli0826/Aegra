@@ -1,6 +1,8 @@
 add_library(aegra_adapter_windows_disk STATIC
     src/windows_block_source.cpp
     src/windows_block_sink.cpp
+    src/windows_boot_environment.cpp
+    src/windows_boot_security.cpp
     src/windows_random_access_block_device.cpp
     src/windows_disk_layout.cpp
     src/windows_disk_restore.cpp
@@ -20,5 +22,5 @@ target_include_directories(
 )
 
 target_compile_definitions(aegra_adapter_windows_disk PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
-target_link_libraries(aegra_adapter_windows_disk PUBLIC Aegra::Ports)
+target_link_libraries(aegra_adapter_windows_disk PUBLIC Aegra::Ports PRIVATE Tbs wbemuuid)
 aegra_configure_target(aegra_adapter_windows_disk)

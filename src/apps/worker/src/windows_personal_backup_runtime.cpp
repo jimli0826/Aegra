@@ -1,6 +1,6 @@
 #include "windows_personal_backup_runtime.h"
 
-#include "worker_task_log.h"
+#include "aegra/apps/worker/worker_task_log.h"
 
 #include "aegra/adapters/personal_archive/personal_archive.h"
 #include "aegra/adapters/windows_disk/windows_disk.h"

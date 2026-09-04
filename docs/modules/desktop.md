@@ -231,8 +231,14 @@ Repository 容量卡片只使用 Service 异步返回的本机 volume inventory 
     可选 128–1024 MiB 或 1–1024 GiB。Desktop 发送字节值，Schedule 创建后冻结；file_set 固定为 0。
   - Compression 为 Fast/Normal/High，分别对应 zstd level **1 / 3 / 9**，新建默认 Normal。
     Desktop 把整数 `compression_level` 写入 UpsertSchedule；创建后冻结。volume_set 与 file_set 均可配置。
-  - Options 底部显示 **Post Backup** / **Enable verify**；默认关闭、编辑时可修改。
-    Desktop 以 `verify_after_backup` 持久化，不在 GUI 内直接读取 Archive 或执行 Verify。
+  - Options 底部显示 **Post Backup** / **Enable verify**；volume_set 还显示
+    **Enable boot check**。两项默认关闭、编辑时可修改，且相互独立（不联动、不锁定）；两者都启用时
+    执行顺序为 Backup → Verify → BootCheck，只启用 BootCheck 时 Backup 成功后直接执行。
+    启用 BootCheck 后必须在 VirtualBox 与 Hyper-V 中选择一个平台；Desktop
+    只读取 Service capability，未安装项显示“未安装”且禁止选择。Desktop 以 `verify_after_backup`、
+    `boot_check_after_backup` 和 `boot_check_hypervisor` 持久化，不在 GUI 内直接读取 Archive、查询
+    hypervisor 安装、执行 Verify 或创建 VM；
+    file_set 不显示 BootCheck。
   Backup list、Add、slide-in wizard、真实 Service/SQLite Job、Schedule、多 Volume 单 Archive、取消和聚合进度
   均已具备生产功能。
 - Restore Source Disks：选中 checkpoint 后调用 Service V3 `GetRecoveryPointLayout`（kind 12）。payload 为

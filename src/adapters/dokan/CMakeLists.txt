@@ -7,6 +7,8 @@ add_library(aegra_adapter_dokan STATIC
     src/cow_backing_store.cpp
     src/disk_image.cpp
     src/vhdx_disk_image.cpp
+    src/vmdk_disk_image.cpp
+    src/vmdk_presentation.cpp
     src/aux_file_store.cpp
     src/dokan_file_system.cpp
     src/file_set_fs.cpp

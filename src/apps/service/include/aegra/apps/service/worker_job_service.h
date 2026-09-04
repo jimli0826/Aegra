@@ -7,6 +7,7 @@
 #include "aegra/ports/file_browser.h"
 
 #include <cstdint>
+#include <string>
 #include <string_view>
 
 namespace aegra::application {
@@ -26,6 +27,16 @@ namespace aegra::apps::service {
 class IServiceLog;
 class WorkerSupervisor;
 struct WorkerJobRequest;
+
+/// Planned post-backup Verify identity (durable post_backup_plans row fields).
+/// The verify job is rebuilt from the Catalog, so a Service restart can resubmit
+/// with the same deterministic idempotency key.
+struct PostBackupVerifyRequest final {
+    std::string backup_job_id;
+    std::string recovery_point_id;
+    std::string repository_connection_id;
+    std::string schedule_id;
+};
 
 class IWorkerJobService {
   public:
@@ -107,9 +118,11 @@ class WorkerJobService final : public IWorkerJobService {
     start_file_restore(const contracts::StartFileRestoreCommand& command,
                        std::string_view idempotency_key,
                        base::CancellationToken cancellation) override;
-    /// Internal post-action path. Builds a Verify job from a completed backup snapshot.
+    /// Internal post-action path. Rebuilds the Verify job from the Catalog so the
+    /// durable coordinator can resubmit it after a Service restart (Replayed on
+    /// the deterministic post-backup idempotency key).
     [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
-    start_post_backup_verify(const WorkerJobRequest& completed_backup,
+    start_post_backup_verify(const PostBackupVerifyRequest& request,
                              base::CancellationToken cancellation);
     [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
     cancel_job(const contracts::ResourceRef& job, std::string_view idempotency_key,

@@ -57,7 +57,7 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
 
 ## Schema 与不变量
 
-- `schema_meta.version` 当前为 `23`（`ports::kControlPlaneSchemaVersion`；v21 增加分卷大小，v22 增加压缩级别，v23 增加备份后 Verify 策略）。产品未发布：
+- `schema_meta.version` 当前为 `27`（`ports::kControlPlaneSchemaVersion`；v21 增加分卷大小，v22 增加压缩级别，v23 增加备份后 Verify 策略，v24 增加 durable `post_backup_plans`，v25 增加 BootCheck hypervisor 选择与 plan 快照，v26 允许 `jobs.operation` 取 BootCheck(5)，BootCheck 运行由 `PostBackupCoordinator` 记录为控制面 Job 供任务日志展示，Verify/BootCheck Job 可携带所属 `schedule_id` 供 UI 按 Schedule 展示后置动作状态，v27 解除 `boot_check_after_backup` 对 `verify_after_backup` 的依赖，两者相互独立）。产品未发布：
   - 新库 `CREATE IF NOT EXISTS` 即为当前完整表结构，再写入当前 version；
   - **不提供** 历史 schema 的 `ALTER` 迁移或兼容读取；旧开发库必须删除后重建；
   - 非 0 且非当前版本 → `kUnsupportedVersion`。
@@ -82,7 +82,8 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
   `schedule_id`、**请求的** `backup_type`（非降级后的 effective 类型）、`content_kind`、
   volume `source_ids` 或 file `selection_id` 列表、`repository_connection_id`、exclude、encryption；
   volume 还必须覆盖 `deduplication_enabled` 与 `split_size_bytes`；
-  两种 content_kind 都必须覆盖 `compression_level` 与 `verify_after_backup`；
+  两种 content_kind 都必须覆盖 `compression_level` 与 `verify_after_backup`；volume_set 还覆盖
+  `boot_check_after_backup` 与 `boot_check_hypervisor`；
   重放时只比指纹，不从 effective Job 状态猜 demote。有 `idempotency_key` 时指纹不得为空。
 - `jobs` FI7 结果投影（schema 13）：`result_requested_backup_type`、`result_effective_backup_type`、
   `result_effective_parent_uuid`、`result_incremental_downgrade_reason`。终端 transition 从 TaskResult
@@ -97,8 +98,19 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
   upsert command 的 idempotency fingerprint 必须包含这些选项、`verify_after_backup` 与
   `archive_password` 的不可逆摘要
   （不存明文）。
-- `schedules.verify_after_backup` 必填、默认 false，允许更新；每次 Backup 启动时快照到内存请求，
-  成功发布 Catalog 后提交独立 Verify Job。
+- `schedules.verify_after_backup` 必填、默认 false，允许更新；Backup 提交时把策略快照写入
+  `post_backup_plans`，成功发布 Catalog 后由 durable coordinator 提交独立 Verify Job。
+- `schedules.boot_check_after_backup`（v24）：默认 false；仅 volume_set，且要求
+  `verify_after_backup=true`（校验 fail-closed）。v25 的 `boot_check_hypervisor` 在启用时必须为
+  VirtualBox(1) 或 Hyper-V(2)，关闭时必须为 null。V4 upsert 两字段同时为 null = 更新保留既有值 /
+  创建为关闭；关闭 Verify 会同时关闭 BootCheck。ScheduleSummary 返回两个字段。
+- `post_backup_plans`（v24）：每个启用后置动作的 Backup Job 一行，与 JobRecord **同事务**写入
+  （`FOREIGN KEY backup_job_id → jobs ON DELETE CASCADE`，随 Job 保留期清除）。字段：
+  `schedule_id` / `recovery_point_id`（file_uuid）/ `repository_connection_id`、
+  `verify_required` / `boot_check_required`、v25 `boot_check_hypervisor` Schedule 快照、每动作 `state(1=pending 2=running 3=succeeded
+  4=failed 5=skipped)` + `job_id` + `message_code` + `attempts`、`claim_owner` +
+  `lease_expires_utc_ms`（coordinator 租约认领，重启后过期即可重认领）。
+  `claim_incomplete` 只认领存在未终态必需动作的行，oldest-first、有界批量。
 - `schedules.archive_password_protected`：加密 Schedule 为 `dpapi-lm:<schedule_id>:<base64>`
   （DPAPI `CRYPTPROTECT_LOCAL_MACHINE`，`pOptionalEntropy` = UTF-8 `schedule_id`）；未加密必须为空串。
   **不**返回给 Desktop `ScheduleSummary`。

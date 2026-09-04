@@ -39,10 +39,14 @@ struct WorkerJobRequest final {
     std::string idempotency_key;
     /// Normalized request identity for idempotent replay (requested fields, not effective type).
     std::string request_fingerprint;
-    /// Owning schedule for backup jobs; used to advance last_recovery_point_id after Catalog publish.
+    /// Owning schedule for backup jobs; used to advance last_recovery_point_id after Catalog
+    /// publish.
     std::string schedule_id;
     /// Snapshot of the owning schedule's post-backup Verify policy at submission.
     bool verify_after_backup{false};
+    /// Snapshot of the owning schedule's post-backup BootCheck policy at submission.
+    bool boot_check_after_backup{false};
+    std::optional<contracts::BootCheckHypervisor> boot_check_hypervisor;
     std::optional<std::string> backup_archive_key;
     /// Opaque restore preflight token when operation is restore (unique job occupancy).
     std::optional<std::string> preflight_token;

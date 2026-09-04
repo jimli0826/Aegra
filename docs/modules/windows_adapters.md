@@ -43,7 +43,7 @@ automount，属性未粘滞时不 fail-closed；完整 Windows 数据盘路径�
 
 ## 依赖
 
-- `aegra_adapter_windows_disk` 只依赖 `Aegra::Ports` 和 Windows SDK。
+- `aegra_adapter_windows_disk` 只依赖 `Aegra::Ports` 和 Windows SDK（含 TBS 与 WMI）。
 - `aegra_adapter_windows_vss` 只依赖 `Aegra::Base`、VSS API、COM 和 Windows SDK；不得依赖
   `windows_disk` 的实现。
 - `aegra_adapter_windows_system` 只依赖 `Aegra::Ports`、BCrypt、Crypt32（DPAPI）和虚拟内存 API；
@@ -68,6 +68,13 @@ automount，属性未粘滞时不 fail-closed；完整 Windows 数据盘路径�
 
 文件系统未就绪、可移动介质无介质或 extent 查询权限不足不会删除 Volume identity；对应 capability 为
 false。只有 Volume 枚举本身无法启动或异常终止时，整个调用失败。
+
+### `inspect_windows_boot_environment`
+
+只读解析运行中 Windows volume GUID、实际 BIOS/UEFI、native x64 architecture、OS build、Secure Boot、
+TPM presence 与系统卷 BitLocker protection。BitLocker 使用 locale-independent
+`ROOT\\CIMV2\\Security\\MicrosoftVolumeEncryption/Win32_EncryptableVolume`，不启动 `manage-bde`，不请求
+recovery key。安全状态无法权威读取时返回 `unknown`，由 BootCheck eligibility fail-closed；不得猜测为关闭。
 
 ### `WindowsSourceInventory`（磁盘优先）
 

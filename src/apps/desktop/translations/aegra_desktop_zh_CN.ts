@@ -2962,5 +2962,33 @@ for critical volumes now</source>
         <source>Enable verify</source>
         <translation>启用校验</translation>
     </message>
+    <message id="aegra.backup.post.boot_check">
+        <source>Enable boot check</source>
+        <translation>启用启动检查</translation>
+    </message>
+    <message id="aegra.backup.post.hypervisor">
+        <source>Hypervisor</source>
+        <translation>虚拟化平台</translation>
+    </message>
+    <message id="aegra.backup.post.installed">
+        <source>Installed</source>
+        <translation>已安装</translation>
+    </message>
+    <message id="aegra.backup.post.not_installed">
+        <source>Not installed</source>
+        <translation>未安装</translation>
+    </message>
+    <message id="aegra.backup.post.hypervisor_none">
+        <source>No supported hypervisor is installed</source>
+        <translation>未安装受支持的虚拟化平台</translation>
+    </message>
+    <message id="aegra.backup.post.hypervisor_unavailable">
+        <source>Select an installed hypervisor for boot check</source>
+        <translation>请选择已安装的虚拟化平台用于启动检查</translation>
+    </message>
+    <message id="aegra.job.operation.bootcheck">
+        <source>Boot Check</source>
+        <translation>启动验证</translation>
+    </message>
 </context>
 </TS>

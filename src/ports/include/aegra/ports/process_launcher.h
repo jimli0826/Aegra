@@ -14,6 +14,11 @@ struct ProcessLaunchResult final {
     std::uint32_t pid{};
 };
 
+struct ProcessEnvironmentVariable final {
+    std::string name;
+    std::string value;
+};
+
 /// Specification for launching a new process.
 struct ProcessLaunchRequest final {
     std::string executable_path;
@@ -21,6 +26,10 @@ struct ProcessLaunchRequest final {
     /// Capture combined stdout/stderr for retrieval via ProcessExitStatus::output.
     /// Best-effort: capture setup failure must not fail the launch.
     bool capture_output{false};
+    /// Per-child environment replacements. Names are matched case-insensitively on
+    /// Windows. The launcher inherits all unspecified variables without mutating
+    /// the parent process environment.
+    std::vector<ProcessEnvironmentVariable> environment_overrides;
 };
 
 /// Status returned when a process exits.

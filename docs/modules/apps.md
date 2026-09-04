@@ -11,6 +11,9 @@
 - `repository_gateway`：企业 Repository 在线入口。
 - `vmware_connector`、`hyperv_connector`：厂商 SDK 隔离。
 - `pe_restore`：WinPE 最小离线恢复程序。
+- `boot_check`：单任务 BootCheck Host（`AegraBootCheck.exe`）：打开 Archive 链 → 整盘只读
+  VMDK/VHDX → 用户指定的 VirtualBox 或 Hyper-V 隔离 VM → 差分盘增长判据；不做 provider 回退，复用 Worker 的响应
+  wire shape 与任务日志，见 [boot_check_host.md](boot_check_host.md)。
 - `desktop`：普通用户 GUI。
 - `cli`：本机 Service 控制面命令行客户端（`AegraCLI.exe`）；只经 Named Pipe 调用 V4 协议，见 [cli.md](cli.md)。
 - `shell_extension`：Explorer 进程内只读浏览 current V7 `.bkf`（ADR-0023）；Composition Root 装配 Archive/NTFS，不请求 Mount Host。
@@ -28,6 +31,8 @@
 Windows 个人卷备份的首个 Worker Composition Root 见
 [Windows 个人卷备份 Composition Root](windows_personal_backup.md)。它只负责具体 Adapter 装配、Manifest
 输入映射和 Snapshot/Source/Archive 生命周期顺序；块处理仍由通用 Pipeline 执行。
+该 Composition Root 还把 Windows Disk Adapter 的只读启动环境探测与实际 Manifest Disk/Volume/extents
+交叉验证：仅完整系统盘写 ADR-0027 Boot Profile，数据盘或不完整选择写 null。
 
 Windows 文件集 Full 备份 Composition Root 见
 [Windows 文件集备份 Composition Root](windows_file_set_backup.md)。Host 按 `content_kind` 分发到
@@ -57,9 +62,11 @@ Header，确认任务身份与 Archive 一致，再以 create-only 语义发布
 Repository 扫描负责补建。选父与降级细节见
 [personal_repository.md](personal_repository.md#service-增量选父与树完整判定)。
 
-Schedule 开启 `verify_after_backup` 时，Service completion observer 只在 Backup 成功且 Catalog 发布成功后
-把不可变完成快照放入有界队列。独立 dispatcher 复用 Worker Verify 入口；file_set 从 Catalog 解析
-base-first 完整链，volume_set 校验刚提交的 Archive。该后置任务不在 Worker completion 线程内同步启动。
+Schedule 开启 `verify_after_backup` 时，Backup 提交即与 JobRecord 同事务写入 durable
+`post_backup_plans`；completion observer 只 kick `PostBackupCoordinator`，由它以 claim/lease 轮询在
+Backup 成功且 Catalog 发布后按确定性幂等键提交独立 Verify Job（两种 content_kind 均经 Catalog 重建
+请求，凭据取 Schedule 密文引用）。Service 崩溃/重启不丢后置动作。该后置任务不在 Worker completion
+线程内同步启动。
 
 ## WinPE 离线恢复
 

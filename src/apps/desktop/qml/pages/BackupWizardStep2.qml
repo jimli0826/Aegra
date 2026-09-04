@@ -37,6 +37,23 @@ Item {
     readonly property int passwordMaxLength: 32
     property string compression: "normal"
     property bool verifyAfterBackup: false
+    property bool bootCheckAfterBackup: false
+    /// Service wire enum: 0=none, 1=VirtualBox, 2=Hyper-V.
+    property int bootCheckHypervisor: 0
+    readonly property bool virtualBoxInstalled: typeof serviceClient !== "undefined"
+                                                && serviceClient
+                                                && serviceClient.virtualBoxInstalled
+    readonly property bool hyperVInstalled: typeof serviceClient !== "undefined"
+                                           && serviceClient
+                                           && serviceClient.hyperVInstalled
+    readonly property bool anyHypervisorInstalled: virtualBoxInstalled || hyperVInstalled
+
+    onFilesModeChanged: {
+        if (filesMode) {
+            bootCheckAfterBackup = false
+            bootCheckHypervisor = 0
+        }
+    }
 
     signal backRequested()
     signal createRequested()
@@ -67,6 +84,36 @@ Item {
         if (root.compression === "high")
             return 9
         return 3
+    }
+
+    function defaultBootCheckHypervisor() {
+        if (root.virtualBoxInstalled)
+            return 1
+        if (root.hyperVInstalled)
+            return 2
+        return 0
+    }
+
+    function isBootCheckHypervisorInstalled(value) {
+        return value === 1 ? root.virtualBoxInstalled
+                           : (value === 2 ? root.hyperVInstalled : false)
+    }
+
+    /// Brand-colored mini icon shown before a hypervisor name (1 = VirtualBox, 2 = Hyper-V).
+    component HypervisorBadge: Rectangle {
+        property int hv: 0
+        width: 18
+        height: 18
+        radius: 4
+        color: hv === 1 ? "#183A61" : "#0078D4"
+        Text {
+            anchors.centerIn: parent
+            text: parent.hv === 1 ? "V" : "H"
+            color: "#ffffff"
+            font.pixelSize: 10
+            font.bold: true
+            font.family: Theme.fontFamily
+        }
     }
 
     function normalizeTimeLabel(value) {
@@ -362,6 +409,9 @@ Item {
         enableDedup = item.deduplicationEnabled !== false
         excludePageHibernation = item.excludePageAndHibernation !== false
         verifyAfterBackup = !!item.verifyAfterBackup
+        bootCheckAfterBackup = !root.filesMode && !!item.bootCheckAfterBackup
+        bootCheckHypervisor = bootCheckAfterBackup
+                              ? parseInt(item.bootCheckHypervisor || 0, 10) : 0
         var level = parseInt(item.compressionLevel, 10)
         if (level === 1)
             compression = "fast"
@@ -410,6 +460,8 @@ Item {
         passwordConfirm = ""
         compression = "normal"
         verifyAfterBackup = false
+        bootCheckAfterBackup = false
+        bootCheckHypervisor = 0
         if (hourCombo) {
             var hIdx = hourOptions.indexOf(timeHour())
             hourCombo.currentIndex = hIdx >= 0 ? hIdx : 12
@@ -1340,42 +1392,156 @@ Item {
                             font.family: Theme.fontFamily
                         }
 
-                        RowLayout {
+                        AppCheckBox {
                             Layout.fillWidth: true
-                            spacing: 10
-                            Rectangle {
-                                Layout.preferredWidth: 18
-                                Layout.preferredHeight: 18
-                                radius: 3
-                                color: root.optionFill(root.verifyAfterBackup)
-                                border.width: root.verifyAfterBackup ? 0 : 1
-                                border.color: root.optionBorder(root.verifyAfterBackup)
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "\u2713"
-                                    color: root.optionMarkColor()
-                                    font.pixelSize: 12
-                                    font.bold: true
-                                    visible: root.verifyAfterBackup
-                                }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.verifyAfterBackup = !root.verifyAfterBackup
+                            //% "Enable verify"
+                            text: qsTrId("aegra.backup.post.verify")
+                            checked: root.verifyAfterBackup
+                            onToggled: root.verifyAfterBackup = checked
+                        }
+
+                        AppCheckBox {
+                            Layout.fillWidth: true
+                            visible: !root.filesMode
+                            //% "Enable boot check"
+                            text: qsTrId("aegra.backup.post.boot_check")
+                            checked: root.bootCheckAfterBackup
+                            enabled: root.bootCheckAfterBackup || root.anyHypervisorInstalled
+                            onToggled: {
+                                root.bootCheckAfterBackup = checked
+                                if (checked) {
+                                    if (!root.isBootCheckHypervisorInstalled(
+                                                root.bootCheckHypervisor))
+                                        root.bootCheckHypervisor =
+                                                root.defaultBootCheckHypervisor()
+                                } else {
+                                    root.bootCheckHypervisor = 0
                                 }
                             }
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            visible: !root.filesMode && !root.anyHypervisorInstalled
+                            //% "No supported hypervisor is installed"
+                            text: qsTrId("aegra.backup.post.hypervisor_none")
+                            color: Theme.colorTextGrey
+                            font.pixelSize: 12
+                            font.family: Theme.fontFamily
+                            wrapMode: Text.WordWrap
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            visible: !root.filesMode && root.bootCheckAfterBackup
+                            spacing: 8
+
                             Text {
-                                Layout.fillWidth: true
-                                //% "Enable verify"
-                                text: qsTrId("aegra.backup.post.verify")
-                                color: Theme.colorTextWhite
-                                font.pixelSize: 13
+                                //% "Hypervisor"
+                                text: qsTrId("aegra.backup.post.hypervisor")
+                                color: Theme.colorTextGrey
+                                font.pixelSize: 12
                                 font.family: Theme.fontFamily
-                                wrapMode: Text.WordWrap
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.verifyAfterBackup = !root.verifyAfterBackup
+                            }
+
+                            ComboBox {
+                                id: hypervisorCombo
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 36
+                                model: [
+                                    { value: 1, label: "VirtualBox",
+                                      installed: root.virtualBoxInstalled },
+                                    { value: 2, label: "Hyper-V",
+                                      installed: root.hyperVInstalled }
+                                ]
+                                currentIndex: root.bootCheckHypervisor === 1 ? 0
+                                              : root.bootCheckHypervisor === 2 ? 1 : -1
+                                onActivated: function(index) {
+                                    root.bootCheckHypervisor = model[index].value
+                                }
+                                background: Rectangle {
+                                    color: Theme.colorInput
+                                    radius: 8
+                                    border.width: 1
+                                    border.color: Theme.colorBorder
+                                }
+                                contentItem: Row {
+                                    leftPadding: 10
+                                    rightPadding: 22
+                                    spacing: 8
+                                    HypervisorBadge {
+                                        hv: root.bootCheckHypervisor
+                                        visible: root.bootCheckHypervisor !== 0
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: root.bootCheckHypervisor === 1 ? "VirtualBox"
+                                              : root.bootCheckHypervisor === 2 ? "Hyper-V" : ""
+                                        color: Theme.colorTextWhite
+                                        font.pixelSize: 13
+                                        font.family: Theme.fontFamily
+                                    }
+                                }
+                                indicator: ComboBoxIndicator { combo: hypervisorCombo }
+                                popup: Popup {
+                                    y: hypervisorCombo.height + 2
+                                    width: hypervisorCombo.width
+                                    padding: 4
+                                    implicitHeight: Math.min(160, contentItem.implicitHeight + 8)
+                                    contentItem: ListView {
+                                        clip: true
+                                        implicitHeight: contentHeight
+                                        model: hypervisorCombo.popup.visible
+                                               ? hypervisorCombo.delegateModel : null
+                                        currentIndex: hypervisorCombo.highlightedIndex
+                                    }
+                                    background: Rectangle {
+                                        color: Theme.colorPopup
+                                        border.color: Theme.colorBorder
+                                        radius: 8
+                                    }
+                                }
+                                delegate: ItemDelegate {
+                                    id: hypervisorItem
+                                    required property var modelData
+                                    required property int index
+                                    width: hypervisorCombo.width
+                                    height: 32
+                                    hoverEnabled: true
+                                    enabled: modelData.installed
+                                    highlighted: hypervisorCombo.highlightedIndex === index
+                                    contentItem: Row {
+                                        leftPadding: 8
+                                        spacing: 8
+                                        HypervisorBadge {
+                                            hv: hypervisorItem.modelData.value
+                                            opacity: hypervisorItem.modelData.installed ? 1.0 : 0.45
+                                            anchors.verticalCenter: parent.verticalCenter
+                                        }
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: hypervisorItem.modelData.label
+                                            color: hypervisorItem.modelData.installed
+                                                   ? Theme.colorTextWhite
+                                                   : Theme.colorButtonDisabledText
+                                            font.pixelSize: 13
+                                            font.family: Theme.fontFamily
+                                        }
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            visible: !hypervisorItem.modelData.installed
+                                            text: qsTrId("aegra.backup.post.not_installed")
+                                            color: Theme.colorButtonDisabledText
+                                            font.pixelSize: 11
+                                            font.family: Theme.fontFamily
+                                        }
+                                    }
+                                    background: Rectangle {
+                                        radius: 4
+                                        color: (hypervisorItem.hovered || hypervisorItem.highlighted)
+                                               ? Theme.colorHover : "transparent"
+                                    }
                                 }
                             }
                         }

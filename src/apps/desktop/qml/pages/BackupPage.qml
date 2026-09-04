@@ -608,6 +608,134 @@ Item {
         }
     }
 
+    /// One pipeline-task chip for the Schedule STATUS column: the letter names
+    /// the task (B backup / V verify / C boot check), the color the state, and
+    /// each task runs its own animation — B a rotating dashed ring, V a
+    /// breathing pulse, C an orbiting dot.
+    component TaskStateBadge: Item {
+        id: badge
+        property string letter: ""
+        property string statusKey: "none"
+        /// "ring" | "pulse" | "orbit"
+        property string animKind: "ring"
+        readonly property bool running: statusKey === "running"
+        width: 22
+        height: 22
+
+        Rectangle {
+            id: badgeFace
+            anchors.fill: parent
+            radius: width / 2
+            color: {
+                if (badge.statusKey === "success")
+                    return Qt.rgba(Theme.colorGreen.r, Theme.colorGreen.g,
+                                   Theme.colorGreen.b, 0.18)
+                if (badge.statusKey === "failed")
+                    return Qt.rgba(Theme.colorAccentRed.r, Theme.colorAccentRed.g,
+                                   Theme.colorAccentRed.b, 0.18)
+                if (badge.running)
+                    return Qt.rgba(Theme.colorAccentBlue.r, Theme.colorAccentBlue.g,
+                                   Theme.colorAccentBlue.b, 0.18)
+                return Theme.colorProgressTrack
+            }
+
+            Text {
+                anchors.centerIn: parent
+                text: badge.letter
+                color: {
+                    if (badge.statusKey === "success")
+                        return Theme.colorGreen
+                    if (badge.statusKey === "failed")
+                        return Theme.colorAccentRed
+                    if (badge.running)
+                        return Theme.colorAccentBlue
+                    return Theme.colorTextDim
+                }
+                font.pixelSize: 10
+                font.bold: true
+                font.family: Theme.fontFamily
+            }
+
+            // Verify: breathing pulse.
+            SequentialAnimation on scale {
+                running: badge.running && badge.animKind === "pulse"
+                loops: Animation.Infinite
+                alwaysRunToEnd: true
+                NumberAnimation { from: 1.0; to: 1.18; duration: 450; easing.type: Easing.InOutQuad }
+                NumberAnimation { from: 1.18; to: 1.0; duration: 450; easing.type: Easing.InOutQuad }
+            }
+        }
+
+        // Backup: rotating dashed ring.
+        Canvas {
+            anchors.fill: parent
+            visible: badge.running && badge.animKind === "ring"
+            antialiasing: true
+            onVisibleChanged: if (visible) requestPaint()
+            Component.onCompleted: requestPaint()
+            onPaint: {
+                var ctx = getContext("2d")
+                ctx.reset()
+                ctx.clearRect(0, 0, width, height)
+                ctx.strokeStyle = Theme.colorAccentBlue
+                ctx.lineWidth = 2
+                ctx.lineCap = "round"
+                var cx = width / 2
+                var cy = height / 2
+                var r = width / 2 - 1.2
+                for (var i = 0; i < 3; ++i) {
+                    var s = i * 2 * Math.PI / 3
+                    ctx.beginPath()
+                    ctx.arc(cx, cy, r, s, s + Math.PI / 3)
+                    ctx.stroke()
+                }
+            }
+            RotationAnimation on rotation {
+                running: badge.running && badge.animKind === "ring"
+                from: 0
+                to: 360
+                duration: 1100
+                loops: Animation.Infinite
+            }
+        }
+
+        // Boot check: orbiting dot.
+        Item {
+            anchors.fill: parent
+            visible: badge.running && badge.animKind === "orbit"
+            Rectangle {
+                width: 5
+                height: 5
+                radius: 2.5
+                color: Theme.colorAccentBlue
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: -2.5
+            }
+            RotationAnimation on rotation {
+                running: badge.running && badge.animKind === "orbit"
+                from: 0
+                to: 360
+                duration: 1400
+                loops: Animation.Infinite
+            }
+        }
+    }
+
+    /// Latest post-backup action status for a schedule row (3 = verify, 5 = boot check).
+    /// Returns { statusKey, progressPercent, stateText }.
+    function schedulePostBackupStatus(schedule, operation) {
+        var _ = root.jobsStatusRevision
+        if (!schedule)
+            return { statusKey: "none" }
+        var jobs = serviceClient.jobs
+        if (!jobs || typeof jobs.latestOperationStatus !== "function")
+            return { statusKey: "none" }
+        var scheduleId = schedule.scheduleId || schedule.id || ""
+        if (scheduleId.length === 0)
+            return { statusKey: "none" }
+        return jobs.latestOperationStatus(scheduleId, operation) || { statusKey: "none" }
+    }
+
     /// Pending wizard create payload while the first-backup confirm dialog is open.
     property var pendingCreatePayload: null
     /// Blocks Create click-through after Later / Start now closes the confirm popup.
@@ -682,6 +810,13 @@ Item {
         var compressionLevel = s2 && typeof s2.selectedCompressionLevel === "function"
                                ? s2.selectedCompressionLevel() : 3
         var verifyAfterBackup = s2 ? !!s2.verifyAfterBackup : false
+        var bootCheckAfterBackup = (!filesMode && s2) ? !!s2.bootCheckAfterBackup : false
+        var bootCheckHypervisor = bootCheckAfterBackup ? s2.bootCheckHypervisor : 0
+        if (bootCheckAfterBackup &&
+                (!s2 || !s2.isBootCheckHypervisorInstalled(bootCheckHypervisor))) {
+            serviceClient.showToast(qsTrId("aegra.backup.post.hypervisor_unavailable"), true)
+            return
+        }
         var encryption = s2 ? s2.encryption : false
         var password = s2 ? (s2.password || "") : ""
         var passwordConfirm = s2 ? (s2.passwordConfirm || "") : ""
@@ -709,6 +844,8 @@ Item {
             splitSizeBytes: splitSizeBytes,
             compressionLevel: compressionLevel,
             verifyAfterBackup: verifyAfterBackup,
+            bootCheckAfterBackup: bootCheckAfterBackup,
+            bootCheckHypervisor: bootCheckHypervisor,
             encryption: encryption,
             password: encryption ? password : ""
         }
@@ -734,7 +871,9 @@ Item {
                                               p.excludePage, !!p.enableDedup,
                                               p.splitSizeBytes || 0, p.compressionLevel || 3,
                                               p.encryption, p.password, !!startFirstBackup, mask,
-                                              monthMask, !!p.verifyAfterBackup)
+                                              monthMask, !!p.verifyAfterBackup,
+                                              !!p.bootCheckAfterBackup,
+                                              p.bootCheckHypervisor || 0)
         }
         if (!ok) {
             //% "Could not save schedule"
@@ -839,6 +978,17 @@ Item {
         var splitSizeBytes = item.splitSizeBytes || 0
         var compressionLevel = item.compressionLevel || 3
         var verifyAfterBackup = s2 ? !!s2.verifyAfterBackup : !!item.verifyAfterBackup
+        var bootCheckAfterBackup = root.backupMode !== "files"
+                                   && (s2 ? !!s2.bootCheckAfterBackup
+                                          : !!item.bootCheckAfterBackup)
+        var bootCheckHypervisor = bootCheckAfterBackup
+                                  ? (s2 ? s2.bootCheckHypervisor
+                                        : (item.bootCheckHypervisor || 0)) : 0
+        if (bootCheckAfterBackup &&
+                (!s2 || !s2.isBootCheckHypervisorInstalled(bootCheckHypervisor))) {
+            serviceClient.showToast(qsTrId("aegra.backup.post.hypervisor_unavailable"), true)
+            return
+        }
         var encryption = !!item.encryptionEnabled
         var sourceIds = serviceClient.sourceIdsForSchedule(sid)
         if (!sourceIds || sourceIds.length === 0)
@@ -857,7 +1007,8 @@ Item {
             ok = serviceClient.upsertSchedule(sid, displayName, enabled, sourceIds,
                                               connId, frequency, timeOfDay, exclude, dedup,
                                               splitSizeBytes, compressionLevel, encryption, "", 2,
-                                              weekdayMask, dayOfMonthMask, verifyAfterBackup)
+                                              weekdayMask, dayOfMonthMask, verifyAfterBackup,
+                                              bootCheckAfterBackup, bootCheckHypervisor)
         }
         if (!ok) {
             serviceClient.showToast(qsTrId("aegra.backup.schedule.update_failed"), true)
@@ -1701,7 +1852,7 @@ Item {
                             horizontalAlignment: Text.AlignHCenter
                         }
                         Text {
-                            Layout.preferredWidth: 110
+                            Layout.preferredWidth: 150
                             //% "Status"
                             text: qsTrId("aegra.backup.column.status").toUpperCase()
                             color: Theme.colorTextDim
@@ -1911,139 +2062,72 @@ Item {
                                     }
                                 }
 
-                                // Status: success / failed / running+progress%
+                                // Status: one chip per pipeline task (B backup, V verify,
+                                // C boot check); color = state, per-task animation while running.
                                 Item {
                                     id: statusCell
-                                    Layout.preferredWidth: 110
+                                    Layout.preferredWidth: 150
                                     Layout.fillHeight: true
                                     readonly property var backupStatus: root.scheduleBackupStatus(modelData)
                                     readonly property string statusKey: backupStatus.statusKey || "none"
-                                    readonly property int progressPct: backupStatus.progressPercent || 0
+                                    readonly property var verifyStatusRaw: root.schedulePostBackupStatus(modelData, 3)
+                                    readonly property var bootCheckStatusRaw: root.schedulePostBackupStatus(modelData, 5)
+                                    readonly property double backupCreated: backupStatus.createdUtcMs || 0
+
+                                    // Only statuses from the current run chain: a running backup
+                                    // starts a new chain, and older verify/boot-check results from
+                                    // the previous chain are hidden instead of shown as stale.
+                                    function chainKey(st) {
+                                        if (!st || (st.statusKey || "none") === "none")
+                                            return "none"
+                                        if (statusCell.statusKey === "running")
+                                            return "none"
+                                        if ((st.createdUtcMs || 0) < statusCell.backupCreated)
+                                            return "none"
+                                        return st.statusKey
+                                    }
+                                    readonly property string verifyKey: chainKey(verifyStatusRaw)
+                                    readonly property string bootCheckKey: chainKey(bootCheckStatusRaw)
+                                    readonly property int runningPercent: {
+                                        if (statusKey === "running")
+                                            return backupStatus.progressPercent || 0
+                                        if (verifyKey === "running")
+                                            return verifyStatusRaw.progressPercent || 0
+                                        if (bootCheckKey === "running")
+                                            return bootCheckStatusRaw.progressPercent || 0
+                                        return -1
+                                    }
 
                                     Row {
                                         anchors.centerIn: parent
                                         spacing: 6
 
-                                        // Icon badge: ✓ success · ⚠ failed · ↻↻ running · – none
-                                        Item {
-                                            id: statusIcon
-                                            width: 22
-                                            height: 22
+                                        TaskStateBadge {
+                                            letter: "B"
+                                            statusKey: statusCell.statusKey
+                                            animKind: "ring"
+                                            visible: statusCell.statusKey !== "none"
                                             anchors.verticalCenter: parent.verticalCenter
-                                            property real spinAngle: 0
-                                            rotation: statusCell.statusKey === "running" ? spinAngle : 0
-
-                                            Rectangle {
-                                                anchors.fill: parent
-                                                radius: width / 2
-                                                color: {
-                                                    if (statusCell.statusKey === "success")
-                                                        return Qt.rgba(Theme.colorGreen.r,
-                                                                       Theme.colorGreen.g,
-                                                                       Theme.colorGreen.b, 0.18)
-                                                    if (statusCell.statusKey === "failed")
-                                                        return Qt.rgba(Theme.colorAccentRed.r,
-                                                                       Theme.colorAccentRed.g,
-                                                                       Theme.colorAccentRed.b, 0.18)
-                                                    if (statusCell.statusKey === "running")
-                                                        return Qt.rgba(Theme.colorAccentBlue.r,
-                                                                       Theme.colorAccentBlue.g,
-                                                                       Theme.colorAccentBlue.b, 0.18)
-                                                    return Theme.colorProgressTrack
-                                                }
-                                            }
-                                            Text {
-                                                anchors.centerIn: parent
-                                                visible: statusCell.statusKey !== "running"
-                                                text: {
-                                                    if (statusCell.statusKey === "success")
-                                                        return "\u2713"
-                                                    if (statusCell.statusKey === "failed")
-                                                        return "\u26A0"
-                                                    return "\u2013"
-                                                }
-                                                color: {
-                                                    if (statusCell.statusKey === "success")
-                                                        return Theme.colorGreen
-                                                    if (statusCell.statusKey === "failed")
-                                                        return Theme.colorAccentRed
-                                                    return Theme.colorTextDim
-                                                }
-                                                font.pixelSize: statusCell.statusKey === "failed" ? 11 : 12
-                                                font.bold: true
-                                                font.family: Theme.fontFamily
-                                            }
-
-                                            // Dual circular arrows (sync) — rotates while running
-                                            Canvas {
-                                                id: syncCanvas
-                                                anchors.centerIn: parent
-                                                width: 16
-                                                height: 16
-                                                visible: statusCell.statusKey === "running"
-                                                antialiasing: true
-                                                onVisibleChanged: if (visible)
-                                                    requestPaint()
-                                                Component.onCompleted: requestPaint()
-                                                onPaint: {
-                                                    var ctx = getContext("2d")
-                                                    ctx.reset()
-                                                    ctx.clearRect(0, 0, width, height)
-                                                    var ink = Theme.colorAccentBlue
-                                                    ctx.strokeStyle = ink
-                                                    ctx.fillStyle = ink
-                                                    ctx.lineWidth = 1.6
-                                                    ctx.lineCap = "round"
-                                                    ctx.lineJoin = "round"
-
-                                                    var cx = width / 2
-                                                    var cy = height / 2
-                                                    var r = Math.min(width, height) / 2 - 2.2
-
-                                                    function drawArcArrow(startAng, endAng) {
-                                                        // Arc body
-                                                        ctx.beginPath()
-                                                        ctx.arc(cx, cy, r, startAng, endAng, false)
-                                                        ctx.stroke()
-                                                        // Filled arrowhead at end, tangent-aligned
-                                                        var tipX = cx + Math.cos(endAng) * r
-                                                        var tipY = cy + Math.sin(endAng) * r
-                                                        var tang = endAng + Math.PI / 2
-                                                        var hx = Math.cos(tang)
-                                                        var hy = Math.sin(tang)
-                                                        var nx = Math.cos(endAng)
-                                                        var ny = Math.sin(endAng)
-                                                        var len = 3.2
-                                                        var wing = 2.2
-                                                        ctx.beginPath()
-                                                        ctx.moveTo(tipX + hx * len, tipY + hy * len)
-                                                        ctx.lineTo(tipX - nx * wing - hx * 0.4,
-                                                                   tipY - ny * wing - hy * 0.4)
-                                                        ctx.lineTo(tipX + nx * wing - hx * 0.4,
-                                                                   tipY + ny * wing - hy * 0.4)
-                                                        ctx.closePath()
-                                                        ctx.fill()
-                                                    }
-
-                                                    // Two opposing arcs with arrowheads (classic sync glyph)
-                                                    drawArcArrow(-Math.PI * 0.85, -Math.PI * 0.15)
-                                                    drawArcArrow(Math.PI * 0.15, Math.PI * 0.85)
-                                                }
-                                            }
-
-                                            NumberAnimation on spinAngle {
-                                                running: statusCell.statusKey === "running"
-                                                from: 0
-                                                to: 360
-                                                loops: Animation.Infinite
-                                                duration: 1200
-                                            }
+                                        }
+                                        TaskStateBadge {
+                                            letter: "V"
+                                            statusKey: statusCell.verifyKey
+                                            animKind: "pulse"
+                                            visible: statusCell.verifyKey !== "none"
+                                            anchors.verticalCenter: parent.verticalCenter
+                                        }
+                                        TaskStateBadge {
+                                            letter: "C"
+                                            statusKey: statusCell.bootCheckKey
+                                            animKind: "orbit"
+                                            visible: statusCell.bootCheckKey !== "none"
+                                            anchors.verticalCenter: parent.verticalCenter
                                         }
 
                                         Text {
                                             anchors.verticalCenter: parent.verticalCenter
-                                            visible: statusCell.statusKey === "running"
-                                            text: statusCell.progressPct + "%"
+                                            visible: statusCell.runningPercent >= 0
+                                            text: statusCell.runningPercent + "%"
                                             color: Theme.colorAccentBlue
                                             font.pixelSize: 12
                                             font.bold: true

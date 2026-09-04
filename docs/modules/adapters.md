@@ -206,6 +206,60 @@ NtfsCore 模块说明见 [ntfs_core.md](ntfs_core.md)。
 - Dokan C 回调使用静态跳板进入实例，不使用全局实例。
 - 对原始备份视图的任何写入都不得修改 Recovery Point。
 
+`ReadOnlyVmdkPresentation` 是 BootCheck 的只读 VMDK 呈现入口：调用方提供生命周期更长的整盘
+`IRandomAccessReader`、空的本地 NTFS mount directory，以及本次 Job 生成的 CID、image UUID 和
+modification UUID。Adapter 通过 Dokan 同时呈现 `base.vmdk` descriptor 与 `base-flat.vmdk` extent；
+extent 的读取 1:1 映射到 reader，末尾不足 512 byte 的部分补零，两个文件均拒绝写入。显式 UUID 是
+VirtualBox 只读 parent 的硬要求；不得依赖 provider 打开后回写 descriptor。Presenter 使用 RAII 卸载，
+不注册 VM、不创建差分盘，也不删除调用方已有目录或文件。
+
+`ReadOnlyVhdxPresentation` 是同一入口的 VHDX 形态（Hyper-V parent）：通过 Dokan 呈现单个只读
+`disk.vhdx`（复用挂载功能已验证的 `VhdxDiskImage` 固定容器编码），供 Hyper-V `New-VHD -Differencing`
+引用；语义与 VMDK 版一致（只读、RAII、不碰调用方目录）。
+
+## VirtualBox BootCheck Adapter
+
+`Aegra::AdapterVirtualBox` 实现 `IBootCheckProvider`。Composition root 注入绝对 `VBoxManage.exe` 路径、
+独立 capability `VBOX_USER_HOME` 和 `IProcessLauncher`；Adapter 不读取用户默认 VirtualBox 配置。
+Capability 只有在 executable 是非 reparse 的常规文件、Authenticode 验证成功、版本为 7.1/7.2、
+`list hostinfo` 成功，并且一个无介质、无网络的临时 VM 确实完成 headless start/state/poweroff/unregister
+后才声明可用。Probe 使用唯一精确名称，清理失败时 capability 不可用。
+Service composition root 仅以 `discover_vbox_manage_path()` 的可信常规文件结果发布“已安装” capability；
+这不替代上述任务运行态 probe。
+
+每个正式 Job 只能使用空的 `<job>/vbox-home`、`<job>/vm` 和不存在的 `<job>/child.vdi`；parent 必须精确为
+`<job>/present/base.vmdk`。Adapter 把 parent 注册为 immutable，创建 VDI differencing child，只把 child
+通过 SATA/AHCI attach 到 VM，并关闭 NIC、audio、clipboard、file transfer、drag-and-drop、USB、VRDE 和
+recording。清理按 poweroff（等待稳定状态）→ detach → unregister（不带 `--delete`）→ 删除 child →
+close parent 执行；对 VirtualBox 释放锁的短暂竞态做有界重试。正式 VM 的外部目录和 parent 永远不交给
+VirtualBox 的宽泛删除命令。
+
+所有命令通过 Process Port 的 per-child environment override 设置 `VBOX_USER_HOME`，不修改 Service/Host
+父进程环境。CLI 输出有界捕获，厂商错误转换为稳定 `bootcheck.*` code。Session 非线程安全，调用方必须
+显式清理；析构的 15 秒清理仅用于异常兜底。
+
+VM 不配置串口或任何 guest 通道：启动确认由 BootCheck Host 监控 `child_medium_path` 差分盘增长完成
+（2026-09-03 起，COM1 Guest Probe 已移除）。
+
+## Hyper-V BootCheck Adapter
+
+`Aegra::AdapterHyperV` 实现同一 `IBootCheckProvider`（`parent_disk_format()=kVhdx`）。Composition
+root 注入 `GetSystemDirectoryW` 解析出的绝对 `powershell.exe` 路径与 `IProcessLauncher`；所有
+Hyper-V 操作通过 `-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand`（UTF-16LE
+base64，前置 `$ErrorActionPreference='Stop'`）执行，脚本内变量一律经单引号转义注入。可用性判据
+为 vmms 服务 Running 且 `Get-VM` 命令可解析，不创建探测 VM（Hyper-V VM 创建代价高）。
+Service 的轻量安装探测只检查 `vmms` 服务是否存在，因此服务停止时仍显示已安装；运行态 `inspect`
+仍要求服务 Running 和模块可解析。
+
+每个正式 Job：parent 必须精确为 `<job>/present/disk.vhdx`，`New-VHD -Differencing` 生成
+`<job>/child.vhdx`，`New-VM -NoVHD`（Boot Profile 决定 Generation 2/UEFI 或 1/BIOS）后移除网卡、
+固定内存、禁用 checkpoint、`AutomaticStopAction TurnOff`；Gen2 关闭 Secure Boot 并显式设置
+FirstBootDevice。创建时把 `aegra-bootcheck:<job_id>` 写入 VM Notes——Hyper-V 没有 per-job 隔离
+注册表，清扫以「名称前缀 + Notes 标记」双重门控在全局清单中识别孤儿 VM（vmms 未运行或模块缺失
+视为 0 台成功）。清理按 `Stop-VM -TurnOff` → `Remove-VM` → 删除 child.vhdx 执行。
+
+与 VirtualBox 相同，Hyper-V VM 不配置 COM 口；启动确认由 BootCheck Host 监控 `child.vhdx` 增长完成。
+
 旧文档中的具体类名、64KB 固定值、`/MT` 和旧 vcxproj 不是新实现约束；这些需要基准、格式和部署验证重新决定。
 
 ## 个人版 SQLite 控制面

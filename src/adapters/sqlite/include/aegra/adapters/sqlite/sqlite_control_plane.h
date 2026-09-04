@@ -73,6 +73,9 @@ class SqliteControlPlaneDatabase final : public ports::IControlPlaneDatabase {
                           base::CancellationToken cancellation) override;
     [[nodiscard]] base::Result<ports::ServiceSettingsRecord>
     get_service_settings(base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<std::optional<ports::PostBackupPlanRecord>>
+    get_post_backup_plan(std::string_view backup_job_id,
+                         base::CancellationToken cancellation) override;
 
   private:
     explicit SqliteControlPlaneDatabase(

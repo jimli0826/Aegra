@@ -81,7 +81,8 @@ constexpr std::size_t kMaximumTokenBytes = 1'024;
 
 [[nodiscard]] bool known_job_operation(const JobOperation operation) noexcept {
     return operation == JobOperation::kBackup || operation == JobOperation::kRestore ||
-           operation == JobOperation::kVerify || operation == JobOperation::kExport;
+           operation == JobOperation::kVerify || operation == JobOperation::kExport ||
+           operation == JobOperation::kBootCheck;
 }
 
 [[nodiscard]] bool terminal_job_state(const ServiceJobState state) noexcept {
@@ -298,7 +299,10 @@ base::Result<void> validate_job_summary(const JobSummary& summary) {
         if (!summary.schedule_id || summary.schedule_id->empty()) {
             return invalid("backup job summary requires schedule_id");
         }
-    } else if (summary.schedule_id && !summary.schedule_id->empty()) {
+    } else if (summary.operation != JobOperation::kVerify &&
+               summary.operation != JobOperation::kBootCheck && summary.schedule_id &&
+               !summary.schedule_id->empty()) {
+        // Post-backup verify/boot check may carry the owning schedule.
         return invalid("non-backup job summary must not set schedule_id");
     }
     return base::Result<void>::success();
@@ -397,6 +401,12 @@ base::Result<void> validate_schedule_summary(const ScheduleSummary& summary) {
                 }
             }
         }
+    }
+    if (summary.boot_check_after_backup != summary.boot_check_hypervisor.has_value() ||
+        (summary.boot_check_hypervisor &&
+         !is_known_boot_check_hypervisor(*summary.boot_check_hypervisor)) ||
+        (summary.content_kind == ContentKind::kFileSet && summary.boot_check_after_backup)) {
+        return invalid("schedule summary boot check policy is invalid");
     }
     return base::Result<void>::success();
 }
@@ -540,10 +550,9 @@ base::Result<void> validate_restore_preflight_request(const RestorePreflightRequ
 
 base::Result<void> validate_restore_preflight(const RestorePreflight& preflight) {
     const bool eligible = preflight.feasibility == RestoreFeasibility::kEligible;
-    const bool capacity_ok =
-        preflight.volume_size_policy == VolumeSizePolicy::kAllowNtfsRelocation
-            ? preflight.target_capacity_bytes > 0
-            : preflight.target_capacity_bytes >= preflight.logical_size_bytes;
+    const bool capacity_ok = preflight.volume_size_policy == VolumeSizePolicy::kAllowNtfsRelocation
+                                 ? preflight.target_capacity_bytes > 0
+                                 : preflight.target_capacity_bytes >= preflight.logical_size_bytes;
     if (!valid_token(preflight.preflight_token) ||
         !valid_stable_value(preflight.repository_connection_id, kMaximumIdentifierBytes) ||
         !valid_stable_value(preflight.recovery_point_id, kMaximumIdentifierBytes) ||
@@ -554,7 +563,8 @@ base::Result<void> validate_restore_preflight(const RestorePreflight& preflight)
         !valid_wire_integer(preflight.expires_utc_ms) ||
         !is_known_volume_size_policy(preflight.volume_size_policy) ||
         !is_known_restore_feasibility(preflight.feasibility) ||
-        preflight.restore_eligible != eligible || !valid_wire_integer(preflight.minimum_target_bytes) ||
+        preflight.restore_eligible != eligible ||
+        !valid_wire_integer(preflight.minimum_target_bytes) ||
         !valid_wire_integer(preflight.relocation_bytes) ||
         !valid_wire_integer(preflight.scratch_upper_bound_bytes) ||
         preflight.shrink_plan_digest.size() > 128 ||
@@ -679,8 +689,22 @@ base::Result<void> validate_upsert_schedule_command(const UpsertScheduleCommand&
             command.backup_type != BackupType::kIncremental) {
             return invalid("file_set schedule requires full or incremental backup type");
         }
+        if (command.boot_check_after_backup.value_or(false) || command.boot_check_hypervisor) {
+            return invalid("file_set schedule cannot enable boot check");
+        }
     } else if (!valid_archive_split_size(command.split_size_bytes)) {
         return invalid("volume_set schedule archive split size is invalid");
+    }
+    if (command.boot_check_after_backup.has_value()) {
+        if (*command.boot_check_after_backup != command.boot_check_hypervisor.has_value()) {
+            return invalid("boot check hypervisor must match the enabled state");
+        }
+    } else if (command.boot_check_hypervisor) {
+        return invalid("boot check hypervisor requires an explicit enabled state");
+    }
+    if (command.boot_check_hypervisor &&
+        !is_known_boot_check_hypervisor(*command.boot_check_hypervisor)) {
+        return invalid("boot check hypervisor is invalid");
     }
     auto protection = validate_protection_spec_input(command.protection, !command.schedule_id);
     if (!protection) {

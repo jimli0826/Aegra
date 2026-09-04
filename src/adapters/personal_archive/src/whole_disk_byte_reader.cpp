@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <utility>
@@ -47,9 +48,63 @@ struct VolumeIndex final {
     std::vector<VolumeChunkSpan> chunks;
 };
 
-struct CachedChunk final {
-    std::uint64_t inner_chunk_index{(std::numeric_limits<std::uint64_t>::max)()};
-    std::vector<std::byte> payload;
+using ChunkPayload = std::shared_ptr<const std::vector<std::byte>>;
+
+/// Bounded LRU of decompressed chunks. Interleaved random reads (a booting or
+/// mounted guest) alternate between chunks, so a single-entry cache thrashes
+/// into a full read+authenticate+decompress per request. Entries are shared so
+/// a reader thread keeps a payload alive even after a concurrent miss evicts it.
+class ChunkCache final {
+  public:
+    explicit ChunkCache(const std::size_t capacity) : capacity_(capacity == 0 ? 1 : capacity) {}
+
+    [[nodiscard]] ChunkPayload find(const std::uint64_t chunk_index) {
+        std::lock_guard lock(mutex_);
+        for (auto& entry : entries_) {
+            if (entry.chunk_index == chunk_index) {
+                entry.last_used = ++use_counter_;
+                return entry.payload;
+            }
+        }
+        return nullptr;
+    }
+
+    void insert(const std::uint64_t chunk_index, ChunkPayload payload) {
+        std::lock_guard lock(mutex_);
+        for (auto& entry : entries_) {
+            if (entry.chunk_index == chunk_index) {
+                entry.payload = std::move(payload);
+                entry.last_used = ++use_counter_;
+                return;
+            }
+        }
+        if (entries_.size() < capacity_) {
+            entries_.push_back(Entry{chunk_index, std::move(payload), ++use_counter_});
+            return;
+        }
+        auto oldest = std::min_element(
+            entries_.begin(), entries_.end(),
+            [](const Entry& left, const Entry& right) { return left.last_used < right.last_used; });
+        *oldest = Entry{chunk_index, std::move(payload), ++use_counter_};
+    }
+
+  private:
+    struct Entry final {
+        std::uint64_t chunk_index{0};
+        ChunkPayload payload;
+        std::uint64_t last_used{0};
+    };
+
+    std::mutex mutex_;
+    std::size_t capacity_{1};
+    std::uint64_t use_counter_{0};
+    std::vector<Entry> entries_;
+};
+
+/// Chunk provider handed through the read path: authoritative reader + cache.
+struct ChunkSource final {
+    ports::IRecoveryPointReader& inner;
+    ChunkCache& cache;
 };
 
 void overlay_region(const std::uint64_t request_offset, const std::uint64_t request_end,
@@ -85,10 +140,10 @@ build_volume_indices(ports::IRecoveryPointReader& inner, const format::Manifest&
             return base::Result<std::vector<VolumeIndex>>::failure(descriptor.error());
         }
         const auto source = descriptor.value().source_index;
-        auto volume = std::find_if(indices.begin(), indices.end(),
-                                   [source](const VolumeIndex& candidate) {
-                                       return candidate.volume_index == source;
-                                   });
+        auto volume =
+            std::find_if(indices.begin(), indices.end(), [source](const VolumeIndex& candidate) {
+                return candidate.volume_index == source;
+            });
         if (volume == indices.end()) {
             continue;
         }
@@ -154,10 +209,9 @@ build_disk_regions(const format::Manifest& manifest, const std::uint32_t disk_nu
             .volume_size = volume.total_size,
         });
     }
-    std::sort(regions.begin(), regions.end(),
-              [](const DiskRegion& left, const DiskRegion& right) {
-                  return left.disk_offset < right.disk_offset;
-              });
+    std::sort(regions.begin(), regions.end(), [](const DiskRegion& left, const DiskRegion& right) {
+        return left.disk_offset < right.disk_offset;
+    });
     return base::Result<std::vector<DiskRegion>>::success(std::move(regions));
 }
 
@@ -171,42 +225,37 @@ build_disk_regions(const format::Manifest& manifest, const std::uint32_t disk_nu
     return nullptr;
 }
 
-[[nodiscard]] base::Result<std::span<const std::byte>>
-load_chunk(ports::IRecoveryPointReader& inner, CachedChunk& cache, std::mutex& cache_mutex,
-           const std::uint64_t inner_chunk_index, const base::CancellationToken cancellation) {
-    {
-        std::lock_guard lock(cache_mutex);
-        if (cache.inner_chunk_index == inner_chunk_index && !cache.payload.empty()) {
-            return base::Result<std::span<const std::byte>>::success(
-                std::span<const std::byte>(cache.payload));
-        }
+[[nodiscard]] base::Result<ChunkPayload> load_chunk(const ChunkSource& source,
+                                                    const std::uint64_t inner_chunk_index,
+                                                    const base::CancellationToken cancellation) {
+    if (auto cached = source.cache.find(inner_chunk_index)) {
+        return base::Result<ChunkPayload>::success(std::move(cached));
     }
-    auto chunk = inner.read_chunk(inner_chunk_index, cancellation);
+    auto chunk = source.inner.read_chunk(inner_chunk_index, cancellation);
     if (!chunk) {
-        return base::Result<std::span<const std::byte>>::failure(chunk.error());
+        return base::Result<ChunkPayload>::failure(chunk.error());
     }
-    std::lock_guard lock(cache_mutex);
-    cache.inner_chunk_index = inner_chunk_index;
-    cache.payload = std::move(chunk).value().payload;
-    return base::Result<std::span<const std::byte>>::success(std::span<const std::byte>(cache.payload));
+    auto payload = std::make_shared<const std::vector<std::byte>>(std::move(chunk).value().payload);
+    source.cache.insert(inner_chunk_index, payload);
+    return base::Result<ChunkPayload>::success(std::move(payload));
 }
 
-[[nodiscard]] base::Result<void>
-read_volume_range(ports::IRecoveryPointReader& inner, CachedChunk& cache, std::mutex& cache_mutex,
-                  const VolumeIndex& volume, const std::uint64_t volume_offset,
-                  const std::span<std::byte> destination,
-                  const base::CancellationToken cancellation) {
+[[nodiscard]] base::Result<void> read_volume_range(const ChunkSource& source,
+                                                   const VolumeIndex& volume,
+                                                   const std::uint64_t volume_offset,
+                                                   const std::span<std::byte> destination,
+                                                   const base::CancellationToken cancellation) {
     if (destination.empty() || volume_offset >= volume.volume_size) {
         return base::Result<void>::success();
     }
     auto remaining = destination;
     auto cursor = volume_offset;
     while (!remaining.empty() && cursor < volume.volume_size) {
-        const auto chunk = std::lower_bound(
-            volume.chunks.begin(), volume.chunks.end(), cursor,
-            [](const VolumeChunkSpan& span, const std::uint64_t offset) {
-                return span.logical_offset + span.logical_size <= offset;
-            });
+        const auto chunk =
+            std::lower_bound(volume.chunks.begin(), volume.chunks.end(), cursor,
+                             [](const VolumeChunkSpan& span, const std::uint64_t offset) {
+                                 return span.logical_offset + span.logical_size <= offset;
+                             });
         if (chunk == volume.chunks.end() || cursor < chunk->logical_offset) {
             const auto gap_end =
                 chunk == volume.chunks.end() ? volume.volume_size : chunk->logical_offset;
@@ -217,17 +266,17 @@ read_volume_range(ports::IRecoveryPointReader& inner, CachedChunk& cache, std::m
             continue;
         }
         const auto into_chunk = cursor - chunk->logical_offset;
-        auto payload = load_chunk(inner, cache, cache_mutex, chunk->inner_chunk_index, cancellation);
+        auto payload = load_chunk(source, chunk->inner_chunk_index, cancellation);
         if (!payload) {
             return base::Result<void>::failure(payload.error());
         }
-        if (payload.value().size() < chunk->logical_size) {
+        if (payload.value()->size() < chunk->logical_size) {
             return base::Result<void>::failure(make_error(
                 base::ErrorCode::kCorruptData, "chunk payload is shorter than logical size"));
         }
-        const auto copy_size =
-            (std::min)(static_cast<std::uint64_t>(remaining.size()), chunk->logical_size - into_chunk);
-        std::memcpy(remaining.data(), payload.value().data() + into_chunk,
+        const auto copy_size = (std::min)(static_cast<std::uint64_t>(remaining.size()),
+                                          chunk->logical_size - into_chunk);
+        std::memcpy(remaining.data(), payload.value()->data() + into_chunk,
                     static_cast<std::size_t>(copy_size));
         remaining = remaining.subspan(static_cast<std::size_t>(copy_size));
         cursor += copy_size;
@@ -236,9 +285,9 @@ read_volume_range(ports::IRecoveryPointReader& inner, CachedChunk& cache, std::m
 }
 
 void overlay_raw_layout(const format::RawDiskLayout& raw_layout,
-                        const format::PartitionStyle partition_style, const std::uint32_t sector_size,
-                        const std::uint64_t disk_size, const std::uint64_t offset,
-                        const std::span<std::byte> buffer) noexcept {
+                        const format::PartitionStyle partition_style,
+                        const std::uint32_t sector_size, const std::uint64_t disk_size,
+                        const std::uint64_t offset, const std::span<std::byte> buffer) noexcept {
     const auto request_end = offset + buffer.size();
     const auto sector = static_cast<std::uint64_t>(sector_size);
     overlay_region(offset, request_end, buffer, 0, raw_layout.mbr_sector);
@@ -257,12 +306,15 @@ void overlay_raw_layout(const format::RawDiskLayout& raw_layout,
     }
     auto backup_entries_offset = backup_header_offset - raw_layout.gpt_backup_entries.size();
     backup_entries_offset = (backup_entries_offset / sector) * sector;
-    overlay_region(offset, request_end, buffer, backup_entries_offset, raw_layout.gpt_backup_entries);
+    overlay_region(offset, request_end, buffer, backup_entries_offset,
+                   raw_layout.gpt_backup_entries);
 }
 
 } // namespace
 
 struct WholeDiskByteReader::Impl final {
+    explicit Impl(const std::size_t cache_chunk_count) : cache(cache_chunk_count) {}
+
     ports::IRecoveryPointReader* inner{nullptr};
     format::Disk disk{};
     std::uint32_t disk_number{0};
@@ -272,8 +324,7 @@ struct WholeDiskByteReader::Impl final {
     format::RawDiskLayout raw_layout{};
     std::vector<DiskRegion> regions;
     std::vector<VolumeIndex> volumes;
-    mutable std::mutex cache_mutex;
-    mutable CachedChunk cache{};
+    mutable ChunkCache cache;
 };
 
 WholeDiskByteReader::WholeDiskByteReader(std::unique_ptr<Impl> implementation) noexcept
@@ -283,11 +334,12 @@ WholeDiskByteReader::~WholeDiskByteReader() = default;
 
 base::Result<std::unique_ptr<WholeDiskByteReader>>
 WholeDiskByteReader::open(ports::IRecoveryPointReader& inner, const format::Manifest& manifest,
-                          const std::uint32_t source_disk_number) {
+                          const std::uint32_t source_disk_number,
+                          const std::size_t cache_chunk_count) {
     const auto* disk = find_disk(manifest, source_disk_number);
     if (disk == nullptr) {
-        return base::Result<std::unique_ptr<WholeDiskByteReader>>::failure(
-            make_error(base::ErrorCode::kNotFound, "source disk is not present in archive manifest"));
+        return base::Result<std::unique_ptr<WholeDiskByteReader>>::failure(make_error(
+            base::ErrorCode::kNotFound, "source disk is not present in archive manifest"));
     }
     if (disk->disk_size == 0) {
         return base::Result<std::unique_ptr<WholeDiskByteReader>>::failure(
@@ -302,7 +354,7 @@ WholeDiskByteReader::open(ports::IRecoveryPointReader& inner, const format::Mani
         return base::Result<std::unique_ptr<WholeDiskByteReader>>::failure(volumes.error());
     }
 
-    auto implementation = std::make_unique<Impl>();
+    auto implementation = std::make_unique<Impl>(cache_chunk_count);
     implementation->inner = &inner;
     implementation->disk = *disk;
     implementation->disk_number = source_disk_number;
@@ -324,13 +376,11 @@ std::uint32_t WholeDiskByteReader::source_disk_number() const noexcept {
     return implementation_->disk_number;
 }
 
-const format::Disk& WholeDiskByteReader::disk() const noexcept {
-    return implementation_->disk;
-}
+const format::Disk& WholeDiskByteReader::disk() const noexcept { return implementation_->disk; }
 
-base::Result<std::size_t>
-WholeDiskByteReader::read_at(const std::uint64_t offset, const std::span<std::byte> destination,
-                             const base::CancellationToken cancellation) {
+base::Result<std::size_t> WholeDiskByteReader::read_at(const std::uint64_t offset,
+                                                       const std::span<std::byte> destination,
+                                                       const base::CancellationToken cancellation) {
     if (destination.empty()) {
         return base::Result<std::size_t>::success(0);
     }
@@ -362,9 +412,8 @@ WholeDiskByteReader::read_at(const std::uint64_t offset, const std::span<std::by
         const auto volume_offset = region.volume_base + (from - region.disk_offset);
         const auto slice = window.subspan(static_cast<std::size_t>(from - offset),
                                           static_cast<std::size_t>(to - from));
-        auto filled = read_volume_range(*implementation_->inner, implementation_->cache,
-                                        implementation_->cache_mutex, *volume, volume_offset, slice,
-                                        cancellation);
+        const ChunkSource chunk_source{*implementation_->inner, implementation_->cache};
+        auto filled = read_volume_range(chunk_source, *volume, volume_offset, slice, cancellation);
         if (!filled) {
             return base::Result<std::size_t>::failure(filled.error());
         }

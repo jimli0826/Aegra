@@ -33,7 +33,8 @@ Validate Request
 -> Optionally wrap each source with Volume Bitmap free-cluster skip (same device path as read)
 -> pagefile/hiber/swap exclusion on the same read root (live GUID or VSS snapshot)
 -> Report both classes as FREE extents; do not read/hash them and persist FREE BlockEntry runs
--> Build one V6 Manifest containing all selected Volumes
+-> Build one V7 schema-2 Manifest containing all selected Volumes
+-> Probe Windows boot environment and write BootProfile only for a complete supported system disk
 -> Log worker thread count; hash/compress fan-out in PersonalArchive (exception-safe)
 -> For incremental, authenticate parent Archive and Sidecar
 -> Create PersonalArchiveSession
@@ -127,7 +128,14 @@ extent 查询次数、buffer pool/生产/消费队列等待、`pipeline_consumer
 - Disk / Partition 来自 `inspect_physical_disk_layout`，并尽量采集 `raw_layout`（MBR/GPT）供整盘还原；
   `PhysicalDrive` 以 `GENERIC_READ` 打开以支持扇区 `ReadFile`；若原始扇区读取被拒绝则留下空
   `raw_layout` 并继续卷备份（整盘还原会在恢复时拒绝无 `raw_layout` 的 Archive）。不伪造 Extent。
-  跨盘卷与完整裸机系统恢复仍属后续范围。
+  跨盘卷不能形成 Boot Profile。
+- Worker 用 `GetFirmwareType`、native architecture/OS build、Secure Boot registry、TBS 和
+  `Win32_EncryptableVolume` WMI 采集启动状态；不读取 BitLocker recovery key。
+- 仅 x64、512-byte logical sector、完整 raw layout 且系统盘所有稳定非零 Volume 都已选择时写入
+  Boot Profile；UEFI 还要求已选择 ESP，BIOS 还要求已选择活动分区和有效 bootstrap code。否则保持
+  `boot_profile=null`，普通卷备份继续成功。
+- 布局 SHA-256 的 canonical preimage 由 Format 定义；增量父层 Profile 身份/布局不一致时 Archive Session
+  拒绝父基线，Service 必须降为新的 Full。
 
 ## 所有权、线程和取消
 

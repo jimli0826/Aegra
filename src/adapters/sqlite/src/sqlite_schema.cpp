@@ -27,7 +27,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_repository_connections_one_default
 CREATE TABLE IF NOT EXISTS jobs (
     job_id TEXT PRIMARY KEY NOT NULL,
     trace_id TEXT NOT NULL,
-    operation INTEGER NOT NULL CHECK (operation BETWEEN 1 AND 4),
+    operation INTEGER NOT NULL CHECK (operation BETWEEN 1 AND 5),
     state INTEGER NOT NULL CHECK (state BETWEEN 1 AND 7),
     content_kind INTEGER NOT NULL DEFAULT 1 CHECK (content_kind IN (1, 2)),
     created_utc_ms INTEGER NOT NULL CHECK (created_utc_ms >= 0),
@@ -94,6 +94,10 @@ CREATE TABLE IF NOT EXISTS schedules (
         CHECK (compression_level IN (1, 3, 9)),
     verify_after_backup INTEGER NOT NULL DEFAULT 0
         CHECK (verify_after_backup IN (0, 1)),
+    boot_check_after_backup INTEGER NOT NULL DEFAULT 0
+        CHECK (boot_check_after_backup IN (0, 1)),
+    boot_check_hypervisor INTEGER
+        CHECK (boot_check_hypervisor IS NULL OR boot_check_hypervisor IN (1, 2)),
     encryption_enabled INTEGER NOT NULL DEFAULT 0
         CHECK (encryption_enabled IN (0, 1)),
     archive_password_protected TEXT NOT NULL DEFAULT '',
@@ -102,6 +106,8 @@ CREATE TABLE IF NOT EXISTS schedules (
     created_utc_ms INTEGER NOT NULL CHECK (created_utc_ms >= 0),
     updated_utc_ms INTEGER NOT NULL CHECK (updated_utc_ms >= 0),
     CHECK (updated_utc_ms >= created_utc_ms),
+    CHECK ((boot_check_after_backup = 0 AND boot_check_hypervisor IS NULL) OR
+           (boot_check_after_backup = 1 AND boot_check_hypervisor IS NOT NULL)),
     FOREIGN KEY (repository_connection_id)
         REFERENCES repository_connections(connection_id) ON DELETE CASCADE
 );
@@ -171,6 +177,35 @@ CREATE TABLE IF NOT EXISTS restore_preflight_entry_ids (
 );
 CREATE INDEX IF NOT EXISTS ix_restore_preflight_entry_ids_token
     ON restore_preflight_entry_ids(preflight_token, ordinal);
+CREATE TABLE IF NOT EXISTS post_backup_plans (
+    backup_job_id TEXT PRIMARY KEY NOT NULL,
+    schedule_id TEXT NOT NULL,
+    recovery_point_id TEXT NOT NULL,
+    repository_connection_id TEXT NOT NULL,
+    verify_required INTEGER NOT NULL CHECK (verify_required IN (0, 1)),
+    boot_check_required INTEGER NOT NULL CHECK (boot_check_required IN (0, 1)),
+    boot_check_hypervisor INTEGER
+        CHECK (boot_check_hypervisor IS NULL OR boot_check_hypervisor IN (1, 2)),
+    verify_state INTEGER NOT NULL DEFAULT 1 CHECK (verify_state BETWEEN 1 AND 5),
+    verify_job_id TEXT,
+    verify_message_code TEXT NOT NULL DEFAULT '',
+    verify_attempts INTEGER NOT NULL DEFAULT 0 CHECK (verify_attempts >= 0),
+    boot_check_state INTEGER NOT NULL DEFAULT 1 CHECK (boot_check_state BETWEEN 1 AND 5),
+    boot_check_job_id TEXT,
+    boot_check_message_code TEXT NOT NULL DEFAULT '',
+    boot_check_attempts INTEGER NOT NULL DEFAULT 0 CHECK (boot_check_attempts >= 0),
+    claim_owner TEXT,
+    lease_expires_utc_ms INTEGER
+        CHECK (lease_expires_utc_ms IS NULL OR lease_expires_utc_ms >= 0),
+    created_utc_ms INTEGER NOT NULL CHECK (created_utc_ms >= 0),
+    updated_utc_ms INTEGER NOT NULL CHECK (updated_utc_ms >= 0),
+    CHECK (updated_utc_ms >= created_utc_ms),
+    CHECK ((boot_check_required = 0 AND boot_check_hypervisor IS NULL) OR
+           (boot_check_required = 1 AND boot_check_hypervisor IS NOT NULL)),
+    FOREIGN KEY (backup_job_id) REFERENCES jobs(job_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_post_backup_plans_created
+    ON post_backup_plans(created_utc_ms ASC, backup_job_id ASC);
 CREATE TABLE IF NOT EXISTS service_settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     job_retention_months INTEGER NOT NULL DEFAULT 3

@@ -277,7 +277,8 @@ encode_repository_connection_resource_request(const QString& request_id,
     bool exclude_page_and_hibernation_files = true, bool deduplication_enabled = true,
     quint64 split_size_bytes = 0, int compression_level = 3, bool encryption_enabled = false,
     const QString& archive_password = {},
-    quint32 day_of_month_mask = 0, bool verify_after_backup = false);
+    quint32 day_of_month_mask = 0, bool verify_after_backup = false,
+    bool boot_check_after_backup = false, int boot_check_hypervisor = 0);
 [[nodiscard]] QByteArray encode_delete_schedule_request(const QString& request_id,
                                                         const QString& idempotency_key,
                                                         const QString& schedule_id);

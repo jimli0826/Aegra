@@ -293,6 +293,9 @@ QByteArray encode_upsert_file_set_schedule_request(
         {QStringLiteral("split_size_bytes"), 0},
         {QStringLiteral("compression_level"), compression_level},
         {QStringLiteral("verify_after_backup"), verify_after_backup},
+        // file_set never enables boot check; null keeps the stored value anyway.
+        {QStringLiteral("boot_check_after_backup"), QJsonValue(QJsonValue::Null)},
+        {QStringLiteral("boot_check_hypervisor"), QJsonValue(QJsonValue::Null)},
         {QStringLiteral("encryption_enabled"), encryption_enabled},
         {QStringLiteral("archive_password"), archive_password}};
     return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),

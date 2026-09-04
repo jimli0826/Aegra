@@ -162,6 +162,13 @@ make_canonical_uuid(ports::IRandomSource& random, const base::CancellationToken&
     fingerprint += std::to_string(command.compression_level);
     fingerprint += "|";
     fingerprint += command.verify_after_backup ? "1" : "0";
+    fingerprint += "|bc:";
+    fingerprint +=
+        command.boot_check_after_backup ? (*command.boot_check_after_backup ? "1" : "0") : "-";
+    fingerprint += "|bch:";
+    fingerprint += command.boot_check_hypervisor
+                       ? std::to_string(static_cast<int>(*command.boot_check_hypervisor))
+                       : "-";
     fingerprint += "|";
     fingerprint += command.encryption_enabled ? "1" : "0";
     fingerprint += "|pwd:";
@@ -391,6 +398,9 @@ base::Result<contracts::CommandAcknowledgement> ScheduleService::upsert_schedule
     std::vector<contracts::FileSourceRef> file_selections;
     contracts::ContentKind content_kind = command.protection.content_kind;
     std::optional<std::string> last_recovery_point_id;
+    // Stored value carried across updates when the command omits the field.
+    bool boot_check_after_backup = false;
+    std::optional<contracts::BootCheckHypervisor> boot_check_hypervisor;
     std::uint64_t created_utc_ms = now;
     if (command.schedule_id) {
         schedule_id = *command.schedule_id;
@@ -411,6 +421,8 @@ base::Result<contracts::CommandAcknowledgement> ScheduleService::upsert_schedule
         created_utc_ms = existing.value()->created_utc_ms;
         backup_set_uuid = existing.value()->backup_set_uuid;
         archive_password_protected = existing.value()->archive_password_protected;
+        boot_check_after_backup = existing.value()->boot_check_after_backup;
+        boot_check_hypervisor = existing.value()->boot_check_hypervisor;
         content_kind = existing.value()->content_kind;
         source_ids = existing.value()->source_ids;
         file_selections = existing.value()->file_selections;
@@ -468,6 +480,16 @@ base::Result<contracts::CommandAcknowledgement> ScheduleService::upsert_schedule
     }
     record.compression_level = command.compression_level;
     record.verify_after_backup = command.verify_after_backup;
+    // Absent on the wire = keep the stored value. Boot check is independent of
+    // Verify; file_set never enables it.
+    record.boot_check_after_backup =
+        command.boot_check_after_backup.value_or(boot_check_after_backup) &&
+        content_kind == contracts::ContentKind::kVolumeSet;
+    record.boot_check_hypervisor =
+        record.boot_check_after_backup
+            ? (command.boot_check_hypervisor ? command.boot_check_hypervisor
+                                             : boot_check_hypervisor)
+            : std::optional<contracts::BootCheckHypervisor>{};
     record.encryption_enabled = command.encryption_enabled;
     record.archive_password_protected = std::move(archive_password_protected);
     record.backup_set_uuid = std::move(backup_set_uuid);

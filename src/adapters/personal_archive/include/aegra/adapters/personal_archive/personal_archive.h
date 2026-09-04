@@ -187,9 +187,8 @@ class PersonalFileArchiveSession final : public ports::IFileBackupSession {
     [[nodiscard]] static base::Result<std::unique_ptr<PersonalFileArchiveSession>>
     create(const FileArchiveCreateRequest& request);
 
-    [[nodiscard]] base::Result<void>
-    write_entry(const contracts::FileEntryDesc& entry,
-                base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<void> write_entry(const contracts::FileEntryDesc& entry,
+                                                 base::CancellationToken cancellation) override;
     [[nodiscard]] base::Result<std::uint64_t>
     write_stream_chunk(const ports::FileChunkWriteRequest& request,
                        base::CancellationToken cancellation) override;
@@ -301,7 +300,8 @@ class PersonalFileArchiveChainReader final : public ports::IFileRecoveryPointRea
     [[nodiscard]] const format::Manifest& tip_manifest() const noexcept;
     [[nodiscard]] const ArchiveIdentity& tip_identity() const noexcept;
 
-    /// Tip Index root digest (hex). Browse tokens bind this together with chain_generation_digest().
+    /// Tip Index root digest (hex). Browse tokens bind this together with
+    /// chain_generation_digest().
     [[nodiscard]] std::string index_root_digest() const override;
     /// Base-first join of every layer Index root digest with '+'. Changes if any layer regenerates.
     [[nodiscard]] std::string chain_generation_digest() const;
@@ -319,7 +319,8 @@ class PersonalFileArchiveChainReader final : public ports::IFileRecoveryPointRea
     /// Resolves a tip stream through parent hops to its local owner without reading payload.
     /// Used by Service restore preflight so missing parents fail before target mutation.
     [[nodiscard]] base::Result<void>
-    resolve_stream_reference(std::uint32_t stream_index, base::CancellationToken cancellation) const;
+    resolve_stream_reference(std::uint32_t stream_index,
+                             base::CancellationToken cancellation) const;
 
     [[nodiscard]] base::Result<std::size_t>
     read_stream(const ports::FileStreamReadRequest& request, std::span<std::byte> destination,
@@ -444,9 +445,9 @@ class PersonalArchiveVolumeRandomReader final : public ports::IRandomAccessReade
          std::uint32_t volume_index);
 
     [[nodiscard]] std::uint64_t size_bytes() const noexcept override;
-    [[nodiscard]] base::Result<std::size_t>
-    read_at(std::uint64_t offset, std::span<std::byte> destination,
-            base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<std::size_t> read_at(std::uint64_t offset,
+                                                    std::span<std::byte> destination,
+                                                    base::CancellationToken cancellation) override;
 
     [[nodiscard]] std::uint32_t volume_index() const noexcept;
 
@@ -468,14 +469,17 @@ class WholeDiskByteReader final : public ports::IRandomAccessReader {
     WholeDiskByteReader(WholeDiskByteReader&&) = delete;
     WholeDiskByteReader& operator=(WholeDiskByteReader&&) = delete;
 
+    /// cache_chunk_count bounds the decompressed-chunk LRU that absorbs the
+    /// interleaved random reads of a mounted or booting guest (memory upper
+    /// bound = cache_chunk_count * chunk logical size).
     [[nodiscard]] static base::Result<std::unique_ptr<WholeDiskByteReader>>
     open(ports::IRecoveryPointReader& inner, const format::Manifest& manifest,
-         std::uint32_t source_disk_number);
+         std::uint32_t source_disk_number, std::size_t cache_chunk_count = 8);
 
     [[nodiscard]] std::uint64_t size_bytes() const noexcept override;
-    [[nodiscard]] base::Result<std::size_t>
-    read_at(std::uint64_t offset, std::span<std::byte> destination,
-            base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<std::size_t> read_at(std::uint64_t offset,
+                                                    std::span<std::byte> destination,
+                                                    base::CancellationToken cancellation) override;
 
     [[nodiscard]] std::uint32_t source_disk_number() const noexcept;
     [[nodiscard]] const format::Disk& disk() const noexcept;

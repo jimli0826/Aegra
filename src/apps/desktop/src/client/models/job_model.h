@@ -52,6 +52,7 @@ class JobModel final : public QAbstractListModel {
     Q_PROPERTY(int backupCount READ backupCount NOTIFY countsChanged)
     Q_PROPERTY(int restoreCount READ restoreCount NOTIFY countsChanged)
     Q_PROPERTY(int verifyCount READ verifyCount NOTIFY countsChanged)
+    Q_PROPERTY(int bootCheckCount READ bootCheckCount NOTIFY countsChanged)
     /// Bumps when job rows or progress change so QML bindings can re-query status.
     Q_PROPERTY(int revision READ revision NOTIFY revisionChanged)
 
@@ -60,6 +61,7 @@ class JobModel final : public QAbstractListModel {
         JobIdRole = Qt::UserRole + 1,
         TraceIdRole,
         OperationTextRole,
+        OperationValueRole,
         StateValueRole,
         StateTextRole,
         StateColorRole,
@@ -102,6 +104,7 @@ class JobModel final : public QAbstractListModel {
     [[nodiscard]] int backupCount() const noexcept;
     [[nodiscard]] int restoreCount() const noexcept;
     [[nodiscard]] int verifyCount() const noexcept;
+    [[nodiscard]] int bootCheckCount() const noexcept;
     [[nodiscard]] int revision() const noexcept;
     [[nodiscard]] bool has_active_jobs() const noexcept;
     [[nodiscard]] std::optional<JobRow> find_job(const QString& job_id) const;
@@ -109,6 +112,10 @@ class JobModel final : public QAbstractListModel {
     /// Latest backup job for a schedule (matched by schedule_id).
     /// Keys: statusKey (none|running|success|failed), progressPercent, stateText, stateValue.
     Q_INVOKABLE [[nodiscard]] QVariantMap latestBackupStatus(const QString& schedule_id) const;
+    /// Latest job of one operation (3 = verify, 5 = boot check) for a schedule.
+    /// Returns { statusKey, progressPercent, stateText, stateValue }.
+    Q_INVOKABLE [[nodiscard]] QVariantMap latestOperationStatus(const QString& schedule_id,
+                                                                int operation) const;
 
     /// Aggregate restore jobs (operation=2) created at/after sinceUtcMs (0 = all restore jobs).
     /// Keys: jobCount, activeCount, progressPercent, stateText, messageText, sourceName,
@@ -153,6 +160,7 @@ class JobModel final : public QAbstractListModel {
     int backup_count_{0};
     int restore_count_{0};
     int verify_count_{0};
+    int boot_check_count_{0};
     int revision_{0};
 };
 

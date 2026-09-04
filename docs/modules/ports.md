@@ -90,8 +90,15 @@ session）实现。每个 Port 约定：
   包含密码、密钥、Secret、Credential、SecretRef、Authorization、Cookie、令牌或其他认证材料。
 - `IMessageChannel` 传递拥有所有权的 UTF-8 消息；一个 Reader 和一个 Writer可以并发，挂起 I/O 必须
   响应取消，Adapter 必须执行帧大小限制。消息 schema 与状态机不属于 Port。
+- `IProcessLauncher` 的 `environment_overrides` 只替换当前 child 的指定变量；未指定变量继续继承，
+  不得通过修改父进程全局环境实现。Windows 变量名按大小写不敏感匹配，重复名、空名、`=` 或内嵌 NUL
+  必须拒绝。该能力用于为并发隔离 Host 设置独立运行目录，例如 BootCheck 的 `VBOX_USER_HOME`。
 
 ## 多数据源演进方向
+
+`ScheduleRecord.boot_check_hypervisor` 与 `PostBackupPlanRecord.boot_check_hypervisor` 使用 Contracts 的
+`BootCheckHypervisor`。前者表达当前 Schedule 选择，后者是 Backup Job 提交时的不可变策略快照；两者都
+必须与对应 enabled/required bool 同时有值或同时为空，防止重启恢复时改选平台。
 
 现有 `IBackupSession` 和 `IRecoveryPointReader` 表达一个连续逻辑 source，不把多个 volume 拼接成一个
 全局 offset 空间。按 [ADR-0003](../adr/0003-personal-split-archive-and-multi-source-boundary.md)，

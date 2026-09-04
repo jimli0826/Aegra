@@ -261,11 +261,92 @@ using Json = nlohmann::json;
     return baseline;
 }
 
+[[nodiscard]] Json encode_boot_profile(const BootProfile& profile) {
+    return {
+        {"profile_version", profile.profile_version},
+        {"system_disk_number", profile.system_disk_number},
+        {"windows_volume_index", profile.windows_volume_index},
+        {"required_boot_partition_numbers", profile.required_boot_partition_numbers},
+        {"firmware_mode", static_cast<std::uint8_t>(profile.firmware_mode)},
+        {"os_architecture", static_cast<std::uint8_t>(profile.os_architecture)},
+        {"os_build", profile.os_build},
+        {"secure_boot_state", static_cast<std::uint8_t>(profile.secure_boot_state)},
+        {"tpm_state", static_cast<std::uint8_t>(profile.tpm_state)},
+        {"bitlocker_state", static_cast<std::uint8_t>(profile.bitlocker_state)},
+        {"logical_sector_size", profile.logical_sector_size},
+        {"layout_fingerprint_algorithm", profile.layout_fingerprint_algorithm},
+        {"layout_fingerprint", encode_binary(profile.layout_fingerprint)},
+        {"probe_protocol_version", profile.probe_protocol_version},
+        {"aegra_service_version", profile.aegra_service_version},
+    };
+}
+
+[[nodiscard]] BootProfile decode_boot_profile(const Json& value) {
+    constexpr std::array<std::string_view, 15> kKeys{
+        "profile_version",
+        "system_disk_number",
+        "windows_volume_index",
+        "required_boot_partition_numbers",
+        "firmware_mode",
+        "os_architecture",
+        "os_build",
+        "secure_boot_state",
+        "tpm_state",
+        "bitlocker_state",
+        "logical_sector_size",
+        "layout_fingerprint_algorithm",
+        "layout_fingerprint",
+        "probe_protocol_version",
+        "aegra_service_version",
+    };
+    if (!value.is_object() || value.size() != kKeys.size() ||
+        !std::ranges::all_of(kKeys, [&](const auto key) { return value.contains(key); })) {
+        throw std::invalid_argument("boot_profile keys are invalid");
+    }
+
+    BootProfile profile;
+    value.at("profile_version").get_to(profile.profile_version);
+    value.at("system_disk_number").get_to(profile.system_disk_number);
+    value.at("windows_volume_index").get_to(profile.windows_volume_index);
+    value.at("required_boot_partition_numbers")
+        .get_to(profile.required_boot_partition_numbers);
+    profile.firmware_mode =
+        static_cast<BootFirmwareMode>(value.at("firmware_mode").get<std::uint8_t>());
+    profile.os_architecture =
+        static_cast<BootOsArchitecture>(value.at("os_architecture").get<std::uint8_t>());
+    value.at("os_build").get_to(profile.os_build);
+    profile.secure_boot_state =
+        static_cast<BootSecurityState>(value.at("secure_boot_state").get<std::uint8_t>());
+    profile.tpm_state =
+        static_cast<BootHardwareState>(value.at("tpm_state").get<std::uint8_t>());
+    profile.bitlocker_state =
+        static_cast<BootSecurityState>(value.at("bitlocker_state").get<std::uint8_t>());
+    value.at("logical_sector_size").get_to(profile.logical_sector_size);
+    value.at("layout_fingerprint_algorithm").get_to(profile.layout_fingerprint_algorithm);
+    const auto fingerprint = decode_binary(value.at("layout_fingerprint"));
+    if (fingerprint.size() != profile.layout_fingerprint.size()) {
+        throw std::invalid_argument("boot_profile layout_fingerprint size is invalid");
+    }
+    std::copy(fingerprint.begin(), fingerprint.end(), profile.layout_fingerprint.begin());
+    value.at("probe_protocol_version").get_to(profile.probe_protocol_version);
+    value.at("aegra_service_version").get_to(profile.aegra_service_version);
+    return profile;
+}
+
 [[nodiscard]] Manifest decode_root(const Json& root) {
     Manifest result;
     root.at("schema_version").get_to(result.schema_version);
-    if (root.contains("content_kind")) {
-        result.content_kind = root.at("content_kind").get<std::uint8_t>();
+    result.content_kind = root.at("content_kind").get<std::uint8_t>();
+    constexpr std::array<std::string_view, 8> kRootKeys{
+        "schema_version", "content_kind", "disks",       "system",
+        "backup_job",    "volumes",      "boot_profile", "extensions",
+    };
+    const bool file_set = result.content_kind == kManifestContentKindFileSet;
+    const auto expected_size = kRootKeys.size() + (file_set ? 1U : 0U);
+    if (!root.is_object() || root.size() != expected_size ||
+        !std::ranges::all_of(kRootKeys, [&](const auto key) { return root.contains(key); }) ||
+        (file_set && !root.contains("file_set_baseline"))) {
+        throw std::invalid_argument("manifest root keys are invalid");
     }
     for (const auto& disk : root.at("disks")) {
         result.disks.push_back(decode_disk(disk));
@@ -275,8 +356,12 @@ using Json = nlohmann::json;
     for (const auto& volume : root.at("volumes")) {
         result.volumes.push_back(decode_volume(volume));
     }
-    if (root.contains("file_set_baseline")) {
+    if (file_set) {
         result.file_set_baseline = decode_file_set_baseline(root.at("file_set_baseline"));
+    }
+    const auto& boot_profile = root.at("boot_profile");
+    if (!boot_profile.is_null()) {
+        result.boot_profile = decode_boot_profile(boot_profile);
     }
     for (const auto& [key, value] : root.at("extensions").items()) {
         result.extensions.push_back({key, decode_binary(value)});
@@ -299,6 +384,8 @@ using Json = nlohmann::json;
                  {"system", encode_system(manifest.system)},
                  {"backup_job", encode_job(manifest.backup_job)},
                  {"volumes", std::move(volumes)},
+                 {"boot_profile", manifest.boot_profile ? encode_boot_profile(*manifest.boot_profile)
+                                                        : Json(nullptr)},
                  {"extensions", encode_extensions(manifest)}};
     if (manifest.content_kind == kManifestContentKindFileSet) {
         root["file_set_baseline"] = encode_file_set_baseline(manifest.file_set_baseline);

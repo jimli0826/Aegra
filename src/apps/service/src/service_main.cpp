@@ -1,5 +1,7 @@
+#include "aegra/adapters/hyperv/hyperv_discovery.h"
 #include "aegra/adapters/sqlite/sqlite_control_plane.h"
 #include "aegra/adapters/storage_local/local_object_storage.h"
+#include "aegra/adapters/virtualbox/virtualbox_discovery.h"
 #include "aegra/adapters/windows_disk/windows_disk.h"
 #include "aegra/adapters/windows_filesystem/windows_filesystem.h"
 #include "aegra/adapters/windows_ipc/windows_named_pipe_channel.h"
@@ -9,15 +11,16 @@
 #include "aegra/adapters/windows_process/windows_process_launcher.h"
 #include "aegra/adapters/windows_system/windows_system.h"
 #include "aegra/application/connected_repository_query.h"
-#include "aegra/application/pe_restore_prepare_service.h"
 #include "aegra/application/file_browse_service.h"
+#include "aegra/application/pe_restore_prepare_service.h"
 #include "aegra/application/personal_repository_query.h"
 #include "aegra/application/recovery_point_operations.h"
 #include "aegra/application/repository_connection_service.h"
 #include "aegra/application/source_inventory_query.h"
 #include "aegra/apps/service/backup_catalog_registrar.h"
+#include "aegra/apps/service/boot_check_supervisor.h"
 #include "aegra/apps/service/mount_supervisor.h"
-#include "aegra/apps/service/post_backup_verifier.h"
+#include "aegra/apps/service/post_backup_coordinator.h"
 #include "aegra/apps/service/schedule_engine.h"
 #include "aegra/apps/service/schedule_execution_coordinator.h"
 #include "aegra/apps/service/schedule_service.h"
@@ -60,8 +63,10 @@
 namespace {
 
 namespace service = aegra::apps::service;
+namespace hyperv = aegra::adapters::hyperv;
 namespace sqlite = aegra::adapters::sqlite;
 namespace storage_local = aegra::adapters::storage_local;
+namespace virtualbox = aegra::adapters::virtualbox;
 namespace windows_disk = aegra::adapters::windows_disk;
 namespace windows_filesystem = aegra::adapters::windows_filesystem;
 namespace windows_ipc = aegra::adapters::windows_ipc;
@@ -169,8 +174,7 @@ class SpdlogServiceLog final : public service::IServiceLog {
     void write(const service::ServiceLogLevel level, const std::string_view message_code,
                const std::string_view detail) noexcept override {
         try {
-            if (message_code == "service.plain" ||
-                message_code == "service.interaction.request" ||
+            if (message_code == "service.plain" || message_code == "service.interaction.request" ||
                 message_code == "service.interaction.response") {
                 logger_->log(log_level(level), "{}", detail);
                 return;
@@ -216,8 +220,10 @@ struct RuntimeComponents final {
     std::unique_ptr<service::RepositoryLocationBrowseRegistry> repository_location_browse;
     std::unique_ptr<service::WorkerSupervisor> supervisor;
     std::unique_ptr<service::WorkerJobService> worker_jobs;
-    /// Declared after worker_jobs so the dispatcher stops before its facade is destroyed.
-    std::shared_ptr<service::PostBackupVerifier> post_backup_verifier;
+    std::shared_ptr<service::BootCheckSupervisor> boot_check_supervisor;
+    /// Declared after boot_check_supervisor/worker_jobs so the scan thread stops
+    /// before the facades it drives are destroyed.
+    std::shared_ptr<service::PostBackupCoordinator> post_backup_coordinator;
     std::unique_ptr<service::ScheduleExecutionCoordinator> schedule_coordinator;
     std::unique_ptr<service::ScheduleService> schedules;
     /// Declared after worker_jobs so destruction stops the poll thread first.
@@ -505,7 +511,9 @@ create_service_log(const std::filesystem::path& data_dir, const bool service_mod
 }
 
 [[nodiscard]] std::vector<std::string> runtime_capabilities(const bool file_browse_enabled,
-                                                            const bool pe_restore_enabled) {
+                                                            const bool pe_restore_enabled,
+                                                            const bool virtualbox_installed,
+                                                            const bool hyperv_installed) {
     // Chain/delete stay off until durable delete resume meets S5 Definition of Done.
     // F8 enables file.restore (PrepareFileRestore + StartFileRestore) when browse is available.
     std::vector<std::string> capabilities{
@@ -537,6 +545,12 @@ create_service_log(const std::filesystem::path& data_dir, const bool service_mod
         capabilities.push_back("restore.pe.prepare");
         capabilities.push_back("restore.pe.arm");
         capabilities.push_back("restore.pe.cancel");
+    }
+    if (virtualbox_installed) {
+        capabilities.push_back("boot_check.hypervisor.virtualbox.installed");
+    }
+    if (hyperv_installed) {
+        capabilities.push_back("boot_check.hypervisor.hyperv.installed");
     }
     std::ranges::sort(capabilities);
     return capabilities;
@@ -575,8 +589,7 @@ create_service_log(const std::filesystem::path& data_dir, const bool service_mod
     if (!is_drive_letter_mount(mount)) {
         return 0xFFU;
     }
-    return static_cast<unsigned char>(
-        std::toupper(static_cast<unsigned char>(mount.front())));
+    return static_cast<unsigned char>(std::toupper(static_cast<unsigned char>(mount.front())));
 }
 
 /// UI label for file browse roots: "Label (D:)" or "D:" when the label is empty.
@@ -691,23 +704,49 @@ create_runtime(const ServiceArguments& arguments) {
             *components.random);
     components.backup_catalog_registrar = std::make_shared<service::BackupCatalogRegistrar>(
         *components.control_plane, *components.storage_factory);
-    components.post_backup_verifier =
-        std::make_shared<service::PostBackupVerifier>(components.logger.get());
+    {
+        service::BootCheckSupervisor::Options boot_check_options;
+        // Optional capability: a missing sibling host only disables boot check.
+        auto boot_check_host = resolve_sibling_executable(std::nullopt, L"AegraBootCheck.exe");
+        if (boot_check_host) {
+            std::error_code boot_check_probe;
+            if (std::filesystem::exists(boot_check_host.value(), boot_check_probe) &&
+                !boot_check_probe) {
+                boot_check_options.host_executable_path = std::move(boot_check_host).value();
+            }
+        }
+        boot_check_options.data_directory = data_dir.value();
+        components.boot_check_supervisor = std::make_shared<service::BootCheckSupervisor>(
+            std::move(boot_check_options), *components.process_launcher, *components.control_plane,
+            *components.storage_factory, *components.clock, components.logger.get());
+        components.boot_check_supervisor->begin_scavenge();
+    }
+    components.post_backup_coordinator = std::make_shared<service::PostBackupCoordinator>(
+        *components.control_plane, *components.clock, *components.random, components.logger.get());
+    // A finished boot check run nudges an immediate coordinator scan so the job
+    // record turns terminal without waiting for the next poll interval.
+    components.boot_check_supervisor->set_completion_observer(
+        [coordinator = std::weak_ptr<service::PostBackupCoordinator>(
+             components.post_backup_coordinator)] {
+            if (const auto locked = coordinator.lock()) {
+                locked->kick();
+            }
+        });
     service::WorkerSupervisorConfig supervisor_config;
     supervisor_config.worker_executable_path = std::move(worker_path_utf8).value();
     // Job lifecycle runs async after backup.start is accepted — log terminal outcomes to file.
     auto* log = components.logger.get();
     auto* jobs_db = components.control_plane.get();
     auto catalog_registrar = components.backup_catalog_registrar;
-    std::weak_ptr<service::PostBackupVerifier> post_backup_verifier =
-        components.post_backup_verifier;
+    std::weak_ptr<service::PostBackupCoordinator> post_backup_coordinator =
+        components.post_backup_coordinator;
     components.supervisor = std::make_unique<service::WorkerSupervisor>(
         std::move(supervisor_config), *components.process_launcher, *components.control_plane,
         *components.clock, *components.random, service::SupervisorProgressCallback{},
         [log, jobs_db, catalog_registrar,
-         post_backup_verifier](const service::WorkerJobRequest& request,
-                               const aegra::contracts::ServiceJobState final_state,
-                               const aegra::contracts::WorkerResponse* response) {
+         post_backup_coordinator](const service::WorkerJobRequest& request,
+                                  const aegra::contracts::ServiceJobState final_state,
+                                  const aegra::contracts::WorkerResponse* response) {
             const auto& job_id = request.worker_request.job_id;
             bool catalog_ready = false;
             if (response != nullptr && catalog_registrar != nullptr) {
@@ -725,18 +764,15 @@ create_runtime(const ServiceArguments& arguments) {
             }
             const bool backup_succeeded =
                 response != nullptr && response->task_result &&
-                (response->task_result->outcome ==
-                     aegra::contracts::TaskOutcome::kSucceeded ||
+                (response->task_result->outcome == aegra::contracts::TaskOutcome::kSucceeded ||
                  response->task_result->outcome ==
                      aegra::contracts::TaskOutcome::kSucceededWithWarning);
-            if (catalog_ready && backup_succeeded && request.verify_after_backup) {
-                const auto verifier = post_backup_verifier.lock();
-                if ((!verifier || !verifier->enqueue(request)) && log != nullptr) {
-                    std::string failure = "Post-backup Verify queue is unavailable for job ";
-                    failure += job_id;
-                    log->write(service::ServiceLogLevel::kError,
-                               "post_backup.verify_queue_unavailable", failure);
-                }
+            (void)catalog_ready;
+            (void)backup_succeeded;
+            // The durable coordinator owns post-backup actions; a completion only
+            // nudges an immediate scan of claimable plans.
+            if (const auto coordinator = post_backup_coordinator.lock()) {
+                coordinator->kick();
             }
             if (log == nullptr) {
                 return;
@@ -792,9 +828,10 @@ create_runtime(const ServiceArguments& arguments) {
     }
     components.worker_jobs = std::make_unique<service::WorkerJobService>(
         *components.source_query, *components.control_plane, *components.storage_factory,
-        *components.supervisor, *components.clock, *components.random,
-        components.file_browse.get(), components.logger.get());
-    components.post_backup_verifier->start(*components.worker_jobs);
+        *components.supervisor, *components.clock, *components.random, components.file_browse.get(),
+        components.logger.get());
+    components.post_backup_coordinator->start(*components.worker_jobs,
+                                              components.boot_check_supervisor.get());
     components.repository_location_browse =
         std::make_unique<service::RepositoryLocationBrowseRegistry>();
     components.schedule_coordinator = std::make_unique<service::ScheduleExecutionCoordinator>();
@@ -824,10 +861,10 @@ create_runtime(const ServiceArguments& arguments) {
                                : aegra::base::Result<std::string>::failure(pe_machine_dir.error());
         auto pe_payload_dir = path_to_utf8(worker_path.value().parent_path());
         auto pending_store =
-            pe_data_dir ? windows_pe::open_pe_pending_store({pe_data_dir.value()})
-                        : aegra::base::Result<
-                              std::unique_ptr<aegra::ports::IPePendingJobStore>>::failure(
-                              pe_data_dir.error());
+            pe_data_dir
+                ? windows_pe::open_pe_pending_store({pe_data_dir.value()})
+                : aegra::base::Result<std::unique_ptr<aegra::ports::IPePendingJobStore>>::failure(
+                      pe_data_dir.error());
         auto* pe_log = components.logger.get();
         windows_pe::OneTimeBootControllerOpenRequest boot_request;
         boot_request.process_launcher = components.process_launcher.get();
@@ -838,8 +875,7 @@ create_runtime(const ServiceArguments& arguments) {
             };
         }
         auto boot_controller = windows_pe::open_one_time_boot_controller(boot_request);
-        auto image_builder =
-            windows_pe::open_pe_image_builder({components.process_launcher.get()});
+        auto image_builder = windows_pe::open_pe_image_builder({components.process_launcher.get()});
         if (pe_payload_dir && pending_store && boot_controller && image_builder) {
             components.pe_pending_store = std::move(pending_store).value();
             components.pe_boot_controller = std::move(boot_controller).value();
@@ -854,21 +890,24 @@ create_runtime(const ServiceArguments& arguments) {
             pe_environment.payload_directory_utf8 = pe_payload_dir.value();
             // Diagnostics: AEGRA_PE_DEBUG_SHELL=1 builds the PE image with an
             // interactive cmd shell for missing-DLL triage on the target machine.
-            pe_environment.debug_shell = ::GetEnvironmentVariableW(L"AEGRA_PE_DEBUG_SHELL", nullptr,
-                                                                   0) != 0;
+            pe_environment.debug_shell =
+                ::GetEnvironmentVariableW(L"AEGRA_PE_DEBUG_SHELL", nullptr, 0) != 0;
             components.pe_restore_jobs = std::make_unique<service::PeRestoreJobService>(
                 *components.source_query, *components.control_plane, *components.storage_factory,
                 *components.pe_prepare, *components.pe_pending_store, *components.clock,
                 *components.random, std::move(pe_environment), components.logger.get());
             pe_restore_enabled = true;
         } else if (components.logger != nullptr) {
-            components.logger->write(service::ServiceLogLevel::kWarning,
-                                     "pe_restore.unavailable", "status=stack_open_failed");
+            components.logger->write(service::ServiceLogLevel::kWarning, "pe_restore.unavailable",
+                                     "status=stack_open_failed");
         }
     }
+    const bool virtualbox_installed = !virtualbox::discover_vbox_manage_path().empty();
+    const bool hyperv_installed = hyperv::is_hyperv_installed();
     components.runtime = {
         .service_version = AEGRA_APPLICATION_VERSION,
-        .capabilities = runtime_capabilities(file_browse_enabled, pe_restore_enabled),
+        .capabilities = runtime_capabilities(file_browse_enabled, pe_restore_enabled,
+                                             virtualbox_installed, hyperv_installed),
         .logger = components.logger.get(),
         .repository_query = components.repository_query.get(),
         .connected_repository_query = components.connected_query.get(),

@@ -2,7 +2,9 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <atomic>
+#include <cwchar>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -51,6 +53,24 @@ class UniqueHandle final {
 
   private:
     HANDLE handle_{nullptr};
+};
+
+class EnvironmentStrings final {
+  public:
+    EnvironmentStrings() : value_(GetEnvironmentStringsW()) {}
+    ~EnvironmentStrings() {
+        if (value_ != nullptr) {
+            FreeEnvironmentStringsW(value_);
+        }
+    }
+
+    EnvironmentStrings(const EnvironmentStrings&) = delete;
+    EnvironmentStrings& operator=(const EnvironmentStrings&) = delete;
+
+    [[nodiscard]] LPWCH get() const noexcept { return value_; }
+
+  private:
+    LPWCH value_{nullptr};
 };
 
 base::Result<std::wstring> utf8_to_utf16(const std::string_view utf8) {
@@ -112,14 +132,99 @@ base::Result<std::wstring> build_command_line(const std::wstring_view executable
     return base::Result<std::wstring>::success(std::move(command));
 }
 
+std::wstring_view environment_name(const std::wstring_view entry) {
+    const std::size_t search_from = !entry.empty() && entry.front() == L'=' ? 1 : 0;
+    const std::size_t separator = entry.find(L'=', search_from);
+    return separator == std::wstring_view::npos ? entry : entry.substr(0, separator);
+}
+
+bool environment_names_equal(const std::wstring_view left, const std::wstring_view right) noexcept {
+    if (left.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)()) ||
+        right.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)())) {
+        return false;
+    }
+    return CompareStringOrdinal(left.data(), static_cast<int>(left.size()), right.data(),
+                                static_cast<int>(right.size()), TRUE) == CSTR_EQUAL;
+}
+
+base::Result<std::vector<std::wstring>>
+convert_environment_overrides(const std::vector<ports::ProcessEnvironmentVariable>& overrides) {
+    std::vector<std::wstring> converted;
+    converted.reserve(overrides.size());
+    for (const auto& variable : overrides) {
+        if (variable.name.empty() || variable.name.find('=') != std::string::npos ||
+            variable.name.find('\0') != std::string::npos ||
+            variable.value.find('\0') != std::string::npos) {
+            return base::Result<std::vector<std::wstring>>::failure(
+                {base::ErrorCode::kInvalidArgument, "process environment override is invalid"});
+        }
+        auto name = utf8_to_utf16(variable.name);
+        auto value = utf8_to_utf16(variable.value);
+        if (!name || !value) {
+            return base::Result<std::vector<std::wstring>>::failure(!name ? name.error()
+                                                                          : value.error());
+        }
+        for (const auto& existing : converted) {
+            if (environment_names_equal(environment_name(existing), name.value())) {
+                return base::Result<std::vector<std::wstring>>::failure(
+                    {base::ErrorCode::kInvalidArgument,
+                     "process environment override is duplicated"});
+            }
+        }
+        converted.push_back(name.value() + L"=" + value.value());
+    }
+    return base::Result<std::vector<std::wstring>>::success(std::move(converted));
+}
+
+base::Result<std::vector<wchar_t>>
+build_environment_block(const std::vector<ports::ProcessEnvironmentVariable>& overrides) {
+    if (overrides.empty()) {
+        return base::Result<std::vector<wchar_t>>::success({});
+    }
+    auto converted = convert_environment_overrides(overrides);
+    if (!converted) {
+        return base::Result<std::vector<wchar_t>>::failure(converted.error());
+    }
+
+    EnvironmentStrings inherited;
+    if (inherited.get() == nullptr) {
+        return base::Result<std::vector<wchar_t>>::failure(
+            {base::ErrorCode::kInternal, "GetEnvironmentStringsW failed"});
+    }
+    std::vector<std::wstring> entries;
+    for (const wchar_t* cursor = inherited.get(); *cursor != L'\0';
+         cursor += std::wcslen(cursor) + 1) {
+        const std::wstring entry(cursor);
+        const bool replaced =
+            std::any_of(converted.value().begin(), converted.value().end(), [&](const auto& value) {
+                return environment_names_equal(environment_name(entry), environment_name(value));
+            });
+        if (!replaced) {
+            entries.push_back(entry);
+        }
+    }
+    entries.insert(entries.end(), converted.value().begin(), converted.value().end());
+    std::sort(entries.begin(), entries.end(), [](const auto& left, const auto& right) {
+        return _wcsicmp(left.c_str(), right.c_str()) < 0;
+    });
+
+    std::vector<wchar_t> block;
+    for (const auto& entry : entries) {
+        block.insert(block.end(), entry.begin(), entry.end());
+        block.push_back(L'\0');
+    }
+    block.push_back(L'\0');
+    return base::Result<std::vector<wchar_t>>::success(std::move(block));
+}
+
 // Console tools emit the OEM code page when redirected to a file.
 std::string oem_bytes_to_utf8(const std::string_view bytes) {
-    if (bytes.empty() || bytes.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)())) {
+    if (bytes.empty() ||
+        bytes.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)())) {
         return {};
     }
     const auto input_size = static_cast<int>(bytes.size());
-    const int wide_size =
-        MultiByteToWideChar(CP_OEMCP, 0, bytes.data(), input_size, nullptr, 0);
+    const int wide_size = MultiByteToWideChar(CP_OEMCP, 0, bytes.data(), input_size, nullptr, 0);
     if (wide_size <= 0) {
         return {};
     }
@@ -157,8 +262,7 @@ std::string oem_bytes_to_utf8(const std::string_view bytes) {
     security.bInheritHandle = TRUE;
     return UniqueHandle(CreateFileW(temp_file, GENERIC_READ | GENERIC_WRITE,
                                     FILE_SHARE_READ | FILE_SHARE_WRITE, &security, CREATE_ALWAYS,
-                                    FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE,
-                                    nullptr));
+                                    FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, nullptr));
 }
 
 constexpr DWORD kMaxCapturedOutputBytes = 16U * 1024U;
@@ -220,6 +324,10 @@ WindowsProcessLauncher::launch(const ports::ProcessLaunchRequest& request) {
     auto command = build_command_line(executable.value(), request.arguments);
     if (!command)
         return base::Result<ports::ProcessLaunchResult>::failure(command.error());
+    auto environment = build_environment_block(request.environment_overrides);
+    if (!environment) {
+        return base::Result<ports::ProcessLaunchResult>::failure(environment.error());
+    }
 
     STARTUPINFOW si{};
     si.cb = sizeof(si);
@@ -239,10 +347,15 @@ WindowsProcessLauncher::launch(const ports::ProcessLaunchRequest& request) {
         // Capture setup failure is non-fatal; the process runs without capture.
     }
 
-    const DWORD creation_flags = CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP;
+    DWORD creation_flags = CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP;
+    void* environment_data = nullptr;
+    if (!environment.value().empty()) {
+        creation_flags |= CREATE_UNICODE_ENVIRONMENT;
+        environment_data = environment.value().data();
+    }
 
     if (!CreateProcessW(executable.value().c_str(), command.value().data(), nullptr, nullptr,
-                        inherit_handles, creation_flags, nullptr, nullptr, &si, &pi)) {
+                        inherit_handles, creation_flags, environment_data, nullptr, &si, &pi)) {
         return base::Result<ports::ProcessLaunchResult>::failure(
             base::Error{base::ErrorCode::kInternal, "CreateProcessW failed"});
     }

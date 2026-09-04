@@ -1,7 +1,7 @@
 #include "aegra/apps/worker/windows_personal_backup_task.h"
 
 #include "windows_personal_backup_task_backend.h"
-#include "worker_task_log.h"
+#include "aegra/apps/worker/worker_task_log.h"
 
 #include "aegra/apps/worker/windows_personal_backup.h"
 #include "aegra/base/error.h"

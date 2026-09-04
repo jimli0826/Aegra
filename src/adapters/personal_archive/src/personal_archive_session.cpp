@@ -208,6 +208,8 @@ load_incremental_baseline(const ArchiveCreateRequest& request) {
     if (!requested_set_matches || identity.block_size != request.block_size ||
         identity.file_uuid == request.file_uuid ||
         sidecar.value().block_size != request.block_size ||
+        !format::compatible_boot_profiles(parent_manifest.boot_profile,
+                                          request.manifest.boot_profile) ||
         parent_volumes.size() != request_volumes.size() ||
         sidecar_volumes.size() != request_volumes.size()) {
         return base::Result<std::optional<IncrementalBaseline>>::failure(

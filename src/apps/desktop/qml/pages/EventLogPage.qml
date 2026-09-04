@@ -27,6 +27,7 @@ Item {
     readonly property int backupCount: root.logModel ? root.logModel.backupCount : 0
     readonly property int restoreCount: root.logModel ? root.logModel.restoreCount : 0
     readonly property int verifyCount: root.logModel ? root.logModel.verifyCount : 0
+    readonly property int bootCheckCount: root.logModel ? root.logModel.bootCheckCount : 0
     readonly property int opTotal: root.logModel ? root.logModel.count : 0
 
     property real ringAnimProgress: 0.0
@@ -263,12 +264,14 @@ Item {
                             property int bCount: root.backupCount
                             property int rCount: root.restoreCount
                             property int vCount: root.verifyCount
+                            property int cCount: root.bootCheckCount
                             property int tot: root.opTotal
 
                             onProgressChanged: requestPaint()
                             onBCountChanged: requestPaint()
                             onRCountChanged: requestPaint()
                             onVCountChanged: requestPaint()
+                            onCCountChanged: requestPaint()
                             onTotChanged: requestPaint()
 
                             onPaint: {
@@ -292,7 +295,8 @@ Item {
                                 var segs = [
                                     { count: bCount, color: Theme.colorMenuActive },
                                     { count: rCount, color: "#3B82F6" },
-                                    { count: vCount, color: "#8B5CF6" }
+                                    { count: vCount, color: "#8B5CF6" },
+                                    { count: cCount, color: "#10B981" }
                                 ]
                                 var active = []
                                 for (var i = 0; i < segs.length; ++i) {
@@ -385,6 +389,22 @@ Item {
                             }
                             Text {
                                 text: qsTrId("aegra.job.operation.verify") + " " + root.verifyCount
+                                color: Theme.colorTextWhite
+                                font.pixelSize: 13
+                                font.bold: true
+                                font.family: Theme.fontFamily
+                            }
+                        }
+
+                        // Boot Check
+                        Row {
+                            spacing: 6
+                            Rectangle {
+                                width: 8; height: 8; radius: 4; color: "#10B981"
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            Text {
+                                text: qsTrId("aegra.job.operation.bootcheck") + " " + root.bootCheckCount
                                 color: Theme.colorTextWhite
                                 font.pixelSize: 13
                                 font.bold: true
@@ -512,7 +532,8 @@ Item {
                             qsTrId("aegra.eventlog.type.all"),
                             qsTrId("aegra.nav.backup"),
                             qsTrId("aegra.nav.restore"),
-                            qsTrId("aegra.job.operation.verify")
+                            qsTrId("aegra.job.operation.verify"),
+                            qsTrId("aegra.job.operation.bootcheck")
                         ]
                         currentIndex: root.typeIndex
                         onActivated: root.typeIndex = currentIndex

@@ -172,23 +172,23 @@ persist_worker_result(const SessionDependencies& dependencies, const std::string
                          : state == contracts::ServiceJobState::kCancelled ? "job.cancelled"
                                                                            : "job.failed";
     TerminalResultFields fields;
-    fields.result_error =
-        response.task_result ? static_cast<std::uint32_t>(response.task_result->error_code)
-                             : static_cast<std::uint32_t>(response.boundary_error_code);
-    fields.result_outcome =
-        response.task_result
-            ? std::optional<std::uint32_t>(static_cast<std::uint32_t>(response.task_result->outcome))
-            : std::nullopt;
-    fields.result_message =
-        response.task_result ? std::optional<std::string>(response.task_result->message_code)
-                             : std::optional<std::string>(response.message_code);
+    fields.result_error = response.task_result
+                              ? static_cast<std::uint32_t>(response.task_result->error_code)
+                              : static_cast<std::uint32_t>(response.boundary_error_code);
+    fields.result_outcome = response.task_result
+                                ? std::optional<std::uint32_t>(
+                                      static_cast<std::uint32_t>(response.task_result->outcome))
+                                : std::nullopt;
+    fields.result_message = response.task_result
+                                ? std::optional<std::string>(response.task_result->message_code)
+                                : std::optional<std::string>(response.message_code);
     if (response.task_result) {
         fields.result_requested_backup_type = response.task_result->requested_backup_type;
         fields.result_effective_backup_type = response.task_result->effective_backup_type;
         fields.result_effective_parent_uuid = response.task_result->effective_parent_uuid;
         if (response.task_result->incremental_downgrade_reason) {
-            fields.result_incremental_downgrade_reason = static_cast<std::uint8_t>(
-                *response.task_result->incremental_downgrade_reason);
+            fields.result_incremental_downgrade_reason =
+                static_cast<std::uint8_t>(*response.task_result->incremental_downgrade_reason);
         }
     }
     return persist_transition(*dependencies.control_plane, *dependencies.clock, job_id, state,
@@ -263,8 +263,7 @@ void retain_terminal_progress(const std::shared_ptr<WorkerSessionState>& session
     constexpr std::size_t kMaximumCachedProgress = 2'048;
     constexpr std::size_t kProgressPruneTarget = 1'024;
     if (cache.size() > kMaximumCachedProgress) {
-        for (auto it = cache.begin();
-             it != cache.end() && cache.size() > kProgressPruneTarget;) {
+        for (auto it = cache.begin(); it != cache.end() && cache.size() > kProgressPruneTarget;) {
             if (it->first == session->job_id) {
                 ++it;
                 continue;
@@ -338,8 +337,7 @@ receive_worker_result(const std::shared_ptr<WorkerSessionState>& session,
             return *event.response;
         }
         if (event.kind == contracts::WorkerEventKind::kProgress && event.progress) {
-            if (dependencies->progress_mutex != nullptr &&
-                dependencies->last_progress != nullptr) {
+            if (dependencies->progress_mutex != nullptr && dependencies->last_progress != nullptr) {
                 std::lock_guard lock(*dependencies->progress_mutex);
                 (*dependencies->last_progress)[session->job_id] = *event.progress;
             }
@@ -355,9 +353,9 @@ receive_worker_result(const std::shared_ptr<WorkerSessionState>& session,
 }
 
 void run_session(const std::shared_ptr<WorkerSessionState>& session,
-                  const std::shared_ptr<SessionDependencies>& dependencies,
-                  std::unique_ptr<WindowsNamedPipeListener> listener,
-                  const WorkerJobRequest& request) noexcept {
+                 const std::shared_ptr<SessionDependencies>& dependencies,
+                 std::unique_ptr<WindowsNamedPipeListener> listener,
+                 const WorkerJobRequest& request) noexcept {
     try {
         auto channel = listener->accept(session->receive_cancel.get_token());
         if (!channel) {
@@ -438,8 +436,8 @@ struct WorkerSupervisor::Impl final {
                                                    base::CancellationToken cancellation);
     [[nodiscard]] base::Result<void>
     start_session_thread(const std::shared_ptr<WorkerSessionState>& state,
-                          std::unique_ptr<WindowsNamedPipeListener> listener,
-                          WorkerJobRequest request) noexcept;
+                         std::unique_ptr<WindowsNamedPipeListener> listener,
+                         WorkerJobRequest request) noexcept;
 };
 
 void WorkerSupervisor::Impl::reap_completed() {
@@ -541,6 +539,33 @@ base::Result<void> WorkerSupervisor::Impl::launch_worker(
         unit.value()->rollback();
         return base::Result<void>::failure(inserted.error());
     }
+    // Durable post-backup plan in the same transaction as the backup job so a
+    // Service crash between submission and completion never loses the action.
+    const bool plan_verify = request.verify_after_backup;
+    const bool plan_boot_check = request.boot_check_after_backup &&
+                                 request.boot_check_hypervisor.has_value() &&
+                                 worker_request.content_kind == contracts::ContentKind::kVolumeSet;
+    if (worker_request.operation == contracts::JobOperation::kBackup &&
+        (plan_verify || plan_boot_check) && worker_request.backup &&
+        !worker_request.backup->file_uuid.empty() && !request.schedule_id.empty()) {
+        ports::PostBackupPlanRecord plan;
+        plan.backup_job_id = state->job_id;
+        plan.schedule_id = request.schedule_id;
+        plan.recovery_point_id = worker_request.backup->file_uuid;
+        plan.repository_connection_id = request.repository_connection_id;
+        plan.verify_required = plan_verify;
+        plan.boot_check_required = plan_boot_check;
+        plan.boot_check_hypervisor =
+            plan_boot_check ? request.boot_check_hypervisor
+                            : std::optional<contracts::BootCheckHypervisor>{};
+        plan.created_utc_ms = record.created_utc_ms;
+        plan.updated_utc_ms = record.created_utc_ms;
+        auto plan_inserted = unit.value()->post_backup_plans().upsert(plan, cancellation);
+        if (!plan_inserted) {
+            unit.value()->rollback();
+            return base::Result<void>::failure(plan_inserted.error());
+        }
+    }
     auto queued_committed = unit.value()->commit(cancellation);
     if (!queued_committed)
         return queued_committed;
@@ -558,9 +583,9 @@ base::Result<void> WorkerSupervisor::Impl::launch_worker(
                       : base::Result<void>::failure(failed.error());
     }
     state->worker_pid = launched.value().pid;
-    auto running =
-        persist_transition(control_plane, clock, state->job_id, contracts::ServiceJobState::kRunning,
-                           "job.running", TerminalResultFields{});
+    auto running = persist_transition(control_plane, clock, state->job_id,
+                                      contracts::ServiceJobState::kRunning, "job.running",
+                                      TerminalResultFields{});
     if (running)
         return base::Result<void>::success();
 
@@ -568,15 +593,16 @@ base::Result<void> WorkerSupervisor::Impl::launch_worker(
     TerminalResultFields start_failed;
     start_failed.result_error = static_cast<std::uint32_t>(running.error().code);
     start_failed.result_message = "service.job_start_persistence_failed";
-    (void)persist_transition(control_plane, clock, state->job_id, contracts::ServiceJobState::kFailed,
+    (void)persist_transition(control_plane, clock, state->job_id,
+                             contracts::ServiceJobState::kFailed,
                              "service.job_start_persistence_failed", std::move(start_failed));
     return base::Result<void>::failure(running.error());
 }
 
 base::Result<void>
 WorkerSupervisor::Impl::start_session_thread(const std::shared_ptr<WorkerSessionState>& state,
-                                              std::unique_ptr<WindowsNamedPipeListener> listener,
-                                              WorkerJobRequest request) noexcept {
+                                             std::unique_ptr<WindowsNamedPipeListener> listener,
+                                             WorkerJobRequest request) noexcept {
     try {
         std::lock_guard lock(sessions_mutex);
         auto& owner = sessions.at(state->job_id);
@@ -649,8 +675,8 @@ base::Result<void> WorkerSupervisor::submit(const WorkerJobRequest& request,
     }
     auto session_request = request;
     session_request.worker_request = std::move(worker_request);
-    auto started = impl_->start_session_thread(state, std::move(listener).value(),
-                                               std::move(session_request));
+    auto started =
+        impl_->start_session_thread(state, std::move(listener).value(), std::move(session_request));
     if (!started)
         impl_->erase_session(state->job_id);
     return started;

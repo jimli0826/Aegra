@@ -138,10 +138,8 @@ using worker_job_detail::path_to_utf8;
 using worker_job_detail::random_id;
 using worker_job_detail::resolve_archive_absolute_path;
 
-
-
-[[nodiscard]] base::Result<std::string>
-random_uuid(ports::IRandomSource& random, const base::CancellationToken cancellation) {
+[[nodiscard]] base::Result<std::string> random_uuid(ports::IRandomSource& random,
+                                                    const base::CancellationToken cancellation) {
     std::array<std::byte, 16> bytes{};
     if (auto filled = random.fill(bytes, cancellation); !filled) {
         return base::Result<std::string>::failure(filled.error());
@@ -174,9 +172,6 @@ random_uuid(ports::IRandomSource& random, const base::CancellationToken cancella
     return base::Result<std::string>::success(std::string(buffer.data()));
 }
 
-
-
-
 /// Wire StartBackup expands to this durable plan (from the schedule) before prepare/submit.
 /// backup_type is the *requested* type (wire); effective type may demote Incremental → Full.
 struct ResolvedBackupPlan final {
@@ -194,6 +189,8 @@ struct ResolvedBackupPlan final {
     std::uint64_t split_size_bytes{0};
     std::int32_t compression_level{contracts::kCompressionLevelNormal};
     bool verify_after_backup{false};
+    bool boot_check_after_backup{false};
+    std::optional<contracts::BootCheckHypervisor> boot_check_hypervisor;
     std::string backup_set_uuid;
     /// schedules.last_recovery_point_id — sole Incremental parent candidate (no Catalog tip scan).
     std::optional<std::string> last_recovery_point_id;
@@ -233,6 +230,12 @@ struct ResolvedBackupPlan final {
     fingerprint += std::to_string(plan.compression_level);
     fingerprint += "|";
     fingerprint += plan.verify_after_backup ? "1" : "0";
+    fingerprint += "|bc:";
+    fingerprint += plan.boot_check_after_backup ? "1" : "0";
+    fingerprint += "|bch:";
+    fingerprint += plan.boot_check_hypervisor
+                       ? std::to_string(static_cast<int>(*plan.boot_check_hypervisor))
+                       : "-";
     return fingerprint;
 }
 
@@ -271,7 +274,6 @@ reconcile_submission_conflict(ports::IControlPlaneDatabase& control_plane,
     return "cancel|" + std::to_string(job_id.size()) + ":" + std::string(job_id);
 }
 
-
 [[nodiscard]] ports::JobStateTransition cancelling_transition(const std::string_view job_id,
                                                               const std::uint64_t utc_ms) {
     ports::JobStateTransition transition;
@@ -288,10 +290,10 @@ struct PreparedBackup final {
     std::string job_id;
 };
 
-[[nodiscard]] bool is_chainable_parent_entry(
-    const personal_repository::CatalogEntry& entry,
-    const std::vector<std::string>& source_volume_ids,
-    const std::string_view schedule_backup_set_uuid) noexcept {
+[[nodiscard]] bool
+is_chainable_parent_entry(const personal_repository::CatalogEntry& entry,
+                          const std::vector<std::string>& source_volume_ids,
+                          const std::string_view schedule_backup_set_uuid) noexcept {
     return personal_repository::is_volume_chainable_parent(entry, source_volume_ids,
                                                            schedule_backup_set_uuid);
 }
@@ -336,11 +338,12 @@ resolve_backup_plan(ports::IControlPlaneDatabase& control_plane,
     plan.deduplication_enabled = record.content_kind == contracts::ContentKind::kVolumeSet
                                      ? record.deduplication_enabled
                                      : false;
-    plan.split_size_bytes = record.content_kind == contracts::ContentKind::kVolumeSet
-                                ? record.split_size_bytes
-                                : 0;
+    plan.split_size_bytes =
+        record.content_kind == contracts::ContentKind::kVolumeSet ? record.split_size_bytes : 0;
     plan.compression_level = record.compression_level;
     plan.verify_after_backup = record.verify_after_backup;
+    plan.boot_check_after_backup = record.boot_check_after_backup;
+    plan.boot_check_hypervisor = record.boot_check_hypervisor;
     plan.backup_set_uuid = record.backup_set_uuid;
     plan.last_recovery_point_id = record.last_recovery_point_id;
     return base::Result<ResolvedBackupPlan>::success(std::move(plan));
@@ -377,8 +380,7 @@ read_catalog_entry_by_uuid(ports::IObjectReader& reader, const std::string& cata
     std::vector<std::byte> bytes(static_cast<std::size_t>(attributes.value().size_bytes));
     std::size_t offset = 0;
     while (offset < bytes.size()) {
-        auto read =
-            reader.read_range(key, offset, std::span(bytes).subspan(offset), cancellation);
+        auto read = reader.read_range(key, offset, std::span(bytes).subspan(offset), cancellation);
         if (!read || read.value() == 0) {
             return base::Result<std::optional<personal_repository::CatalogEntry>>::failure(
                 !read ? read.error()
@@ -386,8 +388,7 @@ read_catalog_entry_by_uuid(ports::IObjectReader& reader, const std::string& cata
         }
         offset += read.value();
     }
-    const auto text =
-        std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    const auto text = std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size());
     auto decoded = personal_repository::decode_catalog_entry_json(text);
     if (!decoded) {
         return base::Result<std::optional<personal_repository::CatalogEntry>>::failure(
@@ -418,8 +419,8 @@ ancestor_chain_complete(ports::IObjectReader& reader, const std::string& catalog
         if (!current.parent_uuid) {
             return base::Result<bool>::success(current.backup_type == format::BackupType::kFull);
         }
-        auto parent = read_catalog_entry_by_uuid(reader, catalog_prefix, *current.parent_uuid,
-                                                cancellation);
+        auto parent =
+            read_catalog_entry_by_uuid(reader, catalog_prefix, *current.parent_uuid, cancellation);
         if (!parent) {
             return base::Result<bool>::failure(parent.error());
         }
@@ -432,12 +433,10 @@ ancestor_chain_complete(ports::IObjectReader& reader, const std::string& catalog
 }
 
 /// Parent is only schedules.last_recovery_point_id. Empty/missing/invalid chain → demote Full.
-[[nodiscard]] base::Result<IncrementalParentResolution>
-resolve_incremental_parent(ports::IRepositoryStorageAccess& storage,
-                           const std::string& schedule_backup_set_uuid,
-                           const std::optional<std::string>& last_recovery_point_id,
-                           const std::vector<std::string>& source_volume_ids,
-                           const base::CancellationToken cancellation) {
+[[nodiscard]] base::Result<IncrementalParentResolution> resolve_incremental_parent(
+    ports::IRepositoryStorageAccess& storage, const std::string& schedule_backup_set_uuid,
+    const std::optional<std::string>& last_recovery_point_id,
+    const std::vector<std::string>& source_volume_ids, const base::CancellationToken cancellation) {
     if (!last_recovery_point_id || last_recovery_point_id->empty()) {
         return base::Result<IncrementalParentResolution>::success(
             demote_to_full(std::optional<std::string>{schedule_backup_set_uuid}));
@@ -445,7 +444,7 @@ resolve_incremental_parent(ports::IRepositoryStorageAccess& storage,
     // Prefix is fixed by repository format; tip identity comes from the schedule, not a scan.
     constexpr std::string_view kCatalogPrefix = "catalog/recovery-points";
     auto entry = read_catalog_entry_by_uuid(storage.reader(), std::string(kCatalogPrefix),
-                                           *last_recovery_point_id, cancellation);
+                                            *last_recovery_point_id, cancellation);
     if (!entry) {
         return base::Result<IncrementalParentResolution>::failure(entry.error());
     }
@@ -535,19 +534,15 @@ load_available_repository(ports::IControlPlaneDatabase& control_plane,
         return base::Result<ports::RepositoryConnectionRecord>::failure(
             {base::ErrorCode::kConflict, "repository is unavailable"});
     }
-    return base::Result<ports::RepositoryConnectionRecord>::success(
-        std::move(*repository.value()));
+    return base::Result<ports::RepositoryConnectionRecord>::success(std::move(*repository.value()));
 }
 
-[[nodiscard]] base::Result<IncrementalParentResolution>
-maybe_resolve_parent(const ResolvedBackupPlan& plan,
-                     const std::vector<std::string>& source_volume_ids,
-                     const ports::RepositoryConnectionRecord& repository,
-                     ports::IRepositoryStorageFactory& storage_factory,
-                     const base::CancellationToken cancellation) {
+[[nodiscard]] base::Result<IncrementalParentResolution> maybe_resolve_parent(
+    const ResolvedBackupPlan& plan, const std::vector<std::string>& source_volume_ids,
+    const ports::RepositoryConnectionRecord& repository,
+    ports::IRepositoryStorageFactory& storage_factory, const base::CancellationToken cancellation) {
     if (plan.backup_type != contracts::BackupType::kIncremental) {
-        return base::Result<IncrementalParentResolution>::success(
-            IncrementalParentResolution{});
+        return base::Result<IncrementalParentResolution>::success(IncrementalParentResolution{});
     }
     auto storage = storage_factory.open(repository.locator, cancellation);
     if (!storage) {
@@ -645,9 +640,8 @@ prepare_volume_backup(const ResolvedBackupPlan& plan, PrepareBackupContext& cont
     if (!repository) {
         return base::Result<PreparedBackup>::failure(repository.error());
     }
-    auto parent =
-        maybe_resolve_parent(plan, sources.value(), repository.value(), context.storage_factory,
-                             cancellation);
+    auto parent = maybe_resolve_parent(plan, sources.value(), repository.value(),
+                                       context.storage_factory, cancellation);
     if (!parent) {
         return base::Result<PreparedBackup>::failure(parent.error());
     }
@@ -670,8 +664,7 @@ prepare_volume_backup(const ResolvedBackupPlan& plan, PrepareBackupContext& cont
     worker.source_refs = std::move(sources).value();
     worker.target_ref = path_to_utf8(identity.value().archive_path);
     worker.trace_id = identity.value().trace_id;
-    auto credentials =
-        assign_backup_credentials(worker, plan, context.control_plane, cancellation);
+    auto credentials = assign_backup_credentials(worker, plan, context.control_plane, cancellation);
     if (!credentials) {
         return base::Result<PreparedBackup>::failure(credentials.error());
     }
@@ -688,6 +681,8 @@ prepare_volume_backup(const ResolvedBackupPlan& plan, PrepareBackupContext& cont
     request.request_fingerprint = backup_request_fingerprint(plan);
     request.schedule_id = plan.schedule_id;
     request.verify_after_backup = plan.verify_after_backup;
+    request.boot_check_after_backup = plan.boot_check_after_backup;
+    request.boot_check_hypervisor = plan.boot_check_hypervisor;
     request.backup_archive_key = identity.value().archive_key;
     return base::Result<PreparedBackup>::success(
         {std::move(request), std::move(identity).value().job_id});
@@ -771,12 +766,10 @@ struct FileParentSelection final {
 };
 
 /// Catalog tip selection only; Worker validates the authenticated metadata baseline.
-[[nodiscard]] base::Result<FileParentSelection>
-resolve_file_incremental_parent(const ResolvedBackupPlan& plan,
-                                const ports::RepositoryConnectionRecord& repository,
-                                ports::IRepositoryStorageFactory& storage_factory,
-                                const std::string& expected_fingerprint_hex,
-                                const base::CancellationToken cancellation) {
+[[nodiscard]] base::Result<FileParentSelection> resolve_file_incremental_parent(
+    const ResolvedBackupPlan& plan, const ports::RepositoryConnectionRecord& repository,
+    ports::IRepositoryStorageFactory& storage_factory, const std::string& expected_fingerprint_hex,
+    const base::CancellationToken cancellation) {
     auto storage = storage_factory.open(repository.locator, cancellation);
     if (!storage) {
         return base::Result<FileParentSelection>::failure(storage.error());
@@ -792,9 +785,9 @@ resolve_file_incremental_parent(const ResolvedBackupPlan& plan,
         return base::Result<FileParentSelection>::failure(graph.error());
     }
     personal_repository::FileIncrementalParentRequest request;
-    request.last_recovery_point_id =
-        plan.last_recovery_point_id ? std::string_view(*plan.last_recovery_point_id)
-                                    : std::string_view{};
+    request.last_recovery_point_id = plan.last_recovery_point_id
+                                         ? std::string_view(*plan.last_recovery_point_id)
+                                         : std::string_view{};
     request.schedule_backup_set_uuid = plan.backup_set_uuid;
     request.expected_selection_fingerprint = expected_fingerprint_hex;
     const auto decision =
@@ -855,9 +848,8 @@ prepare_file_set_backup(const ResolvedBackupPlan& plan, PrepareBackupContext& co
     if (plan.backup_type == contracts::BackupType::kIncremental) {
         const auto fingerprint_hex =
             fingerprint_digest_to_hex(backup.selection_fingerprint->digest);
-        auto decision = resolve_file_incremental_parent(plan, repository.value(),
-                                                        context.storage_factory, fingerprint_hex,
-                                                        cancellation);
+        auto decision = resolve_file_incremental_parent(
+            plan, repository.value(), context.storage_factory, fingerprint_hex, cancellation);
         if (!decision) {
             return base::Result<PreparedBackup>::failure(decision.error());
         }
@@ -886,8 +878,7 @@ prepare_file_set_backup(const ResolvedBackupPlan& plan, PrepareBackupContext& co
     worker.file_source_refs = plan.file_selections;
     worker.target_ref = path_to_utf8(identity.value().archive_path);
     worker.trace_id = identity.value().trace_id;
-    auto credentials =
-        assign_backup_credentials(worker, plan, context.control_plane, cancellation);
+    auto credentials = assign_backup_credentials(worker, plan, context.control_plane, cancellation);
     if (!credentials) {
         return base::Result<PreparedBackup>::failure(credentials.error());
     }
@@ -905,6 +896,8 @@ prepare_file_set_backup(const ResolvedBackupPlan& plan, PrepareBackupContext& co
     request.request_fingerprint = backup_request_fingerprint(plan);
     request.schedule_id = plan.schedule_id;
     request.verify_after_backup = plan.verify_after_backup;
+    request.boot_check_after_backup = plan.boot_check_after_backup;
+    request.boot_check_hypervisor = plan.boot_check_hypervisor;
     request.backup_archive_key = identity.value().archive_key;
     return base::Result<PreparedBackup>::success(
         {std::move(request), std::move(identity).value().job_id});
@@ -954,7 +947,6 @@ persist_cancel_command(ports::IControlPlaneDatabase& control_plane, ports::ICloc
                      : base::Result<contracts::CommandAcknowledgement>::failure(committed.error());
 }
 
-
 [[nodiscard]] std::string verify_request_fingerprint(const contracts::StartVerifyCommand& command) {
     return "start-verify|" + command.repository_connection_id + "|" + command.recovery_point_id;
 }
@@ -992,15 +984,23 @@ volume_verify_credential(const ports::RepositoryConnectionRecord& repository,
     return base::Result<contracts::SecretRef>::success(*repository.credential_ref);
 }
 
+/// Manual verify carries no explicit secret; the planned post-backup path passes
+/// the owning schedule's dpapi-lm password reference for encrypted archives.
+struct VerifyPreparation final {
+    const contracts::StartVerifyCommand& command;
+    std::optional<std::string> archive_secret_ref;
+};
+
 [[nodiscard]] base::Result<PreparedBackup>
-prepare_file_set_verify(const contracts::StartVerifyCommand& command,
+prepare_file_set_verify(const VerifyPreparation& preparation,
                         ports::IControlPlaneDatabase& control_plane,
                         ports::IRepositoryStorageFactory& storage_factory,
                         ports::IRandomSource& random, const base::CancellationToken cancellation) {
+    const auto& command = preparation.command;
     // Open Catalog chain + authenticate Archives so Incremental tips get base-first source_refs.
-    auto chain = open_file_recovery_chain(control_plane, storage_factory,
-                                          command.repository_connection_id,
-                                          command.recovery_point_id, std::nullopt, cancellation);
+    auto chain = open_file_recovery_chain(
+        control_plane, storage_factory, command.repository_connection_id, command.recovery_point_id,
+        preparation.archive_secret_ref, cancellation);
     if (!chain) {
         return base::Result<PreparedBackup>::failure(chain.error());
     }
@@ -1039,10 +1039,10 @@ prepare_file_set_verify(const contracts::StartVerifyCommand& command,
 }
 
 [[nodiscard]] base::Result<PreparedBackup>
-prepare_verify(const contracts::StartVerifyCommand& command,
-               ports::IControlPlaneDatabase& control_plane,
+prepare_verify(const VerifyPreparation& preparation, ports::IControlPlaneDatabase& control_plane,
                ports::IRepositoryStorageFactory& storage_factory, ports::IRandomSource& random,
                const base::CancellationToken cancellation) {
+    const auto& command = preparation.command;
     auto repository =
         control_plane.get_repository_connection(command.repository_connection_id, cancellation);
     if (!repository) {
@@ -1089,7 +1089,7 @@ prepare_verify(const contracts::StartVerifyCommand& command,
             {base::ErrorCode::kConflict, "file_recover.catalog_only"});
     }
     if (found->content_kind == personal_repository::kCatalogContentKindFileSet) {
-        return prepare_file_set_verify(command, control_plane, storage_factory, random,
+        return prepare_file_set_verify(preparation, control_plane, storage_factory, random,
                                        cancellation);
     }
     // Volume-set Verify: single tip Archive (existing path).
@@ -1102,7 +1102,10 @@ prepare_verify(const contracts::StartVerifyCommand& command,
             return base::Result<PreparedBackup>::failure(archive_path.error());
         return base::Result<PreparedBackup>::failure(!job_id ? job_id.error() : trace_id.error());
     }
-    auto credential = volume_verify_credential(*repository.value(), archive_path.value());
+    auto credential = preparation.archive_secret_ref
+                          ? base::Result<contracts::SecretRef>::success(
+                                contracts::SecretRef{*preparation.archive_secret_ref})
+                          : volume_verify_credential(*repository.value(), archive_path.value());
     if (!credential) {
         return base::Result<PreparedBackup>::failure(credential.error());
     }
@@ -1124,16 +1127,14 @@ prepare_verify(const contracts::StartVerifyCommand& command,
 }
 
 [[nodiscard]] std::string
-post_backup_verify_fingerprint(const WorkerJobRequest& completed_backup) {
-    return "post-backup-verify|" + completed_backup.worker_request.job_id + "|" +
-           completed_backup.worker_request.backup->file_uuid;
+planned_post_backup_verify_fingerprint(const PostBackupVerifyRequest& request) {
+    return "post-backup-verify|" + request.backup_job_id + "|" + request.recovery_point_id;
 }
 
 [[nodiscard]] std::string
-post_backup_verify_idempotency_key(const WorkerJobRequest& completed_backup) {
+planned_post_backup_verify_idempotency_key(const PostBackupVerifyRequest& request) {
     // Idempotency keys are stable identifiers ([a-z0-9._:-]); the '|' fingerprint is rejected.
-    return "post-backup-verify:" + completed_backup.worker_request.job_id + ":" +
-           completed_backup.worker_request.backup->file_uuid;
+    return "post-backup-verify:" + request.backup_job_id + ":" + request.recovery_point_id;
 }
 
 [[nodiscard]] bool same_post_backup_verify(const ports::JobRecord& record,
@@ -1142,89 +1143,20 @@ post_backup_verify_idempotency_key(const WorkerJobRequest& completed_backup) {
            record.request_fingerprint == fingerprint;
 }
 
-[[nodiscard]] contracts::SecretRef
-post_backup_credential(const WorkerJobRequest& completed_backup) {
-    if (!completed_backup.worker_request.credential_refs.empty()) {
-        return completed_backup.worker_request.credential_refs.front();
+/// The schedule password (dpapi-lm reference) overrides the connection-default
+/// credential order so encrypted post-backup archives verify without a
+/// repository-level credential. Empty when the schedule is gone or unencrypted.
+[[nodiscard]] std::optional<std::string>
+planned_verify_secret_ref(ports::IControlPlaneDatabase& control_plane,
+                          const std::string& schedule_id,
+                          const base::CancellationToken cancellation) {
+    auto schedule = control_plane.get_schedule(schedule_id, cancellation);
+    if (!schedule || !schedule.value() || !schedule.value()->encryption_enabled ||
+        schedule.value()->archive_password_protected.empty()) {
+        return std::nullopt;
     }
-    return {};
+    return schedule.value()->archive_password_protected;
 }
-
-[[nodiscard]] base::Result<std::vector<std::string>> resolve_post_backup_file_chain_paths(
-    const WorkerJobRequest& completed_backup, ports::IControlPlaneDatabase& control_plane,
-    ports::IRepositoryStorageFactory& storage_factory,
-    const base::CancellationToken cancellation) {
-    const auto& backup = *completed_backup.worker_request.backup;
-    auto layers = resolve_file_set_catalog_chain(control_plane, storage_factory,
-                                                 completed_backup.repository_connection_id,
-                                                 backup.file_uuid, cancellation);
-    if (!layers) {
-        return base::Result<std::vector<std::string>>::failure(layers.error());
-    }
-    auto repository = control_plane.get_repository_connection(
-        completed_backup.repository_connection_id, cancellation);
-    if (!repository || !repository.value()) {
-        return base::Result<std::vector<std::string>>::failure(
-            !repository ? repository.error()
-                        : base::Error{base::ErrorCode::kNotFound,
-                                      "repository connection was not found"});
-    }
-    std::vector<std::string> paths;
-    paths.reserve(layers.value().size());
-    for (const auto& layer : layers.value()) {
-        auto path = resolve_archive_absolute_path(repository.value()->locator,
-                                                  layer.archive_main_key);
-        if (!path) {
-            return base::Result<std::vector<std::string>>::failure(path.error());
-        }
-        paths.push_back(std::move(path).value());
-    }
-    return base::Result<std::vector<std::string>>::success(std::move(paths));
-}
-
-[[nodiscard]] base::Result<PreparedBackup> prepare_post_backup_verify(
-    const WorkerJobRequest& completed_backup, ports::IControlPlaneDatabase& control_plane,
-    ports::IRepositoryStorageFactory& storage_factory, ports::IRandomSource& random,
-    const base::CancellationToken cancellation) {
-    if (!completed_backup.verify_after_backup ||
-        completed_backup.worker_request.operation != contracts::JobOperation::kBackup ||
-        !completed_backup.worker_request.backup ||
-        completed_backup.worker_request.backup->file_uuid.empty()) {
-        return base::Result<PreparedBackup>::failure(
-            {base::ErrorCode::kInvalidArgument, "post-backup Verify request is invalid"});
-    }
-    auto job_id = random_id("job-", random, cancellation);
-    auto trace_id = random_id("trace-", random, cancellation);
-    if (!job_id || !trace_id) {
-        return base::Result<PreparedBackup>::failure(!job_id ? job_id.error() : trace_id.error());
-    }
-    contracts::JobRequest worker;
-    worker.job_id = job_id.value();
-    worker.tenant_id = "personal";
-    worker.operation = contracts::JobOperation::kVerify;
-    worker.content_kind = completed_backup.worker_request.content_kind;
-    worker.trace_id = trace_id.value();
-    const auto credential = post_backup_credential(completed_backup);
-    if (worker.content_kind == contracts::ContentKind::kFileSet) {
-        auto paths = resolve_post_backup_file_chain_paths(completed_backup, control_plane,
-                                                          storage_factory, cancellation);
-        if (!paths) {
-            return base::Result<PreparedBackup>::failure(paths.error());
-        }
-        worker.source_refs = std::move(paths).value();
-        worker.credential_refs.assign(worker.source_refs.size(), credential);
-    } else {
-        worker.source_refs = {completed_backup.worker_request.target_ref};
-        worker.credential_refs = {credential};
-    }
-    WorkerJobRequest request;
-    request.worker_request = std::move(worker);
-    request.source_ids = {completed_backup.worker_request.backup->file_uuid};
-    request.repository_connection_id = completed_backup.repository_connection_id;
-    request.request_fingerprint = post_backup_verify_fingerprint(completed_backup);
-    return base::Result<PreparedBackup>::success({std::move(request), std::move(job_id).value()});
-}
-
 
 } // namespace
 
@@ -1288,11 +1220,9 @@ WorkerJobService::start_backup(const contracts::StartBackupCommand& command,
                         prepared.value().job_id));
 }
 
-base::Result<ScheduledBackupResult>
-WorkerJobService::start_scheduled_backup(const std::string_view schedule_id,
-                                         const std::uint64_t expected_due_utc_ms,
-                                         const std::string_view idempotency_key,
-                                         const base::CancellationToken cancellation) {
+base::Result<ScheduledBackupResult> WorkerJobService::start_scheduled_backup(
+    const std::string_view schedule_id, const std::uint64_t expected_due_utc_ms,
+    const std::string_view idempotency_key, const base::CancellationToken cancellation) {
     if (schedule_id.empty() || idempotency_key.empty()) {
         return base::Result<ScheduledBackupResult>::failure(
             {base::ErrorCode::kInvalidArgument, "scheduled backup arguments are invalid"});
@@ -1370,8 +1300,8 @@ WorkerJobService::start_verify(const contracts::StartVerifyCommand& command,
             acknowledgement(existing.value()->job_id, contracts::CommandDisposition::kReplayed,
                             existing.value()->job_id));
     }
-    auto prepared =
-        prepare_verify(command, control_plane_, storage_factory_, random_, cancellation);
+    auto prepared = prepare_verify(VerifyPreparation{command, std::nullopt}, control_plane_,
+                                   storage_factory_, random_, cancellation);
     if (!prepared) {
         return base::Result<contracts::CommandAcknowledgement>::failure(prepared.error());
     }
@@ -1387,14 +1317,15 @@ WorkerJobService::start_verify(const contracts::StartVerifyCommand& command,
 }
 
 base::Result<contracts::CommandAcknowledgement>
-WorkerJobService::start_post_backup_verify(const WorkerJobRequest& completed_backup,
+WorkerJobService::start_post_backup_verify(const PostBackupVerifyRequest& request,
                                            const base::CancellationToken cancellation) {
-    if (!completed_backup.worker_request.backup) {
+    if (request.backup_job_id.empty() || request.recovery_point_id.empty() ||
+        request.repository_connection_id.empty() || request.schedule_id.empty()) {
         return base::Result<contracts::CommandAcknowledgement>::failure(
-            {base::ErrorCode::kInvalidArgument, "completed backup identity is missing"});
+            {base::ErrorCode::kInvalidArgument, "post-backup verify request is incomplete"});
     }
-    const auto fingerprint = post_backup_verify_fingerprint(completed_backup);
-    const auto idempotency_key = post_backup_verify_idempotency_key(completed_backup);
+    const auto fingerprint = planned_post_backup_verify_fingerprint(request);
+    const auto idempotency_key = planned_post_backup_verify_idempotency_key(request);
     auto existing = control_plane_.get_job_by_idempotency_key(idempotency_key, cancellation);
     if (!existing) {
         return base::Result<contracts::CommandAcknowledgement>::failure(existing.error());
@@ -1408,20 +1339,26 @@ WorkerJobService::start_post_backup_verify(const WorkerJobRequest& completed_bac
             acknowledgement(existing.value()->job_id, contracts::CommandDisposition::kReplayed,
                             existing.value()->job_id));
     }
-    auto prepared = prepare_post_backup_verify(completed_backup, control_plane_, storage_factory_,
-                                               random_, cancellation);
+    contracts::StartVerifyCommand command;
+    command.repository_connection_id = request.repository_connection_id;
+    command.recovery_point_id = request.recovery_point_id;
+    VerifyPreparation preparation{
+        command, planned_verify_secret_ref(control_plane_, request.schedule_id, cancellation)};
+    auto prepared =
+        prepare_verify(preparation, control_plane_, storage_factory_, random_, cancellation);
     if (!prepared) {
         return base::Result<contracts::CommandAcknowledgement>::failure(prepared.error());
     }
     prepared.value().request.idempotency_key = idempotency_key;
+    prepared.value().request.request_fingerprint = fingerprint;
+    // Carry the owning schedule so the Desktop can show per-schedule verify status.
+    prepared.value().request.schedule_id = request.schedule_id;
     auto submitted = supervisor_.submit(prepared.value().request, cancellation);
     if (!submitted) {
         auto replay = control_plane_.get_job_by_idempotency_key(idempotency_key, cancellation);
-        if (replay && replay.value() &&
-            same_post_backup_verify(*replay.value(), fingerprint)) {
+        if (replay && replay.value() && same_post_backup_verify(*replay.value(), fingerprint)) {
             return base::Result<contracts::CommandAcknowledgement>::success(
-                acknowledgement(replay.value()->job_id,
-                                contracts::CommandDisposition::kReplayed,
+                acknowledgement(replay.value()->job_id, contracts::CommandDisposition::kReplayed,
                                 replay.value()->job_id));
         }
         return base::Result<contracts::CommandAcknowledgement>::failure(submitted.error());
@@ -1430,7 +1367,6 @@ WorkerJobService::start_post_backup_verify(const WorkerJobRequest& completed_bac
         acknowledgement(prepared.value().job_id, contracts::CommandDisposition::kAccepted,
                         prepared.value().job_id));
 }
-
 
 base::Result<contracts::CommandAcknowledgement>
 WorkerJobService::cancel_job(const contracts::ResourceRef& job,

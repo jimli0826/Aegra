@@ -1,6 +1,7 @@
 #pragma once
 
 #include "aegra/base/result.h"
+#include "aegra/contracts/boot_check.h"
 #include "aegra/contracts/job.h"
 #include "aegra/contracts/progress.h"
 #include "aegra/contracts/repository_query.h"
@@ -213,6 +214,12 @@ struct ScheduleSummary final {
     std::int32_t compression_level{kCompressionLevelNormal};
     /// When true, Service submits a separate Verify job after a successful Catalog publish.
     bool verify_after_backup{false};
+    /// volume_set only; independent of verify_after_backup. BootCheck of the
+    /// published recovery point in an isolated VM — after a successful Verify
+    /// when verify is also enabled, otherwise directly after the backup.
+    bool boot_check_after_backup{false};
+    /// Present exactly when boot_check_after_backup is true.
+    std::optional<BootCheckHypervisor> boot_check_hypervisor;
     bool encryption_enabled{false};
 };
 
@@ -565,6 +572,11 @@ struct UpsertScheduleCommand final {
     std::uint64_t split_size_bytes{0};
     std::int32_t compression_level{kCompressionLevelNormal};
     bool verify_after_backup{false};
+    /// Absent = keep the stored value on update / false on create. When set true:
+    /// volume_set only and verify_after_backup must be true.
+    std::optional<bool> boot_check_after_backup;
+    /// Required when boot_check_after_backup=true; otherwise absent.
+    std::optional<BootCheckHypervisor> boot_check_hypervisor;
     bool encryption_enabled{false};
     /// Create-only when encryption_enabled. Must be empty on update.
     std::string archive_password;

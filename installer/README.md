@@ -20,8 +20,8 @@ After setup, **Apps & Features** shows:
 
 ## Prerequisites
 
-1. Desktop CMake tree already configured (Qt Creator Release, or equivalent):
-   `build\Desktop_Qt_6_8_3_MSVC2022_64bit-Release`
+1. Qt 6.8.3 MSVC runtime and CMake package at
+   `C:\Qt6\6.8.3\msvc2022_64`. The script configures Desktop in the repository Release preset.
 2. Install WiX Toolset CLI v7:
    ```bat
    winget install WiXToolset.WiXCLI
@@ -44,18 +44,18 @@ cd installer
 
 Compile steps (unless `-SkipCompile`):
 
-1. Delete previous project `exe` / `dll` under `out\build\vs2026-release`, the Desktop CMake tree, and `payload\`.
-2. `scripts\build.cmd Release` (Service / Worker / PE / Shell).
-3. `cmake --build` target `aegra_desktop` in the Desktop CMake tree.
+1. Delete previous project `exe` / `dll` under `out\build\vs2026-release` and `payload\`.
+2. `scripts\build.cmd Release` (Service / Worker / BootCheck / PE / Shell).
+3. Reconfigure `vs2026-release` (desktop always builds; Qt 6.8.3 via `AEGRA_QT_ROOT`), then build target `aegra_desktop` in the same tree.
 4. Copy those outputs into `payload\`.
 5. Fail if any file from the payload list is missing.
 
 | Input | Default |
 |-------|---------|
-| Service / worker / PE / CRT | `out\build\vs2026-release\src\apps\service` |
+| Service / worker / BootCheck / PE / CRT | `out\build\vs2026-release\src\apps\service` |
 | CLI | `out\build\vs2026-release\src\apps\cli` |
 | Shell extension | `out\build\vs2026-release\src\apps\shell_extension` |
-| Desktop | `build\Desktop_Qt_6_8_3_MSVC2022_64bit-Release\src\apps\desktop` |
+| Desktop | `out\build\vs2026-release\src\apps\desktop` |
 | Payload baseline | `installer\payload\` |
 | Dokan kernel MSI | `Dokan_x64.msi` (repo root) |
 
@@ -71,6 +71,7 @@ All binaries live in that folder (no `ui\` subdirectory):
 | `AegraCLI.exe` | Local Service control CLI |
 | `AegraService.exe` | Windows service **AegraService** (`--service`) |
 | `AegraWorker.exe` | Backup / restore / mount worker |
+| `AegraBootCheck.exe` | Post-backup BootCheck host (sibling of `AegraService.exe`) |
 | `AegraPEResore.exe` | WinPE offline restore executor (injected into boot.wim) |
 | `aegra_shell_extension.dll` | Explorer `.bkf` namespace (HKLM COM + synchronous Shell refresh after registry authoring) |
 | `dokan2.dll`, `libsodium.dll`, `zstd.dll`, `sqlite3.dll` | Runtime |

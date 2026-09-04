@@ -1,19 +1,27 @@
 #pragma once
 
 #include "aegra/base/result.h"
+#include "aegra/contracts/boot_check.h"
 #include "aegra/contracts/file_set.h"
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
 namespace aegra::format {
 
-inline constexpr std::uint32_t kManifestSchemaVersion = 1;
+inline constexpr std::uint32_t kManifestSchemaVersion = 2;
 inline constexpr std::uint8_t kManifestContentKindVolumeSet = 1;
 inline constexpr std::uint8_t kManifestContentKindFileSet = 2;
+inline constexpr std::uint16_t kBootProfileVersion = 1;
+inline constexpr std::uint16_t kBootProbeProtocolVersion =
+    contracts::kBootCheckProbeProtocolVersion;
+inline constexpr std::uint8_t kBootLayoutFingerprintAlgorithmSha256V1 = 1;
+inline constexpr std::size_t kBootLayoutFingerprintBytes = 32;
 using Guid = std::array<std::byte, 16>;
 
 enum class PartitionStyle : std::uint8_t {
@@ -32,6 +40,27 @@ enum class BackupType : std::uint8_t {
     kFull = 1,
     kIncremental = 2,
     kDifferential = 3,
+};
+
+enum class BootFirmwareMode : std::uint8_t {
+    kBios = 1,
+    kUefi = 2,
+};
+
+enum class BootOsArchitecture : std::uint8_t {
+    kX64 = 1,
+};
+
+enum class BootSecurityState : std::uint8_t {
+    kUnknown = 0,
+    kDisabled = 1,
+    kEnabled = 2,
+};
+
+enum class BootHardwareState : std::uint8_t {
+    kUnknown = 0,
+    kAbsent = 1,
+    kPresent = 2,
 };
 
 struct Partition final {
@@ -124,6 +153,26 @@ struct FileSetBaseline final {
         contracts::FileChangeDetectionMethod::kNone};
 };
 
+/// Authenticated facts needed to decide whether a volume_set recovery point can be boot-checked.
+/// The profile is absent for data-only or incomplete system-disk selections.
+struct BootProfile final {
+    std::uint16_t profile_version{kBootProfileVersion};
+    std::uint32_t system_disk_number{0};
+    std::uint32_t windows_volume_index{0};
+    std::vector<std::uint32_t> required_boot_partition_numbers;
+    BootFirmwareMode firmware_mode{BootFirmwareMode::kBios};
+    BootOsArchitecture os_architecture{BootOsArchitecture::kX64};
+    std::string os_build;
+    BootSecurityState secure_boot_state{BootSecurityState::kUnknown};
+    BootHardwareState tpm_state{BootHardwareState::kUnknown};
+    BootSecurityState bitlocker_state{BootSecurityState::kUnknown};
+    std::uint32_t logical_sector_size{0};
+    std::uint8_t layout_fingerprint_algorithm{kBootLayoutFingerprintAlgorithmSha256V1};
+    std::array<std::byte, kBootLayoutFingerprintBytes> layout_fingerprint{};
+    std::uint16_t probe_protocol_version{kBootProbeProtocolVersion};
+    std::string aegra_service_version;
+};
+
 struct ProviderExtension final {
     std::string key;
     std::vector<std::byte> payload;
@@ -138,9 +187,19 @@ struct Manifest final {
     std::vector<Volume> volumes;
     /// Present when content_kind=file_set; empty/default invalid for file_set validation.
     FileSetBaseline file_set_baseline;
+    /// Present only when a volume_set contains a complete supported Windows system disk.
+    std::optional<BootProfile> boot_profile;
     std::vector<ProviderExtension> extensions;
 };
 
 [[nodiscard]] base::Result<void> validate_manifest(const Manifest& manifest);
+
+/// Stable binary preimage for BootProfile.layout_fingerprint (SHA-256 algorithm id 1).
+[[nodiscard]] base::Result<std::vector<std::byte>>
+encode_boot_disk_layout_fingerprint_preimage(const Disk& disk);
+
+/// Identity/layout compatibility required between adjacent incremental volume_set layers.
+[[nodiscard]] bool compatible_boot_profiles(const std::optional<BootProfile>& left,
+                                            const std::optional<BootProfile>& right) noexcept;
 
 } // namespace aegra::format

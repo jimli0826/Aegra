@@ -63,6 +63,13 @@ Archive、Catalog 和 IPC 只表达 selection fingerprint、`FileChangeDetection
 `WorkerResponse` / `WorkerCommand` / `WorkerEvent` 语义不变；具体 framing 见
 [ADR-0008](../adr/0008-worker-session-named-pipe-protocol.md)。
 
+`boot_check.h` 定义 vendor-neutral `BootCheckHypervisor`（VirtualBox=1、Hyper-V=2）与历史
+`kBootCheckProbeProtocolVersion`（Manifest V7 Boot Profile 字段仍写该值；COM1 Guest Probe 判据
+已于 2026-09-03 移除，READY 标识常量随之删除，见 [ADR-0028](../adr/0028-boot-check-guest-probe-protocol.md)）。
+`BootCheckJobRequest` schema 2 必须携带用户选择的 hypervisor；Host 不允许自动改选 provider（ADR-0029）。
+`JobOperation` 含 `kBootCheck=5`：Service 侧为任务日志记录的 BootCheck 运行，只出现在控制面 Job 与
+`ListJobs`/`JobSummary`，`validate_job_request` 拒绝它作为 Worker 请求。
+
 `ServiceRequest` / `ServiceResponse` / `ServiceEvent` schema **4**（API 4）定义本地 Desktop 控制面契约。
 新增 query kind 13–15（浏览文件源、列出 RP 条目、PrepareFileRestore）与 command kind 48
 （StartFileRestore）。`UpsertScheduleCommand` 使用 tagged `ProtectionSpecInput`（`volume_source_ids` 与

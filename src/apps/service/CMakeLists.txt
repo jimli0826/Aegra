@@ -28,7 +28,8 @@ add_library(aegra_app_service STATIC
     src/network_share_access.cpp
     src/pe_restore_job_service.cpp
     src/pe_secret_sealer.cpp
-    src/post_backup_verifier.cpp
+    src/boot_check_supervisor.cpp
+    src/post_backup_coordinator.cpp
     src/recovery_point_layout_service.cpp
     src/schedule_engine.cpp
     src/schedule_next_run.cpp
@@ -97,6 +98,7 @@ target_link_libraries(
     PRIVATE Aegra::AppService Aegra::AdapterStorageLocal Aegra::AdapterWindowsIpc
             Aegra::AdapterSqlite Aegra::AdapterWindowsDisk Aegra::AdapterWindowsFilesystem
             Aegra::AdapterWindowsPe Aegra::AdapterWindowsProcess Aegra::AdapterWindowsSystem
+            Aegra::AdapterVirtualBox Aegra::AdapterHyperV
             Aegra::ThirdPartySpdlog Shell32
 )
 set_target_properties(aegra_service PROPERTIES OUTPUT_NAME "AegraService")

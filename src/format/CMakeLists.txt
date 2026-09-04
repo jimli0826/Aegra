@@ -1,6 +1,7 @@
 find_package(nlohmann_json CONFIG REQUIRED)
 
 add_library(aegra_format STATIC
+    src/boot_profile.cpp
     src/manifest_codec.cpp
     src/manifest_validation.cpp
     src/personal_archive_codec.cpp

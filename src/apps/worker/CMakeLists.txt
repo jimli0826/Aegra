@@ -1,5 +1,16 @@
 find_package(nlohmann_json CONFIG REQUIRED)
 
+# Per-task file logger shared by AegraWorker and AegraBootCheck hosts.
+add_library(aegra_app_worker_tasklog STATIC src/worker_task_log.cpp)
+add_library(Aegra::AppWorkerTaskLog ALIAS aegra_app_worker_tasklog)
+target_include_directories(
+    aegra_app_worker_tasklog
+    PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+)
+target_compile_definitions(aegra_app_worker_tasklog PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_link_libraries(aegra_app_worker_tasklog PUBLIC Aegra::Base)
+aegra_configure_target(aegra_app_worker_tasklog)
+
 add_library(aegra_app_worker_personal STATIC
     src/personal_archive_restore_task.cpp
     src/personal_archive_restore_task_backend.cpp
@@ -12,10 +23,10 @@ add_library(aegra_app_worker_personal STATIC
     src/worker_protocol.cpp
     src/worker_session.cpp
     src/worker_session_protocol.cpp
-    src/worker_task_log.cpp
     src/windows_file_set_backup.cpp
     src/windows_file_set_backup_task.cpp
     src/windows_personal_backup.cpp
+    src/windows_personal_boot_profile.cpp
     src/windows_personal_backup_runtime.cpp
     src/windows_personal_backup_task.cpp
     src/windows_personal_backup_task_backend.cpp
@@ -31,7 +42,7 @@ target_include_directories(
 target_compile_definitions(aegra_app_worker_personal PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 target_link_libraries(
     aegra_app_worker_personal
-    PUBLIC Aegra::Base Aegra::Pipeline Aegra::Ports
+    PUBLIC Aegra::AppWorkerTaskLog Aegra::Base Aegra::Pipeline Aegra::Ports
     PRIVATE
         Aegra::AdapterCryptoSodium
         Aegra::AdapterPersonalArchive

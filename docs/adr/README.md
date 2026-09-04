@@ -53,6 +53,15 @@ NTFS 小目标卷恢复的模块、Ports、`$LogFile`/Dirty、Boot 提交与 CHK
 WinPE 一次性启动（BCD bootsequence）与跨重启 Secret Envelope（Proposed）见
 [ADR-0026](0026-winpe-offline-restore-and-secret-envelope.md)。
 
+BootCheck 所需的 Manifest schema 2、认证 Boot Profile、Windows 探测边界与增量链兼容规则见
+[ADR-0027](0027-boot-profile-manifest-schema.md)。
+
+BootCheck 经 COM1 发送固定 READY 标识的单向 Guest Probe Protocol V1 见
+[ADR-0028](0028-boot-check-guest-probe-protocol.md)（已废止：2026-09-03 起启动判据为差分盘增长）。
+
+BootCheck 的用户选择、安装状态 capability、durable plan 快照及禁止 provider 自动回退见
+[ADR-0029](0029-user-selected-boot-check-hypervisor.md)。
+
 ## 状态
 
 - `Proposed`：讨论中，不构成实现依据。

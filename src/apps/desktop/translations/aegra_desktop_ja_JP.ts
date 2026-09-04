@@ -2962,5 +2962,33 @@ for critical volumes now</source>
         <source>Enable verify</source>
         <translation>検証を有効にする</translation>
     </message>
+    <message id="aegra.backup.post.boot_check">
+        <source>Enable boot check</source>
+        <translation>起動チェックを有効にする</translation>
+    </message>
+    <message id="aegra.backup.post.hypervisor">
+        <source>Hypervisor</source>
+        <translation>ハイパーバイザー</translation>
+    </message>
+    <message id="aegra.backup.post.installed">
+        <source>Installed</source>
+        <translation>インストール済み</translation>
+    </message>
+    <message id="aegra.backup.post.not_installed">
+        <source>Not installed</source>
+        <translation>未インストール</translation>
+    </message>
+    <message id="aegra.backup.post.hypervisor_none">
+        <source>No supported hypervisor is installed</source>
+        <translation>対応するハイパーバイザーがインストールされていません</translation>
+    </message>
+    <message id="aegra.backup.post.hypervisor_unavailable">
+        <source>Select an installed hypervisor for boot check</source>
+        <translation>起動チェックにはインストール済みのハイパーバイザーを選択してください</translation>
+    </message>
+    <message id="aegra.job.operation.bootcheck">
+        <source>Boot Check</source>
+        <translation>起動チェック</translation>
+    </message>
 </context>
 </TS>

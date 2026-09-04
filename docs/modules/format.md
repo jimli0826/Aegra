@@ -8,7 +8,9 @@
 
 ### `manifest`
 
-定义可扩展的 `Manifest`、Disk、Partition、Volume、Extent、SystemInfo、BackupJob 和 provider extension envelope。物理机、虚拟机、个人 Archive 与企业 Repository 共享逻辑模型；虚拟化专有字段进入命名 extension，不进入个人格式的固定二进制头。
+定义可扩展的 `Manifest`、Disk、Partition、Volume、Extent、SystemInfo、BackupJob、BootProfile 和
+provider extension envelope。BootProfile 是认证的通用恢复事实，不包含 VirtualBox 对象或厂商字段；
+虚拟化专有字段进入命名 extension，不进入个人格式的固定二进制头。
 
 ### `personal_archive`
 
@@ -53,7 +55,8 @@ F2（Personal Archive V7 + Catalog V2）已实现：
   禁止跨 chunk/part/source/archive；Footer 记录 DEDUP block/bytes；
 - Footer 为 512 字节完整 record（prefix + body），含 file/index 统计与 index root 定位；
 - File Index page header codec 与 leaf/internal CBOR body codec（`file_index.h`）；
-- Manifest CBOR schema 1，根字段 `content_kind`；file_set 禁止 disks/volumes；
+- Manifest CBOR schema 2，根字段 `content_kind` 与 `boot_profile`；file_set 禁止 disks/volumes 且
+  `boot_profile=null`；完整系统盘 volume_set 保存 ADR-0027 的认证启动事实与布局 SHA-256；
 - AEAD HKDF info 升级为 `MYBACKUP-V7-*`；
 - Catalog Entry schema 2：`content_kind`、文件统计、volume dedup 统计与 `format_version=7`。
 

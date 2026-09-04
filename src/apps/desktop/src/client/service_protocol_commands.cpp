@@ -258,7 +258,9 @@ QByteArray encode_upsert_schedule_request(const QString& request_id, const QStri
                                           const bool encryption_enabled,
                                           const QString& archive_password,
                                           const quint32 day_of_month_mask,
-                                          const bool verify_after_backup) {
+                                          const bool verify_after_backup,
+                                          const bool boot_check_after_backup,
+                                          const int boot_check_hypervisor) {
     QJsonArray minutes_json;
     for (const auto minute : local_minutes_of_day) {
         minutes_json.push_back(minute);
@@ -288,6 +290,10 @@ QByteArray encode_upsert_schedule_request(const QString& request_id, const QStri
         {QStringLiteral("split_size_bytes"), static_cast<qint64>(split_size_bytes)},
         {QStringLiteral("compression_level"), compression_level},
         {QStringLiteral("verify_after_backup"), verify_after_backup},
+        {QStringLiteral("boot_check_after_backup"), boot_check_after_backup},
+        {QStringLiteral("boot_check_hypervisor"),
+         boot_check_hypervisor == 0 ? QJsonValue(QJsonValue::Null)
+                                    : QJsonValue(boot_check_hypervisor)},
         {QStringLiteral("encryption_enabled"), encryption_enabled},
         {QStringLiteral("archive_password"), archive_password}};
     return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
@@ -694,6 +700,7 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
                                  "backup_type", "trigger", "next_run_utc_ms",
                                  "exclude_page_and_hibernation_files", "deduplication_enabled",
                                  "split_size_bytes", "compression_level", "verify_after_backup",
+                                 "boot_check_after_backup", "boot_check_hypervisor",
                                  "encryption_enabled"})) {
         return false;
     }
@@ -740,12 +747,30 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
                           compression_level) ||
         (compression_level != 1 && compression_level != 3 && compression_level != 9) ||
         !object.value(QStringLiteral("verify_after_backup")).isBool() ||
+        !object.value(QStringLiteral("boot_check_after_backup")).isBool() ||
+        !(object.value(QStringLiteral("boot_check_hypervisor")).isNull() ||
+          object.value(QStringLiteral("boot_check_hypervisor")).isDouble()) ||
         !object.value(QStringLiteral("encryption_enabled")).isBool() ||
         (content_kind == 2 &&
          (object.value(QStringLiteral("deduplication_enabled")).toBool() ||
           split_size_bytes != 0)) ||
         (content_kind == 1 && split_size_bytes != 0 &&
          split_size_bytes < 128LL * 1024LL * 1024LL)) {
+        return false;
+    }
+    qint64 boot_check_hypervisor = 0;
+    const auto hypervisor_value = object.value(QStringLiteral("boot_check_hypervisor"));
+    if (!hypervisor_value.isNull() &&
+        !integer_in_range(hypervisor_value, 1, 2, boot_check_hypervisor)) {
+        return false;
+    }
+    const bool boot_check_enabled =
+        object.value(QStringLiteral("boot_check_after_backup")).toBool();
+    if (boot_check_enabled != (boot_check_hypervisor != 0)) {
+        return false;
+    }
+    // Boot check is independent of verify; only file_set forbids it.
+    if (content_kind == 2 && boot_check_enabled) {
         return false;
     }
     QVariantList selection_summaries;
@@ -875,6 +900,9 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
               {QStringLiteral("compressionLevel"), compression_level},
               {QStringLiteral("verifyAfterBackup"),
                object.value(QStringLiteral("verify_after_backup")).toBool()},
+              {QStringLiteral("bootCheckAfterBackup"),
+               object.value(QStringLiteral("boot_check_after_backup")).toBool()},
+              {QStringLiteral("bootCheckHypervisor"), boot_check_hypervisor},
               {QStringLiteral("encryptionEnabled"),
                object.value(QStringLiteral("encryption_enabled")).toBool()},
               {QStringLiteral("lastRun"), QString{}},

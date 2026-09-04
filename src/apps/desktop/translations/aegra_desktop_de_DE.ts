@@ -2962,5 +2962,33 @@ Offsite-Coldbackup für kritische Volumes</translation>
         <source>Enable verify</source>
         <translation>Überprüfung aktivieren</translation>
     </message>
+    <message id="aegra.backup.post.boot_check">
+        <source>Enable boot check</source>
+        <translation>Startprüfung aktivieren</translation>
+    </message>
+    <message id="aegra.backup.post.hypervisor">
+        <source>Hypervisor</source>
+        <translation>Hypervisor</translation>
+    </message>
+    <message id="aegra.backup.post.installed">
+        <source>Installed</source>
+        <translation>Installiert</translation>
+    </message>
+    <message id="aegra.backup.post.not_installed">
+        <source>Not installed</source>
+        <translation>Nicht installiert</translation>
+    </message>
+    <message id="aegra.backup.post.hypervisor_none">
+        <source>No supported hypervisor is installed</source>
+        <translation>Kein unterstützter Hypervisor ist installiert</translation>
+    </message>
+    <message id="aegra.backup.post.hypervisor_unavailable">
+        <source>Select an installed hypervisor for boot check</source>
+        <translation>Wählen Sie einen installierten Hypervisor für die Startprüfung</translation>
+    </message>
+    <message id="aegra.job.operation.bootcheck">
+        <source>Boot Check</source>
+        <translation>Startprüfung</translation>
+    </message>
 </context>
 </TS>

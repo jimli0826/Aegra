@@ -111,6 +111,8 @@ void apply_free_overlay(ChainRecord& record, const ports::ChunkDescriptor& overl
             error(base::ErrorCode::kConflict, "archive chain identity is invalid"));
     }
     if (current_identity.block_size != previous_identity.block_size ||
+        !format::compatible_boot_profiles(previous.manifest().boot_profile,
+                                          current.manifest().boot_profile) ||
         !same_volume_geometry(previous.manifest(), current.manifest())) {
         return base::Result<void>::failure(
             error(base::ErrorCode::kConflict, "archive chain source geometry changed"));

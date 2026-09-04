@@ -1,0 +1,88 @@
+#pragma once
+
+#include "aegra/base/cancellation.h"
+#include "aegra/base/result.h"
+#include "aegra/ports/clock.h"
+#include "aegra/ports/credential.h"
+#include "aegra/ports/process_launcher.h"
+#include "aegra/ports/random.h"
+
+#include <cstdint>
+#include <filesystem>
+#include <string>
+
+namespace aegra::apps::boot_check {
+
+/// Exit codes mirror the AegraWorker table so process supervision can share
+/// the same classification.
+enum class BootCheckExitCode : std::int32_t {
+    kSucceeded = 0,
+    kTaskFailed = 10,
+    kCancelled = 11,
+    kRequestRejected = 20,
+    kHostFailure = 21,
+};
+
+/// Trusted host configuration. Nothing in this struct comes from the job
+/// message; the composition root resolves it before any request is read.
+struct BootCheckHostOptions final {
+    /// Trusted absolute VBoxManage.exe path (empty = provider unavailable).
+    std::string vbox_manage_path;
+    /// Isolated VBOX_USER_HOME for the provider capability probe.
+    std::string capability_user_home;
+    /// Trusted absolute powershell.exe (System32); empty = Hyper-V unavailable.
+    std::string powershell_path;
+    std::uint32_t cpu_count{8};
+    std::uint32_t memory_mib{4096};
+    std::uint64_t overlay_limit_bytes{8ULL * 1024ULL * 1024ULL * 1024ULL};
+    /// Overlay-growth FALLBACK threshold, used only when the hypervisor guest
+    /// heartbeat is unavailable (Hyper-V Integration Services disabled, or
+    /// VirtualBox without Guest Additions). Confirmation additionally requires a
+    /// minimum elapsed time and sustained growth, so this alone does not pass an
+    /// early-boot spinner. The primary signal is the guest heartbeat.
+    std::uint64_t boot_confirmed_overlay_bytes{60ULL * 1024ULL * 1024ULL};
+    std::uint64_t boot_timeout_ms{10ULL * 60ULL * 1000ULL};
+    /// Upper bound for a single archive chunk during chain random access.
+    std::uint64_t maximum_chunk_bytes{256ULL * 1024ULL * 1024ULL};
+    /// Decompressed-chunk LRU entries for guest random reads (memory upper
+    /// bound = entries * chunk logical size; 16 * 64 MiB = 1 GiB by default).
+    std::size_t chunk_cache_entries{16};
+};
+
+struct BootCheckHostContext final {
+    ports::ICredentialResolver& credentials;
+    ports::IRandomSource& random;
+    const ports::IClock& clock;
+    ports::IProcessLauncher& launcher;
+};
+
+struct EncodedBootCheckResult final {
+    BootCheckExitCode exit_code{BootCheckExitCode::kHostFailure};
+    std::string response_json;
+};
+
+/// Executes one encoded BootCheck job. The response reuses the WorkerResponse
+/// wire shape (schema 1) so the Service supervisor can share its decoder.
+[[nodiscard]] base::Result<EncodedBootCheckResult>
+run_boot_check_host_request(std::string_view encoded_request, const BootCheckHostOptions& options,
+                            const BootCheckHostContext& context,
+                            const base::CancellationToken& cancellation);
+
+/// Startup scavenger (--scavenge): powers off and unregisters every orphaned
+/// Aegra-BootCheck VM found in the isolated per-job registries under
+/// <data_dir>/bootcheck/jobs, deletes those job directories, and clears stale
+/// staged requests. Best-effort; kTaskFailed only when a directory survived.
+[[nodiscard]] BootCheckExitCode
+run_boot_check_scavenge(const BootCheckHostOptions& options, const BootCheckHostContext& context,
+                        const std::filesystem::path& data_directory);
+
+/// Diagnostic mode (--present-only): presents the chain as a read-only VMDK
+/// and holds the mount for hold_minutes so an external hypervisor can open it,
+/// then cleans up. Never creates a VM; same response shape and exit codes.
+[[nodiscard]] base::Result<EncodedBootCheckResult>
+run_boot_check_present_request(std::string_view encoded_request,
+                               const BootCheckHostOptions& options,
+                               const BootCheckHostContext& context, std::uint32_t hold_minutes,
+                               const base::CancellationToken& cancellation);
+
+} // namespace aegra::apps::boot_check

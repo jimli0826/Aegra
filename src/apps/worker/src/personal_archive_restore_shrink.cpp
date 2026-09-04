@@ -1,6 +1,6 @@
 #include "personal_archive_restore_shrink.h"
 
-#include "worker_task_log.h"
+#include "aegra/apps/worker/worker_task_log.h"
 
 #include "aegra/adapters/crypto_sodium/content_hash.h"
 #include "aegra/adapters/personal_archive/personal_archive.h"

@@ -1,7 +1,7 @@
 #include "aegra/apps/worker/personal_archive_restore_task.h"
 
 #include "personal_archive_restore_task_backend.h"
-#include "worker_task_log.h"
+#include "aegra/apps/worker/worker_task_log.h"
 
 #include "aegra/base/error.h"
 #include "aegra/contracts/progress.h"

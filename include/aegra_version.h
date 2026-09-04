@@ -6,7 +6,7 @@
 #define AEGRI_VERSION_MAJOR 0
 #define AEGRI_VERSION_MINOR 9
 #define AEGRI_VERSION_PATCH 0
-#define AEGRI_VERSION_BUILD 4
+#define AEGRI_VERSION_BUILD 9
 
 #define AEGRI_COMPANY_NAME     "Aegra"
 #define AEGRI_PRODUCT_NAME     "Aegra Image"

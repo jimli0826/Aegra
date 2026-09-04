@@ -5,20 +5,20 @@
 #include <winioctl.h>
 
 #include <cstring>
+#include <limits>
 #include <span>
 
 namespace aegra::adapters::dokan::detail {
 namespace {
 
 HANDLE open_or_create_overlay(const std::wstring& path) {
-    HANDLE h = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ,
-                           nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    HANDLE h = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                           OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE) {
         return INVALID_HANDLE_VALUE;
     }
     DWORD bytes_returned = 0;
-    DeviceIoControl(h, FSCTL_SET_SPARSE, nullptr, 0, nullptr, 0, &bytes_returned,
-                    nullptr);
+    DeviceIoControl(h, FSCTL_SET_SPARSE, nullptr, 0, nullptr, 0, &bytes_returned, nullptr);
     return h;
 }
 
@@ -36,6 +36,9 @@ CowBackingStore::~CowBackingStore() {
 bool CowBackingStore::open_reader(ports::IRandomAccessReader* reader,
                                   const std::wstring& overlay_base, bool read_only) {
     if (reader == nullptr) {
+        return false;
+    }
+    if (reader->size_bytes() > static_cast<std::uint64_t>((std::numeric_limits<LONGLONG>::max)())) {
         return false;
     }
 
@@ -82,9 +85,9 @@ bool CowBackingStore::read_original_at(void* buffer, DWORD len, LONGLONG offset)
 
         auto span = std::span<std::byte>(reinterpret_cast<std::byte*>(out), want);
         auto result = reader_->read_at(src, span, base::CancellationToken{});
-        if (!result || result.value() == 0) {
-            std::memset(out, 0, remaining);
-            break;
+        if (!result || result.value() == 0 || result.value() > want) {
+            SetLastError(ERROR_READ_FAULT);
+            return false;
         }
 
         const auto got = static_cast<std::uint32_t>(result.value());
@@ -154,8 +157,7 @@ void CowBackingStore::flush_bitmap_locked() {
     }
     DWORD written = 0;
     if (!bitmap_.empty()) {
-        WriteFile(h, bitmap_.data(), static_cast<DWORD>(bitmap_.size()), &written,
-                  nullptr);
+        WriteFile(h, bitmap_.data(), static_cast<DWORD>(bitmap_.size()), &written, nullptr);
     }
     CloseHandle(h);
 }
@@ -176,8 +178,8 @@ bool CowBackingStore::raw_read_at(HANDLE h, void* buffer, DWORD len, LONGLONG of
     return true;
 }
 
-bool CowBackingStore::raw_write_at(HANDLE h, const void* buffer, DWORD len,
-                                   LONGLONG offset, LPDWORD written) {
+bool CowBackingStore::raw_write_at(HANDLE h, const void* buffer, DWORD len, LONGLONG offset,
+                                   LPDWORD written) {
     LARGE_INTEGER li{};
     li.QuadPart = offset;
     if (!SetFilePointerEx(h, li, nullptr, FILE_BEGIN)) {
@@ -195,8 +197,7 @@ NTSTATUS CowBackingStore::read(void* buffer, DWORD buffer_len, LPDWORD bytes_rea
     DWORD remaining = buffer_len;
 
     while (remaining > 0) {
-        const std::uint64_t block_index =
-            static_cast<std::uint64_t>(cur) / kBlockSize;
+        const std::uint64_t block_index = static_cast<std::uint64_t>(cur) / kBlockSize;
         const std::uint64_t block_start = block_index * kBlockSize;
         const DWORD in_block_off = static_cast<DWORD>(cur - block_start);
         DWORD chunk = kBlockSize - in_block_off;
@@ -204,10 +205,9 @@ NTSTATUS CowBackingStore::read(void* buffer, DWORD buffer_len, LPDWORD bytes_rea
             chunk = remaining;
         }
 
-        const bool ok =
-            (block_present(block_index) && overlay_ != INVALID_HANDLE_VALUE)
-                ? raw_read_at(overlay_, out, chunk, cur)
-                : read_original_at(out, chunk, cur);
+        const bool ok = (block_present(block_index) && overlay_ != INVALID_HANDLE_VALUE)
+                            ? raw_read_at(overlay_, out, chunk, cur)
+                            : read_original_at(out, chunk, cur);
         if (!ok) {
             return DokanNtStatusFromWin32(GetLastError());
         }
@@ -223,8 +223,8 @@ NTSTATUS CowBackingStore::read(void* buffer, DWORD buffer_len, LPDWORD bytes_rea
     return STATUS_SUCCESS;
 }
 
-NTSTATUS CowBackingStore::write(const void* buffer, DWORD bytes_to_write,
-                                LPDWORD bytes_written, LONGLONG offset) {
+NTSTATUS CowBackingStore::write(const void* buffer, DWORD bytes_to_write, LPDWORD bytes_written,
+                                LONGLONG offset) {
     if (read_only_ || overlay_ == INVALID_HANDLE_VALUE) {
         return STATUS_MEDIA_WRITE_PROTECTED;
     }
@@ -237,8 +237,7 @@ NTSTATUS CowBackingStore::write(const void* buffer, DWORD bytes_to_write,
     static thread_local std::uint8_t block_buf[kBlockSize];
 
     while (remaining > 0) {
-        const std::uint64_t block_index =
-            static_cast<std::uint64_t>(cur) / kBlockSize;
+        const std::uint64_t block_index = static_cast<std::uint64_t>(cur) / kBlockSize;
         const std::uint64_t block_start = block_index * kBlockSize;
         const DWORD in_block_off = static_cast<DWORD>(cur - block_start);
         DWORD chunk = kBlockSize - in_block_off;
@@ -248,8 +247,7 @@ NTSTATUS CowBackingStore::write(const void* buffer, DWORD bytes_to_write,
 
         DWORD written = 0;
         if (chunk == kBlockSize) {
-            if (!raw_write_at(overlay_, in, chunk, static_cast<LONGLONG>(block_start),
-                              &written)) {
+            if (!raw_write_at(overlay_, in, chunk, static_cast<LONGLONG>(block_start), &written)) {
                 return DokanNtStatusFromWin32(GetLastError());
             }
         } else {
@@ -257,14 +255,13 @@ NTSTATUS CowBackingStore::write(const void* buffer, DWORD bytes_to_write,
                 block_present(block_index)
                     ? raw_read_at(overlay_, block_buf, kBlockSize,
                                   static_cast<LONGLONG>(block_start))
-                    : read_original_at(block_buf, kBlockSize,
-                                       static_cast<LONGLONG>(block_start));
+                    : read_original_at(block_buf, kBlockSize, static_cast<LONGLONG>(block_start));
             if (!seeded) {
                 return DokanNtStatusFromWin32(GetLastError());
             }
             std::memcpy(block_buf + in_block_off, in, chunk);
-            if (!raw_write_at(overlay_, block_buf, kBlockSize,
-                              static_cast<LONGLONG>(block_start), &written)) {
+            if (!raw_write_at(overlay_, block_buf, kBlockSize, static_cast<LONGLONG>(block_start),
+                              &written)) {
                 return DokanNtStatusFromWin32(GetLastError());
             }
         }
@@ -316,8 +313,7 @@ NTSTATUS CowBackingStore::resize(LONGLONG raw_eof) {
     if (overlay_ != INVALID_HANDLE_VALUE) {
         LARGE_INTEGER li{};
         li.QuadPart = raw_eof;
-        if (!SetFilePointerEx(overlay_, li, nullptr, FILE_BEGIN) ||
-            !SetEndOfFile(overlay_)) {
+        if (!SetFilePointerEx(overlay_, li, nullptr, FILE_BEGIN) || !SetEndOfFile(overlay_)) {
             return DokanNtStatusFromWin32(GetLastError());
         }
     }
@@ -332,8 +328,7 @@ void CowBackingStore::set_overlay_attributes(DWORD attributes) {
     }
 }
 
-void CowBackingStore::set_overlay_times(const FILETIME* creation,
-                                        const FILETIME* last_access,
+void CowBackingStore::set_overlay_times(const FILETIME* creation, const FILETIME* last_access,
                                         const FILETIME* last_write) {
     std::lock_guard lock(mutex_);
     if (overlay_ != INVALID_HANDLE_VALUE) {

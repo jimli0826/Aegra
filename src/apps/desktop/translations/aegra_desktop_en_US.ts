@@ -2962,5 +2962,33 @@ for critical volumes now</translation>
         <source>Enable verify</source>
         <translation>Enable verify</translation>
     </message>
+    <message id="aegra.backup.post.boot_check">
+        <source>Enable boot check</source>
+        <translation>Enable boot check</translation>
+    </message>
+    <message id="aegra.backup.post.hypervisor">
+        <source>Hypervisor</source>
+        <translation>Hypervisor</translation>
+    </message>
+    <message id="aegra.backup.post.installed">
+        <source>Installed</source>
+        <translation>Installed</translation>
+    </message>
+    <message id="aegra.backup.post.not_installed">
+        <source>Not installed</source>
+        <translation>Not installed</translation>
+    </message>
+    <message id="aegra.backup.post.hypervisor_none">
+        <source>No supported hypervisor is installed</source>
+        <translation>No supported hypervisor is installed</translation>
+    </message>
+    <message id="aegra.backup.post.hypervisor_unavailable">
+        <source>Select an installed hypervisor for boot check</source>
+        <translation>Select an installed hypervisor for boot check</translation>
+    </message>
+    <message id="aegra.job.operation.bootcheck">
+        <source>Boot Check</source>
+        <translation>Boot Check</translation>
+    </message>
 </context>
 </TS>

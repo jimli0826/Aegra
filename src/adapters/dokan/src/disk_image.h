@@ -1,4 +1,4 @@
-// Abstract base for a synthetic virtual disk image (VHDX).
+// Abstract base for a synthetic virtual disk image file (VHDX or VMDK extent).
 //
 // Lock ordering: layout SRWLOCK is always taken before the backing store lock.
 #pragma once
@@ -13,9 +13,11 @@ namespace aegra::adapters::dokan::detail {
 namespace disk_names {
 inline constexpr const wchar_t* kVhdx = L"disk.vhdx";
 inline constexpr const wchar_t* kVhdxPath = L"\\disk.vhdx";
+inline constexpr const wchar_t* kVmdkDescriptor = L"base.vmdk";
+inline constexpr const wchar_t* kVmdkFlatExtent = L"base-flat.vmdk";
 } // namespace disk_names
 
-enum class DiskFormat { kVhdx };
+enum class DiskFormat { kVhdx, kVmdk };
 
 class DiskImage {
   public:
@@ -29,8 +31,8 @@ class DiskImage {
 
     [[nodiscard]] NTSTATUS read(std::uint64_t offset, void* buffer, DWORD buffer_len,
                                 LPDWORD bytes_read);
-    [[nodiscard]] NTSTATUS write(std::uint64_t offset, const void* buffer,
-                                 DWORD bytes_to_write, LPDWORD bytes_written);
+    [[nodiscard]] NTSTATUS write(std::uint64_t offset, const void* buffer, DWORD bytes_to_write,
+                                 LPDWORD bytes_written);
     [[nodiscard]] NTSTATUS set_end_of_file(std::uint64_t virtual_eof);
 
     [[nodiscard]] std::uint64_t file_size() const;
@@ -41,13 +43,10 @@ class DiskImage {
 
   protected:
     virtual void rebuild_locked() = 0;
-    [[nodiscard]] virtual NTSTATUS read_locked(std::uint64_t offset, void* buffer,
-                                               DWORD buffer_len,
+    [[nodiscard]] virtual NTSTATUS read_locked(std::uint64_t offset, void* buffer, DWORD buffer_len,
                                                LPDWORD bytes_read) = 0;
-    [[nodiscard]] virtual NTSTATUS write_locked(std::uint64_t offset,
-                                                const void* buffer,
-                                                DWORD bytes_to_write,
-                                                LPDWORD bytes_written) = 0;
+    [[nodiscard]] virtual NTSTATUS write_locked(std::uint64_t offset, const void* buffer,
+                                                DWORD bytes_to_write, LPDWORD bytes_written) = 0;
     [[nodiscard]] virtual std::uint64_t file_size_locked() const = 0;
     [[nodiscard]] virtual std::uint64_t data_offset_locked() const = 0;
     [[nodiscard]] virtual std::uint64_t unit_size_locked() const = 0;

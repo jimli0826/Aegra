@@ -762,6 +762,7 @@ Item {
                                 delegate: ColumnLayout {
                                     required property int index
                                     required property bool isActive
+                                    required property int operationValue
                                     required property string operationText
                                     required property string sourceName
                                     required property string messageText
@@ -788,7 +789,8 @@ Item {
                                             color: Theme.colorHover
                                             Text {
                                                 anchors.centerIn: parent
-                                                text: operationText.toLowerCase().indexOf("backup") >= 0 ? "💾" : "🔍"
+                                                text: operationValue === 1 ? "💾"
+                                                      : operationValue === 5 ? "🖥️" : "🔍"
                                                 font.pixelSize: 15
                                             }
                                         }

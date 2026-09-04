@@ -10,13 +10,16 @@
 > **[ADR-0019](../adr/0019-file-set-secondary-indexes-and-lazy-reader.md)：** file_set 增加 Entry ID / Stream /
 > Chunk 二级索引；internal child 含物理 offset；普通 open 为 O(1) 级（不扫全树）；全量校验仅
 > `verify_recoverability`。产品未发布，不兼容仅含 Namespace 树的开发期 Archive。
+>
+> **[ADR-0027](../adr/0027-boot-profile-manifest-schema.md)：** current V7 Manifest schema 为 2，根固定
+> 增加 `boot_profile`；schema 1 开发 Archive 不兼容、不迁移。
 
 | 属性 | 内容 |
 | --- | --- |
 | 状态 | 权威格式规范 |
 | 格式版本 | 7 |
-| CBOR Schema | 1（volume_set 与 file_set 共用 schema 编号，根 Map 由 `content_kind` 分支） |
-| 决策依据 | [ADR-0016](../adr/0016-file-set-backup-and-restore-boundary.md) |
+| CBOR Schema | 2（volume_set 与 file_set 共用 schema 编号，根 Map 由 `content_kind` 分支） |
+| 决策依据 | [ADR-0016](../adr/0016-file-set-backup-and-restore-boundary.md)、[ADR-0027](../adr/0027-boot-profile-manifest-schema.md) |
 | 取代 | 开发期 V6 规范；生产只实现 V7，拒绝 `format_version != 7` |
 
 > 本规范是新项目个人版 `.bkf` 的唯一格式依据。产品尚未发布，不读取 V6 或其它试验格式，也不实现迁移、
@@ -91,7 +94,7 @@ struct BackupHeader {
 
     uint64_t cbor_offset;           // offset of CborMetadataEnvelopeHeader
     uint64_t cbor_size;             // envelope total bytes; continuation parts = 0
-    uint32_t cbor_schema_version;   // 1
+    uint32_t cbor_schema_version;   // 2
 
     uint64_t first_record_offset;   // first ArchiveRecord after metadata (or after header on cont. parts)
     uint32_t default_chunk_size;    // writer target; default 512 MiB
@@ -841,26 +844,66 @@ AEAD AAD：
 
 ```text
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "content_kind": 1,
   "disks": [],
   "volumes": [],
   "system": {...},
   "backup_job": {...},
+  "boot_profile": null | {...},
   "extensions": {}
 }
 ```
 
-`disks`/`volumes`/`system`/`backup_job` 字段集与 V6 文档一致；V7 仅要求根上显式 `content_kind=1`。
+`disks`/`volumes`/`system`/`backup_job` 字段集延续当前 V7 模型；根必须显式包含
+`content_kind=1` 和 `boot_profile`。数据盘、不完整系统盘或不支持的启动布局写 `null`，不得伪造可启动。
 增量按 Sidecar 的 DATA/ZERO/FREE 精确状态比较：仅状态相同（DATA 还要求 SHA-256 相同）才省略；
 DATA→FREE、ZERO→FREE、FREE→ZERO 都必须在当前层显式写对应 BlockEntry。链 Reader 合并各层 FREE
 区间并向恢复管线暴露最终跳写范围。多 Volume Snapshot Set 语义保持不变。
+
+#### 7.1.1 Boot Profile Map
+
+非 null 时必须包含且只包含：
+
+```text
+{
+  "profile_version": 1,
+  "system_disk_number": uint32,
+  "windows_volume_index": uint32,
+  "required_boot_partition_numbers": [uint32, ...], // 严格递增、无重复
+  "firmware_mode": 1|2,                 // 1=bios, 2=uefi
+  "os_architecture": 1,                 // 1=x64
+  "os_build": text,
+  "secure_boot_state": 0|1|2,           // unknown|disabled|enabled
+  "tpm_state": 0|1|2,                   // unknown|absent|present
+  "bitlocker_state": 0|1|2,             // unknown|disabled|enabled
+  "logical_sector_size": 512,
+  "layout_fingerprint_algorithm": 1,    // SHA-256 V1
+  "layout_fingerprint": bstr,           // exactly 32 bytes, non-zero
+  "probe_protocol_version": 1,            // ADR-0028 Contracts protocol version
+  "aegra_service_version": text
+}
+```
+
+引用规则：系统盘、Windows volume、每个启动分区都必须存在；Windows volume 必须是该盘单 extent；每个
+必需启动分区必须有已备份 Volume extent。UEFI 必须是 GPT 并含 ESP；BIOS 必须是 MBR、活动分区、有效
+`55 AA` signature 和非空 bootstrap code。raw layout 必须完整，初版只接受 512-byte logical sector。
+
+fingerprint preimage 以 ASCII `AEGRA-BOOT-DISK-V1` 开始，后接 little-endian
+`disk_size:u64, bytes_per_sector:u32, total_sectors:u64, partition_style:u8, partition_count:u64`；Partition
+按 number 排序，逐项写 `number:u32, offset:u64, size:u64, style:u8, active:u8, mbr_type:u8`，再写
+`gpt_type_guid` 与 `gpt_name`（各为 `length:u64 + UTF-8 bytes`）；最后依次写五个 raw-layout blob
+（`length:u64 + bytes`）：MBR、GPT primary header、primary entries、backup header、backup entries。
+算法 1 为该 preimage 的 SHA-256。
+
+相邻增量层 Profile 必须同时为 null，或在 system disk、Windows volume、必需分区、firmware、architecture、
+sector、fingerprint algorithm/digest 和 probe protocol 上一致；不一致的父层不能继续作为增量基线。
 
 ### 7.2 file_set 根 Map
 
 ```text
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "content_kind": 2,
   "disks": [],
   "volumes": [],
@@ -876,6 +919,7 @@ DATA→FREE、ZERO→FREE、FREE→ZERO 都必须在当前层显式写对应 Blo
     "selection_fingerprint": bstr, // exactly 32 bytes; non-zero
     "change_detection_method": 1   // 1=mtime_size_v1
   },
+  "boot_profile": null,
   "extensions": {}
 }
 ```
@@ -883,6 +927,7 @@ DATA→FREE、ZERO→FREE、FREE→ZERO 都必须在当前层显式写对应 Blo
 规则：
 
 - Full/Incremental 均必须携带有效 `selection_fingerprint`；
+- `boot_profile` 必须显式为 null；file_set 不具有整盘启动语义；
 - Full/Incremental 均必须携带 `change_detection_method=1`，且 Incremental Header 置
   `CAP_FILE_METADATA_BASELINE`；
 - current V7 file_set metadata 不包含 `journal_checkpoints`；含该字段的开发期 Archive 统一按

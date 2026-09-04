@@ -3,6 +3,7 @@
 #include "aegra/base/error.h"
 #include "aegra/contracts/progress.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <vector>
@@ -20,15 +21,13 @@ base::Result<void> validate_plan(const VerifyPlan& plan) {
 
 base::Result<void> validate_descriptor(const ports::ChunkDescriptor& descriptor,
                                        const std::uint64_t expected_index,
-                                       const std::uint64_t minimum_offset,
-                                       const std::uint64_t logical_size) {
+                                       const std::uint64_t minimum_offset) {
     if (descriptor.chunk_index != expected_index || descriptor.logical_size == 0 ||
         descriptor.stored_size != descriptor.logical_size) {
         return base::Result<void>::failure(
             {base::ErrorCode::kCorruptData, "verify chunk descriptor is invalid"});
     }
-    if (descriptor.logical_offset < minimum_offset || descriptor.logical_offset > logical_size ||
-        descriptor.logical_size > logical_size - descriptor.logical_offset) {
+    if (descriptor.logical_offset < minimum_offset) {
         return base::Result<void>::failure(
             {base::ErrorCode::kCorruptData, "verify chunk range is invalid"});
     }
@@ -72,17 +71,30 @@ base::Result<void> verify_chunk(ports::IRecoveryPointReader& reader,
     return base::Result<void>::success();
 }
 
-base::Result<std::vector<ports::ChunkDescriptor>>
-preflight(ports::IRecoveryPointReader& reader, const std::uint64_t logical_size) {
+// Each source has its own logical address space that restarts at zero, and sources must
+// appear as contiguous runs (matching the archive layer shape). Sparse layers may leave
+// gaps, so chunks are not required to cover the full logical size.
+base::Result<std::vector<ports::ChunkDescriptor>> preflight(ports::IRecoveryPointReader& reader) {
     std::vector<ports::ChunkDescriptor> descriptors;
     descriptors.reserve(static_cast<std::size_t>(reader.chunk_count()));
+    std::vector<std::uint32_t> seen_sources;
     std::uint64_t minimum_offset = 0;
     for (std::uint64_t index = 0; index < reader.chunk_count(); ++index) {
         auto descriptor = reader.describe_chunk(index);
         if (!descriptor) {
             return base::Result<std::vector<ports::ChunkDescriptor>>::failure(descriptor.error());
         }
-        auto valid = validate_descriptor(descriptor.value(), index, minimum_offset, logical_size);
+        if (descriptors.empty() ||
+            descriptors.back().source_index != descriptor.value().source_index) {
+            if (std::find(seen_sources.begin(), seen_sources.end(),
+                          descriptor.value().source_index) != seen_sources.end()) {
+                return base::Result<std::vector<ports::ChunkDescriptor>>::failure(
+                    {base::ErrorCode::kCorruptData, "verify chunk sources are interleaved"});
+            }
+            seen_sources.push_back(descriptor.value().source_index);
+            minimum_offset = 0;
+        }
+        auto valid = validate_descriptor(descriptor.value(), index, minimum_offset);
         auto end = descriptor_end(descriptor.value());
         if (!valid || !end) {
             return base::Result<std::vector<ports::ChunkDescriptor>>::failure(
@@ -120,13 +132,17 @@ VerifyPipeline::run(const VerifyPlan& plan, const base::CancellationToken& cance
         return base::Result<VerifySummary>::failure(valid_plan.error());
     }
     VerifySummary summary{reader_.logical_size_bytes(), 0, 0};
-    auto descriptors = preflight(reader_, summary.logical_bytes);
+    auto descriptors = preflight(reader_);
     if (!descriptors) {
         return base::Result<VerifySummary>::failure(descriptors.error());
     }
     auto total = verify_size(descriptors.value());
     if (!total) {
         return base::Result<VerifySummary>::failure(total.error());
+    }
+    if (total.value() > summary.logical_bytes) {
+        return base::Result<VerifySummary>::failure(
+            {base::ErrorCode::kCorruptData, "verify byte total exceeds logical size"});
     }
     for (const auto& descriptor : descriptors.value()) {
         if (cancellation.stop_requested()) {

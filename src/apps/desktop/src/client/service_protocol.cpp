@@ -775,7 +775,7 @@ namespace {
         !stable_code(object.value(QStringLiteral("job_id")).toString(), 128) ||
         !object.value(QStringLiteral("trace_id")).isString() ||
         !stable_code(object.value(QStringLiteral("trace_id")).toString(), 128) ||
-        !integer_in_range(object.value(QStringLiteral("operation")), 1, 4, operation) ||
+        !integer_in_range(object.value(QStringLiteral("operation")), 1, 5, operation) ||
         !integer_in_range(object.value(QStringLiteral("state")), 1, 7, state) ||
         !parse_optional_int64(object.value(QStringLiteral("content_kind")), content_kind) ||
         (content_kind && (*content_kind < 1 || *content_kind > 2)) ||
@@ -814,7 +814,8 @@ namespace {
     if (operation == 1 && schedule_id.isEmpty()) {
         return false; // backup jobs must own a schedule
     }
-    if (operation != 1 && !schedule_id.isEmpty()) {
+    // Post-backup verify (3) / boot check (5) may carry the owning schedule.
+    if (operation != 1 && operation != 3 && operation != 5 && !schedule_id.isEmpty()) {
         return false;
     }
     const auto connection_value = object.value(QStringLiteral("repository_connection_id"));

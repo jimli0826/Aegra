@@ -1,7 +1,8 @@
 #include "aegra/apps/worker/windows_personal_backup.h"
 
 #include "windows_personal_backup_runtime.h"
-#include "worker_task_log.h"
+#include "windows_personal_boot_profile.h"
+#include "aegra/apps/worker/worker_task_log.h"
 
 #include "aegra/adapters/personal_archive/personal_archive.h"
 #include "aegra/adapters/windows_disk/windows_disk.h"
@@ -357,6 +358,21 @@ make_manifest(const WindowsPersonalBackupRequest& request,
             base::ErrorCode::kInternal,
             "backup layout metadata is incomplete",
         });
+    }
+    auto boot_profile = collect_windows_boot_profile(request.application_version, sources, manifest);
+    if (!boot_profile) {
+        return base::Result<format::Manifest>::failure(boot_profile.error());
+    }
+    if (auto* log = WorkerTaskLog::active(); log != nullptr) {
+        log->field_bool("boot_profile_present", manifest.boot_profile.has_value());
+        if (manifest.boot_profile) {
+            log->field_u64("boot_system_disk_number",
+                           manifest.boot_profile->system_disk_number);
+            log->field("boot_firmware_mode",
+                       manifest.boot_profile->firmware_mode == format::BootFirmwareMode::kUefi
+                           ? "uefi"
+                           : "bios");
+        }
     }
     auto valid = format::validate_manifest(manifest);
     if (!valid) {

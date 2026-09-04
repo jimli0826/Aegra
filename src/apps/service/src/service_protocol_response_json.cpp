@@ -184,9 +184,9 @@ parse_repository_connection(const Json& payload) {
 
 [[nodiscard]] contracts::SourceInventoryItem parse_source(const Json& payload) {
     constexpr std::array<std::string_view, 17> keys{
-        "source_id",   "display_name",        "kind",          "availability",  "capacity_bytes",
-        "free_bytes",  "disk_capacity_bytes", "is_system",     "is_read_only",  "is_selectable",
-        "disk_number", "offset_bytes",        "mount_letter",  "volume_label",  "health_status",
+        "source_id",       "display_name",        "kind",         "availability", "capacity_bytes",
+        "free_bytes",      "disk_capacity_bytes", "is_system",    "is_read_only", "is_selectable",
+        "disk_number",     "offset_bytes",        "mount_letter", "volume_label", "health_status",
         "partition_style", "media_type"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("source inventory fields are invalid");
@@ -499,8 +499,8 @@ encode_recovery_point_source_volume(const contracts::RecoveryPointSourceVolume& 
 [[nodiscard]] contracts::RecoveryPointSourceVolume
 parse_recovery_point_source_volume(const Json& payload) {
     constexpr std::array<std::string_view, 8> keys{
-        "volume_index",     "letter",           "label",           "filesystem",
-        "total_size_bytes", "free_size_bytes",  "free_size_known", "extents"};
+        "volume_index",     "letter",          "label",           "filesystem",
+        "total_size_bytes", "free_size_bytes", "free_size_known", "extents"};
     if (!exact_keys(payload, keys) || !payload.at("extents").is_array() ||
         !payload.at("free_size_known").is_boolean()) {
         throw std::invalid_argument("recovery point source volume fields are invalid");
@@ -652,11 +652,16 @@ parse_recovery_point_source_volume(const Json& payload) {
                 {"split_size_bytes", summary.split_size_bytes},
                 {"compression_level", summary.compression_level},
                 {"verify_after_backup", summary.verify_after_backup},
+                {"boot_check_after_backup", summary.boot_check_after_backup},
+                {"boot_check_hypervisor",
+                 summary.boot_check_hypervisor
+                     ? Json(static_cast<std::uint8_t>(*summary.boot_check_hypervisor))
+                     : Json()},
                 {"encryption_enabled", summary.encryption_enabled}};
 }
 
 [[nodiscard]] contracts::ScheduleSummary parse_schedule(const Json& payload) {
-    constexpr std::array<std::string_view, 16> keys{"schedule_id",
+    constexpr std::array<std::string_view, 18> keys{"schedule_id",
                                                     "display_name",
                                                     "enabled",
                                                     "content_kind",
@@ -671,6 +676,8 @@ parse_recovery_point_source_volume(const Json& payload) {
                                                     "split_size_bytes",
                                                     "compression_level",
                                                     "verify_after_backup",
+                                                    "boot_check_after_backup",
+                                                    "boot_check_hypervisor",
                                                     "encryption_enabled"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("schedule summary fields are invalid");
@@ -696,6 +703,11 @@ parse_recovery_point_source_volume(const Json& payload) {
     summary.split_size_bytes = unsigned_value<std::uint64_t>(payload, "split_size_bytes");
     summary.compression_level = unsigned_value<std::uint8_t>(payload, "compression_level");
     summary.verify_after_backup = payload.at("verify_after_backup").get<bool>();
+    summary.boot_check_after_backup = payload.at("boot_check_after_backup").get<bool>();
+    if (const auto& hypervisor = payload.at("boot_check_hypervisor"); !hypervisor.is_null()) {
+        summary.boot_check_hypervisor = static_cast<contracts::BootCheckHypervisor>(
+            unsigned_value<std::uint8_t>(payload, "boot_check_hypervisor"));
+    }
     summary.encryption_enabled = payload.at("encryption_enabled").get<bool>();
     return summary;
 }
@@ -790,8 +802,7 @@ template <typename Item, typename Parser>
     return array;
 }
 
-[[nodiscard]] std::vector<std::string> parse_string_array(const Json& payload,
-                                                          const char* field) {
+[[nodiscard]] std::vector<std::string> parse_string_array(const Json& payload, const char* field) {
     const auto& array = payload.at(field);
     if (!array.is_array()) {
         throw std::invalid_argument("restore preflight code array is invalid");
@@ -827,19 +838,21 @@ template <typename Item, typename Parser>
 
 [[nodiscard]] contracts::RestorePreflight parse_restore_preflight(const Json& payload) {
     constexpr std::array<std::string_view, 18> keys{
-        "preflight_token",           "repository_connection_id", "recovery_point_id",
-        "target_source_id",          "logical_size_bytes",       "target_capacity_bytes",
-        "chain_depth",               "expires_utc_ms",           "volume_size_policy",
-        "feasibility",               "restore_eligible",         "minimum_target_bytes",
-        "relocation_bytes",          "scratch_upper_bound_bytes","shrink_plan_digest",
-        "restriction_codes",         "warning_codes",            "message_code"};
+        "preflight_token",    "repository_connection_id",
+        "recovery_point_id",  "target_source_id",
+        "logical_size_bytes", "target_capacity_bytes",
+        "chain_depth",        "expires_utc_ms",
+        "volume_size_policy", "feasibility",
+        "restore_eligible",   "minimum_target_bytes",
+        "relocation_bytes",   "scratch_upper_bound_bytes",
+        "shrink_plan_digest", "restriction_codes",
+        "warning_codes",      "message_code"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("restore preflight fields are invalid");
     }
     contracts::RestorePreflight preflight;
     preflight.preflight_token = payload.at("preflight_token").get<std::string>();
-    preflight.repository_connection_id =
-        payload.at("repository_connection_id").get<std::string>();
+    preflight.repository_connection_id = payload.at("repository_connection_id").get<std::string>();
     preflight.recovery_point_id = payload.at("recovery_point_id").get<std::string>();
     preflight.target_source_id = payload.at("target_source_id").get<std::string>();
     preflight.logical_size_bytes = unsigned_value<std::uint64_t>(payload, "logical_size_bytes");
@@ -852,8 +865,7 @@ template <typename Item, typename Parser>
     preflight.feasibility = static_cast<contracts::RestoreFeasibility>(
         unsigned_value<std::uint8_t>(payload, "feasibility"));
     preflight.restore_eligible = payload.at("restore_eligible").get<bool>();
-    preflight.minimum_target_bytes =
-        unsigned_value<std::uint64_t>(payload, "minimum_target_bytes");
+    preflight.minimum_target_bytes = unsigned_value<std::uint64_t>(payload, "minimum_target_bytes");
     preflight.relocation_bytes = unsigned_value<std::uint64_t>(payload, "relocation_bytes");
     preflight.scratch_upper_bound_bytes =
         unsigned_value<std::uint64_t>(payload, "scratch_upper_bound_bytes");
@@ -1003,8 +1015,8 @@ template <typename Item, typename Parser>
                 {"event_subscription", acknowledgement.event_subscription
                                            ? encode_event_lease(*acknowledgement.event_subscription)
                                            : Json(nullptr)},
-                {"free_bytes", acknowledgement.free_bytes ? Json(*acknowledgement.free_bytes)
-                                                          : Json(nullptr)}};
+                {"free_bytes",
+                 acknowledgement.free_bytes ? Json(*acknowledgement.free_bytes) : Json(nullptr)}};
 }
 
 [[nodiscard]] contracts::CommandAcknowledgement parse_command_ack(const Json& payload) {

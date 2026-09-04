@@ -1,6 +1,6 @@
 #include "personal_archive_verify_task_backend.h"
 
-#include "worker_task_log.h"
+#include "aegra/apps/worker/worker_task_log.h"
 
 #include "aegra/adapters/personal_archive/personal_archive.h"
 #include "aegra/pipeline/verify_pipeline.h"

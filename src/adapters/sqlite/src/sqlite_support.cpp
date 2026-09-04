@@ -77,7 +77,8 @@ constexpr std::size_t kMaximumCommandFingerprintBytes = 4'096;
     return operation == contracts::JobOperation::kBackup ||
            operation == contracts::JobOperation::kRestore ||
            operation == contracts::JobOperation::kVerify ||
-           operation == contracts::JobOperation::kExport;
+           operation == contracts::JobOperation::kExport ||
+           operation == contracts::JobOperation::kBootCheck;
 }
 
 [[nodiscard]] bool known_backup_type(const contracts::BackupType type) noexcept {
@@ -510,7 +511,11 @@ base::Result<void> validate_job_record(const ports::JobRecord& record) {
         if (record.schedule_id.empty()) {
             return invalid("backup job requires schedule_id");
         }
-    } else if (!record.schedule_id.empty()) {
+    } else if (record.operation != contracts::JobOperation::kVerify &&
+               record.operation != contracts::JobOperation::kBootCheck &&
+               !record.schedule_id.empty()) {
+        // Post-backup verify/boot check may carry the owning schedule so the UI
+        // can show per-schedule action status; other operations never do.
         return invalid("non-backup job must not set schedule_id");
     }
     if (record.idempotency_key && record.request_fingerprint.empty()) {
@@ -558,10 +563,18 @@ base::Result<void> validate_schedule_record(const ports::ScheduleRecord& record)
         if (record.deduplication_enabled || record.split_size_bytes != 0) {
             return invalid("file schedule cannot enable deduplication or archive splitting");
         }
+        if (record.boot_check_after_backup || record.boot_check_hypervisor) {
+            return invalid("file schedule cannot enable boot check");
+        }
         auto refs = contracts::validate_file_source_refs(record.file_selections);
         if (!refs) {
             return refs;
         }
+    }
+    if (record.boot_check_after_backup != record.boot_check_hypervisor.has_value() ||
+        (record.boot_check_hypervisor &&
+         !contracts::is_known_boot_check_hypervisor(*record.boot_check_hypervisor))) {
+        return invalid("schedule boot check hypervisor is invalid");
     }
     if (record.trigger.timezone_id.size() > kMaximumTimezoneBytes) {
         return invalid("schedule timezone is invalid");
@@ -661,6 +674,49 @@ base::Result<void> validate_restore_preflight_record(const ports::RestorePreflig
     } else if (!record.entry_ids.empty() || record.logical_size_bytes == 0 ||
                record.feasibility == contracts::RestoreFeasibility::kIneligible) {
         return invalid("volume restore preflight record is invalid");
+    }
+    return base::Result<void>::success();
+}
+
+namespace {
+
+[[nodiscard]] bool valid_post_backup_action(const ports::PostBackupActionRecord& action) noexcept {
+    const bool known_state = action.state == ports::PostBackupActionState::kPending ||
+                             action.state == ports::PostBackupActionState::kRunning ||
+                             action.state == ports::PostBackupActionState::kSucceeded ||
+                             action.state == ports::PostBackupActionState::kFailed ||
+                             action.state == ports::PostBackupActionState::kSkipped;
+    if (!known_state) {
+        return false;
+    }
+    if (action.child_job_id && !valid_stable_value(*action.child_job_id, kMaximumIdentifierBytes)) {
+        return false;
+    }
+    return action.message_code.empty() ||
+           valid_stable_value(action.message_code, kMaximumMessageCodeBytes);
+}
+
+} // namespace
+
+base::Result<void> validate_post_backup_plan_record(const ports::PostBackupPlanRecord& record) {
+    if (!valid_stable_value(record.backup_job_id, kMaximumIdentifierBytes) ||
+        !valid_stable_value(record.schedule_id, kMaximumIdentifierBytes) ||
+        !valid_stable_value(record.recovery_point_id, kMaximumIdentifierBytes) ||
+        !valid_stable_value(record.repository_connection_id, kMaximumIdentifierBytes) ||
+        !valid_post_backup_action(record.verify) || !valid_post_backup_action(record.boot_check) ||
+        (record.claim_owner && !valid_stable_value(*record.claim_owner, kMaximumIdentifierBytes)) ||
+        !valid_optional_wire_integer(record.lease_expires_utc_ms) ||
+        !valid_wire_integer(record.created_utc_ms) || !valid_wire_integer(record.updated_utc_ms) ||
+        record.updated_utc_ms < record.created_utc_ms) {
+        return invalid("post backup plan record is invalid");
+    }
+    if (!record.verify_required && !record.boot_check_required) {
+        return invalid("post backup plan requires at least one action");
+    }
+    if (record.boot_check_required != record.boot_check_hypervisor.has_value() ||
+        (record.boot_check_hypervisor &&
+         !contracts::is_known_boot_check_hypervisor(*record.boot_check_hypervisor))) {
+        return invalid("post backup plan hypervisor is invalid");
     }
     return base::Result<void>::success();
 }
@@ -842,12 +898,17 @@ base::Result<ports::ScheduleRecord> read_schedule(sqlite3_stmt* const stmt) {
     record.split_size_bytes = column_uint64(stmt, 15);
     record.compression_level = sqlite3_column_int(stmt, 16);
     record.verify_after_backup = sqlite3_column_int(stmt, 17) != 0;
-    record.encryption_enabled = sqlite3_column_int(stmt, 18) != 0;
-    record.archive_password_protected = column_text_required(stmt, 19);
-    record.backup_set_uuid = column_text_required(stmt, 20);
-    record.last_recovery_point_id = column_text_optional(stmt, 21);
-    record.created_utc_ms = column_uint64(stmt, 22);
-    record.updated_utc_ms = column_uint64(stmt, 23);
+    record.boot_check_after_backup = sqlite3_column_int(stmt, 18) != 0;
+    if (sqlite3_column_type(stmt, 19) != SQLITE_NULL) {
+        record.boot_check_hypervisor =
+            static_cast<contracts::BootCheckHypervisor>(sqlite3_column_int(stmt, 19));
+    }
+    record.encryption_enabled = sqlite3_column_int(stmt, 20) != 0;
+    record.archive_password_protected = column_text_required(stmt, 21);
+    record.backup_set_uuid = column_text_required(stmt, 22);
+    record.last_recovery_point_id = column_text_optional(stmt, 23);
+    record.created_utc_ms = column_uint64(stmt, 24);
+    record.updated_utc_ms = column_uint64(stmt, 25);
     // file_selections loaded by schedule store after read when content_kind is file_set.
     auto valid = validate_schedule_record(record);
     if (!valid && record.content_kind == contracts::ContentKind::kFileSet &&
@@ -960,6 +1021,48 @@ base::Result<ports::RestorePreflightRecord> read_restore_preflight(sqlite3_stmt*
     return base::Result<ports::RestorePreflightRecord>::success(std::move(record));
 }
 
+base::Result<ports::PostBackupPlanRecord> read_post_backup_plan(sqlite3_stmt* const stmt) {
+    ports::PostBackupPlanRecord record;
+    record.backup_job_id = column_text_required(stmt, 0);
+    record.schedule_id = column_text_required(stmt, 1);
+    record.recovery_point_id = column_text_required(stmt, 2);
+    record.repository_connection_id = column_text_required(stmt, 3);
+    record.verify_required = column_uint64(stmt, 4) != 0;
+    record.boot_check_required = column_uint64(stmt, 5) != 0;
+    if (sqlite3_column_type(stmt, 6) != SQLITE_NULL) {
+        record.boot_check_hypervisor =
+            static_cast<contracts::BootCheckHypervisor>(sqlite3_column_int(stmt, 6));
+    }
+    const auto verify_state = column_uint64(stmt, 7);
+    const auto boot_check_state = column_uint64(stmt, 11);
+    const auto verify_attempts = column_uint64(stmt, 10);
+    const auto boot_check_attempts = column_uint64(stmt, 14);
+    if (verify_state > (std::numeric_limits<std::uint8_t>::max)() ||
+        boot_check_state > (std::numeric_limits<std::uint8_t>::max)() ||
+        verify_attempts > (std::numeric_limits<std::uint32_t>::max)() ||
+        boot_check_attempts > (std::numeric_limits<std::uint32_t>::max)()) {
+        return base::Result<ports::PostBackupPlanRecord>::failure(
+            make_error(base::ErrorCode::kCorruptData, "post backup plan record is corrupt"));
+    }
+    record.verify.state = static_cast<ports::PostBackupActionState>(verify_state);
+    record.verify.child_job_id = column_text_optional(stmt, 8);
+    record.verify.message_code = column_text_required(stmt, 9);
+    record.verify.attempts = static_cast<std::uint32_t>(verify_attempts);
+    record.boot_check.state = static_cast<ports::PostBackupActionState>(boot_check_state);
+    record.boot_check.child_job_id = column_text_optional(stmt, 12);
+    record.boot_check.message_code = column_text_required(stmt, 13);
+    record.boot_check.attempts = static_cast<std::uint32_t>(boot_check_attempts);
+    record.claim_owner = column_text_optional(stmt, 15);
+    record.lease_expires_utc_ms = column_uint64_optional(stmt, 16);
+    record.created_utc_ms = column_uint64(stmt, 17);
+    record.updated_utc_ms = column_uint64(stmt, 18);
+    auto valid = validate_post_backup_plan_record(record);
+    if (!valid) {
+        return base::Result<ports::PostBackupPlanRecord>::failure(valid.error());
+    }
+    return base::Result<ports::PostBackupPlanRecord>::success(std::move(record));
+}
+
 contracts::RepositoryConnectionSummary
 to_connection_summary(const ports::RepositoryConnectionRecord& record) {
     return {record.connection_id, record.display_name, record.locator,
@@ -1029,6 +1132,8 @@ contracts::ScheduleSummary to_schedule_summary(const ports::ScheduleRecord& reco
     summary.split_size_bytes = record.split_size_bytes;
     summary.compression_level = record.compression_level;
     summary.verify_after_backup = record.verify_after_backup;
+    summary.boot_check_after_backup = record.boot_check_after_backup;
+    summary.boot_check_hypervisor = record.boot_check_hypervisor;
     summary.encryption_enabled = record.encryption_enabled;
     return summary;
 }

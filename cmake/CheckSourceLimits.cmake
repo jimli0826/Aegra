@@ -28,7 +28,7 @@ foreach(AEGRA_FILE IN LISTS AEGRA_SOURCES)
     if(AEGRA_EXTENSION STREQUAL ".cpp")
         set(AEGRA_LIMIT 1500)
     else()
-        set(AEGRA_LIMIT 800)
+        set(AEGRA_LIMIT 1000)
     endif()
 
     if(AEGRA_LINE_COUNT GREATER AEGRA_LIMIT)

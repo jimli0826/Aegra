@@ -1,4 +1,5 @@
 add_library(aegra_contracts STATIC
+    src/boot_check_job.cpp
     src/file_set.cpp
     src/job.cpp
     src/pe_restore.cpp

@@ -24,7 +24,10 @@ namespace aegra::ports {
 // v21: immutable schedule split_size_bytes for volume archive splitting (ADR-0003).
 // v22: immutable schedule compression_level (zstd Fast=1, Normal=3, High=9).
 // v23: mutable post-backup Verify policy.
-inline constexpr std::uint32_t kControlPlaneSchemaVersion = 23;
+// v24: durable post_backup_plans (crash-safe post-backup Verify/BootCheck actions).
+// v26: jobs.operation accepts BootCheck (5) so boot check runs appear in the task log.
+// v27: schedules no longer require verify_after_backup when boot check is enabled.
+inline constexpr std::uint32_t kControlPlaneSchemaVersion = 27;
 
 // ---- Durable records (control-plane only; no plaintext secrets, no RP authority) ----
 
@@ -99,6 +102,13 @@ struct ScheduleRecord final {
     std::int32_t compression_level{contracts::kCompressionLevelNormal};
     /// Submit a separate Verify job after a successful backup Catalog publish.
     bool verify_after_backup{false};
+    /// Submit an isolated-VM BootCheck — after a successful Verify when verify
+    /// is also enabled, otherwise directly after the backup. volume_set
+    /// complete-system-disk schedules only; independent of verify_after_backup,
+    /// and file_set schedules must keep it false.
+    bool boot_check_after_backup{false};
+    /// Present exactly when boot_check_after_backup is true.
+    std::optional<contracts::BootCheckHypervisor> boot_check_hypervisor;
     bool encryption_enabled{false};
     /// When encryption_enabled: dpapi-lm:<schedule_id>:<base64> (CRYPTPROTECT_LOCAL_MACHINE,
     /// pOptionalEntropy = UTF-8 schedule_id). Empty when encryption is off. Never log.
@@ -161,6 +171,68 @@ struct RestorePreflightRecord final {
     std::string shrink_plan_digest;
     /// Target inventory identity digest (stable id + capacity + geometry). Empty if unused.
     std::string target_binding_digest;
+};
+
+// ---- Durable post-backup action plan (S/B: verify + boot check) ----
+
+enum class PostBackupActionState : std::uint8_t {
+    kPending = 1,
+    kRunning = 2,
+    kSucceeded = 3,
+    kFailed = 4,
+    kSkipped = 5,
+};
+
+[[nodiscard]] constexpr bool
+is_terminal_post_backup_action_state(const PostBackupActionState state) noexcept {
+    return state == PostBackupActionState::kSucceeded || state == PostBackupActionState::kFailed ||
+           state == PostBackupActionState::kSkipped;
+}
+
+struct PostBackupActionRecord final {
+    PostBackupActionState state{PostBackupActionState::kPending};
+    /// Child verify/boot-check job id once dispatched.
+    std::optional<std::string> child_job_id;
+    /// Stable message code for the latest state change; empty while pending.
+    std::string message_code;
+    std::uint32_t attempts{0};
+};
+
+/// One row per backup job whose schedule enables at least one post-backup action.
+/// Written in the same transaction as the backup JobRecord so a Service crash or
+/// restart never loses a pending action; removed by the jobs retention purge
+/// (FK ON DELETE CASCADE).
+struct PostBackupPlanRecord final {
+    std::string backup_job_id;
+    std::string schedule_id;
+    /// file_uuid of the recovery point the backup publishes.
+    std::string recovery_point_id;
+    std::string repository_connection_id;
+    bool verify_required{false};
+    bool boot_check_required{false};
+    /// Snapshot of the schedule selection; present exactly when BootCheck is required.
+    std::optional<contracts::BootCheckHypervisor> boot_check_hypervisor;
+    PostBackupActionRecord verify;
+    PostBackupActionRecord boot_check;
+    /// Coordinator instance currently driving this plan (lease-based re-claim).
+    std::optional<std::string> claim_owner;
+    std::optional<std::uint64_t> lease_expires_utc_ms;
+    std::uint64_t created_utc_ms{0};
+    std::uint64_t updated_utc_ms{0};
+};
+
+[[nodiscard]] constexpr bool
+is_complete_post_backup_plan(const PostBackupPlanRecord& plan) noexcept {
+    return (!plan.verify_required || is_terminal_post_backup_action_state(plan.verify.state)) &&
+           (!plan.boot_check_required ||
+            is_terminal_post_backup_action_state(plan.boot_check.state));
+}
+
+struct PostBackupPlanClaimRequest final {
+    std::string claim_owner;
+    std::uint64_t now_utc_ms{0};
+    std::uint64_t lease_expires_utc_ms{0};
+    std::uint32_t maximum_plans{8};
 };
 
 // ---- Job state machine (shared pure rules) ----
@@ -366,6 +438,29 @@ class ICommandStore {
                                                     base::CancellationToken cancellation) = 0;
 };
 
+class IPostBackupPlanStore {
+  public:
+    IPostBackupPlanStore() = default;
+    virtual ~IPostBackupPlanStore() = default;
+    IPostBackupPlanStore(const IPostBackupPlanStore&) = delete;
+    IPostBackupPlanStore& operator=(const IPostBackupPlanStore&) = delete;
+    IPostBackupPlanStore(IPostBackupPlanStore&&) = delete;
+    IPostBackupPlanStore& operator=(IPostBackupPlanStore&&) = delete;
+
+    // Insert or replace by backup_job_id (single-writer coordinator state updates).
+    [[nodiscard]] virtual base::Result<void> upsert(const PostBackupPlanRecord& record,
+                                                    base::CancellationToken cancellation) = 0;
+
+    [[nodiscard]] virtual base::Result<std::optional<PostBackupPlanRecord>>
+    get(std::string_view backup_job_id, base::CancellationToken cancellation) = 0;
+
+    // Claims up to maximum_plans incomplete plans whose lease is absent, expired,
+    // or already held by claim_owner, stamping claim_owner + lease. Oldest first.
+    [[nodiscard]] virtual base::Result<std::vector<PostBackupPlanRecord>>
+    claim_incomplete(const PostBackupPlanClaimRequest& request,
+                     base::CancellationToken cancellation) = 0;
+};
+
 class IRestorePreflightStore {
   public:
     IRestorePreflightStore() = default;
@@ -400,6 +495,7 @@ class IControlPlaneUnitOfWork {
     [[nodiscard]] virtual ICommandStore& commands() noexcept = 0;
     [[nodiscard]] virtual IRestorePreflightStore& restore_preflights() noexcept = 0;
     [[nodiscard]] virtual IServiceSettingsStore& service_settings() noexcept = 0;
+    [[nodiscard]] virtual IPostBackupPlanStore& post_backup_plans() noexcept = 0;
 
     [[nodiscard]] virtual base::Result<void> commit(base::CancellationToken cancellation) = 0;
     virtual void rollback() noexcept = 0;
@@ -452,6 +548,8 @@ class IControlPlaneDatabase {
                           base::CancellationToken cancellation) = 0;
     [[nodiscard]] virtual base::Result<ServiceSettingsRecord>
     get_service_settings(base::CancellationToken cancellation) = 0;
+    [[nodiscard]] virtual base::Result<std::optional<PostBackupPlanRecord>>
+    get_post_backup_plan(std::string_view backup_job_id, base::CancellationToken cancellation) = 0;
 };
 
 } // namespace aegra::ports

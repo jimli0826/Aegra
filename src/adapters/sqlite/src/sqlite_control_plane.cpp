@@ -122,7 +122,8 @@ ControlPlaneUnitOfWork::ControlPlaneUnitOfWork(std::shared_ptr<SqliteControlPlan
     : state_(std::move(state)), write_lock_(std::move(write_lock)),
       repository_connections_(*state_, &active_), jobs_(*state_, &active_),
       schedules_(*state_, &active_), audit_events_(*state_, &active_), commands_(*state_, &active_),
-      restore_preflights_(*state_, &active_), service_settings_(*state_, &active_) {}
+      restore_preflights_(*state_, &active_), service_settings_(*state_, &active_),
+      post_backup_plans_(*state_, &active_) {}
 
 ControlPlaneUnitOfWork::~ControlPlaneUnitOfWork() { rollback(); }
 
@@ -144,6 +145,10 @@ ports::IRestorePreflightStore& ControlPlaneUnitOfWork::restore_preflights() noex
 
 ports::IServiceSettingsStore& ControlPlaneUnitOfWork::service_settings() noexcept {
     return service_settings_;
+}
+
+ports::IPostBackupPlanStore& ControlPlaneUnitOfWork::post_backup_plans() noexcept {
+    return post_backup_plans_;
 }
 
 void ControlPlaneUnitOfWork::finish_unlocked() noexcept {
@@ -422,6 +427,14 @@ SqliteControlPlaneDatabase::get_service_settings(const base::CancellationToken c
     std::lock_guard lock(state_->mutex);
     detail::ServiceSettingsStore store(*state_);
     return store.get(cancellation);
+}
+
+base::Result<std::optional<ports::PostBackupPlanRecord>>
+SqliteControlPlaneDatabase::get_post_backup_plan(const std::string_view backup_job_id,
+                                                 const base::CancellationToken cancellation) {
+    std::lock_guard lock(state_->mutex);
+    detail::PostBackupPlanStore store(*state_);
+    return store.get(backup_job_id, cancellation);
 }
 
 } // namespace aegra::adapters::sqlite

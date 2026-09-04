@@ -1,6 +1,6 @@
 #include "aegra/apps/worker/personal_file_archive_verify_task.h"
 
-#include "worker_task_log.h"
+#include "aegra/apps/worker/worker_task_log.h"
 
 #include "aegra/adapters/personal_archive/personal_archive.h"
 #include "aegra/base/error.h"

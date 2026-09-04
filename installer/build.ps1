@@ -27,11 +27,12 @@ $DokanOfficialMsi = Join-Path $RepoRoot "Dokan_x64.msi"
 $VsRoot = "C:\Program Files\Microsoft Visual Studio\18\Insiders"
 $VsDevCmd = Join-Path $VsRoot "Common7\Tools\VsDevCmd.bat"
 $CmakeExe = Join-Path $VsRoot "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
+$QtRoot = "C:\Qt6\6.8.3\msvc2022_64"
+$ReleaseBuildDir = Join-Path $RepoRoot "out\build\vs2026-release"
 $ServiceDir = Join-Path $RepoRoot "out\build\vs2026-release\src\apps\service"
 $CliDir = Join-Path $RepoRoot "out\build\vs2026-release\src\apps\cli"
 $ShellDir = Join-Path $RepoRoot "out\build\vs2026-release\src\apps\shell_extension"
-$GuiBuildDir = Join-Path $RepoRoot "build\Desktop_Qt_6_8_3_MSVC2022_64bit-Release"
-$GuiDir = Join-Path $GuiBuildDir "src\apps\desktop"
+$GuiDir = Join-Path $ReleaseBuildDir "src\apps\desktop"
 
 $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
             [System.Environment]::GetEnvironmentVariable("Path", "User")
@@ -40,10 +41,12 @@ $script:ProjectBinaries = @(
     "AegraCLI.exe",
     "AegraImage.exe",
     "AegraPEResore.exe",
+    "AegraBootCheck.exe",
     "AegraWorker.exe",
     "AegraService.exe",
     "aegra_shell_extension.dll",
     # Remove stale outputs produced before the executable rename.
+    "AegraBootCheckHost.exe",
     "aegra_cli.exe",
     "aegra_desktop.exe",
     "aegra_pe_restore.exe",
@@ -56,6 +59,7 @@ function Get-PayloadFileList {
         "AegraCLI.exe",
         "AegraImage.exe",
         "AegraPEResore.exe",
+        "AegraBootCheck.exe",
         "AegraWorker.exe",
         "AegraService.exe",
         "aegra_shell_extension.dll",
@@ -253,12 +257,24 @@ function Invoke-ProductCompile {
         Pop-Location
     }
 
-    if (-not (Test-Path (Join-Path $GuiBuildDir "CMakeCache.txt"))) {
-        throw "Desktop CMake tree missing: $GuiBuildDir"
-    }
     if (-not (Test-Path $CmakeExe)) { throw "Missing cmake: $CmakeExe" }
+    if (-not (Test-Path (Join-Path $QtRoot "lib\cmake\Qt6\Qt6Config.cmake"))) {
+        throw "Missing Qt 6.8.3 CMake package: $QtRoot"
+    }
+
+    Write-Host "`nConfiguring aegra_desktop in vs2026-release..." -ForegroundColor Yellow
+    Push-Location $RepoRoot
+    try {
+        Invoke-VsDevCommand "`"$CmakeExe`" --preset vs2026-release --no-warn-unused-cli -DAEGRA_QT_ROOT=`"$QtRoot`""
+    } finally {
+        Pop-Location
+    }
+
+    if (-not (Test-Path (Join-Path $ReleaseBuildDir "CMakeCache.txt"))) {
+        throw "Release CMake tree missing after configuration: $ReleaseBuildDir"
+    }
     Write-Host "`nCompiling aegra_desktop..." -ForegroundColor Yellow
-    Invoke-VsDevCommand "`"$CmakeExe`" --build `"$GuiBuildDir`" --config Release --target aegra_desktop --parallel"
+    Invoke-VsDevCommand "`"$CmakeExe`" --build `"$ReleaseBuildDir`" --target aegra_desktop --parallel"
 }
 
 function Copy-Required([string]$source, [string]$destinationDir) {
@@ -282,6 +298,7 @@ function Copy-ProjectOutputsToPayload {
     Copy-Required (Join-Path $ServiceDir "AegraService.exe") $Payload
     Copy-Required (Join-Path $CliDir "AegraCLI.exe") $Payload
     Copy-Required (Join-Path $ServiceDir "AegraWorker.exe") $Payload
+    Copy-Required (Join-Path $ServiceDir "AegraBootCheck.exe") $Payload
     Copy-Required (Join-Path $ServiceDir "AegraPEResore.exe") $Payload
     Copy-Required (Join-Path $ShellDir "aegra_shell_extension.dll") $Payload
     Copy-Required (Join-Path $GuiDir "AegraImage.exe") $Payload
@@ -421,8 +438,7 @@ Write-Host "Dokan:   $DokanOfficialMsi"
 if (-not $SkipCompile) {
     Write-Host "`nDeleting previous project exe/dll outputs..." -ForegroundColor Yellow
     Remove-ProjectBinaries @(
-        (Join-Path $RepoRoot "out\build\vs2026-release\src\apps"),
-        (Join-Path $GuiBuildDir "src\apps"),
+        (Join-Path $ReleaseBuildDir "src\apps"),
         $Payload
     )
     Invoke-ProductCompile

@@ -315,9 +315,8 @@ encode_restore_preflight_request(const contracts::RestorePreflightRequest& reque
 [[nodiscard]] contracts::RestorePreflightRequest
 parse_restore_preflight_request(const Json& payload) {
     constexpr std::array<std::string_view, 7> keys{
-        "repository_connection_id", "recovery_point_id",  "target_source_id",
-        "source_disk_number",       "source_volume_index", "archive_password",
-        "volume_size_policy"};
+        "repository_connection_id", "recovery_point_id", "target_source_id",  "source_disk_number",
+        "source_volume_index",      "archive_password",  "volume_size_policy"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("restore preflight request fields are invalid");
     }
@@ -349,35 +348,34 @@ parse_restore_preflight_request(const Json& payload) {
 }
 
 [[nodiscard]] contracts::StartRestoreCommand parse_start_restore(const Json& payload) {
-    constexpr std::array<std::string_view, 6> keys{
-        "preflight_token",            "confirmed",
-        "archive_password",           "preserve_disk_signature",
-        "auto_expand_last_partition", "partition_layout_edits"};
+    constexpr std::array<std::string_view, 6> keys{"preflight_token",
+                                                   "confirmed",
+                                                   "archive_password",
+                                                   "preserve_disk_signature",
+                                                   "auto_expand_last_partition",
+                                                   "partition_layout_edits"};
     if (!exact_keys(payload, keys) || !payload.at("partition_layout_edits").is_array()) {
         throw std::invalid_argument("start restore fields are invalid");
     }
-    contracts::StartRestoreCommand command{
-        payload.at("preflight_token").get<std::string>(),
-        payload.at("confirmed").get<bool>(),
-        payload.at("archive_password").get<std::string>(),
-        payload.at("preserve_disk_signature").get<bool>(),
-        payload.at("auto_expand_last_partition").get<bool>(),
-        {}};
+    contracts::StartRestoreCommand command{payload.at("preflight_token").get<std::string>(),
+                                           payload.at("confirmed").get<bool>(),
+                                           payload.at("archive_password").get<std::string>(),
+                                           payload.at("preserve_disk_signature").get<bool>(),
+                                           payload.at("auto_expand_last_partition").get<bool>(),
+                                           {}};
     const auto& edits_json = payload.at("partition_layout_edits");
     if (edits_json.size() > contracts::kMaximumPartitionLayoutEdits) {
         throw std::invalid_argument("partition_layout_edits exceeds maximum entry count");
     }
-    constexpr std::array<std::string_view, 3> edit_keys{
-        "source_start_offset_bytes", "target_start_offset_bytes", "size_bytes"};
+    constexpr std::array<std::string_view, 3> edit_keys{"source_start_offset_bytes",
+                                                        "target_start_offset_bytes", "size_bytes"};
     for (const auto& item : edits_json) {
         if (!item.is_object() || !exact_keys(item, edit_keys)) {
             throw std::invalid_argument("partition_layout_edits entry is invalid");
         }
         contracts::RestorePartitionLayoutEdit edit;
-        edit.source_start_offset_bytes =
-            item.at("source_start_offset_bytes").get<std::uint64_t>();
-        edit.target_start_offset_bytes =
-            item.at("target_start_offset_bytes").get<std::uint64_t>();
+        edit.source_start_offset_bytes = item.at("source_start_offset_bytes").get<std::uint64_t>();
+        edit.target_start_offset_bytes = item.at("target_start_offset_bytes").get<std::uint64_t>();
         edit.size_bytes = item.at("size_bytes").get<std::uint64_t>();
         if (edit.size_bytes == 0) {
             throw std::invalid_argument("partition_layout_edits size_bytes is zero");
@@ -549,12 +547,18 @@ encode_mount_recovery_point(const contracts::MountRecoveryPointCommand& command)
                 {"split_size_bytes", command.split_size_bytes},
                 {"compression_level", command.compression_level},
                 {"verify_after_backup", command.verify_after_backup},
+                {"boot_check_after_backup",
+                 command.boot_check_after_backup ? Json(*command.boot_check_after_backup) : Json()},
+                {"boot_check_hypervisor",
+                 command.boot_check_hypervisor
+                     ? Json(static_cast<std::uint8_t>(*command.boot_check_hypervisor))
+                     : Json()},
                 {"encryption_enabled", command.encryption_enabled},
                 {"archive_password", command.archive_password}};
 }
 
 [[nodiscard]] contracts::UpsertScheduleCommand parse_upsert_schedule(const Json& payload) {
-    constexpr std::array<std::string_view, 14> keys{"schedule_id",
+    constexpr std::array<std::string_view, 16> keys{"schedule_id",
                                                     "display_name",
                                                     "enabled",
                                                     "protection",
@@ -566,6 +570,8 @@ encode_mount_recovery_point(const contracts::MountRecoveryPointCommand& command)
                                                     "split_size_bytes",
                                                     "compression_level",
                                                     "verify_after_backup",
+                                                    "boot_check_after_backup",
+                                                    "boot_check_hypervisor",
                                                     "encryption_enabled",
                                                     "archive_password"};
     if (!exact_keys(payload, keys)) {
@@ -586,6 +592,14 @@ encode_mount_recovery_point(const contracts::MountRecoveryPointCommand& command)
     command.split_size_bytes = unsigned_value<std::uint64_t>(payload, "split_size_bytes");
     command.compression_level = unsigned_value<std::uint8_t>(payload, "compression_level");
     command.verify_after_backup = payload.at("verify_after_backup").get<bool>();
+    // null = keep the stored value on update / false on create.
+    if (const auto& boot_check = payload.at("boot_check_after_backup"); !boot_check.is_null()) {
+        command.boot_check_after_backup = boot_check.get<bool>();
+    }
+    if (const auto& hypervisor = payload.at("boot_check_hypervisor"); !hypervisor.is_null()) {
+        command.boot_check_hypervisor = static_cast<contracts::BootCheckHypervisor>(
+            unsigned_value<std::uint8_t>(payload, "boot_check_hypervisor"));
+    }
     command.encryption_enabled = payload.at("encryption_enabled").get<bool>();
     command.archive_password = payload.at("archive_password").get<std::string>();
     return command;
@@ -944,9 +958,13 @@ contracts::ServiceRequestPayload parse_request_payload(const contracts::ServiceR
         return contracts::PeRestoreStateRequest{};
     }
     case contracts::ServiceRequestKind::kArmPeRestore: {
-        constexpr std::array<std::string_view, 7> keys{
-            "preflight_token",          "confirmed", "archive_password", "prompt_for_password",
-            "preserve_disk_signature",  "auto_expand_last_partition",    "locale"};
+        constexpr std::array<std::string_view, 7> keys{"preflight_token",
+                                                       "confirmed",
+                                                       "archive_password",
+                                                       "prompt_for_password",
+                                                       "preserve_disk_signature",
+                                                       "auto_expand_last_partition",
+                                                       "locale"};
         if (!exact_keys(payload, keys)) {
             throw std::invalid_argument("arm pe restore fields are invalid");
         }

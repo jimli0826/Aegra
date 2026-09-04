@@ -3,6 +3,7 @@
 #include "locale/locale_format.h"
 #include "locale/message_code_map.h"
 
+#include <QDateTime>
 #include <QSet>
 #include <QVariantMap>
 
@@ -19,6 +20,11 @@ constexpr std::int64_t kStateSucceeded = 4;
 constexpr std::int64_t kStateFailed = 5;
 constexpr std::int64_t kStateCancelled = 6;
 constexpr std::int64_t kStateInterrupted = 7;
+
+constexpr std::int64_t kOperationBootCheck = 5;
+// Boot check publishes no byte progress; a synthetic percent ramps over the
+// 10-minute boot budget so the running card shows movement.
+constexpr qint64 kBootCheckProgressBudgetMs = 10LL * 60 * 1000;
 
 [[nodiscard]] bool row_is_active(const std::int64_t state) noexcept {
     return state == kStateQueued || state == kStateRunning || state == kStateCancelling;
@@ -82,7 +88,7 @@ void preserve_monotonic_progress(JobRow& incoming, const JobRow& existing) {
 }
 
 void recompute_counts(const QVector<JobRow>& rows, int& running, int& failed, int& succeeded,
-                      int& active, int& backup, int& restore, int& verify) {
+                      int& active, int& backup, int& restore, int& verify, int& boot_check) {
     running = 0;
     failed = 0;
     succeeded = 0;
@@ -90,6 +96,7 @@ void recompute_counts(const QVector<JobRow>& rows, int& running, int& failed, in
     backup = 0;
     restore = 0;
     verify = 0;
+    boot_check = 0;
     for (const auto& row : rows) {
         if (row.state == kStateRunning) {
             ++running;
@@ -111,6 +118,9 @@ void recompute_counts(const QVector<JobRow>& rows, int& running, int& failed, in
         case 3:
             ++verify;
             break;
+        case 5:
+            ++boot_check;
+            break;
         default:
             break;
         }
@@ -130,7 +140,7 @@ void JobModel::set_rows(QVector<JobRow> rows) {
         }
         rows_ = std::move(rows);
         recompute_counts(rows_, running_count_, failed_count_, succeeded_count_, active_count_,
-                         backup_count_, restore_count_, verify_count_);
+                         backup_count_, restore_count_, verify_count_, boot_check_count_);
         if (!rows_.isEmpty()) {
             emit dataChanged(index(0, 0), index(rows_.size() - 1, 0));
         }
@@ -141,7 +151,7 @@ void JobModel::set_rows(QVector<JobRow> rows) {
     beginResetModel();
     rows_ = std::move(rows);
     recompute_counts(rows_, running_count_, failed_count_, succeeded_count_, active_count_,
-                     backup_count_, restore_count_, verify_count_);
+                     backup_count_, restore_count_, verify_count_, boot_check_count_);
     endResetModel();
     emit countChanged();
     emit countsChanged();
@@ -156,7 +166,7 @@ void JobModel::upsert_job(JobRow row) {
             const auto idx = index(i, 0);
             emit dataChanged(idx, idx);
             recompute_counts(rows_, running_count_, failed_count_, succeeded_count_, active_count_,
-                             backup_count_, restore_count_, verify_count_);
+                             backup_count_, restore_count_, verify_count_, boot_check_count_);
             emit countsChanged();
             bump_revision();
             return;
@@ -166,7 +176,7 @@ void JobModel::upsert_job(JobRow row) {
     rows_.prepend(std::move(row));
     endInsertRows();
     recompute_counts(rows_, running_count_, failed_count_, succeeded_count_, active_count_,
-                     backup_count_, restore_count_, verify_count_);
+                     backup_count_, restore_count_, verify_count_, boot_check_count_);
     emit countChanged();
     emit countsChanged();
     bump_revision();
@@ -238,6 +248,7 @@ void JobModel::clear() {
     backup_count_ = 0;
     restore_count_ = 0;
     verify_count_ = 0;
+    boot_check_count_ = 0;
     endResetModel();
     emit countChanged();
     emit countsChanged();
@@ -265,6 +276,8 @@ int JobModel::backupCount() const noexcept { return backup_count_; }
 int JobModel::restoreCount() const noexcept { return restore_count_; }
 
 int JobModel::verifyCount() const noexcept { return verify_count_; }
+
+int JobModel::bootCheckCount() const noexcept { return boot_check_count_; }
 
 int JobModel::revision() const noexcept { return revision_; }
 
@@ -338,7 +351,8 @@ QVariantMap JobModel::latestBackupStatus(const QString& schedule_id) const {
     QVariantMap result{{QStringLiteral("statusKey"), status_key_for_state(chosen->state)},
                        {QStringLiteral("progressPercent"), progress_percent(*chosen)},
                        {QStringLiteral("stateText"), state_text(chosen->state)},
-                       {QStringLiteral("stateValue"), static_cast<qint64>(chosen->state)}};
+                       {QStringLiteral("stateValue"), static_cast<qint64>(chosen->state)},
+                       {QStringLiteral("createdUtcMs"), chosen->created_utc_ms}};
     if (chosen->requested_backup_type) {
         result.insert(QStringLiteral("requestedBackupTypeText"),
                       backup_type_text(*chosen->requested_backup_type));
@@ -354,6 +368,48 @@ QVariantMap JobModel::latestBackupStatus(const QString& schedule_id) const {
     } else {
         result.insert(QStringLiteral("hasDowngrade"), false);
     }
+    if (!chosen->message_code.isEmpty()) {
+        result.insert(QStringLiteral("messageText"), localize_message_code(chosen->message_code));
+    }
+    return result;
+}
+
+QVariantMap JobModel::latestOperationStatus(const QString& schedule_id,
+                                            const int operation) const {
+    QVariantMap empty{{QStringLiteral("statusKey"), QStringLiteral("none")},
+                      {QStringLiteral("progressPercent"), 0},
+                      {QStringLiteral("stateText"), QString{}},
+                      {QStringLiteral("stateValue"), 0}};
+    if (schedule_id.isEmpty()) {
+        return empty;
+    }
+    const JobRow* best_active = nullptr;
+    const JobRow* best_terminal = nullptr;
+    for (const auto& row : rows_) {
+        if (row.operation != operation || row.schedule_id != schedule_id) {
+            continue;
+        }
+        if (is_active_state(row.state)) {
+            if (best_active == nullptr || row.created_utc_ms >= best_active->created_utc_ms) {
+                best_active = &row;
+            }
+            continue;
+        }
+        if (is_terminal_state(row.state)) {
+            if (best_terminal == nullptr || row.created_utc_ms >= best_terminal->created_utc_ms) {
+                best_terminal = &row;
+            }
+        }
+    }
+    const JobRow* chosen = best_active != nullptr ? best_active : best_terminal;
+    if (chosen == nullptr) {
+        return empty;
+    }
+    QVariantMap result{{QStringLiteral("statusKey"), status_key_for_state(chosen->state)},
+                       {QStringLiteral("progressPercent"), progress_percent(*chosen)},
+                       {QStringLiteral("stateText"), state_text(chosen->state)},
+                       {QStringLiteral("stateValue"), static_cast<qint64>(chosen->state)},
+                       {QStringLiteral("createdUtcMs"), chosen->created_utc_ms}};
     if (!chosen->message_code.isEmpty()) {
         result.insert(QStringLiteral("messageText"), localize_message_code(chosen->message_code));
     }
@@ -458,6 +514,7 @@ QVariantMap JobModel::operationCounts() const {
     int backup = 0;
     int restore = 0;
     int verify = 0;
+    int boot_check = 0;
     int other = 0;
     for (const auto& row : rows_) {
         switch (row.operation) {
@@ -470,6 +527,9 @@ QVariantMap JobModel::operationCounts() const {
         case 3:
             ++verify;
             break;
+        case 5:
+            ++boot_check;
+            break;
         default:
             ++other;
             break;
@@ -479,6 +539,7 @@ QVariantMap JobModel::operationCounts() const {
         {QStringLiteral("backup"), backup},
         {QStringLiteral("restore"), restore},
         {QStringLiteral("verify"), verify},
+        {QStringLiteral("bootcheck"), boot_check},
         {QStringLiteral("other"), other},
         {QStringLiteral("total"), static_cast<int>(rows_.size())}
     };
@@ -500,6 +561,8 @@ QVariant JobModel::data(const QModelIndex& index, const int role) const {
         return row.trace_id;
     case OperationTextRole:
         return operation_text(row.operation);
+    case OperationValueRole:
+        return static_cast<qint64>(row.operation);
     case StateValueRole:
         return static_cast<qint64>(row.state);
     case StateTextRole:
@@ -553,6 +616,7 @@ QHash<int, QByteArray> JobModel::roleNames() const {
     return {{JobIdRole, "jobId"},
             {TraceIdRole, "traceId"},
             {OperationTextRole, "operationText"},
+            {OperationValueRole, "operationValue"},
             {StateValueRole, "stateValue"},
             {StateTextRole, "stateText"},
             {StateColorRole, "stateColor"},
@@ -587,6 +651,9 @@ QString JobModel::operation_text(const std::int64_t operation) const {
     case 4:
         //% "Export"
         return qtTrId("aegra.job.operation.export");
+    case 5:
+        //% "Boot Check"
+        return qtTrId("aegra.job.operation.bootcheck");
     default:
         //% "Unknown"
         return qtTrId("aegra.common.unknown");
@@ -688,6 +755,15 @@ bool JobModel::is_active_state(const std::int64_t state) noexcept {
 }
 
 int JobModel::progress_percent(const JobRow& row) noexcept {
+    if (row.operation == kOperationBootCheck && row_is_active(row.state)) {
+        const auto started = row.started_utc_ms.value_or(row.created_utc_ms);
+        const auto elapsed = QDateTime::currentMSecsSinceEpoch() - started;
+        if (elapsed <= 0) {
+            return 0;
+        }
+        const auto percent = (elapsed * 95) / kBootCheckProgressBudgetMs;
+        return percent > 95 ? 95 : static_cast<int>(percent);
+    }
     return compute_progress_percent(row);
 }
 

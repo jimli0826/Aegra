@@ -35,7 +35,7 @@
     <Launch Condition="Privileged" Message="AegraImage requires administrator privileges to install." />
 
     <Feature Id="ProductFeature" Title="AegraImage" Level="1"
-             Description="Desktop, CLI, service, worker, WinPE executor, shell extension and runtime."
+             Description="Desktop, CLI, service, worker, BootCheck, WinPE executor, shell extension and runtime."
              ConfigurableDirectory="INSTALLFOLDER"
              AllowAdvertise="no"
              Display="expand">

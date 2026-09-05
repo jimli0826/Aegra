@@ -66,7 +66,11 @@ Rectangle {
         anchors.rightMargin: 4
         z: 3
         role: "close"
-        onClicked: root.quitRequested()
+        onClicked: {
+            var w = Window.window
+            if (w)
+                w.close()
+        }
     }
 
     ColumnLayout {

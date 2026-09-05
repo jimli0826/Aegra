@@ -208,8 +208,10 @@ base::Result<void> validate_volume_sources(const JobRequest& request) {
     if (!request.file_source_refs.empty() || request.file_restore_target) {
         return invalid("volume_set job cannot carry file payloads");
     }
-    if (!non_empty_refs(request.source_refs) ||
-        request.source_refs.size() > kMaximumFileSelections) {
+    const auto maximum_refs = request.operation == JobOperation::kVerify
+                                  ? kMaximumVerifyRecoveryPoints
+                                  : kMaximumFileSelections;
+    if (!non_empty_refs(request.source_refs) || request.source_refs.size() > maximum_refs) {
         return invalid("volume source_refs are required");
     }
     if (request.operation == JobOperation::kVerify) {
@@ -271,6 +273,64 @@ base::Result<void> validate_file_sources(const JobRequest& request) {
     return validate_file_restore_target(*request.file_restore_target);
 }
 
+base::Result<void> validate_verify_ids(const std::vector<std::string>& ids) {
+    if (ids.empty() || ids.size() > kMaximumVerifyRecoveryPoints) {
+        return invalid("verify recovery point ids are required");
+    }
+    std::set<std::string_view> seen;
+    for (const auto& id : ids) {
+        if (!base::is_canonical_uuid(id) || !seen.insert(id).second) {
+            return invalid("verify recovery point ids are invalid");
+        }
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void> validate_file_set_verify_lengths(const JobRequest& request) {
+    if (request.verify_chain_lengths.empty()) {
+        return request.verify_recovery_point_ids.size() == 1
+                   ? base::Result<void>::success()
+                   : invalid("file_set verify batch requires chain lengths");
+    }
+    if (request.verify_chain_lengths.size() != request.verify_recovery_point_ids.size()) {
+        return invalid("file_set verify chain lengths are invalid");
+    }
+    std::uint32_t maximum = 0;
+    for (const auto length : request.verify_chain_lengths) {
+        if (length == 0 || length > request.source_refs.size()) {
+            return invalid("file_set verify chain lengths are invalid");
+        }
+        maximum = (std::max)(maximum, length);
+    }
+    return maximum == request.source_refs.size()
+               ? base::Result<void>::success()
+               : invalid("file_set verify chain lengths are invalid");
+}
+
+base::Result<void> validate_verify_identity(const JobRequest& request) {
+    if (request.operation != JobOperation::kVerify) {
+        if (!request.verify_recovery_point_ids.empty() || !request.verify_chain_lengths.empty()) {
+            return invalid("verify identity fields require a verify operation");
+        }
+        return base::Result<void>::success();
+    }
+    auto ids = validate_verify_ids(request.verify_recovery_point_ids);
+    if (!ids) {
+        return ids;
+    }
+    if (request.credential_refs.size() != request.source_refs.size()) {
+        return invalid("verify credentials must match source_refs");
+    }
+    if (request.content_kind == ContentKind::kVolumeSet) {
+        if (!request.verify_chain_lengths.empty() ||
+            request.verify_recovery_point_ids.size() != request.source_refs.size()) {
+            return invalid("volume verify requires one archive per recovery point");
+        }
+        return base::Result<void>::success();
+    }
+    return validate_file_set_verify_lengths(request);
+}
+
 } // namespace
 
 base::Result<void> validate_job_request(const JobRequest& request) {
@@ -293,10 +353,13 @@ base::Result<void> validate_job_request(const JobRequest& request) {
     if (!backup) {
         return backup;
     }
-    if (request.content_kind == ContentKind::kVolumeSet) {
-        return validate_volume_sources(request);
+    auto sources = request.content_kind == ContentKind::kVolumeSet
+                       ? validate_volume_sources(request)
+                       : validate_file_sources(request);
+    if (!sources) {
+        return sources;
     }
-    return validate_file_sources(request);
+    return validate_verify_identity(request);
 }
 
 } // namespace aegra::contracts

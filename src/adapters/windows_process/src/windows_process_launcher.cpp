@@ -2,6 +2,9 @@
 
 #include <windows.h>
 
+#include <userenv.h>
+#include <wtsapi32.h>
+
 #include <algorithm>
 #include <atomic>
 #include <cwchar>
@@ -176,34 +179,26 @@ convert_environment_overrides(const std::vector<ports::ProcessEnvironmentVariabl
     return base::Result<std::vector<std::wstring>>::success(std::move(converted));
 }
 
-base::Result<std::vector<wchar_t>>
-build_environment_block(const std::vector<ports::ProcessEnvironmentVariable>& overrides) {
-    if (overrides.empty()) {
-        return base::Result<std::vector<wchar_t>>::success({});
-    }
-    auto converted = convert_environment_overrides(overrides);
-    if (!converted) {
-        return base::Result<std::vector<wchar_t>>::failure(converted.error());
-    }
-
-    EnvironmentStrings inherited;
-    if (inherited.get() == nullptr) {
-        return base::Result<std::vector<wchar_t>>::failure(
-            {base::ErrorCode::kInternal, "GetEnvironmentStringsW failed"});
-    }
+// Merges override entries onto a double-null-terminated base block, replacing
+// any same-named base entries, and returns a sorted double-null block.
+[[nodiscard]] std::vector<wchar_t>
+assemble_environment_block(const wchar_t* base_block, const std::vector<std::wstring>& converted) {
     std::vector<std::wstring> entries;
-    for (const wchar_t* cursor = inherited.get(); *cursor != L'\0';
-         cursor += std::wcslen(cursor) + 1) {
-        const std::wstring entry(cursor);
-        const bool replaced =
-            std::any_of(converted.value().begin(), converted.value().end(), [&](const auto& value) {
-                return environment_names_equal(environment_name(entry), environment_name(value));
-            });
-        if (!replaced) {
-            entries.push_back(entry);
+    if (base_block != nullptr) {
+        for (const wchar_t* cursor = base_block; *cursor != L'\0';
+             cursor += std::wcslen(cursor) + 1) {
+            const std::wstring entry(cursor);
+            const bool replaced =
+                std::any_of(converted.begin(), converted.end(), [&](const auto& value) {
+                    return environment_names_equal(environment_name(entry),
+                                                   environment_name(value));
+                });
+            if (!replaced) {
+                entries.push_back(entry);
+            }
         }
     }
-    entries.insert(entries.end(), converted.value().begin(), converted.value().end());
+    entries.insert(entries.end(), converted.begin(), converted.end());
     std::sort(entries.begin(), entries.end(), [](const auto& left, const auto& right) {
         return _wcsicmp(left.c_str(), right.c_str()) < 0;
     });
@@ -214,7 +209,108 @@ build_environment_block(const std::vector<ports::ProcessEnvironmentVariable>& ov
         block.push_back(L'\0');
     }
     block.push_back(L'\0');
-    return base::Result<std::vector<wchar_t>>::success(std::move(block));
+    return block;
+}
+
+// Empty result (with success) means "inherit the parent environment" (no
+// overrides): the caller passes a null environment to CreateProcess.
+base::Result<std::vector<wchar_t>>
+build_environment_block(const std::vector<ports::ProcessEnvironmentVariable>& overrides) {
+    if (overrides.empty()) {
+        return base::Result<std::vector<wchar_t>>::success({});
+    }
+    auto converted = convert_environment_overrides(overrides);
+    if (!converted) {
+        return base::Result<std::vector<wchar_t>>::failure(converted.error());
+    }
+    EnvironmentStrings inherited;
+    if (inherited.get() == nullptr) {
+        return base::Result<std::vector<wchar_t>>::failure(
+            {base::ErrorCode::kInternal, "GetEnvironmentStringsW failed"});
+    }
+    return base::Result<std::vector<wchar_t>>::success(
+        assemble_environment_block(inherited.get(), converted.value()));
+}
+
+// Always returns a complete block seeded from the target user's profile
+// environment (so %USERPROFILE% and friends resolve to that user), with
+// overrides merged on top.
+base::Result<std::vector<wchar_t>>
+build_user_environment_block(const HANDLE user_token,
+                             const std::vector<ports::ProcessEnvironmentVariable>& overrides) {
+    auto converted = convert_environment_overrides(overrides);
+    if (!converted) {
+        return base::Result<std::vector<wchar_t>>::failure(converted.error());
+    }
+    LPVOID raw = nullptr;
+    if (CreateEnvironmentBlock(&raw, user_token, FALSE) == FALSE || raw == nullptr) {
+        return base::Result<std::vector<wchar_t>>::failure(
+            {base::ErrorCode::kInternal, "CreateEnvironmentBlock failed"});
+    }
+    struct BlockGuard final {
+        LPVOID value;
+        ~BlockGuard() {
+            if (value != nullptr) {
+                DestroyEnvironmentBlock(value);
+            }
+        }
+    } guard{raw};
+    return base::Result<std::vector<wchar_t>>::success(
+        assemble_environment_block(static_cast<const wchar_t*>(raw), converted.value()));
+}
+
+[[nodiscard]] bool current_process_is_local_system() noexcept {
+    HANDLE raw = nullptr;
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw) == FALSE) {
+        return false;
+    }
+    UniqueHandle token(raw);
+    DWORD size = 0;
+    GetTokenInformation(token.get(), TokenUser, nullptr, 0, &size);
+    if (size == 0) {
+        return false;
+    }
+    std::vector<std::byte> buffer(size);
+    if (GetTokenInformation(token.get(), TokenUser, buffer.data(), size, &size) == FALSE) {
+        return false;
+    }
+    const auto* user = reinterpret_cast<const TOKEN_USER*>(buffer.data());
+    SID_IDENTIFIER_AUTHORITY authority = SECURITY_NT_AUTHORITY;
+    PSID system_sid = nullptr;
+    if (AllocateAndInitializeSid(&authority, 1, SECURITY_LOCAL_SYSTEM_RID, 0, 0, 0, 0, 0, 0, 0,
+                                 &system_sid) == FALSE) {
+        return false;
+    }
+    const bool is_system = EqualSid(user->User.Sid, system_sid) == TRUE;
+    FreeSid(system_sid);
+    return is_system;
+}
+
+// Primary token of the interactive user in the active console (or any active)
+// session, suitable for CreateProcessAsUser. Empty when no user is logged on.
+[[nodiscard]] UniqueHandle query_active_user_primary_token() noexcept {
+    HANDLE token = nullptr;
+    const DWORD console = WTSGetActiveConsoleSessionId();
+    if (console != 0xFFFFFFFFU && WTSQueryUserToken(console, &token) == TRUE) {
+        return UniqueHandle(token);
+    }
+    WTS_SESSION_INFOW* sessions = nullptr;
+    DWORD count = 0;
+    if (WTSEnumerateSessionsW(WTS_CURRENT_SERVER_HANDLE, 0, 1, &sessions, &count) == FALSE) {
+        return {};
+    }
+    UniqueHandle result;
+    for (DWORD index = 0; index < count; ++index) {
+        if (sessions[index].State != WTSActive) {
+            continue;
+        }
+        if (WTSQueryUserToken(sessions[index].SessionId, &token) == TRUE) {
+            result = UniqueHandle(token);
+            break;
+        }
+    }
+    WTSFreeMemory(sessions);
+    return result;
 }
 
 // Console tools emit the OEM code page when redirected to a file.
@@ -324,7 +420,18 @@ WindowsProcessLauncher::launch(const ports::ProcessLaunchRequest& request) {
     auto command = build_command_line(executable.value(), request.arguments);
     if (!command)
         return base::Result<ports::ProcessLaunchResult>::failure(command.error());
-    auto environment = build_environment_block(request.environment_overrides);
+
+    // Resolve the active-user launch only when the caller is LocalSystem and a
+    // user is logged on; otherwise fall back to a normal launch below.
+    UniqueHandle user_token;
+    if (request.run_as_active_user && current_process_is_local_system()) {
+        user_token = query_active_user_primary_token();
+    }
+    const bool use_as_user = static_cast<bool>(user_token);
+
+    auto environment =
+        use_as_user ? build_user_environment_block(user_token.get(), request.environment_overrides)
+                    : build_environment_block(request.environment_overrides);
     if (!environment) {
         return base::Result<ports::ProcessLaunchResult>::failure(environment.error());
     }
@@ -349,13 +456,43 @@ WindowsProcessLauncher::launch(const ports::ProcessLaunchRequest& request) {
 
     DWORD creation_flags = CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP;
     void* environment_data = nullptr;
-    if (!environment.value().empty()) {
+    // A user block is always complete and must be passed; the normal block is
+    // empty only when there are no overrides (inherit the parent environment).
+    if (use_as_user || !environment.value().empty()) {
         creation_flags |= CREATE_UNICODE_ENVIRONMENT;
         environment_data = environment.value().data();
     }
 
-    if (!CreateProcessW(executable.value().c_str(), command.value().data(), nullptr, nullptr,
-                        inherit_handles, creation_flags, environment_data, nullptr, &si, &pi)) {
+    BOOL created = FALSE;
+    if (use_as_user) {
+        // Run in the interactive window station/desktop so the child shares the
+        // logged-on user's session (and its default hypervisor registry).
+        wchar_t interactive_desktop[] = L"winsta0\\default";
+        si.lpDesktop = interactive_desktop;
+        created = CreateProcessAsUserW(user_token.get(), executable.value().c_str(),
+                                       command.value().data(), nullptr, nullptr, inherit_handles,
+                                       creation_flags, environment_data, nullptr, &si, &pi);
+        if (created == FALSE) {
+            // Privilege or session resolution failed: fall back to a normal
+            // launch under the caller's own token so BootCheck still runs.
+            si.lpDesktop = nullptr;
+            auto fallback_environment = build_environment_block(request.environment_overrides);
+            DWORD fallback_flags = CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP;
+            void* fallback_data = nullptr;
+            if (fallback_environment && !fallback_environment.value().empty()) {
+                fallback_flags |= CREATE_UNICODE_ENVIRONMENT;
+                fallback_data = fallback_environment.value().data();
+            }
+            created = CreateProcessW(executable.value().c_str(), command.value().data(), nullptr,
+                                     nullptr, inherit_handles, fallback_flags, fallback_data,
+                                     nullptr, &si, &pi);
+        }
+    } else {
+        created = CreateProcessW(executable.value().c_str(), command.value().data(), nullptr,
+                                 nullptr, inherit_handles, creation_flags, environment_data, nullptr,
+                                 &si, &pi);
+    }
+    if (created == FALSE) {
         return base::Result<ports::ProcessLaunchResult>::failure(
             base::Error{base::ErrorCode::kInternal, "CreateProcessW failed"});
     }

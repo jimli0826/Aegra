@@ -283,14 +283,15 @@ parse_repository_connection(const Json& payload) {
                 {"stored_bytes", progress.stored_bytes},
                 {"discovered_entries", progress.discovered_entries},
                 {"processed_entries", progress.processed_entries},
-                {"message_code", progress.message_code}};
+                {"message_code", progress.message_code},
+                {"recovery_point_id", progress.recovery_point_id}};
 }
 
 [[nodiscard]] contracts::TaskProgress parse_task_progress(const Json& payload) {
-    constexpr std::array<std::string_view, 10> keys{
-        "schema_version",    "job_id",          "trace_id",     "phase",
-        "logical_bytes",     "processed_bytes", "stored_bytes", "discovered_entries",
-        "processed_entries", "message_code"};
+    constexpr std::array<std::string_view, 11> keys{
+        "schema_version",     "job_id",          "trace_id",           "phase",
+        "logical_bytes",      "processed_bytes", "stored_bytes",       "discovered_entries",
+        "processed_entries",  "message_code",    "recovery_point_id"};
     if (!exact_keys(payload, keys)) {
         throw std::invalid_argument("task progress fields are invalid");
     }
@@ -306,6 +307,7 @@ parse_repository_connection(const Json& payload) {
     progress.discovered_entries = unsigned_value<std::uint64_t>(payload, "discovered_entries");
     progress.processed_entries = unsigned_value<std::uint64_t>(payload, "processed_entries");
     progress.message_code = payload.at("message_code").get<std::string>();
+    progress.recovery_point_id = payload.at("recovery_point_id").get<std::string>();
     return progress;
 }
 
@@ -638,6 +640,7 @@ parse_recovery_point_source_volume(const Json& payload) {
         selections.push_back(encode_selection_summary(item));
     }
     return Json{{"schedule_id", summary.schedule_id},
+                {"backup_set_uuid", summary.backup_set_uuid},
                 {"display_name", summary.display_name},
                 {"enabled", summary.enabled},
                 {"content_kind", static_cast<std::uint8_t>(summary.content_kind)},
@@ -661,7 +664,8 @@ parse_recovery_point_source_volume(const Json& payload) {
 }
 
 [[nodiscard]] contracts::ScheduleSummary parse_schedule(const Json& payload) {
-    constexpr std::array<std::string_view, 18> keys{"schedule_id",
+    constexpr std::array<std::string_view, 19> keys{"schedule_id",
+                                                    "backup_set_uuid",
                                                     "display_name",
                                                     "enabled",
                                                     "content_kind",
@@ -684,6 +688,7 @@ parse_recovery_point_source_volume(const Json& payload) {
     }
     contracts::ScheduleSummary summary;
     summary.schedule_id = payload.at("schedule_id").get<std::string>();
+    summary.backup_set_uuid = payload.at("backup_set_uuid").get<std::string>();
     summary.display_name = payload.at("display_name").get<std::string>();
     summary.enabled = payload.at("enabled").get<bool>();
     summary.content_kind =
@@ -1239,6 +1244,20 @@ Json encode_response_payload(const contracts::ServiceResponse& response) {
         return Json{{"job_retention_months", settings.job_retention_months},
                     {"updated_utc_ms", settings.updated_utc_ms}};
     }
+    case contracts::ServiceRequestKind::kGetBootCheckHypervisorStatus: {
+        const auto& report =
+            std::get<contracts::BootCheckHypervisorStatusReport>(response.payload);
+        Json items = Json::array();
+        for (const auto& status : report.hypervisors) {
+            items.push_back(Json{{"hypervisor", static_cast<std::uint8_t>(status.hypervisor)},
+                                 {"installed", status.installed},
+                                 {"probe_state", static_cast<std::uint8_t>(status.probe_state)},
+                                 {"available", status.available},
+                                 {"message_code", status.message_code},
+                                 {"checked_utc_ms", status.checked_utc_ms}});
+        }
+        return Json{{"hypervisors", std::move(items)}};
+    }
     default:
         throw std::invalid_argument("service query response kind is invalid");
     }
@@ -1392,6 +1411,32 @@ parse_response_payload(const contracts::ServiceResponseKind response_kind,
             unsigned_value<std::uint8_t>(payload, "job_retention_months");
         settings.updated_utc_ms = unsigned_value<std::uint64_t>(payload, "updated_utc_ms");
         return settings;
+    }
+    case contracts::ServiceRequestKind::kGetBootCheckHypervisorStatus: {
+        constexpr std::array<std::string_view, 1> keys{"hypervisors"};
+        if (!exact_keys(payload, keys) || !payload.at("hypervisors").is_array()) {
+            throw std::invalid_argument("boot check hypervisor status fields are invalid");
+        }
+        constexpr std::array<std::string_view, 6> item_keys{
+            "hypervisor", "installed", "probe_state", "available", "message_code",
+            "checked_utc_ms"};
+        contracts::BootCheckHypervisorStatusReport report;
+        for (const auto& item : payload.at("hypervisors")) {
+            if (!item.is_object() || !exact_keys(item, item_keys)) {
+                throw std::invalid_argument("boot check hypervisor status fields are invalid");
+            }
+            contracts::BootCheckHypervisorStatus status;
+            status.hypervisor = static_cast<contracts::BootCheckHypervisor>(
+                unsigned_value<std::uint8_t>(item, "hypervisor"));
+            status.installed = item.at("installed").get<bool>();
+            status.probe_state = static_cast<contracts::BootCheckProbeState>(
+                unsigned_value<std::uint8_t>(item, "probe_state"));
+            status.available = item.at("available").get<bool>();
+            status.message_code = item.at("message_code").get<std::string>();
+            status.checked_utc_ms = unsigned_value<std::uint64_t>(item, "checked_utc_ms");
+            report.hypervisors.push_back(std::move(status));
+        }
+        return report;
     }
     default:
         throw std::invalid_argument("service query response kind is invalid");

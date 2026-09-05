@@ -84,6 +84,16 @@ Session 在 `abort()` 或析构时关闭句柄并删除本次 partial。`complet
 FlushFileBuffers(partial) -> close -> MoveFileEx(partial, public-staging, WRITE_THROUGH)
 ```
 
+完成暂存后清理内部 partial 的空父目录；发布成功后清理公开 staging 的空父目录；Abort 删除 partial 后
+也尝试清理两侧空目录。清理在 Storage 独占锁内逐级校验路径与 reparse point，仅使用 `RemoveDirectoryW`
+删除空目录，遇到非空、占用或错误立即停止；保留 Repository 根、公开顶层目录及 `.aegra-internal/writes`。
+清理失败不改变已完成的发布结果。Session 创建和 `complete()` 从仓库根开始逐级创建、打开并持有
+不带 `FILE_SHARE_DELETE` 的目录句柄，直到文件创建或移动完成；该保护对同仓库的不同 Storage 实例同样
+生效。创建与打开之间遇到目录被清理时最多重试四次，每次检查取消，目录句柄拒绝 reparse point。
+Session 构造前使用 RAII 失败清理：先释放文件和目录句柄，再清理两侧空父目录；只删除本次确实创建的
+partial，不删除同名已有文件。父目录只创建了一部分时，跳过缺失后代并回收已创建的空祖先。
+本流程不扫描历史残留目录，也不删除未发布对象或崩溃遗留 partial。
+
 进程崩溃可能留下内部 partial，但它不会进入公开枚举，也不能被发布。孤立 partial 的安全扫描和回收属于
 后续 Repository Maintenance；当前实现不得按时间猜测并删除可能仍在使用的写会话。
 

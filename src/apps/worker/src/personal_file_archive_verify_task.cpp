@@ -8,11 +8,13 @@
 #include "aegra/contracts/progress.h"
 #include "aegra/ports/file_recovery_point.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -61,6 +63,7 @@ const char* message_code_for(const base::ErrorCode code) noexcept {
     case base::ErrorCode::kUnauthorized:
         return "verify.credential_unavailable";
     case base::ErrorCode::kNotFound:
+        return "verify.archive_missing";
     case base::ErrorCode::kIoFailure:
         return "verify.source_unavailable";
     case base::ErrorCode::kCorruptData:
@@ -81,7 +84,10 @@ const char* message_code_for(const base::ErrorCode code) noexcept {
     if (code == base::ErrorCode::kCorruptData) {
         return "Archive authentication failed; re-backup or pick another recovery point";
     }
-    if (code == base::ErrorCode::kNotFound || code == base::ErrorCode::kIoFailure) {
+    if (code == base::ErrorCode::kNotFound) {
+        return "Archive file does not exist";
+    }
+    if (code == base::ErrorCode::kIoFailure) {
         return "Check archive path, repository connectivity, and file permissions";
     }
     if (code == base::ErrorCode::kCancelled) {
@@ -125,14 +131,10 @@ base::Result<contracts::TaskResult> validated_result(contracts::TaskResult resul
     return base::Result<contracts::TaskResult>::success(std::move(result));
 }
 
-void publish_progress(const contracts::JobRequest& job, ports::IProgressSink* progress,
-                      const contracts::TaskPhase phase, const std::uint64_t verified_bytes,
-                      const std::uint64_t logical_bytes, const std::string& message_code) {
-    if (progress == nullptr) {
-        return;
+void publish_progress(ports::IProgressSink* progress, contracts::TaskProgress event) {
+    if (progress != nullptr) {
+        progress->publish(event);
     }
-    progress->publish(contracts::make_byte_progress(job.job_id, job.trace_id, phase, logical_bytes,
-                                                    verified_bytes, verified_bytes, message_code));
 }
 
 class EmptyPasswordSecret final : public ports::IResolvedSecret {
@@ -189,6 +191,7 @@ void log_verify_request(WorkerTaskLog* log, const contracts::JobRequest& job,
     log->section("Request");
     log->field("content_kind", "file_set");
     log->field_u64("layers", job.source_refs.size());
+    log->field_u64("recovery_point_count", job.verify_recovery_point_ids.size());
     log->field_bytes("memory_budget", options.memory_budget_bytes);
     log->field("password", job.credential_refs.front().value.empty() ? "empty" : "present");
 }
@@ -245,6 +248,66 @@ failed_verify_result(const contracts::JobRequest& job, const base::Error& error,
     return result;
 }
 
+[[nodiscard]] std::vector<std::uint32_t> file_set_item_lengths(const contracts::JobRequest& job) {
+    if (!job.verify_chain_lengths.empty()) {
+        return job.verify_chain_lengths;
+    }
+    return {static_cast<std::uint32_t>(job.source_refs.size())};
+}
+
+[[nodiscard]] base::Result<std::unique_ptr<adapters::personal_archive::PersonalFileArchiveChainReader>>
+open_file_set_prefix(const contracts::JobRequest& job,
+                     const std::vector<std::unique_ptr<ports::IResolvedSecret>>& secrets,
+                     const WindowsPersonalBackupTaskOptions& options, const std::uint32_t length) {
+    adapters::personal_archive::ArchiveChainOpenRequest open_request;
+    open_request.maximum_chain_depth = contracts::kMaximumFileChainDepth;
+    open_request.layers.reserve(length);
+    for (std::uint32_t index = 0; index < length; ++index) {
+        adapters::personal_archive::ArchiveOpenRequest layer;
+        layer.source = path_from_utf8(job.source_refs[index]);
+        layer.password = secrets[index]->view();
+        layer.maximum_chunk_payload_size = options.memory_budget_bytes;
+        layer.maximum_chunk_logical_size = options.memory_budget_bytes;
+        open_request.layers.push_back(std::move(layer));
+    }
+    return adapters::personal_archive::PersonalFileArchiveChainReader::open(open_request);
+}
+
+[[nodiscard]] base::Result<adapters::personal_archive::FileChainVerifyResult>
+add_file_set_totals(adapters::personal_archive::FileChainVerifyResult total,
+                    const adapters::personal_archive::FileChainVerifyResult& item) {
+    const auto max = (std::numeric_limits<std::uint64_t>::max)();
+    if (item.local_payload_bytes > max - total.local_payload_bytes ||
+        item.tip_resolved_bytes > max - total.tip_resolved_bytes ||
+        item.tip_entry_count > max - total.tip_entry_count ||
+        item.tip_stream_count > max - total.tip_stream_count) {
+        return base::Result<adapters::personal_archive::FileChainVerifyResult>::failure(
+            {base::ErrorCode::kInvalidArgument, "verify totals overflow"});
+    }
+    total.layer_count = (std::max)(total.layer_count, item.layer_count);
+    total.tip_entry_count += item.tip_entry_count;
+    total.tip_stream_count += item.tip_stream_count;
+    total.local_payload_bytes += item.local_payload_bytes;
+    total.tip_resolved_bytes += item.tip_resolved_bytes;
+    return base::Result<adapters::personal_archive::FileChainVerifyResult>::success(total);
+}
+
+[[nodiscard]] base::Result<adapters::personal_archive::FileChainVerifyResult>
+verify_file_set_item(const contracts::JobRequest& job,
+                     const std::vector<std::unique_ptr<ports::IResolvedSecret>>& secrets,
+                     const WindowsPersonalBackupTaskOptions& options,
+                     const std::uint32_t length, const base::CancellationToken& cancellation) {
+    auto chain = open_file_set_prefix(job, secrets, options, length);
+    if (!chain) {
+        return base::Result<adapters::personal_archive::FileChainVerifyResult>::failure(
+            chain.error());
+    }
+    const auto budget = static_cast<std::size_t>(
+        (std::min)(options.memory_budget_bytes,
+                   static_cast<std::uint64_t>((std::numeric_limits<std::size_t>::max)())));
+    return chain.value()->verify_recoverability(budget == 0 ? 1 : budget, cancellation);
+}
+
 [[nodiscard]] base::Result<contracts::TaskResult> run_file_set_verify(
     const contracts::JobRequest& job, const WindowsPersonalBackupTaskOptions& options,
     const WindowsPersonalBackupTaskContext& context, const base::CancellationToken& cancellation) {
@@ -258,8 +321,11 @@ failed_verify_result(const contracts::JobRequest& job, const base::Error& error,
                                 "file_set verify cancelled before start"};
         return failed_verify_result(job, error, task_log.get(), started);
     }
-    publish_progress(job, context.progress, contracts::TaskPhase::kPreparing, 0, 0,
-                     "verify.preparing");
+    auto preparing = contracts::make_byte_progress(job.job_id, job.trace_id,
+                                                   contracts::TaskPhase::kPreparing, 0, 0, 0,
+                                                   "verify.preparing");
+    preparing.recovery_point_id = job.verify_recovery_point_ids.front();
+    publish_progress(context.progress, std::move(preparing));
 
     std::vector<std::unique_ptr<ports::IResolvedSecret>> secrets;
     {
@@ -274,55 +340,54 @@ failed_verify_result(const contracts::JobRequest& job, const base::Error& error,
         secrets = std::move(resolved).value();
     }
 
-    std::unique_ptr<adapters::personal_archive::PersonalFileArchiveChainReader> chain;
-    {
-        ScopedStage stage(task_log.get(), "open_chain");
-        adapters::personal_archive::ArchiveChainOpenRequest open_request;
-        open_request.maximum_chain_depth = contracts::kMaximumFileChainDepth;
-        open_request.layers.reserve(job.source_refs.size());
-        for (std::size_t index = 0; index < job.source_refs.size(); ++index) {
-            adapters::personal_archive::ArchiveOpenRequest layer;
-            layer.source = path_from_utf8(job.source_refs[index]);
-            layer.password = secrets[index]->view();
-            layer.maximum_chunk_payload_size = options.memory_budget_bytes;
-            layer.maximum_chunk_logical_size = options.memory_budget_bytes;
-            open_request.layers.push_back(std::move(layer));
-        }
-        auto opened =
-            adapters::personal_archive::PersonalFileArchiveChainReader::open(open_request);
-        if (!opened) {
-            stage.fail(opened.error(), "PersonalFileArchiveChainReader::open",
-                       verify_hint_for(opened.error().code, opened.error().message));
-            return failed_verify_result(job, opened.error(), task_log.get(), started);
-        }
-        chain = std::move(opened).value();
-        stage.note_u64("layers", chain->layer_count());
-        stage.note_u64("entry_count", chain->entry_count());
-        stage.note_u64("stream_count", chain->stream_count());
-        stage.note("index_generation", chain->index_root_digest());
-    }
-
-    const auto budget = static_cast<std::size_t>(
-        (std::min)(options.memory_budget_bytes,
-                   static_cast<std::uint64_t>((std::numeric_limits<std::size_t>::max)())));
+    const auto lengths = file_set_item_lengths(job);
     adapters::personal_archive::FileChainVerifyResult totals;
-    {
+    std::optional<base::Error> first_error;
+    std::string first_failed_id;
+    for (std::size_t index = 0; index < lengths.size(); ++index) {
+        if (cancellation.stop_requested()) {
+            const base::Error error{base::ErrorCode::kCancelled, "file_set verify cancelled"};
+            return failed_verify_result(job, error, task_log.get(), started);
+        }
+        const auto& recovery_point_id = job.verify_recovery_point_ids[index];
+        auto reading = contracts::make_byte_progress(job.job_id, job.trace_id,
+                                                     contracts::TaskPhase::kReading, 0, 0, 0,
+                                                     "verify.reading");
+        reading.recovery_point_id = recovery_point_id;
+        publish_progress(context.progress, std::move(reading));
         ScopedStage stage(task_log.get(), "verify_recoverability");
-        publish_progress(job, context.progress, contracts::TaskPhase::kReading, 0, 0,
-                         "verify.reading");
-        auto verified = chain->verify_recoverability(budget == 0 ? 1 : budget, cancellation);
+        auto verified =
+            verify_file_set_item(job, secrets, options, lengths[index], cancellation);
         if (!verified) {
             stage.fail(verified.error(), "verify_recoverability",
                        verify_hint_for(verified.error().code, verified.error().message));
-            return failed_verify_result(job, verified.error(), task_log.get(), started);
+            if (!first_error) {
+                first_error = verified.error();
+                first_failed_id = recovery_point_id;
+            }
+            continue;
         }
-        totals = std::move(verified).value();
-        stage.note_u64("layers", totals.layer_count);
-        stage.note_bytes("local_payload_bytes", totals.local_payload_bytes);
-        stage.note_bytes("tip_resolved_bytes", totals.tip_resolved_bytes);
+        stage.note("recovery_point_id", recovery_point_id);
+        stage.note_u64("layers", verified.value().layer_count);
+        auto added = add_file_set_totals(totals, verified.value());
+        if (!added) {
+            return failed_verify_result(job, added.error(), task_log.get(), started);
+        }
+        totals = std::move(added).value();
     }
-    publish_progress(job, context.progress, contracts::TaskPhase::kCompleted,
-                     totals.tip_resolved_bytes, totals.tip_resolved_bytes, "verify.completed");
+    if (first_error) {
+        auto failed_progress = contracts::make_byte_progress(
+            job.job_id, job.trace_id, contracts::TaskPhase::kReading, 0, 0, 0,
+            message_code_for(first_error->code));
+        failed_progress.recovery_point_id = first_failed_id;
+        publish_progress(context.progress, std::move(failed_progress));
+        return failed_verify_result(job, *first_error, task_log.get(), started);
+    }
+    auto completed = contracts::make_byte_progress(
+        job.job_id, job.trace_id, contracts::TaskPhase::kCompleted, totals.tip_resolved_bytes,
+        totals.tip_resolved_bytes, totals.tip_resolved_bytes, "verify.completed");
+    completed.recovery_point_id = job.verify_recovery_point_ids.back();
+    publish_progress(context.progress, std::move(completed));
     auto result = validated_result(completed_result(job, totals));
     if (result) {
         log_verify_success(task_log.get(), result.value(), totals, started);

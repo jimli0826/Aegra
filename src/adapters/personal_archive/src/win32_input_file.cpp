@@ -39,6 +39,11 @@ base::Result<void> Win32InputFile::open(const std::filesystem::path& path) {
                             OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN,
                             nullptr);
     if (handle_ == INVALID_HANDLE_VALUE) {
+        const auto winerr = ::GetLastError();
+        if (winerr == ERROR_FILE_NOT_FOUND || winerr == ERROR_PATH_NOT_FOUND) {
+            return base::Result<void>::failure(
+                {base::ErrorCode::kNotFound, "archive file does not exist"});
+        }
         return base::Result<void>::failure(io_error("failed to open archive input"));
     }
     position_ = 0;

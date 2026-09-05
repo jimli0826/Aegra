@@ -1785,7 +1785,7 @@
     </message>
     <message id="aegra.volume.efi_system">
         <source>EFI System Partition</source>
-        <translation>EFI 系统分区</translation>
+        <translation>ESP</translation>
     </message>
     <message id="aegra.volume.recovery">
         <source>Recovery Partition</source>
@@ -2264,8 +2264,8 @@
         <translation>删除恢复点</translation>
     </message>
     <message id="aegra.repository.delete.plan_message">
-        <source>The service planned to delete %1 recovery point(s) in this chain. Other recovery points are kept. This cannot be undone.</source>
-        <translation>服务计划删除此链中的 %1 个恢复点。其他恢复点将保留。此操作无法撤销。</translation>
+        <source>The service planned to delete %1 recovery point(s). Other recovery points are kept. This cannot be undone.</source>
+        <translation>服务计划删除 %1 个恢复点。其他恢复点将保留。此操作无法撤销。</translation>
     </message>
     <message id="aegra.repository.delete.retained_hint">
         <source>Approximately %1 other recovery point(s) currently listed will remain.</source>
@@ -2989,6 +2989,182 @@ for critical volumes now</source>
     <message id="aegra.job.operation.bootcheck">
         <source>Boot Check</source>
         <translation>启动验证</translation>
+    </message>
+    <message id="aegra.shell.tray.open">
+        <source>Open Aegra</source>
+        <translation>打开 Aegra</translation>
+    </message>
+    <message id="aegra.settings.close_action">
+        <source>Close button</source>
+        <translation>关闭按钮</translation>
+    </message>
+    <message id="aegra.settings.close_action.hide">
+        <source>Hide to tray</source>
+        <translation>隐藏到托盘</translation>
+    </message>
+    <message id="aegra.settings.close_action.quit">
+        <source>Exit</source>
+        <translation>退出程序</translation>
+    </message>
+    <message id="aegra.error.bootcheck.provider_unavailable">
+        <source>The selected hypervisor is not available for boot check</source>
+        <translation>所选虚拟化平台不可用，无法执行启动检查</translation>
+    </message>
+    <message id="aegra.error.bootcheck.virtualbox_hyperv_conflict">
+        <source>VirtualBox cannot start VMs because Hyper-V is using the CPU's virtualization. Enable the Windows feature 'Windows Hypervisor Platform', or switch boot check to Hyper-V.</source>
+        <translation>Hyper-V 已占用 CPU 虚拟化功能，VirtualBox 无法启动虚拟机。请启用 Windows 功能“Windows 虚拟机监控程序平台”，或将启动检查切换为 Hyper-V。</translation>
+    </message>
+    <message id="aegra.error.bootcheck.virtualbox_no_hardware_virt">
+        <source>Hardware virtualization (VT-x/AMD-V) is not available. Enable it in the BIOS/UEFI firmware settings.</source>
+        <translation>硬件虚拟化（VT-x/AMD-V）不可用。请在 BIOS/UEFI 固件设置中启用。</translation>
+    </message>
+    <message id="aegra.backup.post.hypervisor_refresh">
+        <source>Re-check hypervisor availability</source>
+        <translation>重新检测虚拟化平台可用性</translation>
+    </message>
+    <message id="aegra.backup.post.hypervisor_checking">
+        <source>Checking hypervisor availability...</source>
+        <translation>正在检测虚拟化平台可用性...</translation>
+    </message>
+    <message id="aegra.backup.post.hypervisor_blocks_save">
+        <source>The selected hypervisor is unavailable. Fix it, choose another, or turn off boot check to continue.</source>
+        <translation>所选虚拟化平台不可用。请修复、改选其他平台，或关闭启动检查后再继续。</translation>
+    </message>
+    <message id="aegra.repository.delete.selected_count">
+        <source>%1 selected</source>
+        <translation>已选择 %1 项</translation>
+    </message>
+    <message id="aegra.repository.backup_set">
+        <source>Backup set %1</source>
+        <translation>备份集 %1</translation>
+    </message>
+    <message id="aegra.repository.backup_set.summary">
+        <source>%1 recovery points · latest %2</source>
+        <translation>%1 个恢复点 · 最近 %2</translation>
+    </message>
+    <message id="aegra.repository.content.volume_set">
+        <source>Volume set</source>
+        <translation>卷集</translation>
+    </message>
+    <message id="aegra.repository.content.file_set">
+        <source>File set</source>
+        <translation>文件集</translation>
+    </message>
+    <message id="aegra.repository.column.image_size">
+        <source>Image size</source>
+        <translation>镜像大小</translation>
+    </message>
+    <message id="aegra.repository.column.backup_content">
+        <source>Backup content</source>
+        <translation>备份内容</translation>
+    </message>
+    <message id="aegra.repository.point.title">
+        <source>Recovery point %1</source>
+        <translation>恢复点 %1</translation>
+    </message>
+    <message id="aegra.repository.point.latest">
+        <source>Latest</source>
+        <translation>最新</translation>
+    </message>
+    <message id="aegra.repository.point.baseline">
+        <source>Baseline backup</source>
+        <translation>基准备份</translation>
+    </message>
+    <message id="aegra.repository.point.parent_unavailable">
+        <source>Parent recovery point unavailable</source>
+        <translation>父恢复点不可用</translation>
+    </message>
+    <message id="aegra.repository.point.based_on">
+        <source>Based on: %1 · %2</source>
+        <translation>基于：%1 · %2</translation>
+    </message>
+    <message id="aegra.repository.point.technical">
+        <source>Technical information · Recovery point ID</source>
+        <translation>技术信息 · 恢复点 ID</translation>
+    </message>
+    <message id="aegra.repository.point.copy_id">
+        <source>Copy ID</source>
+        <translation>复制 ID</translation>
+    </message>
+    <message id="aegra.common.close">
+        <source>Close</source>
+        <translation>关闭</translation>
+    </message>
+    <message id="aegra.repository.point.sources">
+        <source>%1 sources</source>
+        <translation>%1 个备份源</translation>
+    </message>
+    <message id="aegra.repository.verify.submitted">
+        <source>Verification jobs submitted. See Tasks and Event Log for results.</source>
+        <translation>校验任务已提交，请在任务和事件日志中查看结果。</translation>
+    </message>
+    <message id="aegra.repository.verify.submission_failed">
+        <source>Verification submission stopped. Some jobs may already be submitted; check Tasks before retrying.</source>
+        <translation>校验提交已停止，部分任务可能已提交；重试前请检查任务列表。</translation>
+    </message>
+    <message id="aegra.repository.column.rp_status">
+        <source>Status</source>
+        <translation>状态</translation>
+    </message>
+    <message id="aegra.repository.verify.status.queued">
+        <source>Queued</source>
+        <translation>排队</translation>
+    </message>
+    <message id="aegra.repository.verify.status.running">
+        <source>Verifying</source>
+        <translation>校验中</translation>
+    </message>
+    <message id="aegra.repository.verify.status.succeeded">
+        <source>Verified</source>
+        <translation>已校验</translation>
+    </message>
+    <message id="aegra.repository.verify.status.failed">
+        <source>Failed</source>
+        <translation>失败</translation>
+    </message>
+    <message id="aegra.repository.verify.status.cancelled">
+        <source>Cancelled</source>
+        <translation>已取消</translation>
+    </message>
+    <message id="aegra.repository.verify.finished">
+        <source>Verification completed.</source>
+        <translation>校验已完成。</translation>
+    </message>
+    <message id="aegra.repository.verify.failed">
+        <source>Verification failed.</source>
+        <translation>校验失败。</translation>
+    </message>
+    <message id="aegra.repository.verify.cancelled">
+        <source>Verification cancelled.</source>
+        <translation>校验已取消。</translation>
+    </message>
+    <message id="aegra.error.verify.archive_missing">
+        <source>Archive file does not exist</source>
+        <translation>镜像文件不存在</translation>
+    </message>
+    <message id="aegra.error.verify.source_unavailable">
+        <source>Archive could not be opened. Check the path, repository connection, and file permissions.</source>
+        <translation>无法打开镜像文件。请检查路径、Repository 连接和文件权限。</translation>
+    </message>
+    <message id="aegra.error.verify.corrupt">
+        <source>Archive authentication failed</source>
+        <translation>镜像认证失败</translation>
+    </message>
+    <message id="aegra.error.verify.credential_unavailable">
+        <source>Archive password is unavailable</source>
+        <translation>镜像密码不可用</translation>
+    </message>
+    <message id="aegra.error.verify.cancelled">
+        <source>Verification was cancelled</source>
+        <translation>校验已取消</translation>
+    </message>
+    <message id="aegra.error.verify.failed">
+        <source>Verification failed</source>
+        <translation>校验失败</translation>
+    </message>
+    <message id="aegra.error.verify.invalid_request">
+        <source>Verification request is invalid</source>
+        <translation>校验请求无效</translation>
     </message>
 </context>
 </TS>

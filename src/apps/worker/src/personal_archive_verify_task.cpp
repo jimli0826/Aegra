@@ -6,10 +6,14 @@
 #include "aegra/base/error.h"
 #include "aegra/contracts/progress.h"
 #include "aegra/pipeline/verify_pipeline.h"
+#include "aegra/ports/progress.h"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -28,9 +32,12 @@ base::Result<void> validate_task(const contracts::JobRequest& job,
     if (!valid_job) {
         return valid_job;
     }
-    if (job.operation != contracts::JobOperation::kVerify || job.source_refs.size() != 1 ||
-        !job.target_ref.empty() || job.credential_refs.size() != 1) {
-        return invalid("personal verify task requires one source, no target and one credential");
+    if (job.operation != contracts::JobOperation::kVerify || job.source_refs.empty() ||
+        job.source_refs.size() > contracts::kMaximumVerifyRecoveryPoints ||
+        !job.target_ref.empty() || job.credential_refs.size() != job.source_refs.size() ||
+        job.verify_recovery_point_ids.size() != job.source_refs.size()) {
+        return invalid(
+            "personal verify task requires matching sources, credentials and recovery point ids");
     }
     if (options.memory_budget_bytes == 0) {
         return invalid("personal verify task memory budget is invalid");
@@ -54,6 +61,7 @@ const char* message_code_for(const base::ErrorCode code) noexcept {
     case base::ErrorCode::kUnauthorized:
         return "verify.credential_unavailable";
     case base::ErrorCode::kNotFound:
+        return "verify.archive_missing";
     case base::ErrorCode::kIoFailure:
         return "verify.source_unavailable";
     case base::ErrorCode::kCorruptData:
@@ -74,7 +82,10 @@ const char* message_code_for(const base::ErrorCode code) noexcept {
     if (code == base::ErrorCode::kCorruptData) {
         return "Archive authentication failed; re-backup or pick another recovery point";
     }
-    if (code == base::ErrorCode::kNotFound || code == base::ErrorCode::kIoFailure) {
+    if (code == base::ErrorCode::kNotFound) {
+        return "Archive file does not exist";
+    }
+    if (code == base::ErrorCode::kIoFailure) {
         return "Check archive path, repository connectivity, and file permissions";
     }
     if (code == base::ErrorCode::kCancelled) {
@@ -144,12 +155,23 @@ resolve_verify_secret(const contracts::SecretRef& credential,
     return resolved;
 }
 
-void publish_preparing(const contracts::JobRequest& job, ports::IProgressSink* progress) {
-    if (progress != nullptr) {
-        progress->publish(contracts::make_byte_progress(job.job_id, job.trace_id,
-                                                        contracts::TaskPhase::kPreparing, 0, 0, 0,
-                                                        "verify.preparing"));
+void publish_with_recovery_point(ports::IProgressSink* progress, contracts::TaskProgress event,
+                                 std::string recovery_point_id) {
+    if (progress == nullptr) {
+        return;
     }
+    event.recovery_point_id = std::move(recovery_point_id);
+    progress->publish(event);
+}
+
+void publish_preparing(const contracts::JobRequest& job, ports::IProgressSink* progress) {
+    const auto current =
+        job.verify_recovery_point_ids.empty() ? std::string{} : job.verify_recovery_point_ids.front();
+    publish_with_recovery_point(
+        progress,
+        contracts::make_byte_progress(job.job_id, job.trace_id, contracts::TaskPhase::kPreparing, 0,
+                                      0, 0, "verify.preparing"),
+        current);
 }
 
 void log_verify_request(WorkerTaskLog* log, const contracts::JobRequest& job,
@@ -163,6 +185,7 @@ void log_verify_request(WorkerTaskLog* log, const contracts::JobRequest& job,
     log->field("operation", "verify");
 
     log->section("Request");
+    log->field_u64("recovery_point_count", job.source_refs.size());
     log->field("source", job.source_refs.front());
     log->field_bytes("memory_budget", options.memory_budget_bytes);
     log->field("password", job.credential_refs.front().value.empty() ? "empty" : "present");
@@ -202,6 +225,110 @@ void log_verify_result(WorkerTaskLog* log, const contracts::TaskResult& result,
     log->field("elapsed", format_duration_ms(elapsed));
 }
 
+[[nodiscard]] base::Result<pipeline::VerifySummary>
+add_verify_summary(pipeline::VerifySummary total, const pipeline::VerifySummary& item) {
+    const auto max = (std::numeric_limits<std::uint64_t>::max)();
+    if (item.verified_bytes > max - total.verified_bytes ||
+        item.chunk_count > max - total.chunk_count) {
+        return base::Result<pipeline::VerifySummary>::failure(
+            {base::ErrorCode::kInvalidArgument, "verify totals overflow"});
+    }
+    // Same backup set shares one volume logical size; summing it N times is not capacity.
+    total.logical_bytes = (std::max)(total.logical_bytes, item.logical_bytes);
+    total.verified_bytes += item.verified_bytes;
+    total.chunk_count += item.chunk_count;
+    return base::Result<pipeline::VerifySummary>::success(total);
+}
+
+class StampedProgressSink final : public ports::IProgressSink {
+  public:
+    StampedProgressSink(ports::IProgressSink* inner, std::string recovery_point_id)
+        : inner_(inner), recovery_point_id_(std::move(recovery_point_id)) {}
+
+    void publish(const contracts::TaskProgress& progress) noexcept override {
+        if (inner_ == nullptr) {
+            return;
+        }
+        auto stamped = progress;
+        stamped.recovery_point_id = recovery_point_id_;
+        inner_->publish(stamped);
+    }
+
+  private:
+    ports::IProgressSink* inner_{nullptr};
+    std::string recovery_point_id_;
+};
+
+struct VolumeVerifyCall final {
+    const contracts::JobRequest* job{nullptr};
+    const WindowsPersonalBackupTaskOptions* options{nullptr};
+    const WindowsPersonalBackupTaskContext* context{nullptr};
+    IPersonalArchiveVerifyTaskBackend* backend{nullptr};
+};
+
+[[nodiscard]] base::Result<pipeline::VerifySummary>
+verify_volume_item(const VolumeVerifyCall& call, const std::size_t index,
+                   const base::CancellationToken& cancellation) {
+    const auto& job = *call.job;
+    const auto& recovery_point_id = job.verify_recovery_point_ids[index];
+    if (auto* log = WorkerTaskLog::active()) {
+        log->section("RecoveryPoint");
+        log->field_u64("index", index + 1);
+        log->field_u64("count", job.source_refs.size());
+        log->field("recovery_point_id", recovery_point_id);
+        log->field("source", job.source_refs[index]);
+    }
+    publish_with_recovery_point(
+        call.context->progress,
+        contracts::make_byte_progress(job.job_id, job.trace_id, contracts::TaskPhase::kReading, 0, 0,
+                                      0, "verify.reading"),
+        recovery_point_id);
+    auto resolved =
+        resolve_verify_secret(job.credential_refs[index], call.context->credentials, cancellation);
+    if (!resolved) {
+        return base::Result<pipeline::VerifySummary>::failure(resolved.error());
+    }
+    StampedProgressSink stamped(call.context->progress, recovery_point_id);
+    return call.backend->run(path_from_utf8(job.source_refs[index]), resolved.value()->view(),
+                            {job.job_id, job.trace_id}, *call.options, cancellation, &stamped);
+}
+
+[[nodiscard]] base::Result<pipeline::VerifySummary>
+verify_volume_batch(const VolumeVerifyCall& call, const base::CancellationToken& cancellation) {
+    pipeline::VerifySummary totals;
+    std::optional<base::Error> first_error;
+    std::string first_failed_id;
+    for (std::size_t index = 0; index < call.job->source_refs.size(); ++index) {
+        if (cancellation.stop_requested()) {
+            return base::Result<pipeline::VerifySummary>::failure(
+                {base::ErrorCode::kCancelled, "verify cancelled"});
+        }
+        auto verified = verify_volume_item(call, index, cancellation);
+        if (!verified) {
+            if (!first_error) {
+                first_error = verified.error();
+                first_failed_id = call.job->verify_recovery_point_ids[index];
+            }
+            continue;
+        }
+        auto added = add_verify_summary(totals, verified.value());
+        if (!added) {
+            return added;
+        }
+        totals = std::move(added).value();
+    }
+    if (first_error) {
+        publish_with_recovery_point(
+            call.context->progress,
+            contracts::make_byte_progress(call.job->job_id, call.job->trace_id,
+                                          contracts::TaskPhase::kReading, 0, 0, 0,
+                                          message_code_for(first_error->code)),
+            first_failed_id);
+        return base::Result<pipeline::VerifySummary>::failure(*first_error);
+    }
+    return base::Result<pipeline::VerifySummary>::success(totals);
+}
+
 base::Result<contracts::TaskResult>
 run_accepted_task(const contracts::JobRequest& job,
                   const WindowsPersonalBackupTaskOptions& options,
@@ -224,26 +351,8 @@ run_accepted_task(const contracts::JobRequest& job,
         return result;
     }
 
-    std::unique_ptr<ports::IResolvedSecret> secret;
-    {
-        ScopedStage stage(task_log.get(), "resolve_credentials");
-        auto resolved =
-            resolve_verify_secret(job.credential_refs.front(), context.credentials, cancellation);
-        if (!resolved) {
-            stage.fail(resolved.error(), "resolve_secret",
-                       verify_hint_for(resolved.error().code, resolved.error().message));
-            auto result = validated_result(failed_result(job, resolved.error().code));
-            if (result) {
-                log_verify_result(task_log.get(), result.value(), &resolved.error(), started);
-            }
-            return result;
-        }
-        secret = std::move(resolved).value();
-        stage.note("password", secret->view().empty() ? "empty" : "present");
-    }
-
-    auto verified = backend.run(path_from_utf8(job.source_refs.front()), secret->view(),
-                                {job.job_id, job.trace_id}, options, cancellation, context.progress);
+    const VolumeVerifyCall call{&job, &options, &context, &backend};
+    auto verified = verify_volume_batch(call, cancellation);
     if (!verified) {
         auto result = validated_result(failed_result(job, verified.error().code));
         if (result) {
@@ -251,7 +360,8 @@ run_accepted_task(const contracts::JobRequest& job,
         }
         return result;
     }
-    auto completed = validated_result(completed_result(job, verified.value()));
+    const auto& totals = verified.value();
+    auto completed = validated_result(completed_result(job, totals));
     if (completed) {
         log_verify_result(task_log.get(), completed.value(), nullptr, started);
     }

@@ -14,10 +14,13 @@
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <type_traits>
+#include <vector>
 
 namespace {
 
@@ -66,6 +69,37 @@ std::wstring data_directory() {
         return program_data + L"\\Aegra";
     }
     return {};
+}
+
+/// True when this process runs as LocalSystem. The Service launches BootCheck
+/// under the logged-on user's token when one exists, so a non-System token here
+/// means "user-visible run": the VirtualBox job VM should land in the user's own
+/// default registry rather than a per-job isolated one.
+bool current_process_is_local_system() {
+    HANDLE raw = nullptr;
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw) == FALSE) {
+        return true; // Fail safe: assume System, keep the isolated registry.
+    }
+    std::unique_ptr<std::remove_pointer_t<HANDLE>, decltype(&CloseHandle)> token(raw, &CloseHandle);
+    DWORD size = 0;
+    GetTokenInformation(token.get(), TokenUser, nullptr, 0, &size);
+    if (size == 0) {
+        return true;
+    }
+    std::vector<std::byte> buffer(size);
+    if (GetTokenInformation(token.get(), TokenUser, buffer.data(), size, &size) == FALSE) {
+        return true;
+    }
+    const auto* user = reinterpret_cast<const TOKEN_USER*>(buffer.data());
+    SID_IDENTIFIER_AUTHORITY authority = SECURITY_NT_AUTHORITY;
+    PSID system_sid = nullptr;
+    if (AllocateAndInitializeSid(&authority, 1, SECURITY_LOCAL_SYSTEM_RID, 0, 0, 0, 0, 0, 0, 0,
+                                 &system_sid) == FALSE) {
+        return true;
+    }
+    const bool is_system = EqualSid(user->User.Sid, system_sid) == TRUE;
+    FreeSid(system_sid);
+    return is_system;
 }
 
 std::string capability_user_home() {
@@ -149,7 +183,9 @@ int run_host(const std::span<const char* const> arguments) {
         arguments.size() == 3 && std::string_view(arguments[1]) == "--request";
     const bool scavenge_mode =
         arguments.size() == 2 && std::string_view(arguments[1]) == "--scavenge";
-    if (!(arguments.size() == 1 || request_file_mode || scavenge_mode ||
+    const bool inspect_mode =
+        arguments.size() == 3 && std::string_view(arguments[1]) == "--inspect";
+    if (!(arguments.size() == 1 || request_file_mode || scavenge_mode || inspect_mode ||
           (present_only && arguments.size() <= 3))) {
         return static_cast<int>(aegra::apps::boot_check::BootCheckExitCode::kRequestRejected);
     }
@@ -166,12 +202,24 @@ int run_host(const std::span<const char* const> arguments) {
     options.vbox_manage_path = aegra::adapters::virtualbox::discover_vbox_manage_path();
     options.capability_user_home = capability_user_home();
     options.powershell_path = aegra::adapters::hyperv::discover_powershell_path();
+    // A non-System token means the Service started us under the logged-on user,
+    // so register the job VM in that user's default VirtualBox registry.
+    options.use_isolated_vbox_home = current_process_is_local_system();
 
     const aegra::apps::boot_check::BootCheckHostContext context{credentials, random, clock,
                                                                 launcher};
     if (scavenge_mode) {
         return static_cast<int>(aegra::apps::boot_check::run_boot_check_scavenge(
             options, context, std::filesystem::path(data_directory())));
+    }
+    if (inspect_mode) {
+        auto inspected =
+            aegra::apps::boot_check::run_boot_check_inspect(arguments[2], options, context);
+        if (!inspected) {
+            return static_cast<int>(aegra::apps::boot_check::BootCheckExitCode::kRequestRejected);
+        }
+        std::cout << inspected.value().response_json << '\n';
+        return static_cast<int>(inspected.value().exit_code);
     }
     const std::string encoded_request =
         request_file_mode ? read_request_file(wide_argument(2).c_str()) : read_request();

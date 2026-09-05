@@ -1,6 +1,7 @@
 #include "local_storage_internal.h"
 
 #include <algorithm>
+#include <exception>
 #include <limits>
 #include <mutex>
 #include <string>
@@ -9,12 +10,42 @@
 namespace aegra::adapters::storage_local::detail {
 namespace {
 
+class StagedCreationCleanup final {
+  public:
+    StagedCreationCleanup(const LocalObjectStorageState& state,
+                          const std::filesystem::path& partial,
+                          const std::filesystem::path& staging) noexcept
+        : state_(state), partial_(partial), staging_(staging) {}
+
+    ~StagedCreationCleanup() {
+        if (released_) {
+            return;
+        }
+        if (owns_partial_) {
+            DeleteFileW(partial_.c_str());
+        }
+        prune_empty_object_parents(state_, partial_);
+        prune_empty_object_parents(state_, staging_);
+    }
+
+    void own_partial() noexcept { owns_partial_ = true; }
+    void release() noexcept { released_ = true; }
+
+  private:
+    const LocalObjectStorageState& state_;
+    const std::filesystem::path& partial_;
+    const std::filesystem::path& staging_;
+    bool owns_partial_{false};
+    bool released_{false};
+};
+
 class LocalStagedWriteSession final : public ports::IStagedObjectWriteSession {
   public:
-    LocalStagedWriteSession(std::filesystem::path partial_path, std::filesystem::path staging_path,
+    LocalStagedWriteSession(std::shared_ptr<LocalObjectStorageState> state,
+                            std::filesystem::path partial_path, std::filesystem::path staging_path,
                             UniqueHandle handle)
-        : partial_path_(std::move(partial_path)), staging_path_(std::move(staging_path)),
-          handle_(std::move(handle)) {}
+        : state_(std::move(state)), partial_path_(std::move(partial_path)),
+          staging_path_(std::move(staging_path)), handle_(std::move(handle)) {}
 
     ~LocalStagedWriteSession() override { abort(); }
 
@@ -24,6 +55,7 @@ class LocalStagedWriteSession final : public ports::IStagedObjectWriteSession {
     void abort() noexcept override;
 
   private:
+    std::shared_ptr<LocalObjectStorageState> state_;
     std::filesystem::path partial_path_;
     std::filesystem::path staging_path_;
     UniqueHandle handle_;
@@ -74,11 +106,18 @@ base::Result<void> LocalStagedWriteSession::complete(const base::CancellationTok
             win32_error(GetLastError(), "flush local staged object"));
     }
     handle_.reset();
+    const std::unique_lock lock(state_->mutex);
+    // Deny directory deletion across Storage instances until the move completes.
+    auto parents = pin_object_parents(*state_, staging_path_, cancellation);
+    if (!parents) {
+        return base::Result<void>::failure(parents.error());
+    }
     if (!MoveFileExW(partial_path_.c_str(), staging_path_.c_str(), MOVEFILE_WRITE_THROUGH)) {
         return base::Result<void>::failure(
             win32_error(GetLastError(), "complete local staged object"));
     }
     finished_ = true;
+    prune_empty_object_parents(*state_, partial_path_);
     return base::Result<void>::success();
 }
 
@@ -89,6 +128,13 @@ void LocalStagedWriteSession::abort() noexcept {
     handle_.reset();
     DeleteFileW(partial_path_.c_str());
     finished_ = true;
+    try {
+        const std::unique_lock lock(state_->mutex);
+        prune_empty_object_parents(*state_, partial_path_);
+        prune_empty_object_parents(*state_, staging_path_);
+    } catch (const std::exception&) {
+        OutputDebugStringW(L"Aegra: aborted staging directory cleanup deferred.\n");
+    }
 }
 
 [[nodiscard]] base::Result<void> require_missing(const std::filesystem::path& path,
@@ -121,11 +167,17 @@ create_staged_write_session(std::shared_ptr<LocalObjectStorageState> state,
             !staging_path ? staging_path.error() : partial_path.error());
     }
     const std::unique_lock lock(state->mutex);
-    auto staging_parents = ensure_safe_parent_directories(*state, staging_path.value());
-    auto partial_parents = ensure_safe_parent_directories(*state, partial_path.value());
-    if (!staging_parents || !partial_parents) {
+    // Declared before handles so failure cleanup runs after all pins/files close.
+    StagedCreationCleanup cleanup(*state, partial_path.value(), staging_path.value());
+    auto staging_parents = pin_object_parents(*state, staging_path.value(), cancellation);
+    if (!staging_parents) {
         return base::Result<std::unique_ptr<ports::IStagedObjectWriteSession>>::failure(
-            !staging_parents ? staging_parents.error() : partial_parents.error());
+            staging_parents.error());
+    }
+    auto partial_parents = pin_object_parents(*state, partial_path.value(), cancellation);
+    if (!partial_parents) {
+        return base::Result<std::unique_ptr<ports::IStagedObjectWriteSession>>::failure(
+            partial_parents.error());
     }
     auto staging_missing = require_missing(staging_path.value(), "staging object already exists");
     if (!staging_missing) {
@@ -139,9 +191,12 @@ create_staged_write_session(std::shared_ptr<LocalObjectStorageState> state,
         return base::Result<std::unique_ptr<ports::IStagedObjectWriteSession>>::failure(
             win32_error(GetLastError(), "create local staged object"));
     }
+    cleanup.own_partial();
+    auto session = std::make_unique<LocalStagedWriteSession>(
+        state, partial_path.value(), staging_path.value(), std::move(handle));
+    cleanup.release();
     return base::Result<std::unique_ptr<ports::IStagedObjectWriteSession>>::success(
-        std::make_unique<LocalStagedWriteSession>(
-            std::move(partial_path).value(), std::move(staging_path).value(), std::move(handle)));
+        std::move(session));
 }
 
 } // namespace aegra::adapters::storage_local::detail

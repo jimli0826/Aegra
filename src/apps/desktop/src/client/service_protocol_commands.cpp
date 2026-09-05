@@ -1,5 +1,6 @@
 #include "client/service_protocol.h"
 #include "client/service_protocol_detail.h"
+#include "locale/locale_format.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -592,20 +593,36 @@ QByteArray encode_mount_session_list_request(const QString& request_id) {
         .toJson(QJsonDocument::Compact);
 }
 
-QByteArray encode_mount_recovery_point_request(const QString& request_id,
-                                               const QString& idempotency_key,
-                                               const QString& connection_id,
-                                               const QString& recovery_point_id,
-                                               const int source_disk_number,
-                                               const QString& preferred_drive_letter,
-                                               const QString& archive_password) {
+QByteArray encode_start_verify_request(const QString& request_id, const QString& idempotency_key,
+                                       const QString& connection_id,
+                                       const QStringList& recovery_point_ids) {
+    QJsonArray ids;
+    for (const auto& id : recovery_point_ids) {
+        ids.push_back(id);
+    }
+    const QJsonObject payload{{QStringLiteral("repository_connection_id"), connection_id},
+                               {QStringLiteral("recovery_point_ids"), ids}};
+    return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
+                                      static_cast<qint64>(kServiceSchemaVersion)},
+                                     {QStringLiteral("message_type"), 1},
+                                     {QStringLiteral("request_id"), request_id},
+                                     {QStringLiteral("kind"), kStartVerifyRequestKind},
+                                     {QStringLiteral("idempotency_key"), idempotency_key},
+                                     {QStringLiteral("payload"), payload}})
+        .toJson(QJsonDocument::Compact);
+}
+
+QByteArray encode_mount_recovery_point_request(
+    const QString& request_id, const QString& idempotency_key, const QString& connection_id,
+    const QString& recovery_point_id, const int source_disk_number,
+    const QString& preferred_drive_letter, const QString& archive_password) {
     const QJsonObject payload{
         {QStringLiteral("repository_connection_id"), connection_id},
         {QStringLiteral("recovery_point_id"), recovery_point_id},
         {QStringLiteral("source_disk_number"), source_disk_number},
-        {QStringLiteral("preferred_drive_letter"),
-         preferred_drive_letter.isEmpty() ? QJsonValue(QJsonValue::Null)
-                                          : QJsonValue(preferred_drive_letter)},
+        {QStringLiteral("preferred_drive_letter"), preferred_drive_letter.isEmpty()
+                                                       ? QJsonValue(QJsonValue::Null)
+                                                       : QJsonValue(preferred_drive_letter)},
         {QStringLiteral("archive_password"), archive_password}};
     return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
                                       static_cast<qint64>(kServiceSchemaVersion)},
@@ -695,16 +712,20 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
     }
     const auto object = value.toObject();
     // Must match Service encode_schedule / ScheduleSummary wire fields (schema 4).
-    if (!has_exact_keys(object, {"schedule_id", "display_name", "enabled", "content_kind",
-                                 "source_ids", "selection_summaries", "repository_connection_id",
-                                 "backup_type", "trigger", "next_run_utc_ms",
-                                 "exclude_page_and_hibernation_files", "deduplication_enabled",
-                                 "split_size_bytes", "compression_level", "verify_after_backup",
-                                 "boot_check_after_backup", "boot_check_hypervisor",
-                                 "encryption_enabled"})) {
+    if (!has_exact_keys(object, {"schedule_id", "backup_set_uuid", "display_name", "enabled",
+                                 "content_kind", "source_ids", "selection_summaries",
+                                 "repository_connection_id", "backup_type", "trigger",
+                                 "next_run_utc_ms", "exclude_page_and_hibernation_files",
+                                 "deduplication_enabled", "split_size_bytes", "compression_level",
+                                 "verify_after_backup", "boot_check_after_backup",
+                                 "boot_check_hypervisor", "encryption_enabled"})) {
         return false;
     }
     const auto schedule_id = object.value(QStringLiteral("schedule_id")).toString();
+    const auto backup_set_uuid = object.value(QStringLiteral("backup_set_uuid")).toString();
+    if (!canonical_uuid(backup_set_uuid)) {
+        return false;
+    }
     const auto source_array = object.value(QStringLiteral("source_ids")).toArray();
     QVariantList source_ids;
     QSet<QString> seen_source_ids;
@@ -874,10 +895,19 @@ bool parse_source_inventory_response(const QJsonObject& root, SourceInventoryPag
     } else if (trigger_kind == kScheduleTriggerMonthly) {
         frequency = QStringLiteral("monthly");
     }
+    // sourceName is display-only: re-localize each comma-joined volume label so a
+    // schedule created under an old label (e.g. "EFI System Partition") shows the
+    // current abbreviation (ESP). displayName keeps the persisted identity.
+    QStringList localized_source_parts;
+    for (const auto& part : display_name.split(QStringLiteral(", "))) {
+        localized_source_parts.push_back(localized_volume_label(part));
+    }
+    const QString source_name = localized_source_parts.join(QStringLiteral(", "));
     result = {{QStringLiteral("scheduleId"), schedule_id},
+              {QStringLiteral("backupSetUuid"), backup_set_uuid},
               {QStringLiteral("id"), schedule_id},
               {QStringLiteral("displayName"), display_name},
-              {QStringLiteral("sourceName"), display_name},
+              {QStringLiteral("sourceName"), source_name},
               {QStringLiteral("enabled"), object.value(QStringLiteral("enabled")).toBool()},
               {QStringLiteral("contentKind"), content_kind},
               {QStringLiteral("sourceIds"), source_ids},
@@ -1150,10 +1180,14 @@ bool is_command_failure_response(const QJsonObject& root, const int expected_req
 
 QByteArray encode_plan_delete_recovery_points_request(const QString& request_id,
                                                       const QString& connection_id,
-                                                      const QString& recovery_point_id,
+                                                      const QStringList& recovery_point_ids,
                                                       const QString& archive_password) {
+    QJsonArray ids;
+    for (const auto& id : recovery_point_ids) {
+        ids.append(id);
+    }
     const QJsonObject payload{{QStringLiteral("repository_connection_id"), connection_id},
-                              {QStringLiteral("recovery_point_id"), recovery_point_id},
+                              {QStringLiteral("recovery_point_ids"), ids},
                               {QStringLiteral("archive_password"), archive_password}};
     return QJsonDocument(
                QJsonObject{

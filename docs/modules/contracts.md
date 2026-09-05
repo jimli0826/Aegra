@@ -46,7 +46,9 @@ Worker 前分配持久化身份、创建时间与 selection fingerprint；Worker
 只保存凭据定位符，禁止保存明文 Secret。
 
 `TaskProgress` schema 4 同时携带 `job_id` 与 `trace_id`；`logical_bytes` 可为 null（文件枚举阶段未知总量），
-并增加 `discovered_entries` / `processed_entries`。`TaskResult` schema 4 增加 `entry_count`、
+并增加 `discovered_entries` / `processed_entries` 与 `recovery_point_id`（Verify 批处理当前恢复点，其它任务为空）。
+Verify Job 使用 `verify_recovery_point_ids`（1..1000，同一备份集从早到晚）与可选 `verify_chain_lengths`
+（file_set 多 tip 的 source_refs prefix）。`TaskResult` schema 4 增加 `entry_count`、
 `stream_count`、可选 `partial_restore`，以及 file_set backup 的 `requested_backup_type` /
 `effective_backup_type` / `effective_parent_uuid` / `incremental_downgrade_reason`。不得复制 Adapter
 的原始错误文本。ADR-0022 另增加非负 `deduplicated_block_count` / `deduplicated_logical_bytes`；仅成功的

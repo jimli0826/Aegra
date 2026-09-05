@@ -947,183 +947,10 @@ persist_cancel_command(ports::IControlPlaneDatabase& control_plane, ports::ICloc
                      : base::Result<contracts::CommandAcknowledgement>::failure(committed.error());
 }
 
-[[nodiscard]] std::string verify_request_fingerprint(const contracts::StartVerifyCommand& command) {
-    return "start-verify|" + command.repository_connection_id + "|" + command.recovery_point_id;
-}
-
 [[nodiscard]] bool same_verify(const ports::JobRecord& record,
                                const contracts::StartVerifyCommand& command) noexcept {
     return record.operation == contracts::JobOperation::kVerify &&
-           record.request_fingerprint == verify_request_fingerprint(command);
-}
-
-[[nodiscard]] base::Result<contracts::SecretRef>
-volume_verify_credential(const ports::RepositoryConnectionRecord& repository,
-                         const std::string& archive_path_utf8) {
-    // Credential order matches F7 file recovery: an archive that opens with an empty password
-    // is unencrypted; only encrypted archives use the connection default credential.
-    auto path = path_from_utf8(archive_path_utf8);
-    if (!path) {
-        return base::Result<contracts::SecretRef>::failure(path.error());
-    }
-    adapters::personal_archive::ArchiveOpenRequest probe;
-    probe.source = std::move(path).value();
-    auto opened = adapters::personal_archive::PersonalArchiveReader::open(probe);
-    if (opened || opened.error().code != base::ErrorCode::kUnauthorized) {
-        // Non-credential open failures stay with the Worker, which owns verify error mapping.
-        return base::Result<contracts::SecretRef>::success({});
-    }
-    const auto& capabilities = repository.capabilities;
-    const bool allows_connection_secret =
-        std::find(capabilities.begin(), capabilities.end(), "archive.default_credential") !=
-        capabilities.end();
-    if (!allows_connection_secret || !repository.credential_ref) {
-        return base::Result<contracts::SecretRef>::failure(
-            {base::ErrorCode::kUnauthorized, "archive.credential_required"});
-    }
-    return base::Result<contracts::SecretRef>::success(*repository.credential_ref);
-}
-
-/// Manual verify carries no explicit secret; the planned post-backup path passes
-/// the owning schedule's dpapi-lm password reference for encrypted archives.
-struct VerifyPreparation final {
-    const contracts::StartVerifyCommand& command;
-    std::optional<std::string> archive_secret_ref;
-};
-
-[[nodiscard]] base::Result<PreparedBackup>
-prepare_file_set_verify(const VerifyPreparation& preparation,
-                        ports::IControlPlaneDatabase& control_plane,
-                        ports::IRepositoryStorageFactory& storage_factory,
-                        ports::IRandomSource& random, const base::CancellationToken cancellation) {
-    const auto& command = preparation.command;
-    // Open Catalog chain + authenticate Archives so Incremental tips get base-first source_refs.
-    auto chain = open_file_recovery_chain(
-        control_plane, storage_factory, command.repository_connection_id, command.recovery_point_id,
-        preparation.archive_secret_ref, cancellation);
-    if (!chain) {
-        return base::Result<PreparedBackup>::failure(chain.error());
-    }
-    auto job_id = random_id("job-", random, cancellation);
-    auto trace_id = random_id("trace-", random, cancellation);
-    if (!job_id || !trace_id) {
-        return base::Result<PreparedBackup>::failure(!job_id ? job_id.error() : trace_id.error());
-    }
-    contracts::JobRequest worker;
-    worker.job_id = job_id.value();
-    worker.tenant_id = "personal";
-    worker.operation = contracts::JobOperation::kVerify;
-    worker.content_kind = contracts::ContentKind::kFileSet;
-    worker.source_refs = chain.value().archive_paths_utf8;
-    worker.target_ref.clear();
-    if (chain.value().password.empty()) {
-        worker.credential_refs.assign(worker.source_refs.size(), contracts::SecretRef{});
-    } else {
-        auto protected_secret = adapters::windows_system::protect_local_machine_secret(
-            chain.value().password, job_id.value());
-        if (!protected_secret) {
-            return base::Result<PreparedBackup>::failure(protected_secret.error());
-        }
-        worker.credential_refs.reserve(worker.source_refs.size());
-        for (std::size_t index = 0; index < worker.source_refs.size(); ++index) {
-            worker.credential_refs.push_back(protected_secret.value());
-        }
-    }
-    worker.trace_id = trace_id.value();
-    WorkerJobRequest request;
-    request.worker_request = std::move(worker);
-    request.source_ids = {command.recovery_point_id};
-    request.repository_connection_id = command.repository_connection_id;
-    request.request_fingerprint = verify_request_fingerprint(command);
-    return base::Result<PreparedBackup>::success({std::move(request), std::move(job_id).value()});
-}
-
-[[nodiscard]] base::Result<PreparedBackup>
-prepare_verify(const VerifyPreparation& preparation, ports::IControlPlaneDatabase& control_plane,
-               ports::IRepositoryStorageFactory& storage_factory, ports::IRandomSource& random,
-               const base::CancellationToken cancellation) {
-    const auto& command = preparation.command;
-    auto repository =
-        control_plane.get_repository_connection(command.repository_connection_id, cancellation);
-    if (!repository) {
-        return base::Result<PreparedBackup>::failure(repository.error());
-    }
-    if (!repository.value() ||
-        repository.value()->state != contracts::RepositoryConnectionState::kAvailable) {
-        return base::Result<PreparedBackup>::failure(
-            {base::ErrorCode::kConflict, "repository connection is unavailable"});
-    }
-    auto storage = storage_factory.open(repository.value()->locator, cancellation);
-    if (!storage) {
-        return base::Result<PreparedBackup>::failure(storage.error());
-    }
-    personal_repository::RepositoryCatalogScanner scanner(storage.value()->reader(),
-                                                          storage.value()->enumerator());
-    std::optional<std::string> token;
-    std::optional<personal_repository::CatalogEntry> found;
-    for (;;) {
-        personal_repository::CatalogScanRequest request;
-        request.continuation_token = token;
-        request.maximum_results = 100;
-        auto page = scanner.scan(request, cancellation);
-        if (!page) {
-            return base::Result<PreparedBackup>::failure(page.error());
-        }
-        for (const auto& point : page.value().recovery_points) {
-            if (point.entry.file_uuid == command.recovery_point_id) {
-                found = point.entry;
-                break;
-            }
-        }
-        if (found || !page.value().continuation_token) {
-            break;
-        }
-        token = std::move(page.value().continuation_token);
-    }
-    if (!found) {
-        return base::Result<PreparedBackup>::failure(
-            {base::ErrorCode::kNotFound, "recovery point was not found"});
-    }
-    if (found->structural_state != "complete") {
-        return base::Result<PreparedBackup>::failure(
-            {base::ErrorCode::kConflict, "file_recover.catalog_only"});
-    }
-    if (found->content_kind == personal_repository::kCatalogContentKindFileSet) {
-        return prepare_file_set_verify(preparation, control_plane, storage_factory, random,
-                                       cancellation);
-    }
-    // Volume-set Verify: single tip Archive (existing path).
-    auto archive_path =
-        resolve_archive_absolute_path(repository.value()->locator, found->archive_main_key);
-    auto job_id = random_id("job-", random, cancellation);
-    auto trace_id = random_id("trace-", random, cancellation);
-    if (!archive_path || !job_id || !trace_id) {
-        if (!archive_path)
-            return base::Result<PreparedBackup>::failure(archive_path.error());
-        return base::Result<PreparedBackup>::failure(!job_id ? job_id.error() : trace_id.error());
-    }
-    auto credential = preparation.archive_secret_ref
-                          ? base::Result<contracts::SecretRef>::success(
-                                contracts::SecretRef{*preparation.archive_secret_ref})
-                          : volume_verify_credential(*repository.value(), archive_path.value());
-    if (!credential) {
-        return base::Result<PreparedBackup>::failure(credential.error());
-    }
-    contracts::JobRequest worker;
-    worker.job_id = job_id.value();
-    worker.tenant_id = "personal";
-    worker.operation = contracts::JobOperation::kVerify;
-    worker.content_kind = contracts::ContentKind::kVolumeSet;
-    worker.source_refs = {archive_path.value()};
-    worker.target_ref.clear();
-    worker.credential_refs = {std::move(credential).value()};
-    worker.trace_id = trace_id.value();
-    WorkerJobRequest request;
-    request.worker_request = std::move(worker);
-    request.source_ids = {command.recovery_point_id};
-    request.repository_connection_id = command.repository_connection_id;
-    request.request_fingerprint = verify_request_fingerprint(command);
-    return base::Result<PreparedBackup>::success({std::move(request), std::move(job_id).value()});
+           record.request_fingerprint == worker_job_detail::verify_command_fingerprint(command);
 }
 
 [[nodiscard]] std::string
@@ -1300,8 +1127,10 @@ WorkerJobService::start_verify(const contracts::StartVerifyCommand& command,
             acknowledgement(existing.value()->job_id, contracts::CommandDisposition::kReplayed,
                             existing.value()->job_id));
     }
-    auto prepared = prepare_verify(VerifyPreparation{command, std::nullopt}, control_plane_,
-                                   storage_factory_, random_, cancellation);
+    auto prepared = worker_job_detail::prepare_verify_job(
+        command, std::nullopt,
+        worker_job_detail::VerifyJobDependencies{&control_plane_, &storage_factory_, &random_},
+        cancellation);
     if (!prepared) {
         return base::Result<contracts::CommandAcknowledgement>::failure(prepared.error());
     }
@@ -1341,11 +1170,11 @@ WorkerJobService::start_post_backup_verify(const PostBackupVerifyRequest& reques
     }
     contracts::StartVerifyCommand command;
     command.repository_connection_id = request.repository_connection_id;
-    command.recovery_point_id = request.recovery_point_id;
-    VerifyPreparation preparation{
-        command, planned_verify_secret_ref(control_plane_, request.schedule_id, cancellation)};
-    auto prepared =
-        prepare_verify(preparation, control_plane_, storage_factory_, random_, cancellation);
+    command.recovery_point_ids = {request.recovery_point_id};
+    auto prepared = worker_job_detail::prepare_verify_job(
+        command, planned_verify_secret_ref(control_plane_, request.schedule_id, cancellation),
+        worker_job_detail::VerifyJobDependencies{&control_plane_, &storage_factory_, &random_},
+        cancellation);
     if (!prepared) {
         return base::Result<contracts::CommandAcknowledgement>::failure(prepared.error());
     }

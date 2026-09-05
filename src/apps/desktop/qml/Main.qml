@@ -194,9 +194,11 @@ Window {
                     property int previousIndex: 0
 
                     function switchPage(newIndex) {
-                        if (newIndex === currentIndex)
-                            return
                         if (newIndex < 0 || newIndex > 5)
+                            return
+                        if (newIndex === 5)
+                            serviceClient.markEventsRead()
+                        if (newIndex === currentIndex)
                             return
                         previousIndex = currentIndex
                         currentIndex = newIndex
@@ -383,7 +385,8 @@ Window {
                         width: 7
                         height: 7
                         radius: 3.5
-                        color: "#EE6476"
+                        visible: serviceClient.hasUnreadEvents
+                        color: Theme.colorAccentRed
                         anchors.top: parent.top
                         anchors.right: parent.right
                         anchors.topMargin: 3
@@ -465,7 +468,7 @@ Window {
             anchors.fill: parent
             windowAppReady: window.appReady
             onSizeHintChanged: window.applySplashSize()
-            onQuitRequested: window.close()
+            onQuitRequested: desktopShell.quit()
         }
 
         // Global blocking overlay: Service reconnect plus bounded control-plane queries / commands.
@@ -477,7 +480,7 @@ Window {
             //% "Loading"
             message: window.appLoadingMessage
             actionsVisible: window.appReady && !serviceClient.connected
-            onQuitRequested: window.close()
+            onQuitRequested: desktopShell.quit()
             onDiagnoseRequested: {
                 serviceDiagnostics.diagnose()
                 serviceClient.reconnect()

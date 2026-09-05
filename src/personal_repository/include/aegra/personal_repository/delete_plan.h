@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -32,8 +33,9 @@ build_archive_member_keys(const CatalogEntry& entry);
 
 [[nodiscard]] base::Result<DeletePlan>
 plan_delete_recovery_points(const std::vector<CatalogEntry>& entries,
-                            std::string_view root_file_uuid, std::string_view operation_uuid,
-                            std::uint64_t created_utc_ms, std::uint64_t expires_utc_ms,
+                            std::span<const std::string> root_file_uuids,
+                            std::string_view operation_uuid, std::uint64_t created_utc_ms,
+                            std::uint64_t expires_utc_ms,
                             std::string_view repository_connection_id,
                             const ArchiveMemberGenerationResolver& resolve_member_generation);
 

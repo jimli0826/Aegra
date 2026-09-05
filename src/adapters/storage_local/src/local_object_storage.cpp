@@ -271,6 +271,7 @@ LocalObjectStorage::publish(const ports::ObjectPublishRequest& request,
     if (!published) {
         return base::Result<ports::ObjectAttributes>::failure(published.error());
     }
+    detail::prune_empty_object_parents(*state_, staging.value());
     auto attributes =
         detail::attributes_for_path(*state_, request.destination_key, destination.value());
     return attributes ? attributes

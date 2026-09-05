@@ -45,6 +45,9 @@ inline constexpr std::uint64_t kMaximumArchiveSplitSizeBytes = 1024ULL * 1024ULL
             size_bytes <= kMaximumArchiveSplitSizeBytes);
 }
 
+/// One StartVerify / Worker verify job may cover this many recovery points (one backup set).
+inline constexpr std::uint32_t kMaximumVerifyRecoveryPoints = 1'000;
+
 /// Product zstd levels for schedule compression. Frozen at create.
 inline constexpr std::int32_t kCompressionLevelFast = 1;
 inline constexpr std::int32_t kCompressionLevelNormal = 3;
@@ -134,9 +137,11 @@ struct JobRequest final {
     JobOperation operation{JobOperation::kBackup};
     ContentKind content_kind{ContentKind::kVolumeSet};
 
-    /// volume_set: volume identities (backup) or archive path chain (restore/verify).
+    /// volume_set: volume identities (backup), archive path chain (restore), or independent
+    /// archives earliest-first (verify).
     /// file_set backup: must be empty.
-    /// file_set restore/verify: archive path(s); restore uses tip or single Full archive.
+    /// file_set restore/verify: archive path(s); restore uses tip or single Full archive;
+    /// verify uses the longest selected chain (base-first).
     std::vector<std::string> source_refs;
 
     /// file_set backup only: trusted FileSourceRef list (1..100).
@@ -157,6 +162,12 @@ struct JobRequest final {
     std::optional<RestoreOptions> restore;
     std::string trace_id;
     std::int64_t deadline_utc_ms{0};
+
+    /// Verify: recovery-point ids in chronological order (earliest first). Empty otherwise.
+    std::vector<std::string> verify_recovery_point_ids;
+    /// file_set verify of multiple tips: prefix length into `source_refs` for each id.
+    /// Empty means a single chain occupying all `source_refs`.
+    std::vector<std::uint32_t> verify_chain_lengths;
 };
 
 [[nodiscard]] base::Result<void> validate_job_request(const JobRequest& request);

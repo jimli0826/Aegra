@@ -55,6 +55,10 @@ set(AEGRA_DESKTOP_SOURCES
     src/locale/message_code_map.h
     src/platform/windows_service_diagnostics.cpp
     src/platform/windows_service_diagnostics.h
+    src/platform/windows_tray_icon.cpp
+    src/platform/windows_tray_icon.h
+    src/platform/desktop_shell_controller.cpp
+    src/platform/desktop_shell_controller.h
 )
 
 set(AEGRA_DESKTOP_TS_FILES
@@ -113,7 +117,7 @@ target_link_libraries(
 )
 
 if(WIN32)
-    target_link_libraries(aegra_desktop PRIVATE dwmapi uxtheme Advapi32 Shell32)
+    target_link_libraries(aegra_desktop PRIVATE dwmapi uxtheme Advapi32 Shell32 User32)
 endif()
 
 aegra_configure_target(aegra_desktop)

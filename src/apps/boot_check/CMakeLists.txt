@@ -2,6 +2,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 
 add_library(aegra_app_boot_check STATIC
     src/boot_check_host.cpp
+    src/boot_check_inspect.cpp
     src/boot_check_protocol.cpp
     src/boot_check_scavenge.cpp
     src/boot_check_task.cpp

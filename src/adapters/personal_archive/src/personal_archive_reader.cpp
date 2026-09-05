@@ -1134,8 +1134,7 @@ PersonalArchiveReader::open_with_workers(
     }
     detail::Win32InputFile input;
     if (auto opened = input.open(request.source); !opened) {
-        return base::Result<std::unique_ptr<PersonalArchiveReader>>::failure(
-            error(base::ErrorCode::kIoFailure, "failed to open personal archive"));
+        return base::Result<std::unique_ptr<PersonalArchiveReader>>::failure(opened.error());
     }
     auto file_size = read_stream_size(input);
     if (!file_size) {

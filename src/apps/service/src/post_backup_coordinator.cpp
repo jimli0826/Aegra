@@ -256,7 +256,15 @@ struct PostBackupCoordinator::Impl final {
         record.content_kind = contracts::ContentKind::kVolumeSet;
         record.created_utc_ms = now_utc_ms();
         record.started_utc_ms = record.created_utc_ms;
-        record.source_ids.push_back(plan.recovery_point_id);
+        // Use the owning schedule's volume source ids so the task log shows the
+        // same friendly volume names as the backup, not the raw recovery-point
+        // uuid. Fall back to the recovery point id if the schedule is gone.
+        if (auto schedule = control_plane.get_schedule(plan.schedule_id, {});
+            schedule && schedule.value() && !schedule.value()->source_ids.empty()) {
+            record.source_ids = schedule.value()->source_ids;
+        } else {
+            record.source_ids.push_back(plan.recovery_point_id);
+        }
         record.schedule_id = plan.schedule_id;
         record.repository_connection_id = plan.repository_connection_id;
         record.message_code = "job.running";

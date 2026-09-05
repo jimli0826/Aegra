@@ -2,10 +2,13 @@
 
 // Shared helpers for worker_job_service*.cpp (Service composition root only).
 
+#include "aegra/apps/service/worker_supervisor.h"
 #include "aegra/base/cancellation.h"
 #include "aegra/base/result.h"
 #include "aegra/contracts/service_control.h"
+#include "aegra/ports/control_plane.h"
 #include "aegra/ports/random.h"
+#include "aegra/ports/repository_storage.h"
 
 #include <filesystem>
 #include <optional>
@@ -28,5 +31,25 @@ acknowledgement(std::string command_id, contracts::CommandDisposition dispositio
 
 [[nodiscard]] base::Result<std::string>
 resolve_archive_absolute_path(const std::string& locator, const std::string& archive_main_key);
+
+struct PreparedWorkerJob final {
+    WorkerJobRequest request;
+    std::string job_id;
+};
+
+[[nodiscard]] std::string
+verify_command_fingerprint(const contracts::StartVerifyCommand& command);
+
+struct VerifyJobDependencies final {
+    ports::IControlPlaneDatabase* control_plane{nullptr};
+    ports::IRepositoryStorageFactory* storage_factory{nullptr};
+    ports::IRandomSource* random{nullptr};
+};
+
+[[nodiscard]] base::Result<PreparedWorkerJob>
+prepare_verify_job(const contracts::StartVerifyCommand& command,
+                   const std::optional<std::string>& archive_secret_ref,
+                   const VerifyJobDependencies& dependencies,
+                   base::CancellationToken cancellation);
 
 } // namespace aegra::apps::service::worker_job_detail

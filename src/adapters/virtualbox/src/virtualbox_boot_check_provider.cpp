@@ -7,6 +7,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <atomic>
 #include <charconv>
 #include <chrono>
@@ -27,6 +28,8 @@ using detail::VirtualBoxJobLayout;
 using virtualization::BootCheckVmState;
 
 constexpr const char* kProviderUnavailable = "bootcheck.provider_unavailable";
+constexpr const char* kHyperVConflict = "bootcheck.virtualbox_hyperv_conflict";
+constexpr const char* kNoHardwareVirt = "bootcheck.virtualbox_no_hardware_virt";
 constexpr const char* kVmCreateFailed = "bootcheck.vm_create_failed";
 constexpr const char* kVmStartFailed = "bootcheck.vm_start_failed";
 constexpr const char* kCleanupIncomplete = "bootcheck.cleanup_incomplete";
@@ -62,19 +65,67 @@ class CleanupDeadline final {
     std::jthread watchdog_;
 };
 
+/// Collapses command output into a single bounded log line.
+std::string sanitize_for_log(const std::string_view output, const std::size_t limit = 500) {
+    std::string sanitized;
+    sanitized.reserve((std::min)(output.size(), limit));
+    for (const char character : output) {
+        if (sanitized.size() >= limit) {
+            sanitized += "...";
+            break;
+        }
+        if (character == '\r') {
+            continue;
+        }
+        sanitized += character == '\n' ? ' ' : character;
+    }
+    return sanitized;
+}
+
+void assign_diagnostic(std::string* diagnostic, std::string value) {
+    if (diagnostic != nullptr) {
+        *diagnostic = std::move(value);
+    }
+}
+
+/// Maps well-known VBoxManage failure markers to a message code the desktop
+/// can translate into an actionable hint. Hyper-V holding VT-x/AMD-V without
+/// the Windows Hypervisor Platform feature is the most common field failure.
+const char* classify_unavailable(const std::string_view diagnostic) {
+    for (const auto* marker : {"VERR_NEM_NOT_AVAILABLE", "WHvCapabilityCodeHypervisorPresent",
+                               "VERR_VMX_IN_VMX_ROOT_MODE", "VERR_SVM_IN_USE"}) {
+        if (diagnostic.find(marker) != std::string_view::npos) {
+            return kHyperVConflict;
+        }
+    }
+    for (const auto* marker : {"VERR_VMX_NO_VMX", "VERR_SVM_NO_SVM",
+                               "VERR_VMX_MSR_LOCKED_OR_DISABLED", "VERR_SVM_DISABLED"}) {
+        if (diagnostic.find(marker) != std::string_view::npos) {
+            return kNoHardwareVirt;
+        }
+    }
+    return kProviderUnavailable;
+}
+
 base::Result<std::string> run_required(VirtualBoxCommandRunner& runner,
                                        const std::vector<std::string>& arguments,
                                        const std::string_view user_home, const char* message_code,
-                                       const base::CancellationToken cancellation) {
+                                       const base::CancellationToken cancellation,
+                                       std::string* diagnostic = nullptr) {
     auto result = runner.run(arguments, user_home, cancellation);
     if (!result) {
         if (result.error().code == base::ErrorCode::kCancelled) {
             return base::Result<std::string>::failure(result.error());
         }
+        assign_diagnostic(diagnostic, "VBoxManage " + arguments.front() +
+                                          " did not run: " + std::string(result.error().message));
         return base::Result<std::string>::failure(
             stable_error(base::ErrorCode::kIoFailure, message_code));
     }
     if (result.value().exit_code != 0) {
+        assign_diagnostic(diagnostic, "VBoxManage " + arguments.front() +
+                                          " exit=" + std::to_string(result.value().exit_code) +
+                                          ": " + sanitize_for_log(result.value().output));
         return base::Result<std::string>::failure(
             stable_error(base::ErrorCode::kIoFailure, message_code));
     }
@@ -177,13 +228,14 @@ bool cleanup_probe(VirtualBoxCommandRunner& runner, const std::string_view user_
 }
 
 base::Result<void> probe_headless(VirtualBoxCommandRunner& runner, const std::string_view user_home,
-                                  const base::CancellationToken cancellation) {
+                                  const base::CancellationToken cancellation,
+                                  std::string* diagnostic = nullptr) {
     const std::string vm_name = next_probe_name();
     auto created =
         run_required(runner,
                      {"createvm", "--name=" + vm_name, "--platform-architecture=x86",
                       "--basefolder=" + std::string(user_home), "--ostype=Other_64", "--register"},
-                     user_home, kProviderUnavailable, cancellation);
+                     user_home, kProviderUnavailable, cancellation, diagnostic);
     if (!created) {
         return base::Result<void>::failure(created.error());
     }
@@ -196,7 +248,7 @@ base::Result<void> probe_headless(VirtualBoxCommandRunner& runner, const std::st
          "--drag-and-drop=disabled", "--usb-ohci=off", "--usb-ehci=off", "--usb-xhci=off",
          "--vrde=off", "--recording=off", "--boot1=none", "--boot2=none", "--boot3=none",
          "--boot4=none"},
-        user_home, kProviderUnavailable, cancellation);
+        user_home, kProviderUnavailable, cancellation, diagnostic);
     if (!modified) {
         outcome = base::Result<void>::failure(modified.error());
     }
@@ -204,7 +256,7 @@ base::Result<void> probe_headless(VirtualBoxCommandRunner& runner, const std::st
     bool started = false;
     if (outcome) {
         auto start = run_required(runner, {"startvm", vm_name, "--type=headless"}, user_home,
-                                  kProviderUnavailable, cancellation);
+                                  kProviderUnavailable, cancellation, diagnostic);
         if (!start) {
             outcome = base::Result<void>::failure(start.error());
         } else {
@@ -213,16 +265,21 @@ base::Result<void> probe_headless(VirtualBoxCommandRunner& runner, const std::st
     }
     if (outcome) {
         auto state = run_required(runner, {"showvminfo", vm_name, "--machinereadable"}, user_home,
-                                  kProviderUnavailable, cancellation);
-        if (!state || (parse_vm_state(state.value()) != BootCheckVmState::kRunning &&
-                       parse_vm_state(state.value()) != BootCheckVmState::kPaused)) {
-            outcome = state ? base::Result<void>::failure(
-                                  stable_error(base::ErrorCode::kIoFailure, kProviderUnavailable))
-                            : base::Result<void>::failure(state.error());
+                                  kProviderUnavailable, cancellation, diagnostic);
+        if (!state) {
+            outcome = base::Result<void>::failure(state.error());
+        } else if (parse_vm_state(state.value()) != BootCheckVmState::kRunning &&
+                   parse_vm_state(state.value()) != BootCheckVmState::kPaused) {
+            assign_diagnostic(diagnostic,
+                              "probe VM did not reach running/paused state: " +
+                                  sanitize_for_log(state.value(), 200));
+            outcome = base::Result<void>::failure(
+                stable_error(base::ErrorCode::kIoFailure, kProviderUnavailable));
         }
     }
     const bool cleaned = cleanup_probe(runner, user_home, vm_name, started);
     if (!cleaned && outcome) {
+        assign_diagnostic(diagnostic, "probe VM cleanup incomplete: " + vm_name);
         outcome = base::Result<void>::failure(
             stable_error(base::ErrorCode::kIoFailure, kProviderUnavailable));
     }
@@ -251,6 +308,10 @@ std::vector<std::string> secure_modify_arguments(const std::string& vm_name,
             "--usb-xhci=off",
             "--vrde=off",
             "--recording=off",
+            // Scavenge marker: lets cleanup of a user's default registry delete
+            // only VMs Aegra created (name prefix + this description), never a
+            // user's own machine that happens to share the name prefix.
+            "--description=aegra-bootcheck:" + request.job_id,
             "--boot1=disk",
             "--boot2=none",
             "--boot3=none",
@@ -470,15 +531,19 @@ VirtualBoxBootCheckProvider::inspect(const base::CancellationToken cancellation)
     virtualization::BootCheckProviderInfo info;
     info.provider_name = "Oracle VirtualBox";
     info.message_code = kProviderUnavailable;
-    if (!detail::is_trusted_vbox_manage(impl_->options.vbox_manage_path)) {
+    std::string trust_reason;
+    if (!detail::is_trusted_vbox_manage(impl_->options.vbox_manage_path, &trust_reason)) {
+        info.diagnostic = "VBoxManage.exe trust check failed: " + trust_reason;
         return base::Result<virtualization::BootCheckProviderInfo>::success(std::move(info));
     }
     auto home = detail::prepare_capability_user_home(impl_->options.capability_user_home);
     if (!home) {
+        info.diagnostic = "capability VBOX_USER_HOME unavailable: \"" +
+                          impl_->options.capability_user_home + "\"";
         return base::Result<virtualization::BootCheckProviderInfo>::success(std::move(info));
     }
     auto version_output = run_required(impl_->runner, {"--version"}, home.value(),
-                                       kProviderUnavailable, cancellation);
+                                       kProviderUnavailable, cancellation, &info.diagnostic);
     if (!version_output) {
         if (version_output.error().code == base::ErrorCode::kCancelled) {
             return base::Result<virtualization::BootCheckProviderInfo>::failure(
@@ -487,20 +552,25 @@ VirtualBoxBootCheckProvider::inspect(const base::CancellationToken cancellation)
         return base::Result<virtualization::BootCheckProviderInfo>::success(std::move(info));
     }
     if (!parse_supported_version(version_output.value(), impl_->version)) {
+        info.diagnostic = "unsupported VirtualBox version \"" +
+                          sanitize_for_log(version_output.value(), 60) +
+                          "\" (supported: 7.1.x, 7.2.x)";
         return base::Result<virtualization::BootCheckProviderInfo>::success(std::move(info));
     }
     auto host = run_required(impl_->runner, {"list", "hostinfo"}, home.value(),
-                             kProviderUnavailable, cancellation);
+                             kProviderUnavailable, cancellation, &info.diagnostic);
     if (!host) {
         return host.error().code == base::ErrorCode::kCancelled
                    ? base::Result<virtualization::BootCheckProviderInfo>::failure(host.error())
                    : base::Result<virtualization::BootCheckProviderInfo>::success(std::move(info));
     }
-    auto probe = probe_headless(impl_->runner, home.value(), cancellation);
+    auto probe = probe_headless(impl_->runner, home.value(), cancellation, &info.diagnostic);
     if (!probe) {
-        return probe.error().code == base::ErrorCode::kCancelled
-                   ? base::Result<virtualization::BootCheckProviderInfo>::failure(probe.error())
-                   : base::Result<virtualization::BootCheckProviderInfo>::success(std::move(info));
+        if (probe.error().code == base::ErrorCode::kCancelled) {
+            return base::Result<virtualization::BootCheckProviderInfo>::failure(probe.error());
+        }
+        info.message_code = classify_unavailable(info.diagnostic);
+        return base::Result<virtualization::BootCheckProviderInfo>::success(std::move(info));
     }
     info.available = true;
     info.provider_version = impl_->version;
@@ -520,7 +590,7 @@ VirtualBoxBootCheckProvider::create(const virtualization::BootCheckVmRequest& re
         return base::Result<std::unique_ptr<virtualization::IBootCheckVmSession>>::failure(
             stable_error(base::ErrorCode::kNotFound, kProviderUnavailable));
     }
-    auto layout = detail::prepare_job_layout(request);
+    auto layout = detail::prepare_job_layout(request, impl_->options.use_isolated_home);
     if (!layout) {
         return base::Result<std::unique_ptr<virtualization::IBootCheckVmSession>>::failure(
             layout.error());

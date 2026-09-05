@@ -8,9 +8,10 @@
 
 namespace aegra::apps::service {
 
-/// Next future fire time for a schedule trigger.
-/// Minutes are applied on the UTC day grid (same rule as UpsertSchedule). Empty minute list
-/// returns now_ms so callers can treat the schedule as immediately due for recompute.
+/// Next future fire time for a schedule trigger. `local_minutes_of_day` are wall-clock
+/// minutes in the Service machine's own local time zone (the user's zone, since it is the
+/// same machine), converted to a UTC instant with DST handled. Empty minute list returns
+/// now_ms so callers can treat the schedule as immediately due for recompute.
 [[nodiscard]] std::uint64_t compute_next_run_utc_ms(const contracts::ScheduleTrigger& trigger,
                                                     std::uint64_t now_ms);
 

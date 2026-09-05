@@ -34,6 +34,8 @@ struct TaskProgress final {
     std::uint64_t discovered_entries{0};
     std::uint64_t processed_entries{0};
     std::string message_code;
+    /// Verify batch: recovery point currently being verified. Empty for other tasks.
+    std::string recovery_point_id;
 };
 
 [[nodiscard]] base::Result<void> validate_task_progress(const TaskProgress& progress);

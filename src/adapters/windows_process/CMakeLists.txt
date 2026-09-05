@@ -15,6 +15,9 @@ target_link_libraries(aegra_adapter_windows_process
         Aegra::Base
     PRIVATE
         Kernel32
+        Advapi32
+        Userenv
+        Wtsapi32
 )
 
 target_compile_definitions(aegra_adapter_windows_process

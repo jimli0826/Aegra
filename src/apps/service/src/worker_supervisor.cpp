@@ -490,7 +490,9 @@ void WorkerSupervisor::Impl::monitor(const std::stop_token stop) noexcept {
 base::Result<void>
 WorkerSupervisor::Impl::reserve_session(const std::shared_ptr<WorkerSessionState>& state) {
     std::lock_guard lock(sessions_mutex);
-    if (sessions.size() >= config.max_concurrent_workers || sessions.contains(state->job_id)) {
+    if ((config.max_concurrent_workers > 0 &&
+         sessions.size() >= config.max_concurrent_workers) ||
+        sessions.contains(state->job_id)) {
         return base::Result<void>::failure(
             {base::ErrorCode::kConflict, "worker capacity or job id conflict"});
     }
@@ -636,7 +638,7 @@ base::Result<void> WorkerSupervisor::submit(const WorkerJobRequest& request,
                                             const base::CancellationToken cancel) {
     std::unique_lock lifecycle_lock(impl_->lifecycle_mutex);
     if (impl_->shutting_down || impl_->config.worker_executable_path.empty() ||
-        impl_->config.max_concurrent_workers == 0 || request.source_ids.empty() ||
+        request.source_ids.empty() ||
         request.repository_connection_id.empty() || request.idempotency_key.empty()) {
         return base::Result<void>::failure(
             {base::ErrorCode::kInvalidArgument, "worker submission is invalid"});

@@ -65,6 +65,7 @@ Descriptor 不保存显示名称、Storage URI、凭据、Archive 口令或 UI �
 ## 3. Catalog Entry V2
 
 固定 key：`catalog/recovery-points/<file_uuid>.entry`。文件名 UUID 必须与内容及 `.bkf` Header 一致。
+列举该前缀时忽略非 `<file_uuid>.entry` 对象，不得把无关文件当作 Catalog 损坏。
 
 ```json
 {

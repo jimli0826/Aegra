@@ -12,6 +12,7 @@
 #include <set>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -40,35 +41,56 @@ using detail::Json;
     return std::string(buffer.data(), buffer.size());
 }
 
-[[nodiscard]] base::Result<std::vector<CatalogEntry>>
-collect_subtree(const std::vector<CatalogEntry>& all_entries, const std::string_view root_uuid) {
-    std::map<std::string, CatalogEntry, std::less<>> by_id;
-    std::map<std::string, std::vector<std::string>, std::less<>> children;
-    for (const auto& entry : all_entries) {
-        by_id.emplace(entry.file_uuid, entry);
-        if (entry.parent_uuid) {
-            children[*entry.parent_uuid].push_back(entry.file_uuid);
-        }
+using CatalogById = std::map<std::string, CatalogEntry, std::less<>>;
+using CatalogChildren = std::map<std::string, std::vector<std::string>, std::less<>>;
+
+[[nodiscard]] base::Result<std::set<std::string, std::less<>>>
+select_descendants(const CatalogById& by_id, const CatalogChildren& children,
+                   const std::span<const std::string> root_uuids) {
+    if (root_uuids.empty()) {
+        return base::Result<std::set<std::string, std::less<>>>::failure(
+            invalid("delete plan request is invalid"));
     }
-    if (!by_id.contains(std::string(root_uuid))) {
-        return base::Result<std::vector<CatalogEntry>>::failure(not_found());
-    }
-    std::vector<std::string> stack{std::string(root_uuid)};
     std::set<std::string, std::less<>> selected;
-    while (!stack.empty()) {
-        auto current = std::move(stack.back());
-        stack.pop_back();
-        if (!selected.insert(current).second) {
-            return base::Result<std::vector<CatalogEntry>>::failure(
-                conflict("delete plan graph contains a cycle"));
+    for (const auto& root : root_uuids) {
+        if (!by_id.contains(root)) {
+            return base::Result<std::set<std::string, std::less<>>>::failure(not_found());
         }
-        const auto found = children.find(current);
-        if (found != children.end()) {
-            for (const auto& child : found->second) {
-                stack.push_back(child);
+        std::vector<std::string> stack{root};
+        std::set<std::string, std::less<>> walk_seen;
+        while (!stack.empty()) {
+            auto current = std::move(stack.back());
+            stack.pop_back();
+            if (selected.contains(current)) {
+                continue;
+            }
+            if (!walk_seen.insert(current).second) {
+                return base::Result<std::set<std::string, std::less<>>>::failure(
+                    conflict("delete plan graph contains a cycle"));
+            }
+            selected.insert(current);
+            const auto found = children.find(current);
+            if (found != children.end()) {
+                for (const auto& child : found->second) {
+                    stack.push_back(child);
+                }
             }
         }
     }
+    return base::Result<std::set<std::string, std::less<>>>::success(std::move(selected));
+}
+
+[[nodiscard]] std::vector<CatalogEntry>
+order_descendant_first(const CatalogById& by_id, const CatalogChildren& children,
+                       const std::set<std::string, std::less<>>& selected) {
+    std::vector<std::string> forest_roots;
+    for (const auto& id : selected) {
+        const auto& parent = by_id.at(id).parent_uuid;
+        if (!parent || !selected.contains(*parent)) {
+            forest_roots.push_back(id);
+        }
+    }
+    std::sort(forest_roots.begin(), forest_roots.end());
     std::vector<CatalogEntry> ordered;
     ordered.reserve(selected.size());
     std::function<void(const std::string&)> visit = [&](const std::string& uuid) {
@@ -82,8 +104,29 @@ collect_subtree(const std::vector<CatalogEntry>& all_entries, const std::string_
         }
         ordered.push_back(by_id.at(uuid));
     };
-    visit(std::string(root_uuid));
-    return base::Result<std::vector<CatalogEntry>>::success(std::move(ordered));
+    for (const auto& root : forest_roots) {
+        visit(root);
+    }
+    return ordered;
+}
+
+[[nodiscard]] base::Result<std::vector<CatalogEntry>>
+collect_subtrees(const std::vector<CatalogEntry>& all_entries,
+                 const std::span<const std::string> root_uuids) {
+    CatalogById by_id;
+    CatalogChildren children;
+    for (const auto& entry : all_entries) {
+        by_id.emplace(entry.file_uuid, entry);
+        if (entry.parent_uuid) {
+            children[*entry.parent_uuid].push_back(entry.file_uuid);
+        }
+    }
+    auto selected = select_descendants(by_id, children, root_uuids);
+    if (!selected) {
+        return base::Result<std::vector<CatalogEntry>>::failure(selected.error());
+    }
+    return base::Result<std::vector<CatalogEntry>>::success(
+        order_descendant_first(by_id, children, selected.value()));
 }
 
 [[nodiscard]] base::Result<void> write_all(ports::IStagedObjectWriteSession& session,
@@ -310,19 +353,20 @@ base::Result<std::vector<std::string>> build_archive_member_keys(const CatalogEn
 }
 
 base::Result<DeletePlan> plan_delete_recovery_points(
-    const std::vector<CatalogEntry>& entries, const std::string_view root_file_uuid,
+    const std::vector<CatalogEntry>& entries, const std::span<const std::string> root_file_uuids,
     const std::string_view operation_uuid, const std::uint64_t created_utc_ms,
     const std::uint64_t expires_utc_ms, const std::string_view repository_connection_id,
     const ArchiveMemberGenerationResolver& resolve_member_generation) {
     if (operation_uuid.empty() || created_utc_ms == 0 || entries.empty() || expires_utc_ms == 0 ||
-        repository_connection_id.empty() || !resolve_member_generation) {
+        repository_connection_id.empty() || root_file_uuids.empty() ||
+        !resolve_member_generation) {
         return base::Result<DeletePlan>::failure(invalid("delete plan request is invalid"));
     }
     auto graph = RecoveryPointGraph::build(entries);
     if (!graph) {
         return base::Result<DeletePlan>::failure(graph.error());
     }
-    auto subtree = collect_subtree(entries, root_file_uuid);
+    auto subtree = collect_subtrees(entries, root_file_uuids);
     if (!subtree) {
         return base::Result<DeletePlan>::failure(subtree.error());
     }
@@ -385,8 +429,12 @@ base::Result<void> revalidate_delete_plan_strict(const DeletePlan& plan,
     if (plan.tombstone.targets.empty()) {
         return base::Result<void>::failure(invalid("delete plan is empty"));
     }
-    const auto& root_uuid = plan.tombstone.targets.back().file_uuid;
-    auto expected = collect_subtree(current_entries, root_uuid);
+    std::vector<std::string> planned_ids;
+    planned_ids.reserve(plan.tombstone.targets.size());
+    for (const auto& target : plan.tombstone.targets) {
+        planned_ids.push_back(target.file_uuid);
+    }
+    auto expected = collect_subtrees(current_entries, planned_ids);
     if (!expected) {
         return base::Result<void>::failure(expected.error());
     }

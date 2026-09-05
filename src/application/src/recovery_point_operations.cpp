@@ -360,14 +360,14 @@ RecoveryPointOperations::resolve_chain(const contracts::RecoveryPointRef& refere
 }
 
 base::Result<contracts::DeletePlanSummary>
-RecoveryPointOperations::plan_delete(const contracts::RecoveryPointRef& reference,
+RecoveryPointOperations::plan_delete(const contracts::PlanDeleteRecoveryPointsRequest& request,
                                      const base::CancellationToken cancellation) {
-    auto valid = contracts::validate_recovery_point_ref(reference);
+    auto valid = contracts::validate_plan_delete_recovery_points_request(request);
     if (!valid) {
         return base::Result<contracts::DeletePlanSummary>::failure(valid.error());
     }
     auto connection =
-        require_connection(control_plane_, reference.repository_connection_id, cancellation);
+        require_connection(control_plane_, request.repository_connection_id, cancellation);
     if (!connection) {
         return base::Result<contracts::DeletePlanSummary>::failure(connection.error());
     }
@@ -385,8 +385,8 @@ RecoveryPointOperations::plan_delete(const contracts::RecoveryPointRef& referenc
     }
     const auto now = static_cast<std::uint64_t>((std::max)(clock_.now_utc_ms(), 0LL));
     auto plan = personal_repository::plan_delete_recovery_points(
-        entries.value(), reference.recovery_point_id, operation.value(), now,
-        now + kDeletePlanTtlMs, reference.repository_connection_id,
+        entries.value(), request.recovery_point_ids, operation.value(), now,
+        now + kDeletePlanTtlMs, request.repository_connection_id,
         [&](const std::string_view key) -> base::Result<std::optional<std::string>> {
             auto attributes = storage.value()->reader().get_attributes(key, cancellation);
             if (!attributes && attributes.error().code == base::ErrorCode::kNotFound) {
@@ -412,8 +412,8 @@ RecoveryPointOperations::plan_delete(const contracts::RecoveryPointRef& referenc
     contracts::DeletePlanSummary summary;
     summary.plan_token = plan_token.value();
     summary.operation_id = plan.value().tombstone.operation_uuid;
-    summary.repository_connection_id = reference.repository_connection_id;
-    summary.root_recovery_point_id = reference.recovery_point_id;
+    summary.repository_connection_id = request.repository_connection_id;
+    summary.root_recovery_point_id = request.recovery_point_ids.front();
     summary.expires_utc_ms = plan.value().expires_utc_ms;
     summary.targets.reserve(plan.value().tombstone.targets.size());
     for (const auto& target : plan.value().tombstone.targets) {

@@ -1785,7 +1785,7 @@
     </message>
     <message id="aegra.volume.efi_system">
         <source>EFI System Partition</source>
-        <translation>EFI システムパーティション</translation>
+        <translation>ESP</translation>
     </message>
     <message id="aegra.volume.recovery">
         <source>Recovery Partition</source>
@@ -2264,8 +2264,8 @@
         <translation>リカバリ ポイントの削除</translation>
     </message>
     <message id="aegra.repository.delete.plan_message">
-        <source>The service planned to delete %1 recovery point(s) in this chain. Other recovery points are kept. This cannot be undone.</source>
-        <translation>サービスはこのチェーン内の %1 個のリカバリ ポイントを削除する予定です。他のポイントは保持されます。元に戻せません。</translation>
+        <source>The service planned to delete %1 recovery point(s). Other recovery points are kept. This cannot be undone.</source>
+        <translation>サービスは %1 個のリカバリ ポイントを削除する予定です。他のポイントは保持されます。元に戻せません。</translation>
     </message>
     <message id="aegra.repository.delete.retained_hint">
         <source>Approximately %1 other recovery point(s) currently listed will remain.</source>
@@ -2989,6 +2989,182 @@ for critical volumes now</source>
     <message id="aegra.job.operation.bootcheck">
         <source>Boot Check</source>
         <translation>起動チェック</translation>
+    </message>
+    <message id="aegra.shell.tray.open">
+        <source>Open Aegra</source>
+        <translation>Aegra を開く</translation>
+    </message>
+    <message id="aegra.settings.close_action">
+        <source>Close button</source>
+        <translation>閉じるボタン</translation>
+    </message>
+    <message id="aegra.settings.close_action.hide">
+        <source>Hide to tray</source>
+        <translation>トレイに隠す</translation>
+    </message>
+    <message id="aegra.settings.close_action.quit">
+        <source>Exit</source>
+        <translation>終了する</translation>
+    </message>
+    <message id="aegra.error.bootcheck.provider_unavailable">
+        <source>The selected hypervisor is not available for boot check</source>
+        <translation>選択されたハイパーバイザーが利用できないため、起動チェックを実行できません</translation>
+    </message>
+    <message id="aegra.error.bootcheck.virtualbox_hyperv_conflict">
+        <source>VirtualBox cannot start VMs because Hyper-V is using the CPU's virtualization. Enable the Windows feature 'Windows Hypervisor Platform', or switch boot check to Hyper-V.</source>
+        <translation>Hyper-V が CPU の仮想化機能を使用しているため、VirtualBox は仮想マシンを起動できません。Windows の機能「Windows ハイパーバイザー プラットフォーム」を有効にするか、起動チェックを Hyper-V に切り替えてください。</translation>
+    </message>
+    <message id="aegra.error.bootcheck.virtualbox_no_hardware_virt">
+        <source>Hardware virtualization (VT-x/AMD-V) is not available. Enable it in the BIOS/UEFI firmware settings.</source>
+        <translation>ハードウェア仮想化（VT-x/AMD-V）が利用できません。BIOS/UEFI ファームウェア設定で有効にしてください。</translation>
+    </message>
+    <message id="aegra.backup.post.hypervisor_refresh">
+        <source>Re-check hypervisor availability</source>
+        <translation>ハイパーバイザーの利用可否を再確認</translation>
+    </message>
+    <message id="aegra.backup.post.hypervisor_checking">
+        <source>Checking hypervisor availability...</source>
+        <translation>ハイパーバイザーの利用可否を確認しています...</translation>
+    </message>
+    <message id="aegra.backup.post.hypervisor_blocks_save">
+        <source>The selected hypervisor is unavailable. Fix it, choose another, or turn off boot check to continue.</source>
+        <translation>選択されたハイパーバイザーは利用できません。修復するか、別のものを選ぶか、起動チェックをオフにして続行してください。</translation>
+    </message>
+    <message id="aegra.repository.delete.selected_count">
+        <source>%1 selected</source>
+        <translation>%1 件選択中</translation>
+    </message>
+    <message id="aegra.repository.backup_set">
+        <source>Backup set %1</source>
+        <translation>バックアップ セット %1</translation>
+    </message>
+    <message id="aegra.repository.backup_set.summary">
+        <source>%1 recovery points · latest %2</source>
+        <translation>%1 個のリカバリ ポイント · 最新 %2</translation>
+    </message>
+    <message id="aegra.repository.content.volume_set">
+        <source>Volume set</source>
+        <translation>ボリュームセット</translation>
+    </message>
+    <message id="aegra.repository.content.file_set">
+        <source>File set</source>
+        <translation>ファイルセット</translation>
+    </message>
+    <message id="aegra.repository.column.image_size">
+        <source>Image size</source>
+        <translation>イメージ サイズ</translation>
+    </message>
+    <message id="aegra.repository.column.backup_content">
+        <source>Backup content</source>
+        <translation>バックアップ対象</translation>
+    </message>
+    <message id="aegra.repository.point.title">
+        <source>Recovery point %1</source>
+        <translation>復元ポイント %1</translation>
+    </message>
+    <message id="aegra.repository.point.latest">
+        <source>Latest</source>
+        <translation>最新</translation>
+    </message>
+    <message id="aegra.repository.point.baseline">
+        <source>Baseline backup</source>
+        <translation>ベースバックアップ</translation>
+    </message>
+    <message id="aegra.repository.point.parent_unavailable">
+        <source>Parent recovery point unavailable</source>
+        <translation>親の復元ポイントを利用できません</translation>
+    </message>
+    <message id="aegra.repository.point.based_on">
+        <source>Based on: %1 · %2</source>
+        <translation>ベース：%1 · %2</translation>
+    </message>
+    <message id="aegra.repository.point.technical">
+        <source>Technical information · Recovery point ID</source>
+        <translation>技術情報 · 復元ポイント ID</translation>
+    </message>
+    <message id="aegra.repository.point.copy_id">
+        <source>Copy ID</source>
+        <translation>ID をコピー</translation>
+    </message>
+    <message id="aegra.common.close">
+        <source>Close</source>
+        <translation>閉じる</translation>
+    </message>
+    <message id="aegra.repository.point.sources">
+        <source>%1 sources</source>
+        <translation>%1 個のソース</translation>
+    </message>
+    <message id="aegra.repository.verify.submitted">
+        <source>Verification jobs submitted. See Tasks and Event Log for results.</source>
+        <translation>検証ジョブを送信しました。タスクとイベントログで結果を確認できます。</translation>
+    </message>
+    <message id="aegra.repository.verify.submission_failed">
+        <source>Verification submission stopped. Some jobs may already be submitted; check Tasks before retrying.</source>
+        <translation>検証の送信が停止しました。一部は送信済みの可能性があります。再試行前にタスクを確認してください。</translation>
+    </message>
+    <message id="aegra.repository.column.rp_status">
+        <source>Status</source>
+        <translation>状態</translation>
+    </message>
+    <message id="aegra.repository.verify.status.queued">
+        <source>Queued</source>
+        <translation>待機中</translation>
+    </message>
+    <message id="aegra.repository.verify.status.running">
+        <source>Verifying</source>
+        <translation>検証中</translation>
+    </message>
+    <message id="aegra.repository.verify.status.succeeded">
+        <source>Verified</source>
+        <translation>検証済み</translation>
+    </message>
+    <message id="aegra.repository.verify.status.failed">
+        <source>Failed</source>
+        <translation>失敗</translation>
+    </message>
+    <message id="aegra.repository.verify.status.cancelled">
+        <source>Cancelled</source>
+        <translation>キャンセル</translation>
+    </message>
+    <message id="aegra.repository.verify.finished">
+        <source>Verification completed.</source>
+        <translation>検証が完了しました。</translation>
+    </message>
+    <message id="aegra.repository.verify.failed">
+        <source>Verification failed.</source>
+        <translation>検証に失敗しました。</translation>
+    </message>
+    <message id="aegra.repository.verify.cancelled">
+        <source>Verification cancelled.</source>
+        <translation>検証がキャンセルされました。</translation>
+    </message>
+    <message id="aegra.error.verify.archive_missing">
+        <source>Archive file does not exist</source>
+        <translation>アーカイブファイルが存在しません</translation>
+    </message>
+    <message id="aegra.error.verify.source_unavailable">
+        <source>Archive could not be opened. Check the path, repository connection, and file permissions.</source>
+        <translation>アーカイブを開けません。パス、リポジトリ接続、ファイル権限を確認してください。</translation>
+    </message>
+    <message id="aegra.error.verify.corrupt">
+        <source>Archive authentication failed</source>
+        <translation>アーカイブの認証に失敗しました</translation>
+    </message>
+    <message id="aegra.error.verify.credential_unavailable">
+        <source>Archive password is unavailable</source>
+        <translation>アーカイブのパスワードを利用できません</translation>
+    </message>
+    <message id="aegra.error.verify.cancelled">
+        <source>Verification was cancelled</source>
+        <translation>検証がキャンセルされました</translation>
+    </message>
+    <message id="aegra.error.verify.failed">
+        <source>Verification failed</source>
+        <translation>検証に失敗しました</translation>
+    </message>
+    <message id="aegra.error.verify.invalid_request">
+        <source>Verification request is invalid</source>
+        <translation>検証リクエストが無効です</translation>
     </message>
 </context>
 </TS>

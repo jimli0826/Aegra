@@ -25,6 +25,9 @@ Metadata，不发布或修复 Catalog，不访问 SQLite，也不允许 Desktop 
 
 - 必须先读取并验证 `aegra.repository`。
 - Catalog/Tombstone 对象 key 的 UUID 必须与内容一致，并属于 Descriptor Repository UUID。
+- 前缀下仅处理 `catalog/recovery-points/<uuid>.entry` 与 `catalog/deletions/<uuid>.tombstone`；
+  其它文件忽略。无法读取、无法解析或身份不匹配的单个 `.entry` / `.tombstone` 记入 skipped 并写
+  Service warning（`repository.catalog_entry_skipped`），不得使整次 ListRecoveryPoints 失败。
 - Tombstone 目标在所有页面隐藏。
 - Catalog 图冲突、重复 UUID、跨 Set 父引用和环使扫描失败；缺父节点保留并标记 chain incomplete。
 - 对象读取受单文档、对象数量和总读取字节上限约束，并正确处理短读与取消。

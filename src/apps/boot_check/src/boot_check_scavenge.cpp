@@ -45,6 +45,30 @@ using apps::worker::WorkerTaskLog;
 BootCheckExitCode run_boot_check_scavenge(const BootCheckHostOptions& options,
                                           const BootCheckHostContext& context,
                                           const std::filesystem::path& data_directory) {
+    // User-visible run (host launched under the logged-on user's token): the job
+    // VMs live in that user's default VirtualBox registry, not the isolated
+    // per-job homes. Clean only those (name prefix + description marker); the
+    // isolated job directories are owned by LocalSystem and cleaned by its pass.
+    if (!options.use_isolated_vbox_home) {
+        auto user_log = WorkerTaskLog::open("bootcheck", "scavenge");
+        if (user_log != nullptr) {
+            user_log->section("Scavenge");
+            user_log->field("mode", "user_default_registry");
+        }
+        if (options.vbox_manage_path.empty()) {
+            return BootCheckExitCode::kSucceeded;
+        }
+        auto removed = adapters::virtualbox::scavenge_boot_check_default_registry(
+            context.launcher, options.vbox_manage_path, {});
+        if (user_log != nullptr) {
+            user_log->field("virtualbox", removed
+                                              ? "vms_removed=" + std::to_string(removed.value())
+                                              : "vm_scavenge_failed");
+            user_log->section("Result");
+            user_log->field("outcome", removed ? "clean" : "incomplete");
+        }
+        return removed ? BootCheckExitCode::kSucceeded : BootCheckExitCode::kTaskFailed;
+    }
     auto log = WorkerTaskLog::open("bootcheck", "scavenge");
     bool incomplete = false;
     std::error_code error;

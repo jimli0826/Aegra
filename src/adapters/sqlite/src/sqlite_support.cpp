@@ -26,7 +26,7 @@ constexpr std::size_t kMaximumCapabilities = 64;
 constexpr std::size_t kMaximumCapabilityBytes = 64;
 constexpr std::size_t kMaximumTimezoneBytes = 128;
 constexpr std::size_t kMaximumTokenBytes = 1'024;
-constexpr std::size_t kMaximumCommandFingerprintBytes = 4'096;
+constexpr std::size_t kMaximumCommandFingerprintBytes = 65'536;
 
 [[nodiscard]] bool valid_stable_character(const unsigned char value) noexcept {
     return (value >= 'a' && value <= 'z') || (value >= '0' && value <= '9') || value == '.' ||
@@ -48,9 +48,9 @@ constexpr std::size_t kMaximumCommandFingerprintBytes = 4'096;
 }
 
 [[nodiscard]] bool valid_source_ids(const std::vector<std::string>& source_ids,
-                                    const bool allow_empty) {
-    if ((!allow_empty && source_ids.empty()) ||
-        source_ids.size() > contracts::kMaximumBackupSources) {
+                                    const bool allow_empty,
+                                    const std::size_t maximum = contracts::kMaximumBackupSources) {
+    if ((!allow_empty && source_ids.empty()) || source_ids.size() > maximum) {
         return false;
     }
     std::set<std::string_view> seen;
@@ -486,7 +486,10 @@ base::Result<void> validate_job_record(const ports::JobRecord& record) {
          (!record.started_utc_ms || *record.completed_utc_ms < *record.started_utc_ms)) ||
         ports::is_terminal_job_state(record.state) != record.completed_utc_ms.has_value() ||
         !valid_stable_value(record.message_code, kMaximumMessageCodeBytes) ||
-        !valid_source_ids(record.source_ids, true) ||
+        !valid_source_ids(record.source_ids, true,
+                          record.operation == contracts::JobOperation::kVerify
+                              ? contracts::kMaximumVerifyRecoveryPoints
+                              : contracts::kMaximumBackupSources) ||
         (record.repository_connection_id &&
          !valid_stable_value(*record.repository_connection_id, kMaximumIdentifierBytes)) ||
         (record.target_source_id &&
@@ -1083,7 +1086,9 @@ contracts::JobSummary to_job_summary(const ports::JobRecord& record) {
     summary.created_utc_ms = record.created_utc_ms;
     summary.started_utc_ms = record.started_utc_ms;
     summary.completed_utc_ms = record.completed_utc_ms;
-    summary.message_code = record.message_code;
+    summary.message_code = record.result_message_code && !record.result_message_code->empty()
+                               ? *record.result_message_code
+                               : record.message_code;
     summary.source_ids = record.source_ids;
     if (!record.schedule_id.empty()) {
         summary.schedule_id = record.schedule_id;
@@ -1102,6 +1107,7 @@ contracts::JobSummary to_job_summary(const ports::JobRecord& record) {
 
 contracts::ScheduleSummary to_schedule_summary(const ports::ScheduleRecord& record) {
     contracts::ScheduleSummary summary;
+    summary.backup_set_uuid = record.backup_set_uuid;
     summary.schedule_id = record.schedule_id;
     summary.display_name = record.display_name;
     summary.enabled = record.enabled;

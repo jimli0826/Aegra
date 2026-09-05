@@ -220,8 +220,7 @@ authenticate_archive_metadata(const ArchiveOpenRequest& request) {
     }
     detail::Win32InputFile input;
     if (auto opened = input.open(request.source); !opened) {
-        return base::Result<AuthenticatedArchiveMetadata>::failure(
-            {base::ErrorCode::kIoFailure, "failed to open personal archive"});
+        return base::Result<AuthenticatedArchiveMetadata>::failure(opened.error());
     }
     auto file_size = input.size();
     if (!file_size) {

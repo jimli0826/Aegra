@@ -1,6 +1,7 @@
 #include "client/service_client.h"
 
 #include "client/service_protocol.h"
+#include "locale/locale_format.h"
 #include "locale/message_code_map.h"
 
 #include <QDateTime>
@@ -514,7 +515,7 @@ void ServiceClient::enrich_job_row(JobRow& row) const {
         source_names.reserve(row.source_ids.size());
         for (const auto& source_id : row.source_ids) {
             if (const auto source = sources_.find(source_id)) {
-                source_names.push_back(source->display_name);
+                source_names.push_back(localized_volume_label(source->display_name));
             } else {
                 source_names.push_back(source_id);
             }
@@ -524,9 +525,8 @@ void ServiceClient::enrich_job_row(JobRow& row) const {
     if (!row.connection_id.isEmpty()) {
         if (const auto connection = connections_.find(row.connection_id)) {
             row.destination_name = connection->display_name;
-            // Connection summary currently exposes display name only (no path locator).
             if (row.destination_path.isEmpty()) {
-                row.destination_path = connection->display_name;
+                row.destination_path = connection->locator;
             }
         } else if (row.destination_name.isEmpty()) {
             row.destination_name = row.connection_id;

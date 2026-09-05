@@ -201,7 +201,8 @@ Application 按用户选择的叶子调用 `resolve_chain()`，得到 base-first
 ### 删除
 
 Application 先请求 `plan_delete()` 并向用户展示影响范围；确认后用同一 Plan 执行。删除文件的具体 I/O
-经 Storage Port 完成。不存在成员视为幂等成功，身份或 generation 冲突要求重新计划。
+经 Storage Port 完成。不存在成员视为幂等成功，身份或 generation 冲突要求重新计划。一次计划可包含多个
+所选根；目标集合是各根 descendant 子树的并集，按 descendant-first 森林序排列。
 
 ## SQLite 边界
 
@@ -261,7 +262,7 @@ generation、发布和删除语义见 [Local Storage 模块文档](storage_local
 阶段 13B 已实现 `RepositoryCatalogScanner`：先验证 Descriptor，再分页读取 Catalog Entry 与 Deletion
 Tombstone，隐藏删除中的 Recovery Point，验证 Repository/UUID/链图不变量，并按 `file_uuid` 稳定分页。
 
-S5 已增加 `delete_plan`：descendant-first 计划、带 Storage generation 的 `members`
+S5 已增加 `delete_plan`：descendant-first 计划（可多根并集）、带 Storage generation 的 `members`
 （sidecar → 续卷 → 主卷）、strict revalidation、Tombstone 发布与条件/幂等成员及 Catalog 删除执行。
 Catalog Reconcile（从 Archive 结构补建 Entry）仍属后续工作。
 

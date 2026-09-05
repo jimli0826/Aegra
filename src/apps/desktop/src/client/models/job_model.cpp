@@ -314,6 +314,39 @@ constexpr std::int64_t kOperationBackup = 1;
     return QStringLiteral("none");
 }
 
+[[nodiscard]] QString verify_item_key(const JobRow& job, const int index,
+                                      const int current) noexcept {
+    if (job.state == kStateQueued) {
+        return QStringLiteral("queued");
+    }
+    if (job.state == kStateRunning || job.state == kStateCancelling) {
+        if (current < 0) {
+            return index == 0 ? QStringLiteral("running") : QStringLiteral("queued");
+        }
+        if (index < current) {
+            return QStringLiteral("succeeded");
+        }
+        return index == current ? QStringLiteral("running") : QStringLiteral("queued");
+    }
+    if (job.state == kStateSucceeded) {
+        return QStringLiteral("succeeded");
+    }
+    if (job.state == kStateFailed || job.state == kStateInterrupted) {
+        if (current < 0) {
+            return QStringLiteral("failed");
+        }
+        return index < current ? QStringLiteral("succeeded") : QStringLiteral("failed");
+    }
+    if (job.state == kStateCancelled) {
+        if (current >= 0 && index < current) {
+            return QStringLiteral("succeeded");
+        }
+        return (index == current || current < 0) ? QStringLiteral("cancelled")
+                                                 : QStringLiteral("none");
+    }
+    return QStringLiteral("none");
+}
+
 } // namespace
 
 QVariantMap JobModel::latestBackupStatus(const QString& schedule_id) const {
@@ -508,6 +541,37 @@ qint64 JobModel::earliestActiveRestoreCreatedUtcMs() const {
         }
     }
     return earliest;
+}
+
+QVariantMap JobModel::recoveryPointVerifyStatus(const QString& file_uuid) const {
+    QVariantMap result{{QStringLiteral("key"), QStringLiteral("none")}};
+    if (file_uuid.isEmpty()) {
+        return result;
+    }
+    const JobRow* latest = nullptr;
+    for (const auto& row : rows_) {
+        if (row.operation != 3 || !row.source_ids.contains(file_uuid)) {
+            continue;
+        }
+        if (latest == nullptr || row.created_utc_ms >= latest->created_utc_ms) {
+            latest = &row;
+        }
+    }
+    if (latest == nullptr) {
+        return result;
+    }
+    const auto index = latest->source_ids.indexOf(file_uuid);
+    const auto current = latest->progress_recovery_point_id.isEmpty()
+                             ? -1
+                             : latest->source_ids.indexOf(latest->progress_recovery_point_id);
+    const auto key = verify_item_key(*latest, index, current);
+    result.insert(QStringLiteral("key"), key);
+    if ((key == QLatin1String("failed") || key == QLatin1String("cancelled")) &&
+        !latest->message_code.isEmpty()) {
+        result.insert(QStringLiteral("messageText"),
+                      localize_message_code(latest->message_code));
+    }
+    return result;
 }
 
 QVariantMap JobModel::operationCounts() const {
@@ -815,6 +879,8 @@ QVector<JobRow> jobs_from_variant_list(const QVariantList& items) {
             row.progress_stored_bytes =
                 map.value(QStringLiteral("progressStoredBytes")).toLongLong();
         }
+        row.progress_recovery_point_id =
+            map.value(QStringLiteral("progressRecoveryPointId")).toString();
         row.message_code = map.value(QStringLiteral("messageCode")).toString();
         for (const auto& source_id : map.value(QStringLiteral("sourceIds")).toList()) {
             row.source_ids.push_back(source_id.toString());

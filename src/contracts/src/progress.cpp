@@ -1,5 +1,7 @@
 #include "aegra/contracts/progress.h"
 
+#include "aegra/base/uuid.h"
+
 namespace aegra::contracts {
 namespace {
 
@@ -69,6 +71,12 @@ base::Result<void> validate_task_progress(const TaskProgress& progress) {
         return base::Result<void>::failure(base::Error{
             base::ErrorCode::kInvalidArgument,
             "processed_entries exceeds discovered_entries",
+        });
+    }
+    if (!progress.recovery_point_id.empty() && !base::is_canonical_uuid(progress.recovery_point_id)) {
+        return base::Result<void>::failure(base::Error{
+            base::ErrorCode::kInvalidArgument,
+            "progress recovery_point_id is invalid",
         });
     }
     return base::Result<void>::success();

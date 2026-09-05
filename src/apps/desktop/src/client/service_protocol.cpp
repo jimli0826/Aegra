@@ -792,7 +792,8 @@ namespace {
     QString connection_id;
     QString schedule_id;
     const auto source_value = object.value(QStringLiteral("source_ids"));
-    if (!source_value.isArray() || source_value.toArray().size() > 100) {
+    if (!source_value.isArray() ||
+        source_value.toArray().size() > static_cast<int>(kMaximumVerifyRecoveryPoints)) {
         return false;
     }
     for (const auto& value : source_value.toArray()) {
@@ -887,7 +888,7 @@ namespace {
         if (!has_exact_keys(progress,
                             {"schema_version", "job_id", "trace_id", "phase", "logical_bytes",
                              "processed_bytes", "stored_bytes", "discovered_entries",
-                             "processed_entries", "message_code"})) {
+                             "processed_entries", "message_code", "recovery_point_id"})) {
             return false;
         }
         const auto outer_job_id = object.value(QStringLiteral("job_id")).toString();
@@ -917,6 +918,7 @@ namespace {
                               (std::numeric_limits<qint64>::max)(), discovered_entries) ||
             !integer_in_range(progress.value(QStringLiteral("processed_entries")), 0,
                               (std::numeric_limits<qint64>::max)(), processed_entries) ||
+            !progress.value(QStringLiteral("recovery_point_id")).isString() ||
             (logical_bytes && processed_bytes > *logical_bytes)) {
             return false;
         }
@@ -928,6 +930,8 @@ namespace {
         map.insert(QStringLiteral("progressStoredBytes"), stored_bytes);
         map.insert(QStringLiteral("progressDiscoveredEntries"), discovered_entries);
         map.insert(QStringLiteral("progressProcessedEntries"), processed_entries);
+        map.insert(QStringLiteral("progressRecoveryPointId"),
+                   progress.value(QStringLiteral("recovery_point_id")).toString());
     }
     result = std::move(map);
     return true;
@@ -1097,6 +1101,98 @@ bool is_service_settings_failure_response(const QJsonObject& root) {
            integer_in_range(root.value(QStringLiteral("request_kind")),
                             kGetServiceSettingsRequestKind, kGetServiceSettingsRequestKind,
                             request_kind) &&
+           integer_in_range(root.value(QStringLiteral("boundary_error_code")), 1, 11, error) &&
+           root.value(QStringLiteral("payload")).isNull();
+}
+
+QByteArray encode_get_boot_check_hypervisor_status_request(const QString& request_id) {
+    return QJsonDocument(
+               QJsonObject{
+                   {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
+                   {QStringLiteral("message_type"), 1},
+                   {QStringLiteral("request_id"), request_id},
+                   {QStringLiteral("kind"), kGetBootCheckHypervisorStatusRequestKind},
+                   {QStringLiteral("idempotency_key"), QJsonValue(QJsonValue::Null)},
+                   {QStringLiteral("payload"), QJsonObject{}}})
+        .toJson(QJsonDocument::Compact);
+}
+
+QByteArray encode_refresh_boot_check_hypervisor_status_request(const QString& request_id,
+                                                               const QString& idempotency_key) {
+    return QJsonDocument(
+               QJsonObject{
+                   {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
+                   {QStringLiteral("message_type"), 1},
+                   {QStringLiteral("request_id"), request_id},
+                   {QStringLiteral("kind"), kRefreshBootCheckHypervisorStatusRequestKind},
+                   {QStringLiteral("idempotency_key"), idempotency_key},
+                   {QStringLiteral("payload"), QJsonObject{}}})
+        .toJson(QJsonDocument::Compact);
+}
+
+bool parse_boot_check_hypervisor_status_response(const QJsonObject& root,
+                                                 QList<BootCheckHypervisorStatus>& result) {
+    qint64 kind = 0;
+    qint64 request_kind = 0;
+    qint64 error = 0;
+    if (!integer_in_range(root.value(QStringLiteral("kind")), 1, 1, kind) ||
+        !integer_in_range(root.value(QStringLiteral("request_kind")),
+                          kGetBootCheckHypervisorStatusRequestKind,
+                          kGetBootCheckHypervisorStatusRequestKind, request_kind) ||
+        !integer_in_range(root.value(QStringLiteral("boundary_error_code")), 0, 0, error) ||
+        !root.value(QStringLiteral("payload")).isObject()) {
+        return false;
+    }
+    const auto payload = root.value(QStringLiteral("payload")).toObject();
+    if (!has_exact_keys(payload, {"hypervisors"}) ||
+        !payload.value(QStringLiteral("hypervisors")).isArray()) {
+        return false;
+    }
+    QList<BootCheckHypervisorStatus> parsed;
+    const auto items = payload.value(QStringLiteral("hypervisors")).toArray();
+    for (const auto& entry : items) {
+        if (!entry.isObject()) {
+            return false;
+        }
+        const auto item = entry.toObject();
+        qint64 hypervisor = 0;
+        qint64 probe_state = 0;
+        qint64 checked = 0;
+        if (!has_exact_keys(item, {"hypervisor", "installed", "probe_state", "available",
+                                   "message_code", "checked_utc_ms"}) ||
+            !integer_in_range(item.value(QStringLiteral("hypervisor")), 1, 2, hypervisor) ||
+            !item.value(QStringLiteral("installed")).isBool() ||
+            !integer_in_range(item.value(QStringLiteral("probe_state")),
+                              kBootCheckProbeStateNotProbed, kBootCheckProbeStateProbed,
+                              probe_state) ||
+            !item.value(QStringLiteral("available")).isBool() ||
+            !item.value(QStringLiteral("message_code")).isString() ||
+            !integer_in_range(item.value(QStringLiteral("checked_utc_ms")), 0,
+                              (std::numeric_limits<qint64>::max)(), checked)) {
+            return false;
+        }
+        BootCheckHypervisorStatus status;
+        status.hypervisor = static_cast<int>(hypervisor);
+        status.installed = item.value(QStringLiteral("installed")).toBool();
+        status.probe_state = static_cast<int>(probe_state);
+        status.available = item.value(QStringLiteral("available")).toBool();
+        status.message_code = item.value(QStringLiteral("message_code")).toString();
+        status.checked_utc_ms = checked;
+        parsed.push_back(std::move(status));
+    }
+    result = std::move(parsed);
+    return true;
+}
+
+bool is_boot_check_hypervisor_status_failure_response(const QJsonObject& root) {
+    qint64 kind = 0;
+    qint64 request_kind = 0;
+    qint64 error = 0;
+    return integer_in_range(root.value(QStringLiteral("kind")), kRequestFailedResponseKind,
+                            kRequestFailedResponseKind, kind) &&
+           integer_in_range(root.value(QStringLiteral("request_kind")),
+                            kGetBootCheckHypervisorStatusRequestKind,
+                            kGetBootCheckHypervisorStatusRequestKind, request_kind) &&
            integer_in_range(root.value(QStringLiteral("boundary_error_code")), 1, 11, error) &&
            root.value(QStringLiteral("payload")).isNull();
 }

@@ -21,8 +21,13 @@ VirtualBoxCommandRunner::run(const std::vector<std::string>& arguments,
     request.executable_path = executable_path_;
     request.arguments = arguments;
     request.capture_output = true;
-    request.environment_overrides.push_back(
-        ports::ProcessEnvironmentVariable{"VBOX_USER_HOME", std::string(user_home)});
+    // An empty user_home means "use the invoking user's default VirtualBox
+    // registry" (user-visible job path): leave VBOX_USER_HOME unset so VBoxManage
+    // resolves it from the inherited user environment.
+    if (!user_home.empty()) {
+        request.environment_overrides.push_back(
+            ports::ProcessEnvironmentVariable{"VBOX_USER_HOME", std::string(user_home)});
+    }
     auto launched = launcher_->launch(request);
     if (!launched) {
         return base::Result<VirtualBoxCommandResult>::failure(launched.error());

@@ -14,6 +14,7 @@
 
 #include <QObject>
 #include <QSet>
+#include <QList>
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
@@ -41,6 +42,16 @@ class ServiceClient final : public QObject {
     Q_PROPERTY(QStringList capabilities READ capabilities NOTIFY stateChanged)
     Q_PROPERTY(bool virtualBoxInstalled READ virtualBoxInstalled NOTIFY stateChanged)
     Q_PROPERTY(bool hyperVInstalled READ hyperVInstalled NOTIFY stateChanged)
+    /// Boot-check hypervisor usability probes (kind 21/53). ProbeState uses
+    /// kBootCheckProbeState* (1 not probed, 2 probing, 3 probed); UnavailableText
+    /// is a localized reason, non-empty only for a probed unavailable hypervisor.
+    Q_PROPERTY(int virtualBoxProbeState READ virtualBoxProbeState NOTIFY hypervisorStatusChanged)
+    Q_PROPERTY(QString virtualBoxUnavailableText READ virtualBoxUnavailableText NOTIFY
+                   hypervisorStatusChanged)
+    Q_PROPERTY(int hyperVProbeState READ hyperVProbeState NOTIFY hypervisorStatusChanged)
+    Q_PROPERTY(
+        QString hyperVUnavailableText READ hyperVUnavailableText NOTIFY hypervisorStatusChanged)
+    Q_PROPERTY(bool hypervisorProbing READ hypervisorProbing NOTIFY hypervisorStatusChanged)
     Q_PROPERTY(QString errorText READ errorText NOTIFY stateChanged)
     Q_PROPERTY(bool repositoryConfigured READ repositoryConfigured NOTIFY repositoryChanged)
     Q_PROPERTY(bool repositoryLoading READ repositoryLoading NOTIFY repositoryChanged)
@@ -134,6 +145,7 @@ class ServiceClient final : public QObject {
     Q_PROPERTY(bool toastVisible READ toastVisible NOTIFY toastChanged)
     Q_PROPERTY(QString toastText READ toastText NOTIFY toastChanged)
     Q_PROPERTY(bool toastIsError READ toastIsError NOTIFY toastChanged)
+    Q_PROPERTY(bool hasUnreadEvents READ hasUnreadEvents NOTIFY unreadEventsChanged)
     Q_PROPERTY(bool globalLoading READ globalLoading NOTIFY loadingChanged)
     /// Server chain-aware delete plan (targets only; Desktop does not recompute dependents).
     Q_PROPERTY(bool deletePlanBusy READ deletePlanBusy NOTIFY deletePlanChanged)
@@ -161,6 +173,14 @@ class ServiceClient final : public QObject {
     [[nodiscard]] QStringList capabilities() const;
     [[nodiscard]] bool virtualBoxInstalled() const noexcept;
     [[nodiscard]] bool hyperVInstalled() const noexcept;
+    [[nodiscard]] int virtualBoxProbeState() const noexcept;
+    [[nodiscard]] QString virtualBoxUnavailableText() const;
+    [[nodiscard]] int hyperVProbeState() const noexcept;
+    [[nodiscard]] QString hyperVUnavailableText() const;
+    [[nodiscard]] bool hypervisorProbing() const noexcept;
+    /// Asks the Service to re-probe hypervisor usability, then polls the status
+    /// query until no hypervisor is probing.
+    Q_INVOKABLE void refreshHypervisorStatus();
     [[nodiscard]] QString errorText() const;
     [[nodiscard]] bool repositoryConfigured() const noexcept;
     [[nodiscard]] bool repositoryLoading() const noexcept;
@@ -214,6 +234,8 @@ class ServiceClient final : public QObject {
     [[nodiscard]] QString connectionsErrorText() const;
     [[nodiscard]] QString selectedRepositoryConnectionId() const;
     [[nodiscard]] bool repositoryCommandBusy() const noexcept;
+    Q_INVOKABLE bool verifyRecoveryPoints(const QStringList& recovery_point_ids);
+    Q_INVOKABLE bool verifyAvailable() const;
     [[nodiscard]] QString repositoryCommandErrorText() const;
     [[nodiscard]] QString repositoryCommandErrorCode() const;
     [[nodiscard]] bool repositoryDirectoriesLoading() const noexcept;
@@ -249,6 +271,7 @@ class ServiceClient final : public QObject {
     [[nodiscard]] bool toastVisible() const noexcept;
     [[nodiscard]] QString toastText() const;
     [[nodiscard]] bool toastIsError() const noexcept;
+    [[nodiscard]] bool hasUnreadEvents() const noexcept;
     [[nodiscard]] bool globalLoading() const noexcept;
     [[nodiscard]] bool recoveryPointLayoutLoading() const noexcept;
     [[nodiscard]] QVariantList recoveryPointSourceDisks() const;
@@ -397,6 +420,7 @@ class ServiceClient final : public QObject {
     Q_INVOKABLE QString defaultRepositoryHostVolumeSourceId() const;
     Q_INVOKABLE void cancelActiveBackup();
     Q_INVOKABLE void dismissToast();
+    Q_INVOKABLE void markEventsRead();
     /// Show a top toast. Pass isError=true for validation/command failures (red banner).
     Q_INVOKABLE void showToast(const QString& text, bool isError = false);
     /// Prepare file restore only (capacity / eligibility). Does not start the job.
@@ -424,10 +448,10 @@ class ServiceClient final : public QObject {
     Q_INVOKABLE bool startFileRestore(const QString& recovery_point_id, int conflict_policy = 1,
                                       const QString& archive_password = {},
                                       bool restore_security = true);
-    /// Query Service PlanDeleteRecoveryPoints for one tip RP (chain-aware targets).
-    Q_INVOKABLE bool planDeleteRecoveryPoint(const QString& recovery_point_id,
-                                             const QString& archive_password = {});
-    /// Confirm and execute the pending delete plan token from planDeleteRecoveryPoint.
+    /// Query Service PlanDeleteRecoveryPoints for selected RP roots (chain-aware union).
+    Q_INVOKABLE bool planDeleteRecoveryPoints(const QStringList& recovery_point_ids,
+                                              const QString& archive_password = {});
+    /// Confirm and execute the pending delete plan token from planDeleteRecoveryPoints.
     Q_INVOKABLE bool executeDeletePlan();
     Q_INVOKABLE void clearDeletePlan();
     [[nodiscard]] bool deletePlanBusy() const noexcept;
@@ -454,6 +478,7 @@ class ServiceClient final : public QObject {
     void backupObserveChanged();
     void splashChanged();
     void toastChanged();
+    void unreadEventsChanged();
     void loadingChanged();
     /// Service accepted backup.start and returned a job id.
     void backupStartSucceeded(const QString& jobId);
@@ -482,6 +507,7 @@ class ServiceClient final : public QObject {
     void deleteExecuted();
     void deletePlanFailed(const QString& message);
     void serviceSettingsChanged();
+    void hypervisorStatusChanged();
 
   private:
     using State = ServiceClientState;
@@ -551,6 +577,11 @@ class ServiceClient final : public QObject {
     [[nodiscard]] RequestDisposition handle_update_service_settings_frame(const QByteArray& body);
     void finish_service_settings_failure(const QString& message_code);
     void reset_service_settings();
+    void start_hypervisor_status_query();
+    [[nodiscard]] RequestDisposition handle_hypervisor_status_frame(const QByteArray& body);
+    [[nodiscard]] RequestDisposition handle_hypervisor_refresh_frame(const QByteArray& body);
+    [[nodiscard]] const BootCheckHypervisorStatus* hypervisor_status_for(int hypervisor) const;
+    [[nodiscard]] QString hypervisor_unavailable_text(int hypervisor) const;
     void finish_plan_delete_failure(const QString& message_code);
     void finish_execute_delete_failure(const QString& message_code);
     void finish_job_failure(const QString& message_code);
@@ -566,6 +597,10 @@ class ServiceClient final : public QObject {
     void publish_schedules(QVariantList items);
     void enrich_job_row(JobRow& row) const;
     void finish_repository_command_failure(const QString& message_code);
+    bool submit_next_repository_verify();
+    void observe_accepted_verify_job(const QString& job_id, const QStringList& recovery_point_ids);
+    [[nodiscard]] static QString terminal_job_toast_text(const JobRow& row);
+    QList<QStringList> repository_verify_pending_;
     void finish_backup_command_failure(const QString& message_code);
     void finish_restore_command_failure(const QString& message_code);
     void finish_cancel_command_failure(const QString& message_code);
@@ -701,6 +736,12 @@ class ServiceClient final : public QObject {
     bool jobs_loading_{false};
     bool task_log_loading_{false};
     bool job_list_available_{false};
+    QList<BootCheckHypervisorStatus> hypervisor_status_;
+    bool hypervisor_status_loading_{false};
+    bool hypervisor_refresh_busy_{false};
+    QString hypervisor_status_request_id_;
+    QString hypervisor_refresh_request_id_;
+    QTimer* hypervisor_poll_timer_{nullptr};
     bool service_settings_available_{false};
     bool service_settings_loading_{false};
     bool service_settings_busy_{false};
@@ -797,6 +838,7 @@ class ServiceClient final : public QObject {
     bool first_ready_seen_{false};
     bool splash_error_{false};
     bool toast_visible_{false};
+    bool has_unread_events_{false};
     bool jobs_baseline_seeded_{false};
     bool pending_terminal_job_sync_{false};
     /// Post-backup chain grace: keep sampling the active list after a job ends so

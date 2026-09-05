@@ -1785,7 +1785,7 @@
     </message>
     <message id="aegra.volume.efi_system">
         <source>EFI System Partition</source>
-        <translation>EFI System Partition</translation>
+        <translation>ESP</translation>
     </message>
     <message id="aegra.volume.recovery">
         <source>Recovery Partition</source>
@@ -2264,8 +2264,8 @@
         <translation>Delete recovery points</translation>
     </message>
     <message id="aegra.repository.delete.plan_message">
-        <source>The service planned to delete %1 recovery point(s) in this chain. Other recovery points are kept. This cannot be undone.</source>
-        <translation>The service planned to delete %1 recovery point(s) in this chain. Other recovery points are kept. This cannot be undone.</translation>
+        <source>The service planned to delete %1 recovery point(s). Other recovery points are kept. This cannot be undone.</source>
+        <translation>The service planned to delete %1 recovery point(s). Other recovery points are kept. This cannot be undone.</translation>
     </message>
     <message id="aegra.repository.delete.retained_hint">
         <source>Approximately %1 other recovery point(s) currently listed will remain.</source>
@@ -2989,6 +2989,182 @@ for critical volumes now</translation>
     <message id="aegra.job.operation.bootcheck">
         <source>Boot Check</source>
         <translation>Boot Check</translation>
+    </message>
+    <message id="aegra.shell.tray.open">
+        <source>Open Aegra</source>
+        <translation>Open Aegra</translation>
+    </message>
+    <message id="aegra.settings.close_action">
+        <source>Close button</source>
+        <translation>Close button</translation>
+    </message>
+    <message id="aegra.settings.close_action.hide">
+        <source>Hide to tray</source>
+        <translation>Hide to tray</translation>
+    </message>
+    <message id="aegra.settings.close_action.quit">
+        <source>Exit</source>
+        <translation>Exit</translation>
+    </message>
+    <message id="aegra.error.bootcheck.provider_unavailable">
+        <source>The selected hypervisor is not available for boot check</source>
+        <translation>The selected hypervisor is not available for boot check</translation>
+    </message>
+    <message id="aegra.error.bootcheck.virtualbox_hyperv_conflict">
+        <source>VirtualBox cannot start VMs because Hyper-V is using the CPU's virtualization. Enable the Windows feature 'Windows Hypervisor Platform', or switch boot check to Hyper-V.</source>
+        <translation>VirtualBox cannot start VMs because Hyper-V is using the CPU's virtualization. Enable the Windows feature 'Windows Hypervisor Platform', or switch boot check to Hyper-V.</translation>
+    </message>
+    <message id="aegra.error.bootcheck.virtualbox_no_hardware_virt">
+        <source>Hardware virtualization (VT-x/AMD-V) is not available. Enable it in the BIOS/UEFI firmware settings.</source>
+        <translation>Hardware virtualization (VT-x/AMD-V) is not available. Enable it in the BIOS/UEFI firmware settings.</translation>
+    </message>
+    <message id="aegra.backup.post.hypervisor_refresh">
+        <source>Re-check hypervisor availability</source>
+        <translation>Re-check hypervisor availability</translation>
+    </message>
+    <message id="aegra.backup.post.hypervisor_checking">
+        <source>Checking hypervisor availability...</source>
+        <translation>Checking hypervisor availability...</translation>
+    </message>
+    <message id="aegra.backup.post.hypervisor_blocks_save">
+        <source>The selected hypervisor is unavailable. Fix it, choose another, or turn off boot check to continue.</source>
+        <translation>The selected hypervisor is unavailable. Fix it, choose another, or turn off boot check to continue.</translation>
+    </message>
+    <message id="aegra.repository.delete.selected_count">
+        <source>%1 selected</source>
+        <translation>%1 selected</translation>
+    </message>
+    <message id="aegra.repository.backup_set">
+        <source>Backup set %1</source>
+        <translation>Backup set %1</translation>
+    </message>
+    <message id="aegra.repository.backup_set.summary">
+        <source>%1 recovery points · latest %2</source>
+        <translation>%1 recovery points · latest %2</translation>
+    </message>
+    <message id="aegra.repository.content.volume_set">
+        <source>Volume set</source>
+        <translation>Volume set</translation>
+    </message>
+    <message id="aegra.repository.content.file_set">
+        <source>File set</source>
+        <translation>File set</translation>
+    </message>
+    <message id="aegra.repository.column.image_size">
+        <source>Image size</source>
+        <translation>Image size</translation>
+    </message>
+    <message id="aegra.repository.column.backup_content">
+        <source>Backup content</source>
+        <translation>Backup content</translation>
+    </message>
+    <message id="aegra.repository.point.title">
+        <source>Recovery point %1</source>
+        <translation>Recovery point %1</translation>
+    </message>
+    <message id="aegra.repository.point.latest">
+        <source>Latest</source>
+        <translation>Latest</translation>
+    </message>
+    <message id="aegra.repository.point.baseline">
+        <source>Baseline backup</source>
+        <translation>Baseline backup</translation>
+    </message>
+    <message id="aegra.repository.point.parent_unavailable">
+        <source>Parent recovery point unavailable</source>
+        <translation>Parent recovery point unavailable</translation>
+    </message>
+    <message id="aegra.repository.point.based_on">
+        <source>Based on: %1 · %2</source>
+        <translation>Based on: %1 · %2</translation>
+    </message>
+    <message id="aegra.repository.point.technical">
+        <source>Technical information · Recovery point ID</source>
+        <translation>Technical information · Recovery point ID</translation>
+    </message>
+    <message id="aegra.repository.point.copy_id">
+        <source>Copy ID</source>
+        <translation>Copy ID</translation>
+    </message>
+    <message id="aegra.common.close">
+        <source>Close</source>
+        <translation>Close</translation>
+    </message>
+    <message id="aegra.repository.point.sources">
+        <source>%1 sources</source>
+        <translation>%1 sources</translation>
+    </message>
+    <message id="aegra.repository.verify.submitted">
+        <source>Verification jobs submitted. See Tasks and Event Log for results.</source>
+        <translation>Verification jobs submitted. See Tasks and Event Log for results.</translation>
+    </message>
+    <message id="aegra.repository.verify.submission_failed">
+        <source>Verification submission stopped. Some jobs may already be submitted; check Tasks before retrying.</source>
+        <translation>Verification submission stopped. Some jobs may already be submitted; check Tasks before retrying.</translation>
+    </message>
+    <message id="aegra.repository.column.rp_status">
+        <source>Status</source>
+        <translation>Status</translation>
+    </message>
+    <message id="aegra.repository.verify.status.queued">
+        <source>Queued</source>
+        <translation>Queued</translation>
+    </message>
+    <message id="aegra.repository.verify.status.running">
+        <source>Verifying</source>
+        <translation>Verifying</translation>
+    </message>
+    <message id="aegra.repository.verify.status.succeeded">
+        <source>Verified</source>
+        <translation>Verified</translation>
+    </message>
+    <message id="aegra.repository.verify.status.failed">
+        <source>Failed</source>
+        <translation>Failed</translation>
+    </message>
+    <message id="aegra.repository.verify.status.cancelled">
+        <source>Cancelled</source>
+        <translation>Cancelled</translation>
+    </message>
+    <message id="aegra.repository.verify.finished">
+        <source>Verification completed.</source>
+        <translation>Verification completed.</translation>
+    </message>
+    <message id="aegra.repository.verify.failed">
+        <source>Verification failed.</source>
+        <translation>Verification failed.</translation>
+    </message>
+    <message id="aegra.repository.verify.cancelled">
+        <source>Verification cancelled.</source>
+        <translation>Verification cancelled.</translation>
+    </message>
+    <message id="aegra.error.verify.archive_missing">
+        <source>Archive file does not exist</source>
+        <translation>Archive file does not exist</translation>
+    </message>
+    <message id="aegra.error.verify.source_unavailable">
+        <source>Archive could not be opened. Check the path, repository connection, and file permissions.</source>
+        <translation>Archive could not be opened. Check the path, repository connection, and file permissions.</translation>
+    </message>
+    <message id="aegra.error.verify.corrupt">
+        <source>Archive authentication failed</source>
+        <translation>Archive authentication failed</translation>
+    </message>
+    <message id="aegra.error.verify.credential_unavailable">
+        <source>Archive password is unavailable</source>
+        <translation>Archive password is unavailable</translation>
+    </message>
+    <message id="aegra.error.verify.cancelled">
+        <source>Verification was cancelled</source>
+        <translation>Verification was cancelled</translation>
+    </message>
+    <message id="aegra.error.verify.failed">
+        <source>Verification failed</source>
+        <translation>Verification failed</translation>
+    </message>
+    <message id="aegra.error.verify.invalid_request">
+        <source>Verification request is invalid</source>
+        <translation>Verification request is invalid</translation>
     </message>
 </context>
 </TS>

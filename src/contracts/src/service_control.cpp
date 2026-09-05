@@ -42,8 +42,9 @@ constexpr std::size_t kMaximumTokenBytes = 1'024;
 }
 
 [[nodiscard]] bool valid_source_ids(const std::vector<std::string>& source_ids,
-                                    const bool allow_empty) {
-    if ((!allow_empty && source_ids.empty()) || source_ids.size() > kMaximumBackupSources) {
+                                    const bool allow_empty,
+                                    const std::size_t maximum = kMaximumBackupSources) {
+    if ((!allow_empty && source_ids.empty()) || source_ids.size() > maximum) {
         return false;
     }
     std::set<std::string_view> seen;
@@ -288,7 +289,10 @@ base::Result<void> validate_job_summary(const JobSummary& summary) {
             return invalid("job summary progress is invalid");
         }
     }
-    if (!valid_source_ids(summary.source_ids, true) ||
+    const auto maximum_source_ids = summary.operation == JobOperation::kVerify
+                                        ? kMaximumVerifyRecoveryPoints
+                                        : kMaximumBackupSources;
+    if (!valid_source_ids(summary.source_ids, true, maximum_source_ids) ||
         (summary.repository_connection_id &&
          !valid_stable_value(*summary.repository_connection_id, kMaximumIdentifierBytes)) ||
         (summary.schedule_id &&
@@ -360,6 +364,7 @@ base::Result<void> validate_schedule_trigger(const ScheduleTrigger& trigger) {
 base::Result<void> validate_schedule_summary(const ScheduleSummary& summary) {
     auto valid_trigger = validate_schedule_trigger(summary.trigger);
     if (!valid_stable_value(summary.schedule_id, kMaximumIdentifierBytes) ||
+        !base::is_canonical_uuid(summary.backup_set_uuid) ||
         !valid_text(summary.display_name, kMaximumDisplayNameBytes) ||
         !is_known_content_kind(summary.content_kind) ||
         !valid_stable_value(summary.repository_connection_id, kMaximumIdentifierBytes) ||
@@ -495,6 +500,26 @@ base::Result<void> validate_recovery_point_ref(const RecoveryPointRef& reference
     return base::Result<void>::success();
 }
 
+base::Result<void>
+validate_plan_delete_recovery_points_request(const PlanDeleteRecoveryPointsRequest& request) {
+    if (!valid_stable_value(request.repository_connection_id, kMaximumIdentifierBytes) ||
+        request.recovery_point_ids.empty() ||
+        request.recovery_point_ids.size() > kMaximumDeletePlanTargets) {
+        return invalid("delete plan request is invalid");
+    }
+    std::set<std::string_view> seen;
+    for (const auto& id : request.recovery_point_ids) {
+        if (!valid_stable_value(id, kMaximumIdentifierBytes) || !seen.insert(id).second) {
+            return invalid("delete plan request is invalid");
+        }
+    }
+    constexpr std::size_t kMaximumArchivePasswordBytes = 32;
+    if (request.archive_password.size() > kMaximumArchivePasswordBytes) {
+        return invalid("recovery point archive password is too long");
+    }
+    return base::Result<void>::success();
+}
+
 base::Result<void> validate_start_backup_command(const StartBackupCommand& command) {
     // Wire payload is only schedule_id + backup_type; Service expands the rest from SQLite.
     if (!valid_stable_value(command.schedule_id, kMaximumIdentifierBytes) ||
@@ -507,8 +532,15 @@ base::Result<void> validate_start_backup_command(const StartBackupCommand& comma
 
 base::Result<void> validate_start_verify_command(const StartVerifyCommand& command) {
     if (!valid_stable_value(command.repository_connection_id, kMaximumIdentifierBytes) ||
-        !valid_stable_value(command.recovery_point_id, kMaximumIdentifierBytes)) {
+        command.recovery_point_ids.empty() ||
+        command.recovery_point_ids.size() > kMaximumVerifyRecoveryPoints) {
         return invalid("start verify command is invalid");
+    }
+    std::set<std::string_view> seen;
+    for (const auto& id : command.recovery_point_ids) {
+        if (!valid_stable_value(id, kMaximumIdentifierBytes) || !seen.insert(id).second) {
+            return invalid("start verify command is invalid");
+        }
     }
     return base::Result<void>::success();
 }
@@ -910,7 +942,8 @@ base::Result<void> validate_delete_plan_summary(const DeletePlanSummary& summary
         !valid_stable_value(summary.operation_id, kMaximumIdentifierBytes) ||
         !valid_stable_value(summary.repository_connection_id, kMaximumIdentifierBytes) ||
         !valid_stable_value(summary.root_recovery_point_id, kMaximumIdentifierBytes) ||
-        summary.targets.empty() || summary.targets.size() > 10'000 || summary.expires_utc_ms == 0 ||
+        summary.targets.empty() || summary.targets.size() > kMaximumDeletePlanTargets ||
+        summary.expires_utc_ms == 0 ||
         !valid_wire_integer(summary.expires_utc_ms)) {
         return invalid("delete plan summary is invalid");
     }
@@ -1111,6 +1144,34 @@ base::Result<void>
 validate_update_service_settings_command(const UpdateServiceSettingsCommand& command) {
     if (!is_valid_job_retention_months(command.job_retention_months)) {
         return invalid("update service settings command is invalid");
+    }
+    return base::Result<void>::success();
+}
+
+base::Result<void>
+validate_boot_check_hypervisor_status_query(const BootCheckHypervisorStatusQuery&) {
+    return base::Result<void>::success();
+}
+
+base::Result<void> validate_refresh_boot_check_hypervisor_status_command(
+    const RefreshBootCheckHypervisorStatusCommand&) {
+    return base::Result<void>::success();
+}
+
+base::Result<void>
+validate_boot_check_hypervisor_status_report(const BootCheckHypervisorStatusReport& report) {
+    constexpr std::size_t kMaximumHypervisors = 8;
+    constexpr std::size_t kMaximumProbeMessageCodeBytes = 128;
+    if (report.hypervisors.size() > kMaximumHypervisors) {
+        return invalid("boot check hypervisor status report is invalid");
+    }
+    for (const auto& status : report.hypervisors) {
+        if (!is_known_boot_check_hypervisor(status.hypervisor) ||
+            !is_known_boot_check_probe_state(status.probe_state) ||
+            status.message_code.size() > kMaximumProbeMessageCodeBytes ||
+            !valid_wire_integer(status.checked_utc_ms)) {
+            return invalid("boot check hypervisor status report is invalid");
+        }
     }
     return base::Result<void>::success();
 }

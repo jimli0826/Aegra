@@ -11,6 +11,9 @@
 
 #include <Windows.h>
 
+#include <aclapi.h>
+#include <wtsapi32.h>
+
 #include <nlohmann/json.hpp>
 
 #include <chrono>
@@ -34,6 +37,9 @@ using worker_job_detail::path_to_utf8;
 using worker_job_detail::resolve_archive_absolute_path;
 
 constexpr auto kRunBudget = std::chrono::minutes(45);
+// A capability probe creates one throwaway VM at most; a hung probe must not
+// hold the refresh pipeline for the full job budget.
+constexpr auto kProbeBudget = std::chrono::minutes(5);
 // Catalog publish may still be settling right after backup completion (no verify
 // runtime in between when verify is disabled); bounded wait for the tip entry.
 constexpr unsigned kCatalogSettleAttempts = 12;
@@ -47,6 +53,68 @@ void write_log(IServiceLog* const logger, const ServiceLogLevel level, const std
     if (logger != nullptr) {
         logger->write(level, code, detail);
     }
+}
+
+/// Grants the interactive user full control (inheritable) on the BootCheck tree
+/// so a host launched under that user's token can read staged requests and write
+/// job directories. Best-effort: no active user, or an ACL failure, simply leaves
+/// the tree LocalSystem-only (the host then falls back to a System launch).
+void grant_active_user_access(const std::filesystem::path& directory) noexcept {
+    HANDLE raw_token = nullptr;
+    const DWORD console = WTSGetActiveConsoleSessionId();
+    if (console == 0xFFFFFFFFU || WTSQueryUserToken(console, &raw_token) == FALSE) {
+        return;
+    }
+    struct TokenGuard final {
+        HANDLE value;
+        ~TokenGuard() {
+            if (value != nullptr) {
+                CloseHandle(value);
+            }
+        }
+    } token_guard{raw_token};
+    DWORD size = 0;
+    GetTokenInformation(raw_token, TokenUser, nullptr, 0, &size);
+    if (size == 0) {
+        return;
+    }
+    std::vector<std::byte> buffer(size);
+    if (GetTokenInformation(raw_token, TokenUser, buffer.data(), size, &size) == FALSE) {
+        return;
+    }
+    PSID user_sid = reinterpret_cast<TOKEN_USER*>(buffer.data())->User.Sid;
+
+    PACL existing_dacl = nullptr;
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    auto path = directory.wstring();
+    if (GetNamedSecurityInfoW(path.c_str(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr,
+                              nullptr, &existing_dacl, nullptr, &descriptor) != ERROR_SUCCESS) {
+        return;
+    }
+    struct DescriptorGuard final {
+        PSECURITY_DESCRIPTOR value;
+        ~DescriptorGuard() {
+            if (value != nullptr) {
+                LocalFree(value);
+            }
+        }
+    } descriptor_guard{descriptor};
+
+    EXPLICIT_ACCESSW access{};
+    access.grfAccessPermissions = GENERIC_ALL;
+    access.grfAccessMode = GRANT_ACCESS;
+    access.grfInheritance = OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE;
+    access.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+    access.Trustee.TrusteeType = TRUSTEE_IS_USER;
+    access.Trustee.ptstrName = static_cast<LPWSTR>(user_sid);
+
+    PACL merged_dacl = nullptr;
+    if (SetEntriesInAclW(1, &access, existing_dacl, &merged_dacl) != ERROR_SUCCESS) {
+        return;
+    }
+    (void)SetNamedSecurityInfoW(path.data(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr,
+                                nullptr, merged_dacl, nullptr);
+    LocalFree(merged_dacl);
 }
 
 /// tip -> Full chain of catalog entries for a volume recovery point (base-first).
@@ -109,6 +177,38 @@ resolve_volume_chain(ports::IControlPlaneDatabase& control_plane,
     return base::Result<void>::success();
 }
 
+struct InspectOutcome final {
+    bool available{false};
+    std::string message_code{"bootcheck.provider_unavailable"};
+};
+
+/// Extracts an `--inspect` result from the host's captured stdout. Any launch,
+/// parse, or shape failure keeps the unavailable default.
+[[nodiscard]] InspectOutcome parse_inspect_response(const std::string& output) {
+    InspectOutcome outcome;
+    const auto begin = output.find('{');
+    const auto end = output.rfind('}');
+    if (begin == std::string::npos || end == std::string::npos || end <= begin) {
+        return outcome;
+    }
+    try {
+        const auto root = Json::parse(output.substr(begin, end - begin + 1));
+        if (!root.is_object() || root.value("schema_version", 0) != 1 ||
+            root.value("kind", std::string{}) != "inspect") {
+            return outcome;
+        }
+        outcome.available = root.value("available", false);
+        if (outcome.available) {
+            outcome.message_code.clear();
+        } else if (const auto code = root.value("message_code", std::string{}); !code.empty()) {
+            outcome.message_code = code;
+        }
+    } catch (const std::exception&) {
+        outcome = InspectOutcome{};
+    }
+    return outcome;
+}
+
 /// Extracts the terminal outcome from the host's captured stdout (one
 /// WorkerResponse JSON line, possibly surrounded by stray output).
 [[nodiscard]] BootCheckRunResult parse_host_response(const std::string& output) {
@@ -140,13 +240,13 @@ resolve_volume_chain(ports::IControlPlaneDatabase& control_plane,
     return result;
 }
 
-/// Cancels the wait after the run budget so a hung host is terminated.
+/// Cancels the wait after the given budget so a hung host is terminated.
 class RunDeadline final {
   public:
-    RunDeadline()
-        : watchdog_([this](const std::stop_token stopped) {
+    explicit RunDeadline(const std::chrono::minutes budget = kRunBudget)
+        : watchdog_([this, budget](const std::stop_token stopped) {
               std::unique_lock lock(mutex_);
-              changed_.wait_for(lock, stopped, kRunBudget, [] { return false; });
+              changed_.wait_for(lock, stopped, budget, [] { return false; });
               if (!stopped.stop_requested()) {
                   cancellation_.request_stop();
               }
@@ -179,7 +279,12 @@ struct BootCheckSupervisor::Impl final {
          ports::IControlPlaneDatabase& database, ports::IRepositoryStorageFactory& storage,
          ports::IClock& clock_source, IServiceLog* const service_logger)
         : options(std::move(run_options)), launcher(process_launcher), control_plane(database),
-          storage_factory(storage), clock(clock_source), logger(service_logger) {}
+          storage_factory(storage), clock(clock_source), logger(service_logger) {
+        virtualbox_status.hypervisor = contracts::BootCheckHypervisor::kVirtualBox;
+        virtualbox_status.installed = options.virtualbox_installed;
+        hyperv_status.hypervisor = contracts::BootCheckHypervisor::kHyperV;
+        hyperv_status.installed = options.hyperv_installed;
+    }
 
     Options options;
     ports::IProcessLauncher& launcher;
@@ -191,12 +296,50 @@ struct BootCheckSupervisor::Impl final {
     mutable std::mutex mutex;
     bool stopping{false};
     bool scavenging{false};
+    bool probing{false};
+    contracts::BootCheckHypervisorStatus virtualbox_status;
+    contracts::BootCheckHypervisorStatus hyperv_status;
     std::string active_job_id;
     std::optional<std::pair<std::string, BootCheckRunResult>> finished;
     std::function<void()> completion_observer;
     std::jthread runner;
     std::jthread scavenger;
+    std::jthread prober;
     RunDeadline* active_deadline{nullptr};
+
+    /// Runs one `--inspect` probe and publishes the outcome into `status`.
+    void probe_one(const char* const hypervisor_name,
+                   contracts::BootCheckHypervisorStatus& status, const std::stop_token stopped) {
+        ports::ProcessLaunchRequest launch;
+        launch.executable_path = path_to_utf8(options.host_executable_path);
+        launch.arguments = {"--inspect", hypervisor_name};
+        launch.capture_output = true;
+        InspectOutcome outcome;
+        auto launched = launcher.launch(launch);
+        if (launched) {
+            RunDeadline deadline(kProbeBudget);
+            std::stop_callback stop_forward(stopped, [&deadline] { deadline.cancel(); });
+            auto exited = launcher.wait(launched.value().pid, deadline.token());
+            if (!exited) {
+                (void)launcher.terminate(launched.value().pid);
+            } else {
+                outcome = parse_inspect_response(exited.value().output);
+            }
+        }
+        const auto now = clock.now_utc_ms();
+        {
+            std::lock_guard lock(mutex);
+            status.probe_state = contracts::BootCheckProbeState::kProbed;
+            status.available = outcome.available;
+            status.message_code = outcome.message_code;
+            status.checked_utc_ms = now < 0 ? 0 : static_cast<std::uint64_t>(now);
+        }
+        write_log(logger, outcome.available ? ServiceLogLevel::kInfo : ServiceLogLevel::kWarning,
+                  "boot_check.hypervisor_probed",
+                  std::string("hypervisor=") + hypervisor_name +
+                      "; available=" + (outcome.available ? "true" : "false") +
+                      (outcome.message_code.empty() ? "" : "; message=" + outcome.message_code));
+    }
 
     [[nodiscard]] base::Result<std::string> build_request_json(const BootCheckDispatch& dispatch) {
         auto chain =
@@ -279,10 +422,19 @@ struct BootCheckSupervisor::Impl final {
         if (ec || !write_request_file(request_path, request_json.value())) {
             return {false, kDispatchFailed};
         }
+        // VirtualBox registers per-user, so run the host under the logged-on
+        // user's token to make the job VM appear in their VirtualBox Manager.
+        // Hyper-V VMs are global (System launch keeps the required privileges).
+        const bool user_visible =
+            dispatch.hypervisor == contracts::BootCheckHypervisor::kVirtualBox;
+        if (user_visible) {
+            grant_active_user_access(options.data_directory / L"bootcheck");
+        }
         ports::ProcessLaunchRequest launch;
         launch.executable_path = path_to_utf8(options.host_executable_path);
         launch.arguments = {"--request", path_to_utf8(request_path)};
         launch.capture_output = true;
+        launch.run_as_active_user = user_visible;
         auto launched = launcher.launch(launch);
         if (!launched) {
             std::filesystem::remove(request_path, ec);
@@ -358,11 +510,21 @@ void BootCheckSupervisor::begin_scavenge() {
     }
     impl_->scavenging = true;
     impl_->scavenger = std::jthread([state = impl_.get()](const std::stop_token stopped) {
-        ports::ProcessLaunchRequest launch;
-        launch.executable_path = path_to_utf8(state->options.host_executable_path);
-        launch.arguments = {"--scavenge"};
-        auto launched = state->launcher.launch(launch);
-        if (launched) {
+        // Two passes: a System pass clears isolated job directories/registries,
+        // then an active-user pass clears orphaned VMs from the logged-on user's
+        // own VirtualBox registry (user-visible job path). The user pass falls
+        // back to System when nobody is logged on (a harmless no-op there).
+        const auto run_scavenge = [state, &stopped](const bool as_active_user) {
+            ports::ProcessLaunchRequest launch;
+            launch.executable_path = path_to_utf8(state->options.host_executable_path);
+            launch.arguments = {"--scavenge"};
+            launch.run_as_active_user = as_active_user;
+            auto launched = state->launcher.launch(launch);
+            if (!launched) {
+                write_log(state->logger, ServiceLogLevel::kWarning,
+                          "post_backup.boot_check_scavenge_failed", "status=launch_failed");
+                return;
+            }
             RunDeadline deadline;
             std::stop_callback stop_forward(stopped, [&deadline] { deadline.cancel(); });
             auto exited = state->launcher.wait(launched.value().pid, deadline.token());
@@ -370,15 +532,54 @@ void BootCheckSupervisor::begin_scavenge() {
                 (void)state->launcher.terminate(launched.value().pid);
             }
             write_log(state->logger, ServiceLogLevel::kInfo, "post_backup.boot_check_scavenged",
-                      exited && exited.value().exit_code == 0 ? "status=clean"
-                                                              : "status=incomplete");
-        } else {
-            write_log(state->logger, ServiceLogLevel::kWarning,
-                      "post_backup.boot_check_scavenge_failed", "status=launch_failed");
+                      std::string(as_active_user ? "scope=user " : "scope=system ") +
+                          (exited && exited.value().exit_code == 0 ? "status=clean"
+                                                                   : "status=incomplete"));
+        };
+        run_scavenge(false);
+        if (!stopped.stop_requested()) {
+            run_scavenge(true);
         }
         std::lock_guard lock(state->mutex);
         state->scavenging = false;
     });
+}
+
+void BootCheckSupervisor::begin_hypervisor_probe() {
+    if (!available()) {
+        return;
+    }
+    std::lock_guard lock(impl_->mutex);
+    if (impl_->stopping || impl_->probing ||
+        (!impl_->options.virtualbox_installed && !impl_->options.hyperv_installed)) {
+        return;
+    }
+    impl_->probing = true;
+    if (impl_->options.virtualbox_installed) {
+        impl_->virtualbox_status.probe_state = contracts::BootCheckProbeState::kProbing;
+    }
+    if (impl_->options.hyperv_installed) {
+        impl_->hyperv_status.probe_state = contracts::BootCheckProbeState::kProbing;
+    }
+    // The previous pass has finished (probing was false), so this move-assign
+    // joins an already-completed thread.
+    impl_->prober = std::jthread([state = impl_.get()](const std::stop_token stopped) {
+        if (state->options.virtualbox_installed && !stopped.stop_requested()) {
+            state->probe_one("virtualbox", state->virtualbox_status, stopped);
+        }
+        if (state->options.hyperv_installed && !stopped.stop_requested()) {
+            state->probe_one("hyperv", state->hyperv_status, stopped);
+        }
+        std::lock_guard lock(state->mutex);
+        state->probing = false;
+    });
+}
+
+contracts::BootCheckHypervisorStatusReport BootCheckSupervisor::hypervisor_status() const {
+    std::lock_guard lock(impl_->mutex);
+    contracts::BootCheckHypervisorStatusReport report;
+    report.hypervisors = {impl_->virtualbox_status, impl_->hyperv_status};
+    return report;
 }
 
 bool BootCheckSupervisor::try_start(const BootCheckDispatch& dispatch) {
@@ -429,11 +630,15 @@ void BootCheckSupervisor::shutdown() noexcept {
     }
     impl_->runner.request_stop();
     impl_->scavenger.request_stop();
+    impl_->prober.request_stop();
     if (impl_->runner.joinable()) {
         impl_->runner.join();
     }
     if (impl_->scavenger.joinable()) {
         impl_->scavenger.join();
+    }
+    if (impl_->prober.joinable()) {
+        impl_->prober.join();
     }
 }
 

@@ -61,6 +61,7 @@ map_recovery_point(const personal_repository::CatalogRecoveryPoint& point) {
     for (const auto& point : page.recovery_points) {
         result.items.push_back(map_recovery_point(point));
     }
+    result.skipped_catalog_entry_keys = std::move(page.skipped_entry_keys);
     return result;
 }
 

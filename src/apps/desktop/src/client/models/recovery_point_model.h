@@ -1,7 +1,10 @@
 #pragma once
 
 #include <QAbstractListModel>
+#include <QHash>
+#include <QList>
 #include <QString>
+#include <QStringList>
 #include <QVariantList>
 #include <QVector>
 
@@ -71,6 +74,7 @@ class RecoveryPointModel final : public QAbstractListModel {
     void set_rows(QVector<RecoveryPointRow> rows);
     void clear();
     void retranslate();
+    Q_INVOKABLE void copyIdentifier(const QString& file_uuid) const;
 
     [[nodiscard]] int rowCount(const QModelIndex& parent = QModelIndex()) const override;
     [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
@@ -83,6 +87,21 @@ class RecoveryPointModel final : public QAbstractListModel {
     [[nodiscard]] int fileSetCount() const;
     [[nodiscard]] qint64 totalStoredBytes() const;
     [[nodiscard]] qint64 totalLogicalBytes() const;
+    Q_INVOKABLE [[nodiscard]] QStringList fileUuids() const;
+    /// Backup-set groups, newest latest recovery point first.
+    /// Each map: backupSetUuid, shortId, recoveryPointCount, latestCreatedText,
+    /// contentKind, contentKindText, chainComplete.
+    Q_INVOKABLE [[nodiscard]] QVariantList backupSets() const;
+    /// Recovery points in one backup set, newest first. All rows are peers under the set.
+    Q_INVOKABLE [[nodiscard]] QVariantList recoveryPointsInSet(const QString& backup_set_uuid) const;
+    Q_INVOKABLE [[nodiscard]] QStringList fileUuidsInSet(const QString& backup_set_uuid) const;
+    /// Groups selected ids by backup set; each group is earliest-created first.
+    [[nodiscard]] QList<QStringList> groupFileUuidsByBackupSetChronological(
+        const QStringList& file_uuids) const;
+    /// fileUuid plus Catalog descendants (display-only; delete plan is Service authority).
+    Q_INVOKABLE [[nodiscard]] QStringList descendantFileUuids(const QString& file_uuid) const;
+    /// Catalog ancestors of fileUuid, nearest parent first. Does not include fileUuid.
+    Q_INVOKABLE [[nodiscard]] QStringList ancestorFileUuids(const QString& file_uuid) const;
     Q_INVOKABLE [[nodiscard]] QStringList backupDateYmds() const;
     /// Checkpoints for a local date, newest first. Each map: fileUuid, timeText, backupType,
     /// contentKind, sizeText, logicalSizeBytes, sourceCount, createdUtcMs, createdText,
@@ -95,11 +114,17 @@ class RecoveryPointModel final : public QAbstractListModel {
     void countChanged();
 
   private:
+    void assign_display_numbers();
+    [[nodiscard]] QString point_title(const RecoveryPointRow& row) const;
+    QHash<QString, qulonglong> display_numbers_;
     [[nodiscard]] QString backup_type_text(std::int64_t backup_type) const;
     [[nodiscard]] QString chain_state_text(std::int64_t chain_state) const;
+    [[nodiscard]] QString content_kind_text(std::int64_t content_kind) const;
     [[nodiscard]] QString parent_summary_text(const RecoveryPointRow& row) const;
+    [[nodiscard]] QVariantMap list_item_from_row(const RecoveryPointRow& row) const;
     [[nodiscard]] int chain_depth_for(const RecoveryPointRow& row) const;
     [[nodiscard]] const RecoveryPointRow* find_row(const QString& file_uuid) const;
+    [[nodiscard]] QHash<QString, QStringList> children_by_parent() const;
     [[nodiscard]] static QString short_uuid(const QString& uuid);
     [[nodiscard]] static QString local_date_ymd(std::int64_t created_utc_ms);
     [[nodiscard]] static QString local_time_hm(std::int64_t created_utc_ms);

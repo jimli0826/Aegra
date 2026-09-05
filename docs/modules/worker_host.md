@@ -21,7 +21,7 @@
 | Backup 阶段 | `resolve_credentials` → `prepare_sources`（VSS/raw、bitmap、pagefile 排除）→ `create_archive` → `backup_pipeline`（按卷） |
 | Restore 阶段 | 直接卷：`resolve_credentials` → `open_chain_reader` → `open_volume_reader` → `open_volume_sink` → `restore_pipeline`；缩容卷：`analyze_shrink_plan`（校验 digest，记录源/目标容量与簇数）→ `prepare_scratch_directory` → `open_scratch_store` → `invalidate_boot` → 前缀 `restore_pipeline` → ordinary/critical relocate → Target-only audit → 持锁 Boot commit → 关闭原始句柄 → CHKDSK/postcheck；整盘：`plan_disk_volumes` → `prepare_target_disk`+`open_disk_sink` → `restore_pipeline` → `rebuild_partition_table` |
 | Restore Request | `mode` 为 `volume` / `volume_shrink` / `disk`；`volume_size_policy` 写可读名（`require_source_size` / `allow_ntfs_relocation`）；仅缩容时输出 `shrink_plan_digest` 与 `source_chain_fingerprint` |
-| Verify 阶段 | volume_set：`resolve_credentials` → `open_archive` → `verify_pipeline`；file_set：`resolve_credentials` → `open_chain` → `verify_recoverability`；成功、失败和取消均写 `[Result]` 汇总 |
+| Verify 阶段 | volume_set：对每个恢复点 `resolve_credentials` → `open_archive` → `verify_pipeline`（同一进程从早到晚）；file_set：对每个 tip prefix `resolve_credentials` → `open_chain` → `verify_recoverability`；成功、失败和取消均写 `[Result]` 汇总 |
 | 禁止 | 密码、SecretRef 明文、凭据材料；可记 `password=present|empty` 或层计数 |
 
 Worker 任务日志允许记录诊断所需的源/目标路径、Volume GUID、卷标、主机名和 Archive 信息，但不得记录
@@ -60,6 +60,8 @@ task log 与 Service 分级日志（`logs/trace.log` 等）同树。
 | `restore` | object | volume_set Restore **必填**：`disk_restore`、`source_disk_number`、`source_volume_index`、`bring_target_online`、`preserve_disk_signature`、`auto_expand_last_partition`、`volume_size_policy`、`shrink_plan_digest`、`source_chain_fingerprint`（后两者在直接恢复时为空；缩容执行时 digest/fingerprint 必填） |
 | `trace_id` | string | 必填、非空 |
 | `deadline_utc_ms` | signed integer | 可选；`0` 表示无 deadline |
+| `verify_recovery_point_ids` | string array | Verify 必填：同一备份集恢复点 id，从早到晚 |
+| `verify_chain_lengths` | unsigned array | file_set 多 tip Verify：每项是 `source_refs` 的 prefix 长度；省略表示整链一项 |
 
 ### file_source_refs 元素
 

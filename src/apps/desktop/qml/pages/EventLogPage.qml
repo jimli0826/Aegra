@@ -32,9 +32,31 @@ Item {
 
     property real ringAnimProgress: 0.0
 
+    // Client-side pagination over the accumulated task-log rows (the service
+    // returns up to 100 per fetch; more are pulled on demand as pages advance).
+    property int pageSize: 10
+    property int currentPage: 0
+    readonly property int loadedPages: Math.max(1, Math.ceil(root.logCount / root.pageSize))
+    readonly property int pageStart: root.currentPage * root.pageSize
+    readonly property int pageEndExclusive: Math.min(root.pageStart + root.pageSize, root.logCount)
+
+    onLogCountChanged: {
+        // Keep the current page valid as rows load or the filter shrinks the set.
+        if (root.currentPage > root.loadedPages - 1)
+            root.currentPage = root.loadedPages - 1
+        if (root.currentPage < 0)
+            root.currentPage = 0
+    }
+
+    onCurrentPageChanged: {
+        if (typeof eventList !== "undefined" && eventList)
+            eventList.contentY = 0
+    }
+
     function reload() {
         if (typeof serviceClient === "undefined" || !serviceClient || !serviceClient.jobListAvailable)
             return
+        root.currentPage = 0
         serviceClient.refreshTaskLog(root.timeIndex, root.typeIndex, root.statusIndex)
     }
 
@@ -42,6 +64,31 @@ Item {
         if (typeof serviceClient === "undefined" || !serviceClient)
             return
         serviceClient.loadMoreTaskLog()
+    }
+
+    function goToNextPage() {
+        // Advance within loaded pages; when reaching the end of what is loaded
+        // and the service still has more, fetch the next batch first.
+        if (root.currentPage + 1 < root.loadedPages) {
+            root.currentPage += 1
+        } else if (root.logHasMore && !root.logLoading) {
+            root.pendingNextPage = true
+            root.loadMore()
+        }
+    }
+
+    function goToPrevPage() {
+        if (root.currentPage > 0)
+            root.currentPage -= 1
+    }
+
+    // Set when Next crossed the loaded boundary; advance once new rows arrive.
+    property bool pendingNextPage: false
+    onLoadedPagesChanged: {
+        if (root.pendingNextPage && root.currentPage + 1 < root.loadedPages) {
+            root.currentPage += 1
+            root.pendingNextPage = false
+        }
     }
 
     // Staggered entrance: Stage 1 stat cards, Stage 2 table card
@@ -729,7 +776,7 @@ Item {
                             horizontalAlignment: Text.AlignHCenter
                         }
                         Text {
-                            Layout.preferredWidth: 110
+                            Layout.preferredWidth: 80
                             //% "Status"
                             text: qsTrId("aegra.home.column.status").toUpperCase()
                             color: Theme.colorTextDim
@@ -785,8 +832,12 @@ Item {
 
                         delegate: Item {
                             id: logRow
+                            readonly property bool inPage: index >= root.pageStart
+                                                           && index < root.pageStart + root.pageSize
                             width: eventList.width
-                            height: 52
+                            height: inPage ? 52 : 0
+                            visible: inPage
+                            enabled: inPage
 
                             required property int index
                             required property int stateValue
@@ -944,136 +995,122 @@ Item {
                                             horizontalAlignment: Text.AlignHCenter
                                             elide: Text.ElideMiddle
                                             visible: (logRow.destinationPath || "").length > 0
+                                                     && logRow.destinationPath !== logRow.destinationName
                                         }
                                     }
                                 }
 
-                                // Status
+                                // Status: icon only; state text is on hover.
                                 Item {
-                                    Layout.preferredWidth: 110
+                                    id: logStatusCell
+                                    Layout.preferredWidth: 80
                                     Layout.fillHeight: true
+                                    Accessible.name: logRow.stateText || ""
 
-                                    Row {
+                                    HoverHandler {
+                                        id: statusHover
+                                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                                    }
+                                    ToolTip.visible: statusHover.hovered
+                                                     && (logRow.stateText || "").length > 0
+                                    ToolTip.delay: 400
+                                    ToolTip.text: logRow.stateText || ""
+
+                                    Canvas {
+                                        id: logStatusCanvas
+                                        width: 16
+                                        height: 16
                                         anchors.centerIn: parent
-                                        spacing: 6
+                                        antialiasing: true
+                                        renderTarget: Canvas.FramebufferObject
+                                        renderStrategy: Canvas.Cooperative
 
-                                        // Status icon (Canvas vector)
-                                        Canvas {
-                                            id: logStatusCanvas
-                                            width: 16
-                                            height: 16
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            antialiasing: true
-                                            renderTarget: Canvas.FramebufferObject
-                                            renderStrategy: Canvas.Cooperative
+                                        property int stVal: logRow.stateValue
+                                        property color greenColor: Theme.colorGreen
+                                        property color redColor: Theme.colorAccentRed
+                                        property color blueColor: Theme.colorAccentBlue
 
-                                            property int stVal: logRow.stateValue
-                                            property color greenColor: Theme.colorGreen
-                                            property color redColor: Theme.colorAccentRed
-                                            property color blueColor: Theme.colorAccentBlue
+                                        onStValChanged: requestPaint()
+                                        onGreenColorChanged: requestPaint()
+                                        onRedColorChanged: requestPaint()
+                                        onBlueColorChanged: requestPaint()
+                                        Component.onCompleted: requestPaint()
 
-                                            onStValChanged: requestPaint()
-                                            onGreenColorChanged: requestPaint()
-                                            onRedColorChanged: requestPaint()
-                                            onBlueColorChanged: requestPaint()
-                                            Component.onCompleted: requestPaint()
+                                        onPaint: {
+                                            var ctx = getContext("2d")
+                                            ctx.reset()
+                                            ctx.clearRect(0, 0, width, height)
+                                            var cx = width / 2
+                                            var cy = height / 2
 
-                                            onPaint: {
-                                                var ctx = getContext("2d")
-                                                ctx.reset()
-                                                ctx.clearRect(0, 0, width, height)
-                                                var cx = width / 2
-                                                var cy = height / 2
+                                            if (stVal === 4) {
+                                                // Succeeded: Green check-circle
+                                                ctx.strokeStyle = Theme.colorGreen
+                                                ctx.lineWidth = 1.6
+                                                ctx.lineCap = "round"
+                                                ctx.lineJoin = "round"
 
-                                                if (stVal === 4) {
-                                                    // Succeeded: Green check-circle
-                                                    ctx.strokeStyle = Theme.colorGreen
-                                                    ctx.lineWidth = 1.6
-                                                    ctx.lineCap = "round"
-                                                    ctx.lineJoin = "round"
+                                                ctx.beginPath()
+                                                ctx.arc(cx, cy, 6.2, 0, Math.PI * 2)
+                                                ctx.stroke()
 
-                                                    // Circle
-                                                    ctx.beginPath()
-                                                    ctx.arc(cx, cy, 6.2, 0, Math.PI * 2)
-                                                    ctx.stroke()
+                                                ctx.beginPath()
+                                                ctx.moveTo(cx - 3.4, cy - 0.1)
+                                                ctx.lineTo(cx - 0.8, cy + 2.4)
+                                                ctx.lineTo(cx + 3.6, cy - 2.4)
+                                                ctx.stroke()
+                                            } else if (stVal === 5) {
+                                                // Failed: Red x-circle
+                                                ctx.strokeStyle = Theme.colorAccentRed
+                                                ctx.lineWidth = 1.6
+                                                ctx.lineCap = "round"
+                                                ctx.lineJoin = "round"
 
-                                                    // Checkmark
-                                                    ctx.beginPath()
-                                                    ctx.moveTo(cx - 3.4, cy - 0.1)
-                                                    ctx.lineTo(cx - 0.8, cy + 2.4)
-                                                    ctx.lineTo(cx + 3.6, cy - 2.4)
-                                                    ctx.stroke()
-                                                } else if (stVal === 5) {
-                                                    // Failed: Red x-circle
-                                                    ctx.strokeStyle = Theme.colorAccentRed
-                                                    ctx.lineWidth = 1.6
-                                                    ctx.lineCap = "round"
-                                                    ctx.lineJoin = "round"
+                                                ctx.beginPath()
+                                                ctx.arc(cx, cy, 6.2, 0, Math.PI * 2)
+                                                ctx.stroke()
 
-                                                    // Circle
-                                                    ctx.beginPath()
-                                                    ctx.arc(cx, cy, 6.2, 0, Math.PI * 2)
-                                                    ctx.stroke()
+                                                var r = 2.6
+                                                ctx.beginPath()
+                                                ctx.moveTo(cx - r, cy - r)
+                                                ctx.lineTo(cx + r, cy + r)
+                                                ctx.stroke()
 
-                                                    // Cross
-                                                    var r = 2.6
-                                                    ctx.beginPath()
-                                                    ctx.moveTo(cx - r, cy - r)
-                                                    ctx.lineTo(cx + r, cy + r)
-                                                    ctx.stroke()
+                                                ctx.beginPath()
+                                                ctx.moveTo(cx + r, cy - r)
+                                                ctx.lineTo(cx - r, cy + r)
+                                                ctx.stroke()
+                                            } else if (stVal === 6 || stVal === 7) {
+                                                // Cancelled / Interrupted: Amber minus-circle
+                                                ctx.strokeStyle = "#e6a817"
+                                                ctx.lineWidth = 1.6
+                                                ctx.lineCap = "round"
+                                                ctx.lineJoin = "round"
 
-                                                    ctx.beginPath()
-                                                    ctx.moveTo(cx + r, cy - r)
-                                                    ctx.lineTo(cx - r, cy + r)
-                                                    ctx.stroke()
-                                                } else if (stVal === 6 || stVal === 7) {
-                                                    // Cancelled / Interrupted: Amber minus-circle
-                                                    ctx.strokeStyle = "#e6a817"
-                                                    ctx.lineWidth = 1.6
-                                                    ctx.lineCap = "round"
-                                                    ctx.lineJoin = "round"
+                                                ctx.beginPath()
+                                                ctx.arc(cx, cy, 6.2, 0, Math.PI * 2)
+                                                ctx.stroke()
 
-                                                    // Circle
-                                                    ctx.beginPath()
-                                                    ctx.arc(cx, cy, 6.2, 0, Math.PI * 2)
-                                                    ctx.stroke()
+                                                ctx.beginPath()
+                                                ctx.moveTo(cx - 2.8, cy)
+                                                ctx.lineTo(cx + 2.8, cy)
+                                                ctx.stroke()
+                                            } else {
+                                                // Queued / Running / Cancelling / Active: Blue dot-circle
+                                                ctx.strokeStyle = Theme.colorAccentBlue
+                                                ctx.fillStyle = Theme.colorAccentBlue
+                                                ctx.lineWidth = 1.6
+                                                ctx.lineCap = "round"
+                                                ctx.lineJoin = "round"
 
-                                                    // Minus
-                                                    ctx.beginPath()
-                                                    ctx.moveTo(cx - 2.8, cy)
-                                                    ctx.lineTo(cx + 2.8, cy)
-                                                    ctx.stroke()
-                                                } else {
-                                                    // Queued / Running / Cancelling / Active: Blue dot-circle
-                                                    ctx.strokeStyle = Theme.colorAccentBlue
-                                                    ctx.fillStyle = Theme.colorAccentBlue
-                                                    ctx.lineWidth = 1.6
-                                                    ctx.lineCap = "round"
-                                                    ctx.lineJoin = "round"
+                                                ctx.beginPath()
+                                                ctx.arc(cx, cy, 6.2, 0, Math.PI * 2)
+                                                ctx.stroke()
 
-                                                    ctx.beginPath()
-                                                    ctx.arc(cx, cy, 6.2, 0, Math.PI * 2)
-                                                    ctx.stroke()
-
-                                                    ctx.beginPath()
-                                                    ctx.arc(cx, cy, 2.2, 0, Math.PI * 2)
-                                                    ctx.fill()
-                                                }
+                                                ctx.beginPath()
+                                                ctx.arc(cx, cy, 2.2, 0, Math.PI * 2)
+                                                ctx.fill()
                                             }
-                                        }
-
-                                        Text {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: logRow.stateText || ""
-                                            color: {
-                                                if (logRow.stateValue === 4) return Theme.colorGreen
-                                                if (logRow.stateValue === 5) return Theme.colorAccentRed
-                                                if (logRow.stateValue === 6 || logRow.stateValue === 7) return "#e6a817"
-                                                return logRow.stateColor || Theme.colorAccentBlue
-                                            }
-                                            font.pixelSize: 13
-                                            font.bold: true
-                                            font.family: Theme.fontFamily
                                         }
                                     }
                                 }
@@ -1116,25 +1153,32 @@ Item {
                         anchors.fill: parent
                         anchors.leftMargin: 10
                         anchors.rightMargin: 10
+                        spacing: 10
                         Text {
-                            //% "%1 items"
+                            //% "%1–%2 of %3 · Page %4 / %5"
                             text: qsTrId("aegra.eventlog.page_range")
-                                  .arg(root.logCount > 0 ? 1 : 0)
+                                  .arg(root.logCount > 0 ? root.pageStart + 1 : 0)
+                                  .arg(root.pageEndExclusive)
                                   .arg(root.logCount)
-                                  .arg(root.logCount)
-                                  .arg(1)
-                                  .arg(1)
+                                  .arg(root.logCount > 0 ? root.currentPage + 1 : 0)
+                                  .arg(root.loadedPages)
                             color: Theme.colorTextDim
                             font.pixelSize: 12
                             font.family: Theme.fontFamily
                         }
                         Item { Layout.fillWidth: true }
                         AppButton {
-                            //% "Load more"
+                            //% "Previous"
+                            text: qsTrId("aegra.eventlog.prev")
+                            enabled: root.currentPage > 0 && !root.logLoading
+                            onClicked: root.goToPrevPage()
+                        }
+                        AppButton {
+                            //% "Next"
                             text: qsTrId("aegra.eventlog.next")
-                            enabled: root.logHasMore && !root.logLoading
-                            visible: root.logHasMore
-                            onClicked: root.loadMore()
+                            enabled: (root.currentPage + 1 < root.loadedPages || root.logHasMore)
+                                     && !root.logLoading
+                            onClicked: root.goToNextPage()
                         }
                     }
                 }

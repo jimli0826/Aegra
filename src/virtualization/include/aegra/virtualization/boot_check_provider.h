@@ -28,6 +28,9 @@ struct BootCheckProviderInfo final {
     std::string provider_name;
     std::string provider_version;
     std::string message_code;
+    /// Free-form, log-only detail describing why available is false (failing
+    /// probe step, tool exit code, trimmed output). Never shown to users.
+    std::string diagnostic;
 };
 
 struct BootCheckVmRequest final {

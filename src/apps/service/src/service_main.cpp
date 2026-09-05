@@ -514,7 +514,6 @@ create_service_log(const std::filesystem::path& data_dir, const bool service_mod
                                                             const bool pe_restore_enabled,
                                                             const bool virtualbox_installed,
                                                             const bool hyperv_installed) {
-    // Chain/delete stay off until durable delete resume meets S5 Definition of Done.
     // F8 enables file.restore (PrepareFileRestore + StartFileRestore) when browse is available.
     std::vector<std::string> capabilities{
         "backup.start",
@@ -523,6 +522,8 @@ create_service_log(const std::filesystem::path& data_dir, const bool service_mod
         "mount.list",
         "mount.start",
         "mount.unmount",
+        "recovery_point.chain",
+        "recovery_point.delete",
         "recovery_point.verify",
         "repository.connection",
         "repository.list",
@@ -704,6 +705,8 @@ create_runtime(const ServiceArguments& arguments) {
             *components.random);
     components.backup_catalog_registrar = std::make_shared<service::BackupCatalogRegistrar>(
         *components.control_plane, *components.storage_factory);
+    const bool virtualbox_installed = !virtualbox::discover_vbox_manage_path().empty();
+    const bool hyperv_installed = hyperv::is_hyperv_installed();
     {
         service::BootCheckSupervisor::Options boot_check_options;
         // Optional capability: a missing sibling host only disables boot check.
@@ -716,10 +719,14 @@ create_runtime(const ServiceArguments& arguments) {
             }
         }
         boot_check_options.data_directory = data_dir.value();
+        boot_check_options.virtualbox_installed = virtualbox_installed;
+        boot_check_options.hyperv_installed = hyperv_installed;
         components.boot_check_supervisor = std::make_shared<service::BootCheckSupervisor>(
             std::move(boot_check_options), *components.process_launcher, *components.control_plane,
             *components.storage_factory, *components.clock, components.logger.get());
         components.boot_check_supervisor->begin_scavenge();
+        // Startup usability probe so the Desktop wizard can warn before any job.
+        components.boot_check_supervisor->begin_hypervisor_probe();
     }
     components.post_backup_coordinator = std::make_shared<service::PostBackupCoordinator>(
         *components.control_plane, *components.clock, *components.random, components.logger.get());
@@ -902,8 +909,6 @@ create_runtime(const ServiceArguments& arguments) {
                                      "status=stack_open_failed");
         }
     }
-    const bool virtualbox_installed = !virtualbox::discover_vbox_manage_path().empty();
-    const bool hyperv_installed = hyperv::is_hyperv_installed();
     components.runtime = {
         .service_version = AEGRA_APPLICATION_VERSION,
         .capabilities = runtime_capabilities(file_browse_enabled, pe_restore_enabled,
@@ -921,6 +926,7 @@ create_runtime(const ServiceArguments& arguments) {
         .schedules = components.schedules.get(),
         .worker_supervisor = components.supervisor.get(),
         .mount_supervisor = components.mount_supervisor.get(),
+        .boot_check = components.boot_check_supervisor.get(),
         .control_plane = components.control_plane.get(),
         .storage_factory = components.storage_factory.get(),
     };

@@ -440,6 +440,20 @@ contracts::JobRequest parse_job(const Json& root) {
     }
     job.backup = optional_backup(root);
     job.restore = optional_restore(root);
+    const auto verify_ids = root.find("verify_recovery_point_ids");
+    if (verify_ids != root.end() && !verify_ids->is_null()) {
+        if (!verify_ids->is_array()) {
+            throw std::invalid_argument("worker request verify_recovery_point_ids must be an array");
+        }
+        job.verify_recovery_point_ids = verify_ids->get<std::vector<std::string>>();
+    }
+    const auto chain_lengths = root.find("verify_chain_lengths");
+    if (chain_lengths != root.end() && !chain_lengths->is_null()) {
+        if (!chain_lengths->is_array()) {
+            throw std::invalid_argument("worker request verify_chain_lengths must be an array");
+        }
+        job.verify_chain_lengths = chain_lengths->get<std::vector<std::uint32_t>>();
+    }
     return job;
 }
 

@@ -9,7 +9,9 @@ V4 codec（`aegra_app_service_protocol`），不链接本 Host。
 Service Host 负责 framing、并发 dispatch、deadline、会话生命周期、取消收口，以及正式 Windows Service
 本机 Pipe ACL 边界。
 Composition root 打开个人版 SQLite 控制面、注入 Inventory/Repository Application use case，并通过
-`WorkerSupervisor` 启动单任务 Worker；Service 本身不执行备份/恢复数据面，也不直接解析 `.bkf`。
+`WorkerSupervisor` 启动单任务 Worker；默认 `max_concurrent_workers = 0`（不限制并发进程数）。
+同一备份集的 Verify 只占用一个 Worker 进程，在进程内按创建时间依次校验恢复点。
+Service 本身不执行备份/恢复数据面，也不直接解析 `.bkf`。
 
 UNC Repository 在进入同步 WNet 或文件系统调用前，对 IP-literal Server 的 SMB 445 端口执行 1.5 秒
 非阻塞可达性探测（每 100ms 检查取消）。断网时直接返回 Repository unavailable，避免单 Service IPC
@@ -57,6 +59,7 @@ src/apps/service/
     ├── windows_service_control_win32.cpp
     ├── windows_service_scm_host.cpp
     ├── worker_job_service.cpp
+    ├── worker_job_service_verify.cpp      # StartVerify 备份集批处理准备
     ├── worker_job_service_file_restore.cpp  # PrepareFileRestore + StartFileRestore
     ├── worker_job_service_restore.cpp      # volume PrepareRestore + StartRestore
     ├── worker_job_service_restore_shared.cpp  # shared chain/preflight helpers
@@ -115,8 +118,7 @@ Pipe/framing/peer close、Service stop 或响应写失败才结束 session。请
   cancel、Schedule 与 `GetRecoveryPointLayout`（kind 12：按 connection + recovery_point_id 打开 Archive
   Manifest，返回真实源卷 letter/label/filesystem/size）。Backup Start 和 Schedule 使用完整有序
   `source_ids[]`，一个命令只创建一个 Job。Recovery Point chain、delete plan/execute 与 Verify start 的
-  handler 已接线，但 S5 完成门禁前不在 runtime capability 列表中；dispatcher 必须在调用 handler 前返回
-  `service.capability_unavailable`。尚未接入的 Restore/Mount/Event 命令同样返回 capability unavailable。
+  handler 已接线，runtime 宣告 `recovery_point.chain`、`recovery_point.delete`、`recovery_point.verify`。
 - `service.settings`：kind 16 `GetServiceSettings` / kind 49 `UpdateServiceSettings`。控制面持久化
   `job_retention_months`（1/3/6，默认 3）；启动与更新后硬删除过期终端 Job（30 天/月）。
 - Repository 响应只包含 Repository UUID 和不含客户 Metadata 的 Catalog 摘要，不包含根路径、Archive key、
@@ -240,9 +242,8 @@ Chunk Index、Manifest 或 Archive metadata 的权威副本；Repository 仍是�
 
 ## 当前状态
 
-S0-S4 已完成；S5 进行中并已部分接入 composition：chain/delete/verify contracts、Application 用例、
-delete-plan 核心和 Host dispatch 已存在，但 capability 保持关闭。完整 Verify Worker 人工进程验证、持久化
-per-file Archive Credential 映射与 Local Storage 故障恢复验证仍待补齐。
+S0-S4 已完成；S5 chain/delete/verify 已接入 composition 并宣告 capability。完整 Verify Worker 人工进程验证、
+持久化 per-file Archive Credential 映射与 Local Storage 故障恢复验证仍待补齐。
 
 `GetRecoveryPointLayout` 已实现：Catalog 定位 Archive → `PersonalArchiveReader` 读取 Manifest →
 返回 hierarchical `disks[]`（分区表）+ `volumes[]`（letter/label/fs/size + extents）。无 `disks[]`
@@ -306,10 +307,12 @@ per-file Archive Credential 映射与 Local Storage 故障恢复验证仍待补�
   parent_reference_invalid|chain_depth_limit`、`service.content_kind_mismatch`。
 - **凭证**：先空口令；失败且 connection 声明 `archive.default_credential` 时使用 connection
   SecretRef；请求可带 `archive_secret_ref`。
-- **Verify**：file_set `prepare_verify` 注入 base-first `source_refs`（全链）与匹配
-  `credential_refs`；Worker 经 chain reader 做可恢复性 Verify。volume_set 按同一凭证顺序：
-  先空口令探测（未加密 Archive 直接空凭据），仅加密 Archive 在 connection 声明
-  `archive.default_credential` 时使用 connection SecretRef，否则返回 `archive.credential_required`。
+- **Verify**：StartVerify `recovery_point_ids` 必须属于同一备份集。Service 按创建时间排序后提交
+  **一个** Worker Job。file_set 注入最长选中链 base-first `source_refs` 与匹配 `credential_refs`，
+  多 tip 时带 `verify_chain_lengths`；Worker 按 prefix 依次做可恢复性 Verify。volume_set 每个恢复点
+  一份独立 Archive。凭证顺序：先空口令探测（未加密 Archive 直接空凭据），仅加密 Archive 在
+  connection 声明 `archive.default_credential` 时使用 connection SecretRef，否则返回
+  `archive.credential_required`。进度携带当前 `recovery_point_id`。
 
 ### F8 / FI8：文件选择性恢复
 

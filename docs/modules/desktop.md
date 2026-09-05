@@ -41,7 +41,8 @@ src/apps/desktop/
 └── src/
     ├── main.cpp
     ├── locale/            # LocaleController、格式化、message_code 映射
-    └── client/            # transport、protocol、coordinator、models、ServiceClient 门面
+    ├── client/            # transport、protocol、coordinator、models、ServiceClient 门面
+    └── platform/          # Win32 托盘、Service SCM 诊断、窗口 chrome
 ```
 
 `aegra_desktop` 只依赖 Qt Core/Gui/Qml/Quick/QuickControls2/Network/LinguistTools。Qt 通过
@@ -57,7 +58,8 @@ src/apps/desktop/
 - 首次启动跟随系统 locale；无效保存值回退 `en_US`。缺失或损坏的 `.qm` 不得阻止启动。
 - Service 只返回稳定 `message_code`；Desktop 通过 `message_code_map` 转为翻译 ID，未知 code 使用通用安全文本。
 - 日期、容量等通过 `LocaleFormat`/`QLocale` 格式化，不在 QML 拼接固定英文单位。
-- Settings 页面：语言/主题为 Desktop 本地 `QSettings`；**任务历史保留**（1/3/6 个月）走 Service
+- Settings 页面：语言/主题/关闭按钮为 Desktop 本地 `QSettings`（`ui/language`、`ui/theme`、
+  `ui/closeAction`）；**任务历史保留**（1/3/6 个月）走 Service
   `service.settings`（kind 16/49），由控制面 SQLite 持久化并硬删除过期终端 Job，不落在 Desktop 本地。
 - 构建时用 `lrelease` 从 `translations/*.ts` 生成 `.qm`，并由 `resources.qrc` 嵌入 `:/Aegra/i18n/`。
 
@@ -83,8 +85,13 @@ ServiceClient (QML 门面)
 - file_set Schedule 可配置 Full|Incremental（不提供 Differential）。向导说明选择范围变化会建立新 Full
   基线。Job 列表与 schedule 状态展示 Service 投影的 requested/effective type 与
   `incremental_downgrade_reason` 本地化文案；Desktop 不自行推断降级原因。
-- Recovery Point 列表可展示 parent 安全摘要与链深度（展示用）；删除必须先 `PlanDeleteRecoveryPoints`
-  再 `ExecuteDeletePlan`，只展示 server 返回的 target 数量，不在 UI 重算依赖。
+- Recovery Point 列表两级：`backup_set_uuid` 组头可展开/折叠，默认折叠；组内 Full 与 Incremental 平级缩进
+  （均为二级，不按链深度再嵌套）。默认不显示复选框；点 Delete 进入选择模式后才显示（含表头全选与组全选），
+  Cancel 退出选择模式。大小列展示 Catalog `stored_size_bytes`（镜像/Archive 文件大小），不是源逻辑容量。
+  勾选 Full 基线会选中其 Catalog 后代整条增量链；勾选 Incremental 会选中依赖该点的后代。取消勾选
+  会同时取消该点、其后代、以及会覆盖它们的祖先。parent 安全摘要与链深度仅供展示；删除必须先
+  `PlanDeleteRecoveryPoints`（`recovery_point_ids[]`）再 `ExecuteDeletePlan`，只展示 server 返回的
+  target 数量，不在 UI 重算依赖。Service 对各所选根做 descendant 子树并集。
 - `post_to_object` 提供单线程 Qt 投递边界，供后续 task event 在对象销毁后安全丢弃更新。
 - V4 字段以 Contracts 与 ADR-0017 / SERVICE_CONTROL_PROTOCOL_V4 为准；Desktop 私有 codec 不独立扩展 wire schema。
 - NTFS 小目标卷恢复（ADR-0025）：仅当 Service 宣告 `restore.ntfs_shrink.v1` 时
@@ -129,13 +136,38 @@ ServiceClient (QML 门面)
 
 - 默认窗口为 1080x720，最小 900x600，使用 32px 自绘标题栏和产品图标。
 - 标题栏提供拖动、双击最大化、最小化、最大化/还原和关闭；窗口按钮尺寸保持 36x32。
+- 标题栏关闭、Splash 关闭和 Alt+F4 的行为由 Settings「关闭按钮」决定，写入 `ui/closeAction`：`hide`
+  （默认）隐藏到通知区域，`quit` 结束 Desktop 进程。托盘左键或二次启动恢复窗口，右键菜单提供打开与退出。
+  Splash / Loading 上的 Quit 以及托盘 Exit 始终调用 `desktopShell.quit()`。`aegra_desktop` 不依赖
+  Qt Widgets，托盘使用 Win32 `Shell_NotifyIconW`。
 - 左侧导航展开宽度 160px，折叠宽度 56px，菜单项高度 40px；顺序保持 Home、Backup、Restore、Mount、
   Repository、Event Log，底部保留 Settings 和折叠开关；帮助与反馈入口位于右上角更多菜单。
+- 顶部通知铃铛只在当前 Desktop 会话检测到新的终态 Job event 后显示红点；启动时载入的历史事件不触发红点，
+  打开 Event Log 后清除当前未读状态。
 - 未接入页面和命令可以显示但必须禁用；当前 Repository 页面保持选中。
 - 默认采用旧版 `blueExtra` 深蓝调色板，不自行切换为浅色工作区。后续 Theme 设置接入 Service 前不持久化
   用户主题选择。
 
 ## Repository 页面
+
+Delete 后的 Verify 进入独立选择模式，只允许一级备份集选择（含全选）；再次 Verify 按备份集分组，
+每个备份集一次 StartVerify（kind 39，`recovery_point_ids` 从早到晚），收到接受响应后才提交下一备份集。
+同一备份集只启动一个 Worker 进程，在进程内按创建时间依次校验恢复点；多个备份集并行。
+提交不是校验成功。Desktop 在接受后立刻把 Verify Job 写入任务列表并开始轮询，恢复点表最后一列
+随进度以图标显示排队 / 校验中 / 已校验 / 失败（悬停显示具体原因，例如镜像文件不存在）；Job 终态弹出完成提示。
+未在校验时回退为备份链完整（勾）或不完整（警告）。一批中第一项失败之后的恢复点不再显示为成功。
+失败、超时或断线停止后续提交，已接受的任务保留。删除与校验模式互斥。
+
+备份集名称前复用 ScheduleTypeIcon（volume：硬盘，files：文件夹），颜色绑定 Theme。
+分组不显示 Volume set/File set 类型文字；无关联计划时标题显示备份源数量，备份链状态保持原列对齐。
+
+恢复点列表通过 ScheduleSummary.backup_set_uuid 关联计划名称；无法关联时显示内容类型和备份源数量。
+子行显示本机持久化的“恢复点 N”，最新点与 Full 基准点有标签。序号保存在 Desktop QSettings 的
+recoveryPointLabels 下，首次载入按时间及 UUID 排序分配，后续只追加，删除不回收；换机或清除 UI
+设置后按当前目录重新分配。仅点击备份集前箭头展开/折叠，点击行不切换展开。双击恢复点打开详情，单击不弹框；
+删除/校验选择模式下仅勾选框切换选中，点击行不选中，双击不打开详情。
+详情显示类型、时间和父恢复点的名称/时间；父项未加载时
+提示不可用。GUID 仅在技术信息中展示并可复制。显示序号不参与恢复或删除决策。
 
 页面沿用旧版 Repository 交互层级：Repository connection 卡片列表为主视图，点击恢复点数量打开覆盖主视图
 90% 宽度的右侧 Recovery Point 抽屉。列表直接绑定 Service V3 `repository.connection` 分页结果，可展示多个

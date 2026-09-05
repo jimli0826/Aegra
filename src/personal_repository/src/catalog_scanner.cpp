@@ -1,9 +1,12 @@
 #include "aegra/personal_repository/catalog_scanner.h"
 
+#include "aegra/base/uuid.h"
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <set>
 #include <span>
 #include <string>
@@ -111,6 +114,19 @@ enumerate_all(ports::IPrefixEnumerator& enumerator, const std::string& prefix,
     return descriptor.deletion_prefix + "/" + std::string(operation_uuid) + ".tombstone";
 }
 
+[[nodiscard]] bool is_typed_uuid_object_key(const std::string_view key,
+                                            const std::string_view prefix,
+                                            const std::string_view suffix) noexcept {
+    if (prefix.empty() || suffix.empty() || !key.starts_with(prefix) ||
+        key.size() <= prefix.size() + 1U + suffix.size() || key[prefix.size()] != '/' ||
+        !key.ends_with(suffix)) {
+        return false;
+    }
+    const auto uuid =
+        key.substr(prefix.size() + 1U, key.size() - prefix.size() - 1U - suffix.size());
+    return uuid.find('/') == std::string_view::npos && base::is_canonical_uuid(uuid);
+}
+
 struct LoadedCatalog final {
     RepositoryDescriptor descriptor;
     std::vector<CatalogEntry> entries;
@@ -128,35 +144,76 @@ load_descriptor(ports::IObjectReader& reader, const CatalogScannerLimits& limits
                    : base::Result<RepositoryDescriptor>::failure(encoded.error());
 }
 
-[[nodiscard]] base::Result<std::set<std::string, std::less<>>>
+struct HiddenLoad final {
+    std::set<std::string, std::less<>> hidden;
+    std::vector<std::string> skipped_tombstone_keys;
+};
+
+struct DecodedEntries final {
+    std::vector<CatalogEntry> entries;
+    std::vector<std::string> skipped_entry_keys;
+};
+
+[[nodiscard]] std::optional<DeletionTombstone>
+try_load_tombstone(ports::IObjectReader& reader, const ports::ObjectAttributes& object,
+                   const RepositoryDescriptor& descriptor, const CatalogCodecLimits& codec,
+                   std::uint64_t& remaining, const base::CancellationToken cancellation) {
+    auto encoded = read_object(reader, object, codec, remaining, cancellation);
+    if (!encoded) {
+        return std::nullopt;
+    }
+    auto tombstone = decode_deletion_tombstone_json(encoded.value(), codec);
+    if (!tombstone || tombstone.value().repository_uuid != descriptor.repository_uuid ||
+        object.key != tombstone_key(descriptor, tombstone.value().operation_uuid)) {
+        return std::nullopt;
+    }
+    return std::move(tombstone).value();
+}
+
+[[nodiscard]] std::optional<CatalogEntry>
+try_load_catalog_entry(ports::IObjectReader& reader, const ports::ObjectAttributes& object,
+                       const RepositoryDescriptor& descriptor, const CatalogCodecLimits& codec,
+                       std::uint64_t& remaining, const base::CancellationToken cancellation) {
+    auto encoded = read_object(reader, object, codec, remaining, cancellation);
+    if (!encoded) {
+        return std::nullopt;
+    }
+    auto entry = decode_catalog_entry_json(encoded.value(), codec);
+    if (!entry || entry.value().repository_uuid != descriptor.repository_uuid ||
+        object.key != catalog_key(descriptor, entry.value().file_uuid)) {
+        return std::nullopt;
+    }
+    return std::move(entry).value();
+}
+
+[[nodiscard]] base::Result<HiddenLoad>
 load_hidden(ports::IObjectReader& reader, ports::IPrefixEnumerator& enumerator,
             const RepositoryDescriptor& descriptor, const CatalogScannerLimits& limits,
             std::uint64_t& remaining, const base::CancellationToken cancellation) {
     auto objects = enumerate_all(enumerator, descriptor.deletion_prefix,
                                  limits.maximum_tombstone_objects, cancellation);
     if (!objects) {
-        return base::Result<std::set<std::string, std::less<>>>::failure(objects.error());
+        return base::Result<HiddenLoad>::failure(objects.error());
     }
-    std::set<std::string, std::less<>> hidden;
+    HiddenLoad loaded;
     for (const auto& object : objects.value()) {
-        auto encoded = read_object(reader, object, limits.codec, remaining, cancellation);
-        auto tombstone = encoded ? decode_deletion_tombstone_json(encoded.value(), limits.codec)
-                                 : base::Result<DeletionTombstone>::failure(encoded.error());
-        if (!tombstone || tombstone.value().repository_uuid != descriptor.repository_uuid ||
-            object.key != tombstone_key(descriptor, tombstone.value().operation_uuid)) {
-            return base::Result<std::set<std::string, std::less<>>>::failure(
-                tombstone ? scanner_error(base::ErrorCode::kConflict,
-                                          "deletion tombstone identity conflicts with repository")
-                          : tombstone.error());
+        if (!is_typed_uuid_object_key(object.key, descriptor.deletion_prefix, ".tombstone")) {
+            continue;
+        }
+        auto tombstone =
+            try_load_tombstone(reader, object, descriptor, limits.codec, remaining, cancellation);
+        if (!tombstone) {
+            loaded.skipped_tombstone_keys.push_back(object.key);
+            continue;
         }
         for (const auto& target : tombstone.value().targets) {
-            hidden.insert(target.file_uuid);
+            loaded.hidden.insert(target.file_uuid);
         }
     }
-    return base::Result<std::set<std::string, std::less<>>>::success(std::move(hidden));
+    return base::Result<HiddenLoad>::success(std::move(loaded));
 }
 
-[[nodiscard]] base::Result<std::vector<CatalogEntry>>
+[[nodiscard]] base::Result<DecodedEntries>
 decode_catalog_entries(ports::IObjectReader& reader, ports::IPrefixEnumerator& enumerator,
                        const RepositoryDescriptor& descriptor,
                        const std::set<std::string, std::less<>>& hidden,
@@ -165,25 +222,24 @@ decode_catalog_entries(ports::IObjectReader& reader, ports::IPrefixEnumerator& e
     auto objects = enumerate_all(enumerator, descriptor.catalog_prefix,
                                  limits.maximum_catalog_objects, cancellation);
     if (!objects) {
-        return base::Result<std::vector<CatalogEntry>>::failure(objects.error());
+        return base::Result<DecodedEntries>::failure(objects.error());
     }
-    std::vector<CatalogEntry> entries;
+    DecodedEntries loaded;
     for (const auto& object : objects.value()) {
-        auto encoded = read_object(reader, object, limits.codec, remaining, cancellation);
-        auto entry = encoded ? decode_catalog_entry_json(encoded.value(), limits.codec)
-                             : base::Result<CatalogEntry>::failure(encoded.error());
-        if (!entry || entry.value().repository_uuid != descriptor.repository_uuid ||
-            object.key != catalog_key(descriptor, entry.value().file_uuid)) {
-            return base::Result<std::vector<CatalogEntry>>::failure(
-                entry ? scanner_error(base::ErrorCode::kConflict,
-                                      "catalog entry identity conflicts with repository")
-                      : entry.error());
+        if (!is_typed_uuid_object_key(object.key, descriptor.catalog_prefix, ".entry")) {
+            continue;
+        }
+        auto entry = try_load_catalog_entry(reader, object, descriptor, limits.codec, remaining,
+                                            cancellation);
+        if (!entry) {
+            loaded.skipped_entry_keys.push_back(object.key);
+            continue;
         }
         if (!hidden.contains(entry.value().file_uuid)) {
-            entries.push_back(std::move(entry).value());
+            loaded.entries.push_back(std::move(entry).value());
         }
     }
-    return base::Result<std::vector<CatalogEntry>>::success(std::move(entries));
+    return base::Result<DecodedEntries>::success(std::move(loaded));
 }
 
 [[nodiscard]] base::Result<CatalogScanPage> build_page(RepositoryDescriptor descriptor,
@@ -247,14 +303,16 @@ RepositoryCatalogScanner::load_entries(const base::CancellationToken cancellatio
     if (!hidden) {
         return base::Result<CatalogEntriesLoad>::failure(hidden.error());
     }
-    auto entries = decode_catalog_entries(reader_, enumerator_, descriptor.value(), hidden.value(),
-                                          limits_, remaining, cancellation);
+    auto entries = decode_catalog_entries(reader_, enumerator_, descriptor.value(),
+                                          hidden.value().hidden, limits_, remaining, cancellation);
     if (!entries) {
         return base::Result<CatalogEntriesLoad>::failure(entries.error());
     }
     CatalogEntriesLoad loaded;
     loaded.descriptor = std::move(descriptor).value();
-    loaded.entries = std::move(entries).value();
+    loaded.entries = std::move(entries.value().entries);
+    loaded.skipped_entry_keys = std::move(entries.value().skipped_entry_keys);
+    loaded.skipped_tombstone_keys = std::move(hidden.value().skipped_tombstone_keys);
     return base::Result<CatalogEntriesLoad>::success(std::move(loaded));
 }
 
@@ -269,8 +327,14 @@ RepositoryCatalogScanner::scan(const CatalogScanRequest& request,
     if (!loaded) {
         return base::Result<CatalogScanPage>::failure(loaded.error());
     }
-    return build_page(std::move(loaded.value().descriptor), std::move(loaded.value().entries),
-                      request);
+    auto skipped_entries = std::move(loaded.value().skipped_entry_keys);
+    auto page = build_page(std::move(loaded.value().descriptor), std::move(loaded.value().entries),
+                           request);
+    if (!page) {
+        return page;
+    }
+    page.value().skipped_entry_keys = std::move(skipped_entries);
+    return page;
 }
 
 } // namespace aegra::personal_repository

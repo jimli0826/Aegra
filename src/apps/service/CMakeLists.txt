@@ -43,6 +43,7 @@ add_library(aegra_app_service STATIC
     src/windows_service_control_win32.cpp
     src/windows_service_scm_host.cpp
     src/worker_job_service.cpp
+    src/worker_job_service_verify.cpp
     src/worker_job_service_file_restore.cpp
     src/worker_job_service_restore.cpp
     src/worker_job_service_restore_shared.cpp
@@ -82,6 +83,7 @@ target_link_libraries(
         Mpr
         Netapi32
         Ws2_32
+        Wtsapi32
 )
 aegra_configure_target(aegra_app_service)
 

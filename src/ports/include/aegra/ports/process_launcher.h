@@ -30,6 +30,14 @@ struct ProcessLaunchRequest final {
     /// Windows. The launcher inherits all unspecified variables without mutating
     /// the parent process environment.
     std::vector<ProcessEnvironmentVariable> environment_overrides;
+    /// When true and the launcher runs as LocalSystem with an interactive user
+    /// logged on, start the child in that user's session under the user's primary
+    /// token (so it sees the user's profile/environment). With no interactive user
+    /// or insufficient privilege, the launcher falls back to a normal launch under
+    /// the caller's own token. Non-System callers always fall back. Environment
+    /// overrides still apply on top of the resolved environment. Used by BootCheck
+    /// so the VM lands in the logged-on user's own hypervisor registry.
+    bool run_as_active_user{false};
 };
 
 /// Status returned when a process exits.

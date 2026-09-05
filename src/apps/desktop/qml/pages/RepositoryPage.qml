@@ -6,12 +6,130 @@ import "../components"
 
 Item {
     id: root
+    property var pointDetails: ({})
+    readonly property int jobsRevision: serviceClient.jobs ? serviceClient.jobs.revision : 0
+    function recoveryPointStatusKey(fileUuid) {
+        var _r = root.jobsRevision
+        if (!serviceClient.jobs || !fileUuid)
+            return "none"
+        var status = serviceClient.jobs.recoveryPointVerifyStatus(fileUuid)
+        return status && status.key ? status.key : "none"
+    }
+    function backupSetStatusKey(points) {
+        var _r = root.jobsRevision
+        var anyRunning = false
+        var anyQueued = false
+        var anyFailed = false
+        var anyCancelled = false
+        var anySucceeded = false
+        var anyNone = false
+        for (var i = 0; i < points.length; ++i) {
+            var key = root.recoveryPointStatusKey(points[i].fileUuid)
+            if (key === "running")
+                anyRunning = true
+            else if (key === "queued")
+                anyQueued = true
+            else if (key === "failed")
+                anyFailed = true
+            else if (key === "cancelled")
+                anyCancelled = true
+            else if (key === "succeeded")
+                anySucceeded = true
+            else
+                anyNone = true
+        }
+        if (anyRunning)
+            return "running"
+        if (anyQueued)
+            return "queued"
+        if (anyFailed)
+            return "failed"
+        if (anyCancelled)
+            return "cancelled"
+        if (anySucceeded && !anyNone)
+            return "succeeded"
+        return "none"
+    }
+    function statusTextForKey(key, fallback) {
+        if (key === "running")
+            return qsTrId("aegra.repository.verify.status.running")
+        if (key === "queued")
+            return qsTrId("aegra.repository.verify.status.queued")
+        if (key === "succeeded")
+            return qsTrId("aegra.repository.verify.status.succeeded")
+        if (key === "failed")
+            return qsTrId("aegra.repository.verify.status.failed")
+        if (key === "cancelled")
+            return qsTrId("aegra.repository.verify.status.cancelled")
+        return fallback
+    }
+    function recoveryPointStatusLabel(fileUuid, fallback) {
+        var st = serviceClient.jobs.recoveryPointVerifyStatus(fileUuid)
+        if (st && st.messageText)
+            return st.messageText
+        var key = st && st.key ? st.key : "none"
+        return root.statusTextForKey(key, fallback)
+    }
+    function backupSetStatusLabel(points, fallback) {
+        var key = root.backupSetStatusKey(points)
+        if (key === "failed" || key === "cancelled") {
+            for (var i = 0; i < points.length; ++i) {
+                var st = serviceClient.jobs.recoveryPointVerifyStatus(points[i].fileUuid)
+                if (st && st.messageText)
+                    return st.messageText
+            }
+        }
+        return root.statusTextForKey(key, fallback)
+    }
+    function statusGlyphKind(key, chainComplete) {
+        if (key === "running" || key === "queued" || key === "succeeded"
+                || key === "failed" || key === "cancelled")
+            return key
+        return chainComplete ? "succeeded" : "incomplete"
+    }
+    function backupSetPresentation(group) {
+        var schedules = serviceClient.schedules
+        for (var i = 0; i < schedules.length; ++i) {
+            var schedule = schedules[i]
+            if (schedule.backupSetUuid === group.backupSetUuid)
+                return { title: schedule.displayName || schedule.sourceName || group.sourceSummary,
+                         source: schedule.protectedSourceSummary || group.sourceSummary }
+        }
+        return { title: group.sourceSummary, source: "" }
+    }
     property bool recoveryPointDrawerOpen: false
     property bool addPanelOpen: false
     readonly property string selectedId: serviceClient.selectedRepositoryConnectionId
     readonly property bool repositorySelected: selectedId.length > 0
-    property string selectedRecoveryPointId: ""
-    property string selectedRecoveryPointSummary: ""
+    property var selectedRecoveryPointSet: ({})
+    property int selectedRecoveryPointCount: 0
+    property bool recoveryPointDeleteMode: false
+    property bool recoveryPointVerifyMode: false
+    readonly property bool recoveryPointSelectionMode: recoveryPointDeleteMode || recoveryPointVerifyMode
+    property var expandedBackupSetSet: ({})
+    property int expandedBackupSetEpoch: 0
+    readonly property var backupSetGroups: {
+        var _c = serviceClient.recoveryPointCount
+        var _l = serviceClient.repositoryLoading
+        if (!serviceClient.recoveryPoints)
+            return []
+        return serviceClient.recoveryPoints.backupSets()
+    }
+    readonly property string selectedRecoveryPointSummary: {
+        var n = root.selectedRecoveryPointCount
+        if (n <= 0)
+            return ""
+        if (n > 1)
+            //% "%1 selected"
+            return qsTrId("aegra.repository.delete.selected_count").arg(n)
+        var id = Object.keys(root.selectedRecoveryPointSet)[0]
+        var details = serviceClient.recoveryPoints
+                      ? serviceClient.recoveryPoints.recoveryPointDetails(id)
+                      : null
+        if (!details)
+            return ""
+        return details.backupTypeText + " · " + details.createdText
+    }
     /// Bumped on refresh so free/used volume stats rebind.
     property int storageStatsEpoch: 0
     /// connectionId → recovery point count (filled when that connection catalog loads).
@@ -60,15 +178,127 @@ Item {
         return (cached === undefined || cached === null) ? 0 : cached
     }
 
-    function selectRecoveryPoint(fileUuid, summaryText) {
-        root.selectedRecoveryPointId = fileUuid || ""
-        root.selectedRecoveryPointSummary = summaryText || ""
+    function clearRecoveryPointSelection() {
+        root.selectedRecoveryPointSet = ({})
+        root.selectedRecoveryPointCount = 0
+    }
+
+    function exitRecoveryPointDeleteMode() {
+        root.recoveryPointDeleteMode = false
+        root.recoveryPointVerifyMode = false
+        root.clearRecoveryPointSelection()
+    }
+
+    function clearBackupSetExpansion() {
+        root.expandedBackupSetSet = ({})
+        root.expandedBackupSetEpoch++
+    }
+
+    onSelectedIdChanged: {
+        root.exitRecoveryPointDeleteMode()
+        root.clearBackupSetExpansion()
+    }
+
+    function isRecoveryPointSelected(fileUuid) {
+        var _ = root.selectedRecoveryPointCount
+        return !!(fileUuid && root.selectedRecoveryPointSet[fileUuid])
+    }
+
+    function isBackupSetExpanded(backupSetUuid) {
+        var _ = root.expandedBackupSetEpoch
+        if (!backupSetUuid)
+            return false
+        return root.expandedBackupSetSet[backupSetUuid] === true
+    }
+
+    function toggleBackupSetExpanded(backupSetUuid) {
+        if (!backupSetUuid)
+            return
+        var next = Object.assign({}, root.expandedBackupSetSet)
+        next[backupSetUuid] = !root.isBackupSetExpanded(backupSetUuid)
+        root.expandedBackupSetSet = next
+        root.expandedBackupSetEpoch++
+    }
+
+    function applyFileUuidSelection(ids, selecting) {
+        var next = Object.assign({}, root.selectedRecoveryPointSet)
+        var i
+        for (i = 0; i < ids.length; ++i) {
+            if (selecting)
+                next[ids[i]] = true
+            else
+                delete next[ids[i]]
+        }
+        root.selectedRecoveryPointSet = next
+        root.selectedRecoveryPointCount = Object.keys(next).length
+    }
+
+    function toggleRecoveryPoint(fileUuid) {
+        if (!root.recoveryPointDeleteMode)
+            return
+        if (!fileUuid || fileUuid.length === 0 || !serviceClient.recoveryPoints)
+            return
+        var descendants = serviceClient.recoveryPoints.descendantFileUuids(fileUuid)
+        if (!descendants || descendants.length === 0)
+            descendants = [fileUuid]
+        var selecting = !root.selectedRecoveryPointSet[fileUuid]
+        if (selecting) {
+            root.applyFileUuidSelection(descendants, true)
+            return
+        }
+        var ancestors = serviceClient.recoveryPoints.ancestorFileUuids(fileUuid)
+        root.applyFileUuidSelection(descendants.concat(ancestors), false)
+    }
+
+    function backupSetSelectedCount(backupSetUuid) {
+        var _ = root.selectedRecoveryPointCount
+        if (!serviceClient.recoveryPoints || !backupSetUuid)
+            return 0
+        var ids = serviceClient.recoveryPoints.fileUuidsInSet(backupSetUuid)
+        var n = 0
+        var i
+        for (i = 0; i < ids.length; ++i) {
+            if (root.selectedRecoveryPointSet[ids[i]])
+                ++n
+        }
+        return n
+    }
+
+    function toggleBackupSetSelection(backupSetUuid) {
+        if (!root.recoveryPointSelectionMode || serviceClient.repositoryCommandBusy)
+            return
+        if (!serviceClient.recoveryPoints || !backupSetUuid)
+            return
+        var ids = serviceClient.recoveryPoints.fileUuidsInSet(backupSetUuid)
+        if (!ids || ids.length === 0)
+            return
+        var selected = root.backupSetSelectedCount(backupSetUuid)
+        root.applyFileUuidSelection(ids, selected !== ids.length)
+    }
+
+    function toggleSelectAllRecoveryPoints() {
+        if (!root.recoveryPointSelectionMode || serviceClient.repositoryCommandBusy)
+            return
+        if (!serviceClient.recoveryPoints)
+            return
+        if (root.selectedRecoveryPointCount > 0
+                && root.selectedRecoveryPointCount === serviceClient.recoveryPointCount) {
+            root.clearRecoveryPointSelection()
+            return
+        }
+        var ids = serviceClient.recoveryPoints.fileUuids()
+        var next = {}
+        for (var i = 0; i < ids.length; ++i)
+            next[ids[i]] = true
+        root.selectedRecoveryPointSet = next
+        root.selectedRecoveryPointCount = ids.length
     }
 
     function requestDeletePlan() {
-        if (!root.selectedRecoveryPointId || root.selectedRecoveryPointId.length === 0)
+        var ids = Object.keys(root.selectedRecoveryPointSet)
+        if (!ids || ids.length === 0)
             return
-        if (!serviceClient.planDeleteRecoveryPoint(root.selectedRecoveryPointId)) {
+        if (!serviceClient.planDeleteRecoveryPoints(ids)) {
             serviceClient.showToast(qsTrId("aegra.repository.delete.plan_failed"), true)
         }
     }
@@ -97,8 +327,7 @@ Item {
             serviceClient.showToast(message, true)
         }
         function onDeleteExecuted() {
-            root.selectedRecoveryPointId = ""
-            root.selectedRecoveryPointSummary = ""
+            root.exitRecoveryPointDeleteMode()
             //% "Recovery points deleted"
             serviceClient.showToast(qsTrId("aegra.repository.delete.done"), false)
             root.refreshStorageStats()
@@ -1294,7 +1523,10 @@ Item {
                             verticalAlignment: Text.AlignVCenter
                         }
 
-                        onClicked: root.recoveryPointDrawerOpen = false
+                        onClicked: {
+                            root.exitRecoveryPointDeleteMode()
+                            root.recoveryPointDrawerOpen = false
+                        }
                     }
                 }
 
@@ -1313,14 +1545,48 @@ Item {
                         text: qsTrId("aegra.common.delete")
                         danger: true
                         enabled: serviceClient.connected
-                                 && root.selectedRecoveryPointId.length > 0
+                                 && !root.recoveryPointVerifyMode
+                                 && !serviceClient.repositoryCommandBusy
                                  && !serviceClient.deletePlanBusy
                                  && !serviceClient.repositoryLoading
-                        onClicked: root.requestDeletePlan()
+                                 && (!root.recoveryPointDeleteMode
+                                     || root.selectedRecoveryPointCount > 0)
+                        onClicked: {
+                            if (!root.recoveryPointDeleteMode) {
+                                root.recoveryPointDeleteMode = true
+                                return
+                            }
+                            root.requestDeletePlan()
+                        }
+                    }
+                    AppButton {
+                        text: qsTrId("aegra.job.operation.verify")
+                        enabled: serviceClient.connected && serviceClient.verifyAvailable()
+                                 && !serviceClient.repositoryLoading
+                                 && !serviceClient.repositoryCommandBusy
+                                 && !root.recoveryPointDeleteMode
+                                 && (!root.recoveryPointVerifyMode || root.selectedRecoveryPointCount > 0)
+                        onClicked: {
+                            if (!root.recoveryPointVerifyMode) {
+                                root.clearRecoveryPointSelection()
+                                root.recoveryPointVerifyMode = true
+                                return
+                            }
+                            if (serviceClient.verifyRecoveryPoints(Object.keys(root.selectedRecoveryPointSet)))
+                                root.exitRecoveryPointDeleteMode()
+                            else
+                                serviceClient.showToast(qsTrId("aegra.repository.verify.submission_failed"), true)
+                        }
+                    }
+                    AppButton {
+                        //% "Cancel"
+                        text: qsTrId("aegra.common.cancel")
+                        visible: root.recoveryPointSelectionMode
+                        onClicked: root.exitRecoveryPointDeleteMode()
                     }
                     Item { Layout.fillWidth: true }
                     Text {
-                        visible: root.selectedRecoveryPointId.length > 0
+                        visible: root.selectedRecoveryPointCount > 0
                         text: root.selectedRecoveryPointSummary
                         color: Theme.colorTextGrey
                         font.family: Theme.fontFamily
@@ -1338,60 +1604,110 @@ Item {
                     }
                 }
 
-                Rectangle {
+                Card {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 40
-                    color: Theme.colorTableHeader
+                    Layout.fillHeight: true
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.topMargin: 10
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 10
+                        anchors.bottomMargin: 10
+                        spacing: 0
+
+                Item {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 34
 
                     RowLayout {
                         anchors.fill: parent
                         anchors.leftMargin: 10
                         anchors.rightMargin: 10
-                        spacing: 10
+                        spacing: 8
 
-                        Item { Layout.preferredWidth: 28 }
+                        Item {
+                            Layout.preferredWidth: root.recoveryPointSelectionMode ? 28 : 0
+                            Layout.fillHeight: true
+                            visible: root.recoveryPointSelectionMode
+                            Rectangle {
+                                width: 16
+                                height: 16
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                radius: 3
+                                color: root.selectedRecoveryPointCount > 0
+                                       ? Theme.colorAccentBlue : Theme.colorInput
+                                border.width: 1
+                                border.color: root.selectedRecoveryPointCount > 0
+                                             ? Theme.colorAccentBlue : Theme.colorTextGrey
+                                Text {
+                                    anchors.centerIn: parent
+                                    visible: root.selectedRecoveryPointCount > 0
+                                    text: (serviceClient.recoveryPointCount > 0
+                                           && root.selectedRecoveryPointCount
+                                              === serviceClient.recoveryPointCount)
+                                          ? "\u2713" : "\u2212"
+                                    color: "white"
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.toggleSelectAllRecoveryPoints()
+                                }
+                            }
+                        }
                         Text {
                             Layout.fillWidth: true
                             //% "Recovery point"
-                            text: qsTrId("aegra.repository.column.recovery_point")
-                            color: Theme.colorTextGrey
+                            text: qsTrId("aegra.repository.column.backup_content").toUpperCase()
+                            color: Theme.colorTextDim
                             font.pixelSize: 11
+                            font.bold: true
+                            font.letterSpacing: 0.8
+                            font.family: Theme.fontFamily
                         }
                         Text {
                             Layout.preferredWidth: 120
                             //% "Backup time"
-                            text: qsTrId("aegra.repository.column.backup_time")
-                            color: Theme.colorTextGrey
+                            text: qsTrId("aegra.repository.column.backup_time").toUpperCase()
+                            color: Theme.colorTextDim
                             font.pixelSize: 11
+                            font.bold: true
+                            font.letterSpacing: 0.8
+                            font.family: Theme.fontFamily
                         }
                         Text {
-                            Layout.preferredWidth: 60
+                            Layout.preferredWidth: 100
                             //% "Type"
-                            text: qsTrId("aegra.repository.column.type")
-                            color: Theme.colorTextGrey
+                            text: qsTrId("aegra.repository.column.type").toUpperCase()
+                            color: Theme.colorTextDim
                             font.pixelSize: 11
+                            font.bold: true
+                            font.letterSpacing: 0.8
+                            font.family: Theme.fontFamily
                         }
                         Text {
                             Layout.preferredWidth: 80
-                            //% "Logical size"
-                            text: qsTrId("aegra.repository.column.logical_size")
-                            color: Theme.colorTextGrey
+                            //% "Image size"
+                            text: qsTrId("aegra.repository.column.image_size").toUpperCase()
+                            color: Theme.colorTextDim
                             font.pixelSize: 11
+                            font.bold: true
+                            font.letterSpacing: 0.8
+                            font.family: Theme.fontFamily
                         }
                         Text {
-                            visible: drawerPanel.width >= 800
-                            Layout.preferredWidth: 80
-                            //% "Stored size"
-                            text: qsTrId("aegra.repository.column.stored_size")
-                            color: Theme.colorTextGrey
+                            Layout.preferredWidth: 96
+                            //% "Status"
+                            text: qsTrId("aegra.repository.column.rp_status").toUpperCase()
+                            color: Theme.colorTextDim
                             font.pixelSize: 11
-                        }
-                        Text {
-                            Layout.preferredWidth: 72
-                            //% "Backup chain"
-                            text: qsTrId("aegra.repository.column.chain")
-                            color: Theme.colorTextGrey
-                            font.pixelSize: 11
+                            font.bold: true
+                            font.letterSpacing: 0.8
+                            font.family: Theme.fontFamily
                         }
                     }
                 }
@@ -1401,152 +1717,330 @@ Item {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
-                    model: serviceClient.recoveryPoints
+                    boundsBehavior: Flickable.StopAtBounds
+                    model: root.backupSetGroups
+                    spacing: 0
 
-                    delegate: Rectangle {
-                        required property string fileUuid
-                        required property string backupSetUuid
-                        required property string createdText
-                        required property string backupTypeText
-                        required property string logicalSizeText
-                        required property string storedSizeText
-                        required property string deduplicatedLogicalBytesText
-                        required property string chainStateText
-                        required property bool chainComplete
-                        required property string parentSummaryText
-                        required property int chainDepth
-                        required property bool isBaseline
-                        required property int index
-                        readonly property bool selected: root.selectedRecoveryPointId === fileUuid
+                    delegate: Item {
+                        id: backupSetGroup
                         width: recoveryPointList.width
-                        height: 64
-                        color: selected
-                               ? Qt.rgba(Theme.colorAccentBlue.r, Theme.colorAccentBlue.g,
-                                         Theme.colorAccentBlue.b, 0.18)
-                               : (index % 2 === 0 ? Theme.colorTableRow : Theme.colorTableAlt)
+                        height: groupColumn.height
+                        property string backupSetUuid: modelData.backupSetUuid || ""
+                        property int setPointCount: Number(modelData.recoveryPointCount || 0)
+                        property int setSelectedCount: root.backupSetSelectedCount(backupSetUuid)
+                        property bool expanded: root.isBackupSetExpanded(backupSetUuid)
+                        property var points: expanded && serviceClient.recoveryPoints
+                                             ? serviceClient.recoveryPoints.recoveryPointsInSet(
+                                                   backupSetUuid)
+                                             : []
 
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 10
-                            anchors.rightMargin: 10
-                            spacing: 10
+                        Column {
+                            id: groupColumn
+                            width: backupSetGroup.width
+
+                        Item {
+                            width: backupSetGroup.width
+                            height: 52
 
                             Rectangle {
-                                Layout.preferredWidth: 16
-                                Layout.preferredHeight: 16
-                                Layout.leftMargin: 6
-                                radius: 3
-                                color: selected ? Theme.colorAccentBlue : "transparent"
-                                border.width: selected ? 0 : 1
-                                border.color: Theme.colorBorder
-                                Text {
-                                    anchors.centerIn: parent
-                                    visible: selected
-                                    text: "\u2713"
-                                    color: "white"
-                                    font.pixelSize: 11
-                                    font.bold: true
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.leftMargin: 10
+                                anchors.rightMargin: 10
+                                height: 1
+                                gradient: Gradient {
+                                    orientation: Gradient.Horizontal
+                                    GradientStop { position: 0.00; color: "transparent" }
+                                    GradientStop { position: 0.15; color: Theme.colorBorder }
+                                    GradientStop { position: 0.85; color: Theme.colorBorder }
+                                    GradientStop { position: 1.00; color: "transparent" }
                                 }
                             }
 
-                            Column {
-                                Layout.fillWidth: true
-                                spacing: 2
-
-                                Text {
-                                    width: parent.width
-                                    text: fileUuid
-                                    color: Theme.colorTextWhite
-                                    font.family: "Consolas"
-                                    font.pixelSize: 11
-                                    elide: Text.ElideMiddle
-                                }
-                                Text {
-                                    width: parent.width
-                                    text: parentSummaryText
-                                          + (chainDepth > 1
-                                             ? (" · " + qsTrId("aegra.repository.chain.depth")
-                                                .arg(chainDepth))
-                                             : "")
-                                    color: Theme.colorTextDim
-                                    font.family: Theme.fontFamily
-                                    font.pixelSize: 10
-                                    elide: Text.ElideRight
-                                }
+                            HoverHandler {
+                                id: setHover
+                                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
                             }
 
-                            Text {
-                                Layout.preferredWidth: 120
-                                text: createdText
-                                color: Theme.colorTextGrey
-                                font.family: Theme.fontFamily
-                                font.pixelSize: 11
+                            Rectangle {
+                                anchors.fill: parent
+                                anchors.leftMargin: 4
+                                anchors.rightMargin: 4
+                                radius: 10
+                                color: setHover.hovered ? Theme.colorHover : "transparent"
                             }
-                            Text {
-                                Layout.preferredWidth: 60
-                                text: backupTypeText
-                                color: isBaseline ? Theme.colorTextWhite : Theme.colorTextGrey
-                                font.family: Theme.fontFamily
-                                font.pixelSize: 11
-                                font.bold: isBaseline
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 10
+                                anchors.rightMargin: 10
+                                spacing: 8
+
+                                MouseArea {
+                                    Layout.preferredWidth: 16
+                                    Layout.fillHeight: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.toggleBackupSetExpanded(
+                                                   backupSetGroup.backupSetUuid)
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: backupSetGroup.expanded ? "\u25BE" : "\u25B8"
+                                        color: Theme.colorTextGrey
+                                        font.pixelSize: 12
+                                        horizontalAlignment: Text.AlignHCenter
+                                    }
+                                }
+
+                                Rectangle {
+                                    visible: root.recoveryPointSelectionMode
+                                    Layout.preferredWidth: root.recoveryPointSelectionMode ? 16 : 0
+                                    Layout.preferredHeight: 16
+                                    radius: 3
+                                    color: backupSetGroup.setSelectedCount > 0
+                                           ? Theme.colorAccentBlue : Theme.colorInput
+                                    border.width: 1
+                                    border.color: backupSetGroup.setSelectedCount > 0
+                                                 ? Theme.colorAccentBlue : Theme.colorTextGrey
+                                    Text {
+                                        anchors.centerIn: parent
+                                        visible: backupSetGroup.setSelectedCount > 0
+                                        text: backupSetGroup.setSelectedCount
+                                              === backupSetGroup.setPointCount
+                                              ? "\u2713" : "\u2212"
+                                        color: "white"
+                                        font.pixelSize: 11
+                                        font.bold: true
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            mouse.accepted = true
+                                            root.toggleBackupSetSelection(
+                                                backupSetGroup.backupSetUuid)
+                                        }
+                                    }
+                                }
+
+                                ScheduleTypeIcon {
+                                    Layout.preferredWidth: 28
+                                    Layout.preferredHeight: 28
+                                    size: 28
+                                    kind: Number(modelData.contentKind) === 2 ? "files" : "volume"
+                                    ink: Theme.colorTextGrey
+                                }
+
+                                Column {
+                                    Layout.fillWidth: true
+                                    spacing: 2
+
+                                    Text {
+                                        width: parent.width
+                                        text: root.backupSetPresentation(modelData).title
+                                        color: Theme.colorTextWhite
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: 13
+                                        font.bold: true
+                                        elide: Text.ElideMiddle
+                                    }
+                                    Text {
+                                        width: parent.width
+                                        //% "%1 recovery points · latest %2"
+                                        text: (root.backupSetPresentation(modelData).source.length > 0
+                                               && root.backupSetPresentation(modelData).source !== root.backupSetPresentation(modelData).title
+                                               ? root.backupSetPresentation(modelData).source + " · " : "")
+                                              + qsTrId("aegra.repository.backup_set.summary")
+                                              .arg(backupSetGroup.setPointCount)
+                                              .arg(modelData.latestCreatedText || "")
+                                        color: Theme.colorTextDim
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: 10
+                                        elide: Text.ElideRight
+                                    }
+                                }
+
+                                Item { Layout.preferredWidth: 80 }
+                                Item {
+                                    Layout.preferredWidth: 96
+                                    Layout.fillHeight: true
+                                    StatusGlyph {
+                                        anchors.centerIn: parent
+                                        size: 16
+                                        kind: {
+                                            var _r = root.jobsRevision
+                                            var key = root.backupSetStatusKey(backupSetGroup.points)
+                                            return root.statusGlyphKind(key,
+                                                                        modelData.chainComplete === true)
+                                        }
+                                        label: {
+                                            var _r = root.jobsRevision
+                                            var fallback = modelData.chainComplete
+                                                  ? qsTrId("aegra.repository.chain.complete")
+                                                  : qsTrId("aegra.repository.chain.incomplete")
+                                            return root.backupSetStatusLabel(
+                                                backupSetGroup.points, fallback)
+                                        }
+                                    }
+                                }
                             }
-                            Text {
-                                Layout.preferredWidth: 80
-                                text: logicalSizeText
-                                color: Theme.colorTextGrey
-                                font.family: Theme.fontFamily
-                                font.pixelSize: 11
-                            }
-                            Text {
-                                visible: drawerPanel.width >= 800
-                                Layout.preferredWidth: 80
-                                text: storedSizeText
-                                color: Theme.colorTextGrey
-                                font.family: Theme.fontFamily
-                                font.pixelSize: 11
-                            }
-                            Text {
-                                visible: drawerPanel.width >= 900
-                                Layout.preferredWidth: 72
-                                //% "Deduplicated"
-                                text: qsTrId("aegra.repository.dedup.bytes") + ": "
-                                      + deduplicatedLogicalBytesText
-                                color: Theme.colorTextDim
-                                font.family: Theme.fontFamily
-                                font.pixelSize: 10
-                                elide: Text.ElideRight
-                            }
-                            Text {
-                                Layout.preferredWidth: 72
-                                text: chainStateText
-                                color: chainComplete
-                                       ? Theme.colorGreen : Theme.colorAccentRed
-                                font.family: Theme.fontFamily
-                                font.pixelSize: 11
-                                font.bold: true
-                            }
+
                         }
 
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.selectRecoveryPoint(
-                                           fileUuid,
-                                           backupTypeText + " · " + createdText)
-                        }
+                        Repeater {
+                            model: backupSetGroup.points
+                            delegate: Item {
+                                width: backupSetGroup.width
+                                height: 52
+                                property bool selected: root.isRecoveryPointSelected(
+                                                            modelData.fileUuid)
 
-                        Rectangle {
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.bottom: parent.bottom
-                            height: 1
-                            gradient: Gradient {
-                                orientation: Gradient.Horizontal
-                                GradientStop { position: 0.00; color: "transparent" }
-                                GradientStop { position: 0.15; color: Theme.colorBorder }
-                                GradientStop { position: 0.85; color: Theme.colorBorder }
-                                GradientStop { position: 1.00; color: "transparent" }
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.leftMargin: 10
+                                    anchors.rightMargin: 10
+                                    height: 1
+                                    gradient: Gradient {
+                                        orientation: Gradient.Horizontal
+                                        GradientStop { position: 0.00; color: "transparent" }
+                                        GradientStop { position: 0.15; color: Theme.colorBorder }
+                                        GradientStop { position: 0.85; color: Theme.colorBorder }
+                                        GradientStop { position: 1.00; color: "transparent" }
+                                    }
+                                }
+
+                                HoverHandler {
+                                    id: rpHover
+                                    acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                                }
+
+                                Rectangle {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 4
+                                    anchors.rightMargin: 4
+                                    radius: 10
+                                    color: rpHover.hovered ? Theme.colorHover : "transparent"
+                                }
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 10
+                                    anchors.rightMargin: 10
+                                    spacing: 8
+
+                                    // One indent step past the backup-set chevron so Full/Inc sit as children.
+                                    Item { Layout.preferredWidth: 40 }
+
+                                    Rectangle {
+                                        visible: root.recoveryPointDeleteMode
+                                        Layout.preferredWidth: root.recoveryPointDeleteMode ? 16 : 0
+                                        Layout.preferredHeight: 16
+                                        radius: 3
+                                        color: selected ? Theme.colorAccentBlue : Theme.colorInput
+                                        border.width: 1
+                                        border.color: selected ? Theme.colorAccentBlue
+                                                               : Theme.colorTextGrey
+                                        Text {
+                                            anchors.centerIn: parent
+                                            visible: selected
+                                            text: "\u2713"
+                                            color: "white"
+                                            font.pixelSize: 11
+                                            font.bold: true
+                                        }
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            enabled: root.recoveryPointDeleteMode
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                mouse.accepted = true
+                                                root.toggleRecoveryPoint(modelData.fileUuid)
+                                            }
+                                        }
+                                    }
+
+                                    Column {
+                                        Layout.fillWidth: true
+                                        spacing: 2
+
+                                        Text {
+                                            width: parent.width
+                                            text: modelData.displayTitle || ""
+                                            color: Theme.colorTextWhite
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: 13
+                                            font.bold: true
+                                            elide: Text.ElideMiddle
+                                        }
+                                        Text {
+                                            width: parent.width
+                                            text: [modelData.isLatest ? qsTrId("aegra.repository.point.latest") : "",
+                                                   modelData.isBaseline ? qsTrId("aegra.repository.point.baseline") : ""]
+                                                  .filter(function(label) { return label.length > 0 }).join(" · ")
+                                            color: Theme.colorTextDim
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: 10
+                                            elide: Text.ElideRight
+                                        }
+                                    }
+
+                                    Text {
+                                        Layout.preferredWidth: 120
+                                        text: modelData.createdText || ""
+                                        color: Theme.colorTextGrey
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: 12
+                                    }
+                                    Text {
+                                        Layout.preferredWidth: 100
+                                        text: modelData.backupTypeText || ""
+                                        color: modelData.isBaseline
+                                               ? Theme.colorTextWhite : Theme.colorTextGrey
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: 13
+                                        font.bold: modelData.isBaseline === true
+                                    }
+                                    Text {
+                                        Layout.preferredWidth: 80
+                                        text: modelData.storedSizeText || ""
+                                        color: Theme.colorTextGrey
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: 12
+                                    }
+                                    Item {
+                                        Layout.preferredWidth: 96
+                                        Layout.fillHeight: true
+                                        StatusGlyph {
+                                            anchors.centerIn: parent
+                                            size: 16
+                                            kind: {
+                                                var _r = root.jobsRevision
+                                                var key = root.recoveryPointStatusKey(
+                                                              modelData.fileUuid)
+                                                return root.statusGlyphKind(
+                                                    key, modelData.chainComplete === true)
+                                            }
+                                            label: {
+                                                var _r = root.jobsRevision
+                                                return root.recoveryPointStatusLabel(
+                                                    modelData.fileUuid,
+                                                    modelData.chainStateText || "")
+                                            }
+                                        }
+                                    }
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    enabled: !root.recoveryPointSelectionMode
+                                    cursorShape: Qt.PointingHandCursor
+                                    onDoubleClicked: {
+                                        root.pointDetails = modelData
+                                        recoveryPointDetailsDialog.open()
+                                    }
+                                }
                             }
+                        }
                         }
                     }
 
@@ -1559,6 +2053,65 @@ Item {
                         font.family: Theme.fontFamily
                         font.pixelSize: 13
                     }
+                }
+                    }
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: recoveryPointDetailsDialog
+        anchors.centerIn: parent
+        width: Math.min(520, root.width - 40)
+        modal: true
+        title: root.pointDetails.displayTitle || ""
+        header: Text {
+            padding: 16
+            text: recoveryPointDetailsDialog.title
+            color: Theme.colorTextWhite
+            font.family: Theme.fontFamily
+            font.bold: true
+            wrapMode: Text.Wrap
+        }
+        background: Rectangle { color: Theme.colorPopup; radius: 8; border.color: Theme.colorBorder }
+        contentItem: ColumnLayout {
+            spacing: 12
+            Text {
+                Layout.fillWidth: true
+                text: (root.pointDetails.backupTypeText || "") + " · " + (root.pointDetails.createdText || "")
+                color: Theme.colorTextWhite
+                font.family: Theme.fontFamily
+                wrapMode: Text.Wrap
+            }
+            Text {
+                Layout.fillWidth: true
+                text: root.pointDetails.parentSummaryText || ""
+                color: Theme.colorTextGrey
+                font.family: Theme.fontFamily
+                wrapMode: Text.Wrap
+            }
+            Text {
+                text: qsTrId("aegra.repository.point.technical")
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+            }
+            Text {
+                Layout.fillWidth: true
+                text: root.pointDetails.fileUuid || ""
+                color: Theme.colorTextGrey
+                font.family: Theme.fontFamily
+                wrapMode: Text.WrapAnywhere
+            }
+            RowLayout {
+                AppButton {
+                    text: qsTrId("aegra.repository.point.copy_id")
+                    onClicked: serviceClient.recoveryPoints.copyIdentifier(root.pointDetails.fileUuid)
+                }
+                Item { Layout.fillWidth: true }
+                AppButton {
+                    text: qsTrId("aegra.common.close")
+                    onClicked: recoveryPointDetailsDialog.close()
                 }
             }
         }
@@ -1584,7 +2137,7 @@ Item {
             Text {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
-                //% "The service planned to delete %1 recovery point(s) in this chain. Other recovery points are kept. This cannot be undone."
+                //% "The service planned to delete %1 recovery point(s). Other recovery points are kept. This cannot be undone."
                 text: qsTrId("aegra.repository.delete.plan_message")
                       .arg((serviceClient.deletePlan && serviceClient.deletePlan.targetCount)
                            ? serviceClient.deletePlan.targetCount : 0)

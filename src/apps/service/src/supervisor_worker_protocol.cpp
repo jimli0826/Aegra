@@ -122,6 +122,13 @@ encode_supervisor_job_request(const contracts::JobRequest& request) {
             root["backup"] = backup;
         }
 
+        if (!request.verify_recovery_point_ids.empty()) {
+            root["verify_recovery_point_ids"] = request.verify_recovery_point_ids;
+        }
+        if (!request.verify_chain_lengths.empty()) {
+            root["verify_chain_lengths"] = request.verify_chain_lengths;
+        }
+
         if (request.restore.has_value()) {
             Json edits = Json::array();
             for (const auto& edit : request.restore->partition_layout_edits) {
@@ -190,6 +197,9 @@ decode_supervisor_worker_event(std::string_view json_text) {
                 progress.processed_entries = p.at("processed_entries").get<std::uint64_t>();
             }
             progress.message_code = p.at("message_code").get<std::string>();
+            if (p.contains("recovery_point_id") && p.at("recovery_point_id").is_string()) {
+                progress.recovery_point_id = p.at("recovery_point_id").get<std::string>();
+            }
             event.progress = progress;
         }
 

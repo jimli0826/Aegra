@@ -37,6 +37,13 @@ BootCheck 是独立进程而不是 Worker 操作：不占用 Worker 数据面槽
   保持只读 parent 挂载 N 分钟（供外部 hypervisor/工具加载，如 VMware 需
   `disk.locking="FALSE"` + independent-nonpersistent），到期或取消后照常 cleanup；成功
   message code 为 `bootcheck.present_hold_completed`，不创建 VM。
+- 能力探测模式 `--inspect <virtualbox|hyperv>`：运行对应 provider 的 `inspect()`（VirtualBox 含
+  签名校验、7.1/7.2 版本门槛与 headless 探测 VM；Hyper-V 检查 vmms + 模块），stdout 输出单条
+  JSON `{schema_version, kind:"inspect", hypervisor, available, message_code, provider_version,
+  diagnostic}`；不可用仍以退出码 `0` 返回（`available=false` + 稳定 `bootcheck.*` 码），仅参数
+  非法返回 `20`。Service 的 `BootCheckSupervisor` 在启动时和收到
+  `RefreshBootCheckHypervisorStatus`（kind 53）时后台运行本模式并缓存结果，经 kind 21 查询
+  提供给 Desktop 备份向导。
 
 ## 阶段与日志
 

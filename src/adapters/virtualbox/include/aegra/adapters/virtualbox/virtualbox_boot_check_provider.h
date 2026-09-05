@@ -14,6 +14,12 @@ namespace aegra::adapters::virtualbox {
 struct VirtualBoxProviderOptions final {
     std::string vbox_manage_path;
     std::string capability_user_home;
+    /// When true (LocalSystem path), the job VM is registered in a per-job
+    /// isolated VBOX_USER_HOME so it never touches a user's global registry.
+    /// When false (host running under the logged-on user's token), the job VM
+    /// is registered in that user's default VirtualBox registry so it shows up
+    /// in their VirtualBox Manager. The capability probe always stays isolated.
+    bool use_isolated_home{true};
 };
 
 // The injected process launcher must outlive the provider and all sessions

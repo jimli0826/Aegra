@@ -26,6 +26,7 @@ struct JobRow final {
     std::optional<std::int64_t> progress_logical_bytes;
     std::optional<std::int64_t> progress_processed_bytes;
     std::optional<std::int64_t> progress_stored_bytes;
+    QString progress_recovery_point_id;
     QString message_code;
     QStringList source_ids;
     /// Owning schedule for backup jobs; empty for other operations.
@@ -125,6 +126,11 @@ class JobModel final : public QAbstractListModel {
     /// Earliest created_utc_ms among active restore jobs (operation=2, queued/running/cancelling).
     /// Returns 0 when no restore job is active — used to reattach the Restore summary page.
     Q_INVOKABLE [[nodiscard]] qint64 earliestActiveRestoreCreatedUtcMs() const;
+
+    /// Latest verify job that includes this recovery point.
+    /// Keys: key (none|queued|running|succeeded|failed|cancelled).
+    Q_INVOKABLE [[nodiscard]] QVariantMap recoveryPointVerifyStatus(
+        const QString& file_uuid) const;
 
     /// Aggregate job counts by operation type.
     /// Keys: backup, restore, verify, other, total.

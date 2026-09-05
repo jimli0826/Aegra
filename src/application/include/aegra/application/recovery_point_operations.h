@@ -30,7 +30,7 @@ class IRecoveryPointOperations {
                   base::CancellationToken cancellation) = 0;
 
     [[nodiscard]] virtual base::Result<contracts::DeletePlanSummary>
-    plan_delete(const contracts::RecoveryPointRef& reference,
+    plan_delete(const contracts::PlanDeleteRecoveryPointsRequest& request,
                 base::CancellationToken cancellation) = 0;
 
     [[nodiscard]] virtual base::Result<contracts::CommandAcknowledgement>
@@ -51,7 +51,7 @@ class RecoveryPointOperations final : public IRecoveryPointOperations {
                   base::CancellationToken cancellation) override;
 
     [[nodiscard]] base::Result<contracts::DeletePlanSummary>
-    plan_delete(const contracts::RecoveryPointRef& reference,
+    plan_delete(const contracts::PlanDeleteRecoveryPointsRequest& request,
                 base::CancellationToken cancellation) override;
 
     [[nodiscard]] base::Result<contracts::CommandAcknowledgement>

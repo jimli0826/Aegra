@@ -1,5 +1,8 @@
 # 本地 Service 控制面协议 V4（详细说明）
 
+ScheduleSummary 新增必填 `backup_set_uuid`（规范 UUID），来自 ScheduleRecord，用于 Desktop 将恢复点
+分组关联至计划名称。Service 与 Desktop 严格字段集合同时更新；不提供旧字段集合回退。
+
 > [ADR-0020](../adr/0020-file-set-metadata-signature-incremental.md) 已将 file_set Incremental 变化判断改为
 > metadata signature（`write_time + logical_size`）。current V4 的 Schedule/Job/Recovery Point 字段直接承载
 > Full/Incremental，不增加 V5 或 V4 兼容分支；目标控制面语义见
@@ -91,8 +94,8 @@
 
 | 类别 | kind 范围 | `idempotency_key` | 成功 response.kind |
 | --- | --- | --- | --- |
-| Query | 1–17 | null | 1 |
-| Command | 32–50 | 非空 | 2 |
+| Query | 1–21 | null | 1 |
+| Command | 32–53 | 非空 | 2 |
 
 ### 3.2 幂等
 
@@ -140,6 +143,7 @@ Job list 的 `progress`：仅合并 Worker 监督器缓存中的真实 progress�
 | 18 | AnalyzeNtfsShrink | Query |
 | 19 | PreparePeRestore | Query |
 | 20 | GetPeRestoreState | Query |
+| 21 | GetBootCheckHypervisorStatus | Query |
 | 32 | AddRepositoryConnection | Command |
 | 33 | ImportRepositoryConnection | Command |
 | 34 | TestRepositoryConnection | Command |
@@ -161,6 +165,7 @@ Job list 的 `progress`：仅合并 Worker 监督器缓存中的真实 progress�
 | 50 | ConnectRepositoryLocation | Command |
 | 51 | ArmPeRestore | Command |
 | 52 | CancelPeRestore | Command |
+| 53 | RefreshBootCheckHypervisorStatus | Command |
 
 ---
 
@@ -326,10 +331,11 @@ exact keys（17）：
 **TaskProgress** exact keys：
 
 `schema_version`(=4), `job_id`, `trace_id`, `phase`, `logical_bytes`, `processed_bytes`,
-`stored_bytes`, `discovered_entries`, `processed_entries`, `message_code`
+`stored_bytes`, `discovered_entries`, `processed_entries`, `message_code`, `recovery_point_id`
 
 - 枚举阶段未知总量时：`logical_bytes` 可为 `null`；`discovered_entries` 递增；
 - 所有整数 ≤ `INT64_MAX`；`processed_* <= total_*` 当 total 已知。
+- `recovery_point_id`：Verify 批处理当前正在校验的恢复点规范 UUID；其它任务为空字符串。
 
 **TaskResult** exact keys：
 
@@ -371,6 +377,7 @@ Footer，其它任务为 0。file_set backup 成功时 `requested_backup_type` /
 | 5 ListJobs | summary 含 `content_kind` 与 requested/effective backup 投影（FI7）；请求增加 `scope`（1=all / 2=active / 3=terminal）与可选 `from_utc_ms`/`to_utc_ms`（按 `created_utc_ms`）。热路径用 active；Task Log 用 terminal + 时间窗 |
 | 6 ListSchedules | summary 含 `content_kind` 与 file selection 安全摘要 |
 | 9 PrepareRestore | **仅 volume_set** RP；file_set RP 必须用 kind 15 |
+| 11 PlanDeleteRecoveryPoints | 请求 payload 为 `repository_connection_id` + `recovery_point_ids[]` + `archive_password`（exact 3）。`recovery_point_ids` 为 1–10000 个互不相同的 Recovery Point id；Service 对各根做 descendant 子树并集，生成一份 descendant-first 删除计划。响应 `root_recovery_point_id` 为请求中的第一个 id |
 | 12 GetRecoveryPointLayout | payload 增加 `content_kind`（"volume_set"/"file_set"）；volume_set 返回 volume geometry；file_set 返回空 `disks`/`volumes`（无磁盘布局，挂载为只读文件盘符） |
 | 16 GetServiceSettings | 控制面偏好：`job_retention_months` ∈ {1,3,6}，默认 3；`updated_utc_ms` |
 
@@ -562,6 +569,45 @@ Prepare 在写前解析选择闭包内全部 parent stream 引用到 local owner
 目标缺 ACL 能力且 `restore_security=true` → RequestFailed
 `file_restore.target_capability_missing`。选择闭包存在超过目标单文件上限的文件 → RequestFailed
 `file_restore.target_file_too_large`。FAT32 单文件上限为 4 GiB - 1。
+
+### 6.4 kind 21 — GetBootCheckHypervisorStatus
+
+**用途：** 返回 Service 缓存的 boot check hypervisor 可用性快照（安装发现 + 最近一次
+`AegraBootCheck --inspect` 探测结果）。查询本身不触发探测，永不阻塞。  
+**Capability：** 无（BootCheck supervisor 缺失时返回 `service.capability_unavailable`）。
+
+**请求 payload（exact 0）：** `{}`
+
+**成功 payload（exact 1）：**
+
+```json
+{
+  "hypervisors": [
+    {
+      "hypervisor": 1,
+      "installed": true,
+      "probe_state": 3,
+      "available": false,
+      "message_code": "bootcheck.virtualbox_hyperv_conflict",
+      "checked_utc_ms": 1785603600000
+    },
+    {
+      "hypervisor": 2,
+      "installed": true,
+      "probe_state": 3,
+      "available": true,
+      "message_code": "",
+      "checked_utc_ms": 1785603600000
+    }
+  ]
+}
+```
+
+`hypervisor`：1 = VirtualBox、2 = Hyper-V。`probe_state`：1 = NotProbed（Service 启动后未探测）、
+2 = Probing（探测进行中）、3 = Probed。`available` 与 `message_code` 仅在 Probed 时有意义；
+不可用时 `message_code` 是稳定 `bootcheck.*` 码（如 `bootcheck.virtualbox_hyperv_conflict`、
+`bootcheck.virtualbox_no_hardware_virt`、`bootcheck.provider_unavailable`），Desktop 直接本地化展示。
+Service 启动时自动探测一轮；Desktop 在探测进行中以短轮询本查询直至 `probe_state != 2`。
 
 ---
 
@@ -843,9 +889,30 @@ Service 将 `backup_type` 一律写为 Incremental。
 
 **Worker schema 4 `RestoreOptions`：** 与上表对应字段均为必需（`partition_layout_edits` 可为 `[]`）。Decoder 不得把 `partition_layout_edits` 当作缺省省略的可选字段。
 
-### 7.5 其它命令 32–39、41–47、50
+### 7.4a kind 39 — StartVerify
+
+**Capability：** `recovery_point.verify`  
+**幂等命令**
+
+**请求 payload（exact 2）：**
+
+| 字段 | 类型 |
+| --- | --- |
+| `repository_connection_id` | string |
+| `recovery_point_ids` | string[] | 1–1000 个互不相同的恢复点 id，必须属于**同一个备份集** |
+
+Service 按 `created_utc_ms`（并列时按 id）从早到晚排序，在**一个** Worker 进程中依次校验。
+volume_set：每个恢复点一份独立 Archive。file_set：最长选中链 base-first，按 prefix 依次打开。
+多个备份集由 Desktop 各发一次 StartVerify，Service 默认可并行任意数量 Worker
+（`max_concurrent_workers = 0` 表示不限制）。
+
+**成功：** CommandAcknowledgement，`resource_id = job_id`。Job `source_ids` 为排序后的恢复点 id。
+进度 `recovery_point_id` 标识当前项。
+
+### 7.5 其它命令 32–38、41–47、50
 
 字段级形状与 V3 相同（版本号 4），除非 Contracts 明确收紧。`StartRestore` 见 §7.4（**不是**仅 volume）。
+`StartVerify`（kind 39）见 §7.4a（`recovery_point_ids[]`，不是单个 id）。
 
 Repository 网络命令失败使用以下稳定 `message_code`，不得返回 Win32 原始错误文本：
 
@@ -869,6 +936,16 @@ kind 17 `ListRepositoryDirectories` 查询共享根目录的直接子目录；pa
 - `repository.descriptor_invalid`
 
 `TestRepositoryConnection` 失败先把连接状态持久化为 Unavailable，再返回本次稳定失败码。
+
+### 7.6 kind 53 — RefreshBootCheckHypervisorStatus
+
+**用途：** 让 Service 异步重跑一轮已安装 hypervisor 的 `AegraBootCheck --inspect` 探测。
+
+**请求 payload（exact 0）：** `{}`；`idempotency_key` 必填但**不写命令账本**——刷新是易失副作用，
+重复提交只是再探测一次或复用进行中的探测。成功立即返回 CommandAccepted
+（`resource_id = "bootcheck.hypervisor_probe"`），结果通过 kind 21 轮询获得。
+探测进行中再次提交同样返回 Accepted 并复用该轮探测；BootCheck supervisor 缺失时返回
+`service.capability_unavailable`。
 
 ---
 

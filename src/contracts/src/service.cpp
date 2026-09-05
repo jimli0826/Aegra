@@ -86,9 +86,11 @@ template <typename Payload, typename Validator>
         return validate_payload<RestorePreflightRequest>(request,
                                                          validate_restore_preflight_request);
     case ServiceRequestKind::kResolveRecoveryPointChain:
-    case ServiceRequestKind::kPlanDeleteRecoveryPoints:
     case ServiceRequestKind::kGetRecoveryPointLayout:
         return validate_payload<RecoveryPointRef>(request, validate_recovery_point_ref);
+    case ServiceRequestKind::kPlanDeleteRecoveryPoints:
+        return validate_payload<PlanDeleteRecoveryPointsRequest>(
+            request, validate_plan_delete_recovery_points_request);
     case ServiceRequestKind::kBrowseFileSources:
         return validate_payload<BrowseFileSourcesRequest>(request,
                                                           validate_browse_file_sources_request);
@@ -112,6 +114,9 @@ template <typename Payload, typename Validator>
     case ServiceRequestKind::kGetPeRestoreState:
         return validate_payload<PeRestoreStateRequest>(request,
                                                        validate_pe_restore_state_request);
+    case ServiceRequestKind::kGetBootCheckHypervisorStatus:
+        return validate_payload<BootCheckHypervisorStatusQuery>(
+            request, validate_boot_check_hypervisor_status_query);
     default:
         return invalid("service query kind is invalid");
     }
@@ -159,6 +164,9 @@ template <typename Payload, typename Validator>
     case ServiceRequestKind::kUpdateServiceSettings:
         return validate_payload<UpdateServiceSettingsCommand>(
             request, validate_update_service_settings_command);
+    case ServiceRequestKind::kRefreshBootCheckHypervisorStatus:
+        return validate_payload<RefreshBootCheckHypervisorStatusCommand>(
+            request, validate_refresh_boot_check_hypervisor_status_command);
     default:
         return invalid("service command kind is invalid");
     }
@@ -222,6 +230,9 @@ template <typename Payload, typename Validator>
         return validate_response_payload<RestorePreflight>(response, validate_restore_preflight);
     case ServiceRequestKind::kGetPeRestoreState:
         return validate_response_payload<PeRestoreState>(response, validate_pe_restore_state);
+    case ServiceRequestKind::kGetBootCheckHypervisorStatus:
+        return validate_response_payload<BootCheckHypervisorStatusReport>(
+            response, validate_boot_check_hypervisor_status_report);
     default:
         return invalid("service query response kind is invalid");
     }
@@ -252,7 +263,7 @@ template <typename Payload, typename Validator>
 
 bool is_service_query_kind(const ServiceRequestKind kind) noexcept {
     return kind >= ServiceRequestKind::kGetServiceInfo &&
-           kind <= ServiceRequestKind::kGetPeRestoreState;
+           kind <= ServiceRequestKind::kGetBootCheckHypervisorStatus;
 }
 
 bool is_service_command_kind(const ServiceRequestKind kind) noexcept {
@@ -262,7 +273,8 @@ bool is_service_command_kind(const ServiceRequestKind kind) noexcept {
            kind == ServiceRequestKind::kUpdateServiceSettings ||
            kind == ServiceRequestKind::kConnectRepositoryLocation ||
            kind == ServiceRequestKind::kArmPeRestore ||
-           kind == ServiceRequestKind::kCancelPeRestore;
+           kind == ServiceRequestKind::kCancelPeRestore ||
+           kind == ServiceRequestKind::kRefreshBootCheckHypervisorStatus;
 }
 
 base::Result<void> validate_service_request(const ServiceRequest& request) {

@@ -12,6 +12,8 @@ This product has not been released. Do not add compatibility paths, migration lo
 
 Use Visual Studio 2026 Insiders from `C:\Program Files\Microsoft Visual Studio\18\Insiders` for Windows builds.
 
+Build only the Release configuration. Do not build the Debug configuration.
+
 Use QT 6.8.3 from C:\Qt6\6.8.3\msvc2022_64 for UI build.
 
 ## Testing policy

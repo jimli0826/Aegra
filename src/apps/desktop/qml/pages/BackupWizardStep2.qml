@@ -47,6 +47,24 @@ Item {
                                            && serviceClient
                                            && serviceClient.hyperVInstalled
     readonly property bool anyHypervisorInstalled: virtualBoxInstalled || hyperVInstalled
+    /// Service-side usability probes (AegraBootCheck --inspect, cached by the Service).
+    readonly property bool hypervisorProbing: typeof serviceClient !== "undefined"
+                                              && serviceClient
+                                              && serviceClient.hypervisorProbing
+    readonly property string selectedHypervisorUnavailableText: {
+        if (typeof serviceClient === "undefined" || !serviceClient)
+            return ""
+        if (bootCheckHypervisor === 1)
+            return serviceClient.virtualBoxUnavailableText
+        if (bootCheckHypervisor === 2)
+            return serviceClient.hyperVUnavailableText
+        return ""
+    }
+    /// Blocks Save/Create: boot check is enabled but its hypervisor was probed
+    /// and found unusable, so the scheduled check would fail every run.
+    readonly property bool bootCheckHypervisorUnavailable: bootCheckAfterBackup && !filesMode
+                                                           && bootCheckHypervisor !== 0
+                                                           && selectedHypervisorUnavailableText.length > 0
 
     onFilesModeChanged: {
         if (filesMode) {
@@ -99,21 +117,16 @@ Item {
                            : (value === 2 ? root.hyperVInstalled : false)
     }
 
-    /// Brand-colored mini icon shown before a hypervisor name (1 = VirtualBox, 2 = Hyper-V).
-    component HypervisorBadge: Rectangle {
+    /// Product icon shown before a hypervisor name (1 = VirtualBox, 2 = Hyper-V).
+    component HypervisorIcon: Image {
         property int hv: 0
         width: 18
         height: 18
-        radius: 4
-        color: hv === 1 ? "#183A61" : "#0078D4"
-        Text {
-            anchors.centerIn: parent
-            text: parent.hv === 1 ? "V" : "H"
-            color: "#ffffff"
-            font.pixelSize: 10
-            font.bold: true
-            font.family: Theme.fontFamily
-        }
+        source: hv === 1 ? "qrc:/Aegra/icons/virtualbox.png"
+                         : hv === 2 ? "qrc:/Aegra/icons/hyperv.png" : ""
+        fillMode: Image.PreserveAspectFit
+        smooth: true
+        mipmap: true
     }
 
     function normalizeTimeLabel(value) {
@@ -1436,12 +1449,67 @@ Item {
                             visible: !root.filesMode && root.bootCheckAfterBackup
                             spacing: 8
 
-                            Text {
-                                //% "Hypervisor"
-                                text: qsTrId("aegra.backup.post.hypervisor")
-                                color: Theme.colorTextGrey
-                                font.pixelSize: 12
-                                font.family: Theme.fontFamily
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                Text {
+                                    //% "Hypervisor"
+                                    text: qsTrId("aegra.backup.post.hypervisor")
+                                    color: Theme.colorTextGrey
+                                    font.pixelSize: 12
+                                    font.family: Theme.fontFamily
+                                }
+
+                                Item { Layout.fillWidth: true }
+
+                                // Header right: re-run the Service-side usability probe.
+                                MouseArea {
+                                    id: hypervisorRefreshArea
+                                    Layout.preferredWidth: 28
+                                    Layout.preferredHeight: 28
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    enabled: !root.hypervisorProbing
+                                    onClicked: serviceClient.refreshHypervisorStatus()
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: 6
+                                        color: hypervisorRefreshArea.pressed
+                                               ? Theme.colorButtonHover
+                                               : (hypervisorRefreshArea.containsMouse
+                                                  ? Theme.colorHover : "transparent")
+                                        border.width: 0
+
+                                        NavIcon {
+                                            id: hypervisorRefreshIcon
+                                            anchors.centerIn: parent
+                                            width: 16
+                                            height: 16
+                                            name: "refresh"
+                                            color: hypervisorRefreshArea.containsMouse
+                                                   ? Theme.colorAccentBlue : Theme.colorTextGrey
+
+                                            RotationAnimation on rotation {
+                                                running: root.hypervisorProbing
+                                                from: 0
+                                                to: 360
+                                                duration: 1000
+                                                loops: Animation.Infinite
+                                                onRunningChanged: {
+                                                    if (!running)
+                                                        hypervisorRefreshIcon.rotation = 0
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    ToolTip.visible: hypervisorRefreshArea.containsMouse
+                                    ToolTip.delay: 400
+                                    //% "Re-check hypervisor availability"
+                                    ToolTip.text: qsTrId("aegra.backup.post.hypervisor_refresh")
+                                }
                             }
 
                             ComboBox {
@@ -1469,7 +1537,7 @@ Item {
                                     leftPadding: 10
                                     rightPadding: 22
                                     spacing: 8
-                                    HypervisorBadge {
+                                    HypervisorIcon {
                                         hv: root.bootCheckHypervisor
                                         visible: root.bootCheckHypervisor !== 0
                                         anchors.verticalCenter: parent.verticalCenter
@@ -1514,7 +1582,7 @@ Item {
                                     contentItem: Row {
                                         leftPadding: 8
                                         spacing: 8
-                                        HypervisorBadge {
+                                        HypervisorIcon {
                                             hv: hypervisorItem.modelData.value
                                             opacity: hypervisorItem.modelData.installed ? 1.0 : 0.45
                                             anchors.verticalCenter: parent.verticalCenter
@@ -1544,6 +1612,21 @@ Item {
                                     }
                                 }
                             }
+
+                            Text {
+                                Layout.fillWidth: true
+                                visible: root.hypervisorProbing
+                                         || root.selectedHypervisorUnavailableText.length > 0
+                                text: root.hypervisorProbing
+                                      //% "Checking hypervisor availability..."
+                                      ? qsTrId("aegra.backup.post.hypervisor_checking")
+                                      : root.selectedHypervisorUnavailableText
+                                color: root.hypervisorProbing ? Theme.colorTextGrey
+                                                              : Theme.colorAccentRed
+                                font.pixelSize: 12
+                                font.family: Theme.fontFamily
+                                wrapMode: Text.WordWrap
+                            }
                         }
                     }
                 }
@@ -1563,12 +1646,19 @@ Item {
                 onClicked: root.backRequested()
             }
             AppButton {
+                id: createButton
                 text: root.editing ? qsTrId("aegra.common.save")
                                    : qsTrId("aegra.common.create")
                 Layout.preferredWidth: 140
                 Layout.preferredHeight: 40
                 primary: true
+                enabled: !root.bootCheckHypervisorUnavailable
                 onClicked: root.createRequested()
+
+                ToolTip.visible: hovered && root.bootCheckHypervisorUnavailable
+                ToolTip.delay: 400
+                //% "The selected hypervisor is unavailable. Fix it, choose another, or turn off boot check to continue."
+                ToolTip.text: qsTrId("aegra.backup.post.hypervisor_blocks_save")
             }
         }
     }

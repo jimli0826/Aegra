@@ -26,7 +26,8 @@ namespace aegra::apps::service {
 
 struct WorkerSupervisorConfig final {
     std::string worker_executable_path;
-    std::uint32_t max_concurrent_workers{2};
+    /// Zero means unlimited concurrent Worker processes.
+    std::uint32_t max_concurrent_workers{0};
     std::chrono::seconds default_job_deadline{3600};
     std::chrono::seconds stop_drain_timeout{10};
 };

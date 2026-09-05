@@ -15,6 +15,7 @@ inline constexpr quint32 kServiceSchemaVersion = 4;
 inline constexpr quint32 kServiceApiVersion = 4;
 inline constexpr quint32 kRecoveryPointPageSize = 100;
 inline constexpr quint32 kJobPageSize = 100;
+inline constexpr quint32 kMaximumVerifyRecoveryPoints = 1'000;
 /// ListJobs scope (contracts::JobListScope).
 inline constexpr int kJobListScopeAll = 1;
 inline constexpr int kJobListScopeActive = 2;
@@ -48,8 +49,14 @@ inline constexpr int kListRepositoryDirectoriesRequestKind = 17;
 inline constexpr int kAnalyzeNtfsShrinkRequestKind = 18;
 inline constexpr int kPreparePeRestoreRequestKind = 19;
 inline constexpr int kGetPeRestoreStateRequestKind = 20;
+inline constexpr int kGetBootCheckHypervisorStatusRequestKind = 21;
 inline constexpr int kArmPeRestoreRequestKind = 51;
 inline constexpr int kCancelPeRestoreRequestKind = 52;
+inline constexpr int kRefreshBootCheckHypervisorStatusRequestKind = 53;
+/// BootCheckHypervisorStatus.probe_state (contracts::BootCheckProbeState).
+inline constexpr int kBootCheckProbeStateNotProbed = 1;
+inline constexpr int kBootCheckProbeStateProbing = 2;
+inline constexpr int kBootCheckProbeStateProbed = 3;
 inline constexpr int kAddRepositoryConnectionRequestKind = 32;
 inline constexpr int kImportRepositoryConnectionRequestKind = 33;
 inline constexpr int kTestRepositoryConnectionRequestKind = 34;
@@ -65,6 +72,11 @@ inline constexpr int kVolumeSizePolicyRequireSourceSize = 1;
 inline constexpr int kVolumeSizePolicyAllowNtfsRelocation = 2;
 inline constexpr int kStartBackupRequestKind = 37;
 inline constexpr int kCancelJobRequestKind = 38;
+inline constexpr int kStartVerifyRequestKind = 39;
+[[nodiscard]] QByteArray encode_start_verify_request(const QString& request_id,
+                                                     const QString& idempotency_key,
+                                                     const QString& connection_id,
+                                                     const QStringList& recovery_point_ids);
 inline constexpr int kStartRestoreRequestKind = 40;
 inline constexpr int kMountRecoveryPointRequestKind = 41;
 inline constexpr int kUnmountSessionRequestKind = 42;
@@ -138,6 +150,17 @@ struct MountSessionPage final {
 struct ServiceSettings final {
     int job_retention_months{kDefaultJobRetentionMonths};
     qint64 updated_utc_ms{0};
+};
+
+/// One hypervisor's boot-check usability (kind 21). available/message_code are
+/// meaningful only when probe_state is kBootCheckProbeStateProbed.
+struct BootCheckHypervisorStatus final {
+    int hypervisor{0};
+    bool installed{false};
+    int probe_state{kBootCheckProbeStateNotProbed};
+    bool available{false};
+    QString message_code;
+    qint64 checked_utc_ms{0};
 };
 
 struct CommandAck final {
@@ -323,7 +346,7 @@ encode_browse_file_sources_request(const QString& request_id,
     bool verify_after_backup = false);
 [[nodiscard]] QByteArray
 encode_plan_delete_recovery_points_request(const QString& request_id, const QString& connection_id,
-                                           const QString& recovery_point_id,
+                                           const QStringList& recovery_point_ids,
                                            const QString& archive_password = {});
 [[nodiscard]] QByteArray encode_execute_delete_plan_request(const QString& request_id,
                                                             const QString& idempotency_key,
@@ -350,6 +373,15 @@ encode_plan_delete_recovery_points_request(const QString& request_id, const QStr
 [[nodiscard]] bool parse_service_settings_response(const QJsonObject& root,
                                                    ServiceSettings& result);
 [[nodiscard]] bool is_service_settings_failure_response(const QJsonObject& root);
+[[nodiscard]] QByteArray
+encode_get_boot_check_hypervisor_status_request(const QString& request_id);
+[[nodiscard]] QByteArray
+encode_refresh_boot_check_hypervisor_status_request(const QString& request_id,
+                                                    const QString& idempotency_key);
+[[nodiscard]] bool
+parse_boot_check_hypervisor_status_response(const QJsonObject& root,
+                                            QList<BootCheckHypervisorStatus>& result);
+[[nodiscard]] bool is_boot_check_hypervisor_status_failure_response(const QJsonObject& root);
 [[nodiscard]] bool parse_source_inventory_response(const QJsonObject& root,
                                                    SourceInventoryPage& result);
 [[nodiscard]] bool parse_repository_connection_list_response(const QJsonObject& root,

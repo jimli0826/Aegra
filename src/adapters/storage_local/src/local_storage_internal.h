@@ -10,6 +10,7 @@
 #include <shared_mutex>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace aegra::adapters::storage_local::detail {
 
@@ -81,6 +82,12 @@ ensure_safe_parent_directories(const LocalObjectStorageState& state,
 [[nodiscard]] base::Result<void>
 validate_safe_parent_directories(const LocalObjectStorageState& state,
                                  const std::filesystem::path& path);
+// Caller holds state.mutex exclusively. Only empty parents below the top-level key are removed.
+void prune_empty_object_parents(const LocalObjectStorageState& state,
+                                const std::filesystem::path& path) noexcept;
+[[nodiscard]] base::Result<std::vector<UniqueHandle>>
+pin_object_parents(const LocalObjectStorageState& state, const std::filesystem::path& path,
+                   base::CancellationToken cancellation);
 [[nodiscard]] base::Result<UniqueHandle> open_regular_file(const LocalObjectStorageState& state,
                                                            const std::filesystem::path& path,
                                                            DWORD desired_access);

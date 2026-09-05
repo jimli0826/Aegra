@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <limits>
 #include <string_view>
 #include <utility>
@@ -145,7 +146,13 @@ bool same_path(const std::wstring& left, const std::wstring& right) {
     return _wcsicmp(left.c_str(), right.c_str()) == 0;
 }
 
-bool verify_signature(const std::wstring& path) {
+void assign_reason(std::string* reason, std::string value) {
+    if (reason != nullptr) {
+        *reason = std::move(value);
+    }
+}
+
+LONG verify_signature_status(const std::wstring& path) {
     WINTRUST_FILE_INFO file{};
     file.cbStruct = sizeof(file);
     file.pcwszFilePath = path.c_str();
@@ -161,27 +168,40 @@ bool verify_signature(const std::wstring& path) {
     const LONG result = WinVerifyTrust(nullptr, &policy, &trust);
     trust.dwStateAction = WTD_STATEACTION_CLOSE;
     (void)WinVerifyTrust(nullptr, &policy, &trust);
-    return result == ERROR_SUCCESS;
+    return result;
 }
 
 } // namespace
 
-bool is_trusted_vbox_manage(const std::string_view executable_path) {
+bool is_trusted_vbox_manage(const std::string_view executable_path, std::string* reason) {
     auto normalized = normalize_local_path(executable_path, kProviderUnavailable);
     if (!normalized) {
+        assign_reason(reason, "path missing or not an absolute local path: \"" +
+                                  std::string(executable_path) + "\"");
         return false;
     }
     const std::size_t leaf = normalized.value().find_last_of(L"\\/");
     if (leaf == std::wstring::npos ||
         _wcsicmp(normalized.value().c_str() + leaf + 1, L"VBoxManage.exe") != 0) {
+        assign_reason(reason, "path does not name VBoxManage.exe");
         return false;
     }
     const DWORD attributes = GetFileAttributesW(normalized.value().c_str());
     if (attributes == INVALID_FILE_ATTRIBUTES ||
         (attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0) {
+        assign_reason(reason, "file not found or not a regular file");
         return false;
     }
-    return verify_signature(normalized.value());
+    const LONG signature_status = verify_signature_status(normalized.value());
+    if (signature_status != ERROR_SUCCESS) {
+        char status[16]{};
+        (void)std::snprintf(status, sizeof(status), "0x%08lX",
+                            static_cast<unsigned long>(signature_status));
+        assign_reason(reason,
+                      std::string("Authenticode verification failed, WinVerifyTrust=") + status);
+        return false;
+    }
+    return true;
 }
 
 base::Result<std::string> prepare_capability_user_home(const std::string_view requested_path) {
@@ -198,7 +218,7 @@ base::Result<std::string> prepare_capability_user_home(const std::string_view re
 }
 
 base::Result<VirtualBoxJobLayout>
-prepare_job_layout(const virtualization::BootCheckVmRequest& request) {
+prepare_job_layout(const virtualization::BootCheckVmRequest& request, const bool use_isolated_home) {
     if (!safe_job_id(request.job_id) || request.cpu_count == 0 || request.cpu_count > 32 ||
         request.memory_mib < 1024 || request.memory_mib > 32768 ||
         request.overlay_limit_bytes == 0) {
@@ -226,7 +246,10 @@ prepare_job_layout(const virtualization::BootCheckVmRequest& request) {
     const std::wstring home = root.value() + L"\\vbox-home";
     const std::wstring vm_base = root.value() + L"\\vm";
     const std::wstring child = root.value() + L"\\child.vdi";
-    if (!create_empty_directory(home) || !create_empty_directory(vm_base) ||
+    // The isolated registry (LocalSystem path) needs its own vbox-home; the
+    // user-visible path leaves user_home empty so VBoxManage falls back to the
+    // invoking user's default registry.
+    if ((use_isolated_home && !create_empty_directory(home)) || !create_empty_directory(vm_base) ||
         GetFileAttributesW(child.c_str()) != INVALID_FILE_ATTRIBUTES) {
         return base::Result<VirtualBoxJobLayout>::failure(
             path_error(base::ErrorCode::kConflict, kVmCreateFailed));
@@ -234,7 +257,8 @@ prepare_job_layout(const virtualization::BootCheckVmRequest& request) {
 
     auto root_utf8 = wide_to_utf8(root.value());
     auto parent_utf8 = wide_to_utf8(parent.value());
-    auto home_utf8 = wide_to_utf8(home);
+    auto home_utf8 = use_isolated_home ? wide_to_utf8(home)
+                                       : base::Result<std::string>::success(std::string{});
     auto vm_base_utf8 = wide_to_utf8(vm_base);
     auto child_utf8 = wide_to_utf8(child);
     if (!root_utf8 || !parent_utf8 || !home_utf8 || !vm_base_utf8 || !child_utf8) {

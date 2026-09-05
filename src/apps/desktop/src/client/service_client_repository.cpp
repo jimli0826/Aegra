@@ -4,12 +4,14 @@
 #include "locale/locale_format.h"
 #include "locale/message_code_map.h"
 
+#include <QDateTime>
 #include <QHash>
 #include <QJsonObject>
 #include <QSet>
 #include <QUuid>
 
 #include <algorithm>
+#include <utility>
 #include <vector>
 
 namespace aegra::desktop {
@@ -898,6 +900,25 @@ RequestDisposition ServiceClient::handle_repository_command_frame(const QByteArr
     if (!parse_command_ack_response(root, repository_command_kind_, acknowledgement)) {
         return RequestDisposition::kProtocolError;
     }
+    if (repository_command_kind_ == kStartVerifyRequestKind) {
+        if (!acknowledgement.has_resource_id) {
+            return RequestDisposition::kProtocolError;
+        }
+        const auto accepted_ids = repository_verify_pending_.isEmpty()
+                                      ? QStringList{}
+                                      : repository_verify_pending_.front();
+        if (!repository_verify_pending_.isEmpty()) {
+            repository_verify_pending_.removeFirst();
+        }
+        observe_accepted_verify_job(acknowledgement.resource_id, accepted_ids);
+        if (repository_verify_pending_.isEmpty()) {
+            reset_repository_command();
+            show_toast(qtTrId("aegra.repository.verify.submitted"));
+        } else {
+            submit_next_repository_verify();
+        }
+        return RequestDisposition::kFinished;
+    }
     const auto completed_kind = repository_command_kind_;
     const bool location_probe = completed_kind == kConnectRepositoryLocationRequestKind;
     const bool refresh_probe =
@@ -996,6 +1017,10 @@ void ServiceClient::finish_repository_directories_failure(const QString& message
 }
 
 void ServiceClient::finish_repository_command_failure(const QString& message_code) {
+    if (repository_command_kind_ == kStartVerifyRequestKind) {
+        repository_verify_pending_.clear();
+        show_toast(qtTrId("aegra.repository.verify.submission_failed"));
+    }
     const bool test_probe = repository_command_kind_ == kTestRepositoryConnectionRequestKind;
     const bool refresh_probe = repository_refresh_running_ && test_probe;
     // Row-level error for Test/Refresh: store message_code; model localizes for display.
@@ -1020,6 +1045,7 @@ void ServiceClient::finish_repository_command_failure(const QString& message_cod
 }
 
 void ServiceClient::reset_repository_command() {
+    repository_verify_pending_.clear();
     repository_command_busy_ = false;
     repository_command_request_id_.clear();
     repository_command_idempotency_key_.clear();
@@ -1027,6 +1053,107 @@ void ServiceClient::reset_repository_command() {
     repository_command_connection_id_.clear();
     repository_command_error_code_.clear();
     emit repositoryCommandChanged();
+}
+
+bool ServiceClient::verifyAvailable() const {
+    return connected() && capabilities_.contains(QStringLiteral("recovery_point.verify"));
+}
+
+bool ServiceClient::verifyRecoveryPoints(const QStringList& recovery_point_ids) {
+    if (!verifyAvailable() || repository_command_busy_ || recovery_point_ids.isEmpty() ||
+        selected_repository_connection_id_.isEmpty() ||
+        recovery_point_ids.size() > kMaximumRecoveryPoints) {
+        return false;
+    }
+    const auto known = recovery_points_.fileUuids();
+    for (const auto& id : recovery_point_ids) {
+        if (!known.contains(id)) {
+            return false;
+        }
+    }
+    auto batches = recovery_points_.groupFileUuidsByBackupSetChronological(recovery_point_ids);
+    if (batches.isEmpty()) {
+        return false;
+    }
+    for (const auto& batch : batches) {
+        if (batch.isEmpty() ||
+            batch.size() > static_cast<qsizetype>(kMaximumVerifyRecoveryPoints)) {
+            return false;
+        }
+    }
+    repository_verify_pending_ = std::move(batches);
+    repository_command_connection_id_ = selected_repository_connection_id_;
+    repository_command_kind_ = kStartVerifyRequestKind;
+    repository_command_busy_ = true;
+    repository_command_error_code_.clear();
+    emit repositoryCommandChanged();
+    return submit_next_repository_verify();
+}
+
+bool ServiceClient::submit_next_repository_verify() {
+    repository_command_request_id_ = new_request_id();
+    repository_command_idempotency_key_ = new_idempotency_key();
+    const auto body = encode_start_verify_request(
+        repository_command_request_id_, repository_command_idempotency_key_,
+        repository_command_connection_id_, repository_verify_pending_.front());
+    const auto started = coordinator_->begin_request(
+        repository_command_request_id_, body,
+        [this](const QByteArray& frame) { return handle_repository_command_frame(frame); });
+    if (!started) {
+        finish_repository_command_failure(QStringLiteral("service.send_failed"));
+    }
+    return started;
+}
+
+void ServiceClient::observe_accepted_verify_job(const QString& job_id,
+                                                const QStringList& recovery_point_ids) {
+    if (job_id.isEmpty() || recovery_point_ids.isEmpty()) {
+        return;
+    }
+    JobRow optimistic;
+    optimistic.job_id = job_id;
+    optimistic.operation = 3;
+    optimistic.state = 2;
+    optimistic.created_utc_ms = QDateTime::currentMSecsSinceEpoch();
+    optimistic.source_ids = recovery_point_ids;
+    optimistic.connection_id = repository_command_connection_id_;
+    enrich_job_row(optimistic);
+    jobs_.upsert_job(std::move(optimistic));
+    emit jobsChanged();
+    if (job_list_available_ && !jobs_loading_ &&
+        (job_request_id_.isEmpty() || !coordinator_->has_pending_request(job_request_id_))) {
+        start_job_query();
+        return;
+    }
+    update_job_polling();
+}
+
+QString ServiceClient::terminal_job_toast_text(const JobRow& row) {
+    if (row.operation == 3) {
+        if (row.state == 4) {
+            return qtTrId("aegra.repository.verify.finished");
+        }
+        if (row.state == 6) {
+            return qtTrId("aegra.repository.verify.cancelled");
+        }
+        return qtTrId("aegra.repository.verify.failed");
+    }
+    QString state_text;
+    switch (row.state) {
+    case 4:
+        state_text = qtTrId("aegra.toast.job.succeeded");
+        break;
+    case 5:
+        state_text = qtTrId("aegra.toast.job.failed");
+        break;
+    case 6:
+        state_text = qtTrId("aegra.toast.job.cancelled");
+        break;
+    default:
+        state_text = qtTrId("aegra.toast.job.interrupted");
+        break;
+    }
+    return state_text + QLatin1String(" (") + row.job_id + QLatin1Char(')');
 }
 
 bool ServiceClient::deletePlanBusy() const noexcept { return delete_plan_busy_; }
@@ -1051,9 +1178,9 @@ void ServiceClient::clearDeletePlan() {
     emit deletePlanChanged();
 }
 
-bool ServiceClient::planDeleteRecoveryPoint(const QString& recovery_point_id,
-                                            const QString& archive_password) {
-    if (state_ != State::kReady || delete_plan_busy_ || recovery_point_id.isEmpty() ||
+bool ServiceClient::planDeleteRecoveryPoints(const QStringList& recovery_point_ids,
+                                             const QString& archive_password) {
+    if (state_ != State::kReady || delete_plan_busy_ || recovery_point_ids.isEmpty() ||
         selected_repository_connection_id_.isEmpty()) {
         return false;
     }
@@ -1063,7 +1190,7 @@ bool ServiceClient::planDeleteRecoveryPoint(const QString& recovery_point_id,
     delete_plan_request_id_ = new_request_id();
     emit deletePlanChanged();
     const auto body = encode_plan_delete_recovery_points_request(
-        delete_plan_request_id_, selected_repository_connection_id_, recovery_point_id,
+        delete_plan_request_id_, selected_repository_connection_id_, recovery_point_ids,
         archive_password);
     const auto started = coordinator_->begin_request(
         delete_plan_request_id_, body,

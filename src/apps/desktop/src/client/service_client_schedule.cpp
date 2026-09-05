@@ -252,6 +252,19 @@ void ServiceClient::refreshSchedules() {
 void ServiceClient::enrich_schedules_with_connections() {
     for (auto& item : schedules_) {
         auto map = item.toMap();
+        QStringList protected_sources;
+        for (const auto& source_id : map.value(QStringLiteral("sourceIds")).toList()) {
+            if (const auto source = sources_.find(source_id.toString())) {
+                protected_sources.push_back(source->mount_letter.isEmpty() ? source->display_name
+                                                                           : source->mount_letter);
+            }
+        }
+        for (const auto& selection : map.value(QStringLiteral("selectionSummaries")).toList()) {
+            protected_sources.push_back(
+                selection.toMap().value(QStringLiteral("displayLabel")).toString());
+        }
+        map.insert(QStringLiteral("protectedSourceSummary"),
+                   protected_sources.join(QStringLiteral(", ")));
         const auto connection_id = map.value(QStringLiteral("connectionId")).toString();
         if (const auto found = connections_.find(connection_id)) {
             map.insert(QStringLiteral("destinationName"), found->display_name);

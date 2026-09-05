@@ -259,44 +259,67 @@ make_image_identity(ports::IRandomSource& random, const base::CancellationToken&
                                                  TaskResources& resources,
                                                  const base::CancellationToken& cancellation,
                                                  ScopedStage& stage) {
-    if (hypervisor == contracts::BootCheckHypervisor::kVirtualBox &&
-        !options.vbox_manage_path.empty()) {
-        adapters::virtualbox::VirtualBoxProviderOptions provider_options;
-        provider_options.vbox_manage_path = options.vbox_manage_path;
-        provider_options.capability_user_home = options.capability_user_home;
-        auto provider = std::make_unique<adapters::virtualbox::VirtualBoxBootCheckProvider>(
-            context.launcher, std::move(provider_options));
-        auto inspected = provider->inspect(cancellation);
-        if (!inspected) {
-            stage.fail(inspected.error(), "VirtualBoxBootCheckProvider::inspect");
-            return base::Result<void>::failure(inspected.error());
-        }
-        if (inspected.value().available) {
-            stage.note("provider", inspected.value().provider_name);
-            stage.note("provider_version", inspected.value().provider_version);
-            resources.provider = std::move(provider);
-            return base::Result<void>::success();
-        }
-    }
-    if (hypervisor == contracts::BootCheckHypervisor::kHyperV &&
-        !options.powershell_path.empty()) {
-        adapters::hyperv::HyperVProviderOptions provider_options;
-        provider_options.powershell_path = options.powershell_path;
-        auto provider = std::make_unique<adapters::hyperv::HyperVBootCheckProvider>(
-            context.launcher, std::move(provider_options));
-        auto inspected = provider->inspect(cancellation);
-        if (!inspected) {
-            stage.fail(inspected.error(), "HyperVBootCheckProvider::inspect");
-            return base::Result<void>::failure(inspected.error());
-        }
-        if (inspected.value().available) {
-            stage.note("provider", inspected.value().provider_name);
-            stage.note("provider_version", inspected.value().provider_version);
-            resources.provider = std::move(provider);
-            return base::Result<void>::success();
+    // Providers may refine the generic code into an actionable one (for
+    // example a VirtualBox/Hyper-V conflict) that the desktop can translate.
+    std::string unavailable_code = kProviderUnavailable;
+    if (hypervisor == contracts::BootCheckHypervisor::kVirtualBox) {
+        stage.note("hypervisor", "virtualbox");
+        if (options.vbox_manage_path.empty()) {
+            stage.note("diagnostic",
+                       "VBoxManage.exe not discovered (registry InstallDir or Program Files)");
+        } else {
+            stage.note("vbox_manage_path", options.vbox_manage_path);
+            adapters::virtualbox::VirtualBoxProviderOptions provider_options;
+            provider_options.vbox_manage_path = options.vbox_manage_path;
+            provider_options.capability_user_home = options.capability_user_home;
+            provider_options.use_isolated_home = options.use_isolated_vbox_home;
+            auto provider = std::make_unique<adapters::virtualbox::VirtualBoxBootCheckProvider>(
+                context.launcher, std::move(provider_options));
+            auto inspected = provider->inspect(cancellation);
+            if (!inspected) {
+                stage.fail(inspected.error(), "VirtualBoxBootCheckProvider::inspect");
+                return base::Result<void>::failure(inspected.error());
+            }
+            if (inspected.value().available) {
+                stage.note("provider", inspected.value().provider_name);
+                stage.note("provider_version", inspected.value().provider_version);
+                resources.provider = std::move(provider);
+                return base::Result<void>::success();
+            }
+            stage.note("diagnostic", inspected.value().diagnostic);
+            if (!inspected.value().message_code.empty()) {
+                unavailable_code = inspected.value().message_code;
+            }
         }
     }
-    const base::Error error = stage_error(base::ErrorCode::kNotFound, kProviderUnavailable);
+    if (hypervisor == contracts::BootCheckHypervisor::kHyperV) {
+        stage.note("hypervisor", "hyperv");
+        if (options.powershell_path.empty()) {
+            stage.note("diagnostic", "powershell.exe not discovered");
+        } else {
+            stage.note("powershell_path", options.powershell_path);
+            adapters::hyperv::HyperVProviderOptions provider_options;
+            provider_options.powershell_path = options.powershell_path;
+            auto provider = std::make_unique<adapters::hyperv::HyperVBootCheckProvider>(
+                context.launcher, std::move(provider_options));
+            auto inspected = provider->inspect(cancellation);
+            if (!inspected) {
+                stage.fail(inspected.error(), "HyperVBootCheckProvider::inspect");
+                return base::Result<void>::failure(inspected.error());
+            }
+            if (inspected.value().available) {
+                stage.note("provider", inspected.value().provider_name);
+                stage.note("provider_version", inspected.value().provider_version);
+                resources.provider = std::move(provider);
+                return base::Result<void>::success();
+            }
+            stage.note("diagnostic", inspected.value().diagnostic);
+            if (!inspected.value().message_code.empty()) {
+                unavailable_code = inspected.value().message_code;
+            }
+        }
+    }
+    const base::Error error{base::ErrorCode::kNotFound, unavailable_code};
     stage.fail(error, "select_provider");
     return base::Result<void>::failure(error);
 }

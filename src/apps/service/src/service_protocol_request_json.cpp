@@ -258,18 +258,38 @@ parse_recovery_point_request(const Json& payload) {
             payload.at("archive_password").get<std::string>()};
 }
 
+[[nodiscard]] Json
+encode_plan_delete_request(const contracts::PlanDeleteRecoveryPointsRequest& request) {
+    return Json{{"repository_connection_id", request.repository_connection_id},
+                {"recovery_point_ids", request.recovery_point_ids},
+                {"archive_password", request.archive_password}};
+}
+
+[[nodiscard]] contracts::PlanDeleteRecoveryPointsRequest
+parse_plan_delete_request(const Json& payload) {
+    constexpr std::array<std::string_view, 3> keys{
+        "repository_connection_id", "recovery_point_ids", "archive_password"};
+    if (!exact_keys(payload, keys) || !payload.at("recovery_point_ids").is_array()) {
+        throw std::invalid_argument("delete plan request fields are invalid");
+    }
+    return {payload.at("repository_connection_id").get<std::string>(),
+            payload.at("recovery_point_ids").get<std::vector<std::string>>(),
+            payload.at("archive_password").get<std::string>()};
+}
+
 [[nodiscard]] Json encode_start_verify(const contracts::StartVerifyCommand& command) {
     return Json{{"repository_connection_id", command.repository_connection_id},
-                {"recovery_point_id", command.recovery_point_id}};
+                {"recovery_point_ids", command.recovery_point_ids}};
 }
 
 [[nodiscard]] contracts::StartVerifyCommand parse_start_verify(const Json& payload) {
-    constexpr std::array<std::string_view, 2> keys{"repository_connection_id", "recovery_point_id"};
-    if (!exact_keys(payload, keys)) {
+    constexpr std::array<std::string_view, 2> keys{"repository_connection_id",
+                                                   "recovery_point_ids"};
+    if (!exact_keys(payload, keys) || !payload.at("recovery_point_ids").is_array()) {
         throw std::invalid_argument("start verify fields are invalid");
     }
     return {payload.at("repository_connection_id").get<std::string>(),
-            payload.at("recovery_point_id").get<std::string>()};
+            payload.at("recovery_point_ids").get<std::vector<std::string>>()};
 }
 
 [[nodiscard]] Json encode_execute_delete_plan(const contracts::ExecuteDeletePlanCommand& command) {
@@ -724,9 +744,11 @@ Json encode_request_payload(const contracts::ServiceRequest& request) {
         return encode_restore_preflight_request(
             std::get<contracts::RestorePreflightRequest>(request.payload));
     case contracts::ServiceRequestKind::kResolveRecoveryPointChain:
-    case contracts::ServiceRequestKind::kPlanDeleteRecoveryPoints:
     case contracts::ServiceRequestKind::kGetRecoveryPointLayout:
         return encode_recovery_point_ref(std::get<contracts::RecoveryPointRef>(request.payload));
+    case contracts::ServiceRequestKind::kPlanDeleteRecoveryPoints:
+        return encode_plan_delete_request(
+            std::get<contracts::PlanDeleteRecoveryPointsRequest>(request.payload));
     case contracts::ServiceRequestKind::kAddRepositoryConnection:
     case contracts::ServiceRequestKind::kImportRepositoryConnection:
     case contracts::ServiceRequestKind::kConnectRepositoryLocation:
@@ -818,6 +840,12 @@ Json encode_request_payload(const contracts::ServiceRequest& request) {
         const auto& body = std::get<contracts::UpdateServiceSettingsCommand>(request.payload);
         return Json{{"job_retention_months", body.job_retention_months}};
     }
+    case contracts::ServiceRequestKind::kGetBootCheckHypervisorStatus:
+        (void)std::get<contracts::BootCheckHypervisorStatusQuery>(request.payload);
+        return Json::object();
+    case contracts::ServiceRequestKind::kRefreshBootCheckHypervisorStatus:
+        (void)std::get<contracts::RefreshBootCheckHypervisorStatusCommand>(request.payload);
+        return Json::object();
     }
     throw std::invalid_argument("service request kind is invalid");
 }
@@ -854,9 +882,10 @@ contracts::ServiceRequestPayload parse_request_payload(const contracts::ServiceR
     case contracts::ServiceRequestKind::kPreparePeRestore:
         return parse_restore_preflight_request(payload);
     case contracts::ServiceRequestKind::kResolveRecoveryPointChain:
-    case contracts::ServiceRequestKind::kPlanDeleteRecoveryPoints:
     case contracts::ServiceRequestKind::kGetRecoveryPointLayout:
         return parse_recovery_point_ref(payload);
+    case contracts::ServiceRequestKind::kPlanDeleteRecoveryPoints:
+        return parse_plan_delete_request(payload);
     case contracts::ServiceRequestKind::kAddRepositoryConnection:
     case contracts::ServiceRequestKind::kImportRepositoryConnection:
     case contracts::ServiceRequestKind::kConnectRepositoryLocation:
@@ -996,6 +1025,21 @@ contracts::ServiceRequestPayload parse_request_payload(const contracts::ServiceR
         command.job_retention_months =
             unsigned_value<std::uint8_t>(payload, "job_retention_months");
         return command;
+    }
+    case contracts::ServiceRequestKind::kGetBootCheckHypervisorStatus: {
+        constexpr std::array<std::string_view, 0> keys{};
+        if (!exact_keys(payload, keys)) {
+            throw std::invalid_argument("boot check hypervisor status query fields are invalid");
+        }
+        return contracts::BootCheckHypervisorStatusQuery{};
+    }
+    case contracts::ServiceRequestKind::kRefreshBootCheckHypervisorStatus: {
+        constexpr std::array<std::string_view, 0> keys{};
+        if (!exact_keys(payload, keys)) {
+            throw std::invalid_argument(
+                "refresh boot check hypervisor status fields are invalid");
+        }
+        return contracts::RefreshBootCheckHypervisorStatusCommand{};
     }
     }
     throw std::invalid_argument("service request kind is invalid");

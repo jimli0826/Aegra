@@ -1,6 +1,7 @@
 #include "local_storage_internal.h"
 
 #include <algorithm>
+#include <exception>
 #include <filesystem>
 #include <limits>
 #include <string>
@@ -441,6 +442,125 @@ base::Result<void> ensure_safe_parent_directories(const LocalObjectStorageState&
 base::Result<void> validate_safe_parent_directories(const LocalObjectStorageState& state,
                                                     const std::filesystem::path& path) {
     return check_directory_chain(state, path, false);
+}
+
+void prune_empty_object_parents(const LocalObjectStorageState& state,
+                                const std::filesystem::path& path) noexcept {
+    try {
+        const auto relative = path.lexically_relative(state.root);
+        if (relative.empty() || relative.is_absolute()) {
+            return;
+        }
+        for (const auto& component : relative) {
+            if (component == L".." || component == L".") {
+                return;
+            }
+        }
+        auto boundary = state.root / *relative.begin();
+        if (is_internal_component(relative.begin()->native())) {
+            boundary /= L"writes";
+        }
+        auto parent = path.parent_path();
+        while (parent != boundary && parent != state.root) {
+            const auto attributes = GetFileAttributesW(parent.c_str());
+            if (attributes == INVALID_FILE_ATTRIBUTES) {
+                const auto error = GetLastError();
+                if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) {
+                    return;
+                }
+                parent = parent.parent_path();
+                continue;
+            }
+            if (!validate_safe_parent_directories(state, parent)) {
+                return;
+            }
+            if (is_reparse_or_not_directory(attributes) || !RemoveDirectoryW(parent.c_str())) {
+                return;
+            }
+            parent = parent.parent_path();
+        }
+    } catch (const std::exception&) {
+        // Housekeeping must not turn a committed publish into a reported failure.
+        OutputDebugStringW(L"Aegra: empty staging directory cleanup deferred.\n");
+    }
+}
+
+namespace {
+
+[[nodiscard]] base::Result<UniqueHandle> pin_directory(const std::filesystem::path& path,
+                                                       const bool create_missing,
+                                                       const base::CancellationToken cancellation) {
+    // A competing cleanup can remove an empty directory between creation and open.
+    for (unsigned attempt = 0; attempt < 4; ++attempt) {
+        auto active = check_cancelled(cancellation);
+        if (!active) {
+            return base::Result<UniqueHandle>::failure(active.error());
+        }
+        auto inspected = inspect_directory(path, create_missing);
+        if (!inspected) {
+            if (create_missing && inspected.error().code == base::ErrorCode::kNotFound) {
+                continue;
+            }
+            return base::Result<UniqueHandle>::failure(inspected.error());
+        }
+        UniqueHandle handle(CreateFileW(
+            path.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+            OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+        if (!handle.valid()) {
+            const auto error = GetLastError();
+            if (create_missing &&
+                (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)) {
+                continue;
+            }
+            return base::Result<UniqueHandle>::failure(win32_error(error, "pin object directory"));
+        }
+        BY_HANDLE_FILE_INFORMATION information{};
+        if (!GetFileInformationByHandle(handle.get(), &information)) {
+            return base::Result<UniqueHandle>::failure(
+                win32_error(GetLastError(), "inspect pinned object directory"));
+        }
+        if (is_reparse_or_not_directory(information.dwFileAttributes)) {
+            return base::Result<UniqueHandle>::failure(
+                local_error(base::ErrorCode::kConflict, "object directory is unsafe"));
+        }
+        return base::Result<UniqueHandle>::success(std::move(handle));
+    }
+    return base::Result<UniqueHandle>::failure(
+        local_error(base::ErrorCode::kConflict, "object directory changed during pin"));
+}
+
+} // namespace
+
+base::Result<std::vector<UniqueHandle>>
+pin_object_parents(const LocalObjectStorageState& state, const std::filesystem::path& path,
+                   const base::CancellationToken cancellation) {
+    const auto relative = path.lexically_relative(state.root);
+    if (relative.empty() || relative.is_absolute()) {
+        return base::Result<std::vector<UniqueHandle>>::failure(
+            local_error(base::ErrorCode::kInvalidArgument, "object path escapes storage root"));
+    }
+    for (const auto& component : relative) {
+        if (component == L".." || component == L".") {
+            return base::Result<std::vector<UniqueHandle>>::failure(
+                local_error(base::ErrorCode::kInvalidArgument, "object path escapes storage root"));
+        }
+    }
+    std::vector<UniqueHandle> handles;
+    auto current = state.root;
+    auto root = pin_directory(current, false, cancellation);
+    if (!root) {
+        return base::Result<std::vector<UniqueHandle>>::failure(root.error());
+    }
+    handles.push_back(std::move(root).value());
+    for (const auto& component : relative.parent_path()) {
+        current /= component;
+        auto pinned = pin_directory(current, true, cancellation);
+        if (!pinned) {
+            return base::Result<std::vector<UniqueHandle>>::failure(pinned.error());
+        }
+        handles.push_back(std::move(pinned).value());
+    }
+    return base::Result<std::vector<UniqueHandle>>::success(std::move(handles));
 }
 
 base::Result<UniqueHandle> open_regular_file(const LocalObjectStorageState& state,

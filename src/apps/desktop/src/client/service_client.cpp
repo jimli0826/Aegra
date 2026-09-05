@@ -61,6 +61,12 @@ ServiceClient::ServiceClient(QObject* parent)
     job_poll_timer_->setInterval(kJobPollIntervalMilliseconds);
     toast_timer_->setSingleShot(true);
     toast_timer_->setInterval(4'000);
+    // Re-reads the hypervisor status while a Service-side probe pass is running.
+    hypervisor_poll_timer_ = new QTimer(this);
+    hypervisor_poll_timer_->setSingleShot(true);
+    hypervisor_poll_timer_->setInterval(2'000);
+    connect(hypervisor_poll_timer_, &QTimer::timeout, this,
+            &ServiceClient::start_hypervisor_status_query);
     // After main UI has been Ready once, keep trying the live Service pipe if we drop offline.
     reconnect_watchdog_->setInterval(2'500);
     connect(reconnect_watchdog_, &QTimer::timeout, this, [this]() {
@@ -131,6 +137,82 @@ bool ServiceClient::virtualBoxInstalled() const noexcept {
 }
 bool ServiceClient::hyperVInstalled() const noexcept {
     return capabilities_.contains(QStringLiteral("boot_check.hypervisor.hyperv.installed"));
+}
+
+const BootCheckHypervisorStatus* ServiceClient::hypervisor_status_for(const int hypervisor) const {
+    for (const auto& status : hypervisor_status_) {
+        if (status.hypervisor == hypervisor) {
+            return &status;
+        }
+    }
+    return nullptr;
+}
+
+QString ServiceClient::hypervisor_unavailable_text(const int hypervisor) const {
+    const auto* status = hypervisor_status_for(hypervisor);
+    if (status == nullptr || !status->installed ||
+        status->probe_state != kBootCheckProbeStateProbed || status->available) {
+        return {};
+    }
+    return localize_message_code(status->message_code.isEmpty()
+                                     ? QStringLiteral("bootcheck.provider_unavailable")
+                                     : status->message_code);
+}
+
+int ServiceClient::virtualBoxProbeState() const noexcept {
+    const auto* status = hypervisor_status_for(1);
+    return status != nullptr ? status->probe_state : kBootCheckProbeStateNotProbed;
+}
+
+QString ServiceClient::virtualBoxUnavailableText() const { return hypervisor_unavailable_text(1); }
+
+int ServiceClient::hyperVProbeState() const noexcept {
+    const auto* status = hypervisor_status_for(2);
+    return status != nullptr ? status->probe_state : kBootCheckProbeStateNotProbed;
+}
+
+QString ServiceClient::hyperVUnavailableText() const { return hypervisor_unavailable_text(2); }
+
+bool ServiceClient::hypervisorProbing() const noexcept {
+    if (hypervisor_refresh_busy_) {
+        return true;
+    }
+    return std::ranges::any_of(hypervisor_status_, [](const BootCheckHypervisorStatus& status) {
+        return status.probe_state == kBootCheckProbeStateProbing;
+    });
+}
+
+void ServiceClient::refreshHypervisorStatus() {
+    if (state_ != State::kReady || hypervisor_refresh_busy_) {
+        return;
+    }
+    hypervisor_refresh_busy_ = true;
+    emit hypervisorStatusChanged();
+    const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    hypervisor_refresh_request_id_ = request_id;
+    const auto body = encode_refresh_boot_check_hypervisor_status_request(
+        request_id, QUuid::createUuid().toString(QUuid::WithoutBraces));
+    if (!coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
+            return handle_hypervisor_refresh_frame(frame_body);
+        })) {
+        hypervisor_refresh_busy_ = false;
+        emit hypervisorStatusChanged();
+    }
+}
+
+void ServiceClient::start_hypervisor_status_query() {
+    if (state_ != State::kReady || hypervisor_status_loading_) {
+        return;
+    }
+    hypervisor_status_loading_ = true;
+    const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    hypervisor_status_request_id_ = request_id;
+    const auto body = encode_get_boot_check_hypervisor_status_request(request_id);
+    if (!coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
+            return handle_hypervisor_status_frame(frame_body);
+        })) {
+        hypervisor_status_loading_ = false;
+    }
 }
 
 QString ServiceClient::errorText() const {
@@ -343,6 +425,7 @@ QString ServiceClient::splashErrorText() const { return splash_error_ ? errorTex
 bool ServiceClient::toastVisible() const noexcept { return toast_visible_; }
 QString ServiceClient::toastText() const { return toast_text_; }
 bool ServiceClient::toastIsError() const noexcept { return toast_is_error_; }
+bool ServiceClient::hasUnreadEvents() const noexcept { return has_unread_events_; }
 bool ServiceClient::globalLoading() const noexcept {
     // After splash: full-window overlay while page catalog queries run (menu switch reload),
     // matching old AegraImage Main.qml appLoading.
@@ -438,6 +521,14 @@ void ServiceClient::dismissToast() {
     toast_text_.clear();
     toast_is_error_ = false;
     emit toastChanged();
+}
+
+void ServiceClient::markEventsRead() {
+    if (!has_unread_events_) {
+        return;
+    }
+    has_unread_events_ = false;
+    emit unreadEventsChanged();
 }
 
 void ServiceClient::on_transport_connected() {
@@ -893,6 +984,7 @@ RequestDisposition ServiceClient::handle_service_info_frame(const QByteArray& bo
         if (service_settings_available_) {
             refreshServiceSettings();
         }
+        start_hypervisor_status_query();
     });
     return RequestDisposition::kFinished;
 }
@@ -1103,6 +1195,55 @@ RequestDisposition ServiceClient::handle_update_service_settings_frame(const QBy
     service_settings_update_request_id_.clear();
     service_settings_update_idempotency_key_.clear();
     emit serviceSettingsChanged();
+    return RequestDisposition::kFinished;
+}
+
+RequestDisposition ServiceClient::handle_hypervisor_status_frame(const QByteArray& body) {
+    QJsonObject root;
+    if (!parse_response_root(body, extract_response_request_id(body), root)) {
+        return RequestDisposition::kProtocolError;
+    }
+    hypervisor_status_loading_ = false;
+    hypervisor_status_request_id_.clear();
+    if (is_boot_check_hypervisor_status_failure_response(root)) {
+        // Status stays at its previous snapshot; the wizard still renders the
+        // installed flags from capabilities.
+        emit hypervisorStatusChanged();
+        return RequestDisposition::kFinished;
+    }
+    QList<BootCheckHypervisorStatus> statuses;
+    if (!parse_boot_check_hypervisor_status_response(root, statuses)) {
+        emit hypervisorStatusChanged();
+        return RequestDisposition::kProtocolError;
+    }
+    hypervisor_status_ = std::move(statuses);
+    const bool probing =
+        std::ranges::any_of(hypervisor_status_, [](const BootCheckHypervisorStatus& status) {
+            return status.probe_state == kBootCheckProbeStateProbing;
+        });
+    if (probing) {
+        hypervisor_poll_timer_->start();
+    } else {
+        hypervisor_poll_timer_->stop();
+    }
+    emit hypervisorStatusChanged();
+    return RequestDisposition::kFinished;
+}
+
+RequestDisposition ServiceClient::handle_hypervisor_refresh_frame(const QByteArray& body) {
+    QJsonObject root;
+    if (!parse_response_root(body, extract_response_request_id(body), root)) {
+        return RequestDisposition::kProtocolError;
+    }
+    hypervisor_refresh_busy_ = false;
+    hypervisor_refresh_request_id_.clear();
+    CommandAck ack;
+    if (!is_command_failure_response(root, kRefreshBootCheckHypervisorStatusRequestKind) &&
+        parse_command_ack_response(root, kRefreshBootCheckHypervisorStatusRequestKind, ack)) {
+        // Probe accepted: pull the status now so the UI flips into "probing".
+        start_hypervisor_status_query();
+    }
+    emit hypervisorStatusChanged();
     return RequestDisposition::kFinished;
 }
 
@@ -1333,6 +1474,7 @@ void ServiceClient::seed_terminal_toast_baseline(const QVector<JobRow>& rows) {
 void ServiceClient::publish_terminal_toasts(const QVector<JobRow>& rows) {
     QString latest_toast;
     bool latest_is_error = false;
+    bool found_new_event = false;
     for (const auto& row : rows) {
         if (row.state != 4 && row.state != 5 && row.state != 6 && row.state != 7) {
             continue;
@@ -1342,27 +1484,16 @@ void ServiceClient::publish_terminal_toasts(const QVector<JobRow>& rows) {
             continue;
         }
         toasted_job_keys_.insert(key);
-        const auto state_text = [&]() -> QString {
-            switch (row.state) {
-            case 4:
-                //% "Job succeeded"
-                return qtTrId("aegra.toast.job.succeeded");
-            case 5:
-                //% "Job failed"
-                return qtTrId("aegra.toast.job.failed");
-            case 6:
-                //% "Job cancelled"
-                return qtTrId("aegra.toast.job.cancelled");
-            default:
-                //% "Job interrupted"
-                return qtTrId("aegra.toast.job.interrupted");
-            }
-        }();
-        latest_toast = state_text + QLatin1String(" (") + row.job_id + QLatin1Char(')');
+        found_new_event = true;
+        latest_toast = terminal_job_toast_text(row);
         latest_is_error = row.state != 4;
     }
     if (!latest_toast.isEmpty()) {
         show_toast(latest_toast, latest_is_error);
+    }
+    if (found_new_event && !has_unread_events_) {
+        has_unread_events_ = true;
+        emit unreadEventsChanged();
     }
 }
 

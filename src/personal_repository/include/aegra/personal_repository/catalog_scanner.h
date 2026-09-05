@@ -37,6 +37,8 @@ struct CatalogScanPage final {
     RepositoryDescriptor descriptor;
     std::vector<CatalogRecoveryPoint> recovery_points;
     std::optional<std::string> continuation_token;
+    /// Catalog `.entry` keys that were skipped as unreadable or invalid. Not an empty-list failure.
+    std::vector<std::string> skipped_entry_keys;
 };
 
 /// Raw catalog entries after decode + identity checks (tombstones applied).
@@ -45,6 +47,8 @@ struct CatalogScanPage final {
 struct CatalogEntriesLoad final {
     RepositoryDescriptor descriptor;
     std::vector<CatalogEntry> entries;
+    std::vector<std::string> skipped_entry_keys;
+    std::vector<std::string> skipped_tombstone_keys;
 };
 
 class RepositoryCatalogScanner final {
@@ -53,7 +57,9 @@ class RepositoryCatalogScanner final {
                              CatalogScannerLimits limits = {});
 
     /// Decode catalog objects and apply deletion tombstones. Does not build RecoveryPointGraph.
-    /// Hard failures: storage IO, descriptor/tombstone/entry JSON identity conflicts, size limits.
+    /// Hard failures: storage IO, descriptor JSON, prefix enumeration, and size limits.
+    /// Unrecognized prefix objects are ignored. Unreadable or invalid `<uuid>.entry` /
+    /// `<uuid>.tombstone` objects are skipped and recorded; they do not fail the load.
     [[nodiscard]] base::Result<CatalogEntriesLoad>
     load_entries(base::CancellationToken cancellation) const;
 

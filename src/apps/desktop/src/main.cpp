@@ -1,5 +1,6 @@
 #include "client/service_client.h"
 #include "locale/locale_controller.h"
+#include "platform/desktop_shell_controller.h"
 #include "platform/windows_service_diagnostics.h"
 
 #include <QDir>
@@ -120,6 +121,7 @@ void configure_application(QGuiApplication& application) {
     application.setOrganizationName(QStringLiteral("Aegra"));
     application.setOrganizationDomain(QStringLiteral("aegra.app"));
     application.setApplicationName(QStringLiteral("Aegra"));
+    application.setQuitOnLastWindowClosed(false);
     const auto icon = load_product_icon();
     if (!icon.isNull()) {
         application.setWindowIcon(icon);
@@ -138,22 +140,6 @@ void write_qml_errors(const QList<QQmlError>& errors) {
     QTextStream stream(&file);
     for (const auto& error : errors) {
         stream << error.toString() << '\n';
-    }
-}
-
-void raise_main_windows(QQmlApplicationEngine& engine) {
-    for (QObject* object : engine.rootObjects()) {
-        auto* window = qobject_cast<QWindow*>(object);
-        if (window == nullptr) {
-            continue;
-        }
-        if (window->windowState() & Qt::WindowMinimized) {
-            window->showNormal();
-        } else {
-            window->show();
-        }
-        window->raise();
-        window->requestActivate();
     }
 }
 
@@ -223,7 +209,10 @@ int main(int argument_count, char* arguments[]) {
     aegra::desktop::LocaleController locale_controller(&engine);
     aegra::desktop::ServiceClient service_client;
     aegra::desktop::WindowsServiceDiagnostics service_diagnostics;
+    aegra::desktop::DesktopShellController shell_controller;
     service_client.set_locale_controller(&locale_controller);
+    QObject::connect(&locale_controller, &aegra::desktop::LocaleController::languageChanged,
+                     &shell_controller, &aegra::desktop::DesktopShellController::retranslate);
 
     engine.addImportPath(QStringLiteral("qrc:/Aegra/qml"));
     engine.rootContext()->setContextProperty(QStringLiteral("localeController"),
@@ -231,6 +220,8 @@ int main(int argument_count, char* arguments[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("serviceClient"), &service_client);
     engine.rootContext()->setContextProperty(QStringLiteral("serviceDiagnostics"),
                                              &service_diagnostics);
+    engine.rootContext()->setContextProperty(QStringLiteral("desktopShell"),
+                                             &shell_controller);
     engine.rootContext()->setContextProperty(QStringLiteral("nativeAcrylicBlur"), false);
     engine.rootContext()->setContextProperty(QStringLiteral("nativeWindowCorners"),
                                              is_windows_11_or_greater());
@@ -256,6 +247,7 @@ int main(int argument_count, char* arguments[]) {
         auto* window = qobject_cast<QWindow*>(object);
         apply_frameless_platform_chrome(window);
         if (window != nullptr) {
+            shell_controller.attach(window);
             QObject::connect(window, &QWindow::windowStateChanged, window,
                              [window](Qt::WindowState) {
                                  apply_frameless_platform_chrome(window);
@@ -266,7 +258,7 @@ int main(int argument_count, char* arguments[]) {
     QObject::connect(&ipc_server, &QLocalServer::newConnection, &application, [&]() {
         while (QLocalSocket* client = ipc_server.nextPendingConnection()) {
             client->deleteLater();
-            raise_main_windows(engine);
+            shell_controller.showMainWindow();
         }
     });
 

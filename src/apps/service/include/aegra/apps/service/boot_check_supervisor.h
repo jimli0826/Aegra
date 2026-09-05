@@ -1,6 +1,7 @@
 #pragma once
 
 #include "aegra/base/result.h"
+#include "aegra/contracts/service_control.h"
 #include "aegra/ports/clock.h"
 #include "aegra/ports/control_plane.h"
 #include "aegra/ports/process_launcher.h"
@@ -43,6 +44,9 @@ class BootCheckSupervisor final {
         /// Trusted absolute AegraBootCheck.exe path; empty = unavailable.
         std::filesystem::path host_executable_path;
         std::filesystem::path data_directory;
+        /// Tooling discovery from the composition root (registry/file checks).
+        bool virtualbox_installed{false};
+        bool hyperv_installed{false};
     };
 
     BootCheckSupervisor(Options options, ports::IProcessLauncher& launcher,
@@ -66,6 +70,13 @@ class BootCheckSupervisor final {
     /// instances. Dispatch is blocked until the scavenge finishes so a new job
     /// directory can never race the cleanup.
     void begin_scavenge();
+    /// Ensures one asynchronous `AegraBootCheck --inspect` pass over the
+    /// installed hypervisors is running (service start, and the
+    /// RefreshBootCheckHypervisorStatus command). A pass already in flight is
+    /// left alone. Probes never block job dispatch.
+    void begin_hypervisor_probe();
+    /// Cached usability snapshot of both hypervisors; never blocks on a probe.
+    [[nodiscard]] contracts::BootCheckHypervisorStatusReport hypervisor_status() const;
     /// False when unavailable, shutting down, scavenging, or a run is active.
     [[nodiscard]] bool try_start(const BootCheckDispatch& dispatch);
     /// Terminal result for the given run, consumed on read.

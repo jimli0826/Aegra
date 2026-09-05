@@ -56,6 +56,8 @@ struct RecoveryPointPage final {
     std::string repository_uuid;
     std::vector<RecoveryPointSummary> items;
     std::optional<std::string> continuation_token;
+    /// In-process only (not on the Service wire). Keys of skipped invalid catalog entries.
+    std::vector<std::string> skipped_catalog_entry_keys;
 };
 
 [[nodiscard]] base::Result<void>

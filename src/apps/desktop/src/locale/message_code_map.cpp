@@ -254,6 +254,23 @@ namespace {
          QStringLiteral("aegra.error.file_restore.completed")},
         {QStringLiteral("service.content_kind_mismatch"),
          QStringLiteral("aegra.error.file_restore.content_kind_mismatch")},
+        {QStringLiteral("bootcheck.provider_unavailable"),
+         QStringLiteral("aegra.error.bootcheck.provider_unavailable")},
+        {QStringLiteral("bootcheck.virtualbox_hyperv_conflict"),
+         QStringLiteral("aegra.error.bootcheck.virtualbox_hyperv_conflict")},
+        {QStringLiteral("bootcheck.virtualbox_no_hardware_virt"),
+         QStringLiteral("aegra.error.bootcheck.virtualbox_no_hardware_virt")},
+        {QStringLiteral("verify.archive_missing"),
+         QStringLiteral("aegra.error.verify.archive_missing")},
+        {QStringLiteral("verify.source_unavailable"),
+         QStringLiteral("aegra.error.verify.source_unavailable")},
+        {QStringLiteral("verify.corrupt"), QStringLiteral("aegra.error.verify.corrupt")},
+        {QStringLiteral("verify.credential_unavailable"),
+         QStringLiteral("aegra.error.verify.credential_unavailable")},
+        {QStringLiteral("verify.cancelled"), QStringLiteral("aegra.error.verify.cancelled")},
+        {QStringLiteral("verify.failed"), QStringLiteral("aegra.error.verify.failed")},
+        {QStringLiteral("verify.invalid_request"),
+         QStringLiteral("aegra.error.verify.invalid_request")},
     };
     return kCatalog;
 }
@@ -303,6 +320,26 @@ QString translation_id_for_message_code(const QString& message_code) {
     qtTrId("aegra.error.pe_restore.payload_missing");
     //% "An offline restore is already prepared and waiting for restart"
     qtTrId("aegra.error.pe_restore.pending_exists");
+    //% "The selected hypervisor is not available for boot check"
+    qtTrId("aegra.error.bootcheck.provider_unavailable");
+    //% "VirtualBox cannot start VMs because Hyper-V is using the CPU's virtualization. Enable the Windows feature 'Windows Hypervisor Platform', or switch boot check to Hyper-V."
+    qtTrId("aegra.error.bootcheck.virtualbox_hyperv_conflict");
+    //% "Hardware virtualization (VT-x/AMD-V) is not available. Enable it in the BIOS/UEFI firmware settings."
+    qtTrId("aegra.error.bootcheck.virtualbox_no_hardware_virt");
+    //% "Archive file does not exist"
+    qtTrId("aegra.error.verify.archive_missing");
+    //% "Archive could not be opened. Check the path, repository connection, and file permissions."
+    qtTrId("aegra.error.verify.source_unavailable");
+    //% "Archive authentication failed"
+    qtTrId("aegra.error.verify.corrupt");
+    //% "Archive password is unavailable"
+    qtTrId("aegra.error.verify.credential_unavailable");
+    //% "Verification was cancelled"
+    qtTrId("aegra.error.verify.cancelled");
+    //% "Verification failed"
+    qtTrId("aegra.error.verify.failed");
+    //% "Verification request is invalid"
+    qtTrId("aegra.error.verify.invalid_request");
 }
 
 QString localize_message_code(const QString& message_code) {

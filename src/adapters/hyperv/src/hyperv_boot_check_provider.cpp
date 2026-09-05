@@ -321,6 +321,7 @@ HyperVBootCheckProvider::inspect(const base::CancellationToken cancellation) {
     info.provider_name = "Microsoft Hyper-V";
     info.message_code = kProviderUnavailable;
     if (impl_->options.powershell_path.empty()) {
+        info.diagnostic = "powershell.exe not discovered";
         return base::Result<virtualization::BootCheckProviderInfo>::success(std::move(info));
     }
     // Available = vmms running + Hyper-V module resolvable. Real create errors
@@ -334,10 +335,16 @@ HyperVBootCheckProvider::inspect(const base::CancellationToken cancellation) {
         if (probed.error().code == base::ErrorCode::kCancelled) {
             return base::Result<virtualization::BootCheckProviderInfo>::failure(probed.error());
         }
+        info.diagnostic = "PowerShell probe did not run: " + probed.error().message;
         return base::Result<virtualization::BootCheckProviderInfo>::success(std::move(info));
     }
     const auto marker = probed.value().output.find(kReadyMarker);
     if (probed.value().exit_code != 0 || marker == std::string::npos) {
+        info.diagnostic =
+            "vmms service or Hyper-V module unavailable, probe exit=" +
+            std::to_string(probed.value().exit_code) + ": " +
+            probed.value().output.substr(0, (std::min)(probed.value().output.size(),
+                                                       static_cast<std::size_t>(300)));
         return base::Result<virtualization::BootCheckProviderInfo>::success(std::move(info));
     }
     auto version = probed.value().output.substr(marker + kReadyMarker.size());

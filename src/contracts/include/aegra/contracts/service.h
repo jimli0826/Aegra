@@ -50,6 +50,8 @@ enum class ServiceRequestKind : std::uint8_t {
     kPreparePeRestore = 19,
     /// Armed state of the pending WinPE restore hand-off.
     kGetPeRestoreState = 20,
+    /// Cached usability of every boot-check hypervisor (installed + probe outcome).
+    kGetBootCheckHypervisorStatus = 21,
     kAddRepositoryConnection = 32,
     kImportRepositoryConnection = 33,
     kTestRepositoryConnection = 34,
@@ -75,6 +77,8 @@ enum class ServiceRequestKind : std::uint8_t {
     kArmPeRestore = 51,
     /// Disarm the one-time boot and delete the pending WinPE restore hand-off.
     kCancelPeRestore = 52,
+    /// Start an asynchronous re-probe of every installed boot-check hypervisor.
+    kRefreshBootCheckHypervisorStatus = 53,
 };
 
 enum class ServiceResponseKind : std::uint8_t {
@@ -100,13 +104,15 @@ struct ServiceInfo final {
 using ServiceRequestPayload = std::variant<
     ServiceVersionRange, ServiceRecoveryPointListRequest, RepositoryConnectionListRequest,
     SourceInventoryListRequest, JobListRequest, ScheduleListRequest, AuditEventListRequest,
-    MountSessionListRequest, RestorePreflightRequest, RecoveryPointRef, RepositoryConnectionInput,
+    MountSessionListRequest, RestorePreflightRequest, RecoveryPointRef,
+    PlanDeleteRecoveryPointsRequest, RepositoryConnectionInput,
     ResourceRef, StartBackupCommand, StartVerifyCommand, StartRestoreCommand,
     MountRecoveryPointCommand, UpsertScheduleCommand, EventSubscriptionRequest,
     EventAcknowledgement, ExecuteDeletePlanCommand, BrowseFileSourcesRequest,
     RepositoryDirectoryListRequest, ListRecoveryPointEntriesRequest, PrepareFileRestoreRequest,
     StartFileRestoreCommand, ServiceSettingsQuery, UpdateServiceSettingsCommand,
-    PeRestoreStateRequest, ArmPeRestoreCommand>;
+    PeRestoreStateRequest, ArmPeRestoreCommand, BootCheckHypervisorStatusQuery,
+    RefreshBootCheckHypervisorStatusCommand>;
 
 struct ServiceRequest final {
     std::uint32_t schema_version{kServiceRequestSchemaVersion};
@@ -122,7 +128,8 @@ using ServiceResponsePayload =
                  SourceInventoryPage, JobPage, SchedulePage, AuditEventPage, MountSessionPage,
                  RestorePreflight, RecoveryPointChainResult, DeletePlanSummary, RecoveryPointLayout,
                  CommandAcknowledgement, FileSourceNodePage, RecoveryPointEntryPage,
-                 FileRestorePreflight, ServiceSettings, PeRestoreState>;
+                 FileRestorePreflight, ServiceSettings, PeRestoreState,
+                 BootCheckHypervisorStatusReport>;
 
 struct ServiceResponse final {
     std::uint32_t schema_version{kServiceResponseSchemaVersion};

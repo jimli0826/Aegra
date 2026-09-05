@@ -48,6 +48,7 @@ Json encode_progress(const contracts::TaskProgress& progress) {
         {"discovered_entries", progress.discovered_entries},
         {"processed_entries", progress.processed_entries},
         {"message_code", progress.message_code},
+        {"recovery_point_id", progress.recovery_point_id},
     };
 }
 

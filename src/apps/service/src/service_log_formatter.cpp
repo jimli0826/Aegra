@@ -185,6 +185,10 @@ void omit_trace_fields(Json& value) {
         return "Arm PE restore";
     case contracts::ServiceRequestKind::kCancelPeRestore:
         return "Cancel PE restore";
+    case contracts::ServiceRequestKind::kGetBootCheckHypervisorStatus:
+        return "Get boot check hypervisor status";
+    case contracts::ServiceRequestKind::kRefreshBootCheckHypervisorStatus:
+        return "Refresh boot check hypervisor status";
     default:
         return "Unknown command";
     }

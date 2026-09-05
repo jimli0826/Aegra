@@ -61,10 +61,10 @@ Service composition root 注入。Repository command 使用持久化幂等记录
 调用方；不持久化本地化文本、Win32 原始错误、Catalog 或 Archive metadata。
 
 S5 增加 `RecoveryPointOperations`：按 connection 打开 Repository、扫描 Catalog、构建
-`RecoveryPointGraph`、返回 base-first 链摘要；生成 descendant-first 删除计划（plan token 持久化在
-Repository `staging/delete-plans/`），计划持久化每个 Archive member 的 Storage generation，并按
-tombstone 协议执行条件删除，防止崩溃续作误删同 key 的新对象。Verify 由 Service
-`WorkerJobService::start_verify` 构造受信任 Archive 路径后提交 Supervisor。
+`RecoveryPointGraph`、返回 base-first 链摘要；按所选根生成 descendant-first 删除计划（多根时取子树
+并集；plan token 持久化在 Repository `staging/delete-plans/`），计划持久化每个 Archive member 的
+Storage generation，并按 tombstone 协议执行条件删除，防止崩溃续作误删同 key 的新对象。Verify 由
+Service `WorkerJobService::start_verify` 构造受信任 Archive 路径后提交 Supervisor。
 
 S6 等待前置 S5：`RestorePreflightService` 已建立 Application 编排边界，按
 `repository_connection_id + recovery_point_id + target_source_id` 查找受信任资源，验证目标为可用、非系统、

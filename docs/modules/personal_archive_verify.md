@@ -50,13 +50,22 @@ Schedule 的 dpapi-lm 密文引用（未加密备份为空凭据/空口令）。
 ## Job 与结果
 
 - `operation = kVerify`；
-- `source_refs` 恰好包含一个 `.bkf` 路径；
+- volume_set：`source_refs` 为 1..1000 个独立 `.bkf` 路径（同一备份集，从早到晚），每项一份
+  `credential_refs`；`verify_recovery_point_ids` 与 `source_refs` 一一对应；
+- file_set：`source_refs` 为最长选中链（base-first）；单个 tip 时 `verify_chain_lengths` 为空，
+  多个 tip 时每项是 `source_refs` 的 prefix 长度；
 - `target_ref` 必须为空，因为 Verify 不产生数据目标；
-- `credential_refs` 恰好包含一个口令 SecretRef；空 SecretRef 表示未加密 Archive（空口令），
-  与 Restore 和 file_set Verify 的约定一致；
+- 空 SecretRef 表示未加密 Archive（空口令），与 Restore 的约定一致；
+- Worker 在同一进程内按顺序校验各恢复点；某一项失败后继续后续项，Job 仍为失败；
+  `TaskProgress.recovery_point_id` 为第一项失败的恢复点，其后未成功的项在 UI 上同为失败；
+- 打开失败时：文件/路径不存在映射为 `kNotFound` / `verify.archive_missing`，日志写明
+  `archive file does not exist` 与路径；其它打开失败为 `verify.source_unavailable`；
 - 成功结果使用 `verify.completed`，失败和取消使用稳定的 `verify.*` message code；
-- `logical_bytes` 表示 Archive 描述的源逻辑容量，`stored_bytes` 表示本次成功解码验证的逻辑 payload
-  字节，`chunk_count` 表示完成验证的 Chunk 数量。
+  Desktop Status 悬停显示该 message code 的本地化原因，不用泛化的「失败」；
+- `logical_bytes` 表示 Archive 描述的源逻辑容量（同一备份集批处理取各恢复点的最大值，不把卷容量
+  加 N 次）；`stored_bytes` 表示本次成功解码验证的逻辑 payload 字节（批处理为各项之和）；
+  `chunk_count` 表示完成验证的 Chunk 数量（批处理为各项之和）。增量层允许合法空洞，payload 可以
+  小于卷逻辑容量。
 
 ## 安全、取消与资源
 

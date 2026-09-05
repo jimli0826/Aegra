@@ -18,6 +18,7 @@ namespace aegra::contracts {
 inline constexpr std::uint32_t kMaximumServicePageResults = 100;
 inline constexpr std::uint32_t kMaximumUnacknowledgedServiceEvents = 128;
 inline constexpr std::uint32_t kMaximumBackupSources = 100;
+inline constexpr std::uint32_t kMaximumDeletePlanTargets = 10'000;
 
 struct MessageArgument final {
     std::string name;
@@ -199,6 +200,7 @@ struct FileSelectionSummary final {
 
 struct ScheduleSummary final {
     std::string schedule_id;
+    std::string backup_set_uuid;
     std::string display_name;
     bool enabled{false};
     ContentKind content_kind{ContentKind::kVolumeSet};
@@ -313,6 +315,15 @@ struct RecoveryPointRef final {
     std::string archive_password;
 };
 
+/// Plan a chain-aware delete for one or more selected Recovery Point roots.
+/// Service unions each root's descendant subtree into a single plan.
+struct PlanDeleteRecoveryPointsRequest final {
+    std::string repository_connection_id;
+    std::vector<std::string> recovery_point_ids;
+    /// Optional one-shot password; unused by catalog delete planning. Never logged.
+    std::string archive_password;
+};
+
 struct StartBackupCommand final {
     /// Required. Sources, repository, exclude options, encryption and password ciphertext
     /// are loaded from the durable schedule record (not accepted on the wire).
@@ -323,7 +334,9 @@ struct StartBackupCommand final {
 
 struct StartVerifyCommand final {
     std::string repository_connection_id;
-    std::string recovery_point_id;
+    /// 1..kMaximumVerifyRecoveryPoints unique ids from one backup set. Service verifies
+    /// earliest to latest in a single Worker process.
+    std::vector<std::string> recovery_point_ids;
 };
 
 enum class RecoveryPointStructuralState : std::uint8_t {
@@ -684,6 +697,41 @@ struct UpdateServiceSettingsCommand final {
     std::uint8_t job_retention_months{kDefaultJobRetentionMonths};
 };
 
+/// Empty body for GetBootCheckHypervisorStatus (exact_keys {}).
+struct BootCheckHypervisorStatusQuery final {};
+
+/// Empty body for RefreshBootCheckHypervisorStatus (exact_keys {}).
+struct RefreshBootCheckHypervisorStatusCommand final {};
+
+/// Probe lifecycle of one boot-check hypervisor on this host.
+enum class BootCheckProbeState : std::uint8_t {
+    kNotProbed = 1,
+    kProbing = 2,
+    kProbed = 3,
+};
+
+[[nodiscard]] constexpr bool is_known_boot_check_probe_state(const BootCheckProbeState state) //
+    noexcept {
+    return state == BootCheckProbeState::kNotProbed || state == BootCheckProbeState::kProbing ||
+           state == BootCheckProbeState::kProbed;
+}
+
+/// Usability of one hypervisor for boot check on this host. `available` and
+/// `message_code` are meaningful only when probe_state is kProbed;
+/// message_code carries the stable bootcheck.* reason when unavailable.
+struct BootCheckHypervisorStatus final {
+    BootCheckHypervisor hypervisor{BootCheckHypervisor::kVirtualBox};
+    bool installed{false};
+    BootCheckProbeState probe_state{BootCheckProbeState::kNotProbed};
+    bool available{false};
+    std::string message_code;
+    std::uint64_t checked_utc_ms{0};
+};
+
+struct BootCheckHypervisorStatusReport final {
+    std::vector<BootCheckHypervisorStatus> hypervisors;
+};
+
 using FileSourceNodePage = ServicePage<FileSourceNode>;
 
 struct EventSubscriptionRequest final {
@@ -747,6 +795,8 @@ validate_mount_session_list_request(const MountSessionListRequest& request);
 validate_repository_connection_input(const RepositoryConnectionInput& input);
 [[nodiscard]] base::Result<void> validate_resource_ref(const ResourceRef& reference);
 [[nodiscard]] base::Result<void> validate_recovery_point_ref(const RecoveryPointRef& reference);
+[[nodiscard]] base::Result<void>
+validate_plan_delete_recovery_points_request(const PlanDeleteRecoveryPointsRequest& request);
 [[nodiscard]] base::Result<void> validate_start_backup_command(const StartBackupCommand& command);
 [[nodiscard]] base::Result<void> validate_start_verify_command(const StartVerifyCommand& command);
 [[nodiscard]] base::Result<void>
@@ -797,6 +847,12 @@ validate_start_file_restore_command(const StartFileRestoreCommand& command);
 [[nodiscard]] base::Result<void> validate_service_settings(const ServiceSettings& settings);
 [[nodiscard]] base::Result<void>
 validate_update_service_settings_command(const UpdateServiceSettingsCommand& command);
+[[nodiscard]] base::Result<void>
+validate_boot_check_hypervisor_status_query(const BootCheckHypervisorStatusQuery& query);
+[[nodiscard]] base::Result<void> validate_refresh_boot_check_hypervisor_status_command(
+    const RefreshBootCheckHypervisorStatusCommand& command);
+[[nodiscard]] base::Result<void>
+validate_boot_check_hypervisor_status_report(const BootCheckHypervisorStatusReport& report);
 
 [[nodiscard]] base::Result<void>
 validate_repository_connection_page(const RepositoryConnectionPage& page);

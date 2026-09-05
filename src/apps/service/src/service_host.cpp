@@ -7,6 +7,7 @@
 #include "aegra/application/recovery_point_operations.h"
 #include "aegra/application/repository_connection_service.h"
 #include "aegra/application/source_inventory_query.h"
+#include "aegra/apps/service/boot_check_supervisor.h"
 #include "aegra/apps/service/mount_supervisor.h"
 #include "aegra/apps/service/schedule_service.h"
 
@@ -218,6 +219,9 @@ recovery_point_response(const contracts::ServiceRequest& request, const ServiceR
     }
     if (fitted.value().catalog.state == contracts::RepositoryCatalogState::kNotConfigured) {
         response.message_code = "repository.not_configured";
+    }
+    for (const auto& key : fitted.value().catalog.skipped_catalog_entry_keys) {
+        write_log(runtime, ServiceLogLevel::kWarning, "repository.catalog_entry_skipped", key);
     }
     response.payload = std::move(fitted).value();
     return base::Result<contracts::ServiceResponse>::success(std::move(response));
@@ -603,6 +607,18 @@ command_response(const contracts::ServiceRequest& request, const ServiceRuntimeI
                request.kind == contracts::ServiceRequestKind::kCancelPeRestore) {
         handled = true;
         result = runtime.pe_restore->cancel_pe_restore(cancellation);
+    } else if (runtime.boot_check && request.idempotency_key &&
+               request.kind == contracts::ServiceRequestKind::kRefreshBootCheckHypervisorStatus) {
+        // Volatile probe refresh: no durable side effect, so no command ledger.
+        // A pass already in flight is reused; the caller polls the status query.
+        handled = true;
+        runtime.boot_check->begin_hypervisor_probe();
+        contracts::CommandAcknowledgement acknowledgement;
+        acknowledgement.command_id = *request.idempotency_key;
+        acknowledgement.disposition = contracts::CommandDisposition::kAccepted;
+        acknowledgement.resource_id = "bootcheck.hypervisor_probe";
+        result =
+            base::Result<contracts::CommandAcknowledgement>::success(std::move(acknowledgement));
     }
     if (!handled)
         return capability_unavailable(request);
@@ -751,7 +767,7 @@ recovery_point_ops_response(const contracts::ServiceRequest& request,
         return base::Result<contracts::ServiceResponse>::success(std::move(response));
     }
     auto result = runtime.recovery_point_operations->plan_delete(
-        std::get<contracts::RecoveryPointRef>(request.payload), cancellation);
+        std::get<contracts::PlanDeleteRecoveryPointsRequest>(request.payload), cancellation);
     if (!result) {
         return base::Result<contracts::ServiceResponse>::success(failure(
             result.error().code, request.request_id, request.kind, "recovery_point.plan_failed"));
@@ -1069,6 +1085,27 @@ update_service_settings_response(const contracts::ServiceRequest& request,
     return base::Result<contracts::ServiceResponse>::success(std::move(response));
 }
 
+[[nodiscard]] base::Result<contracts::ServiceResponse>
+boot_check_hypervisor_status_response(const contracts::ServiceRequest& request,
+                                      const ServiceRuntimeInfo& runtime) {
+    if (runtime.boot_check == nullptr) {
+        return capability_unavailable(request);
+    }
+    auto report = runtime.boot_check->hypervisor_status();
+    auto valid = contracts::validate_boot_check_hypervisor_status_report(report);
+    if (!valid) {
+        return base::Result<contracts::ServiceResponse>::failure(valid.error());
+    }
+    contracts::ServiceResponse response;
+    response.request_id = request.request_id;
+    response.kind = contracts::ServiceResponseKind::kQueryResult;
+    response.request_kind = request.kind;
+    response.boundary_error_code = base::ErrorCode::kNone;
+    response.message_code = "bootcheck.hypervisor_status_ready";
+    response.payload = std::move(report);
+    return base::Result<contracts::ServiceResponse>::success(std::move(response));
+}
+
 base::Result<contracts::ServiceResponse>
 dispatch_service_request(const contracts::ServiceRequest& request,
                          const ServiceRuntimeInfo& runtime, const ServiceSessionContext& session,
@@ -1188,6 +1225,12 @@ dispatch_service_request(const contracts::ServiceRequest& request,
         break;
     case contracts::ServiceRequestKind::kUpdateServiceSettings:
         response = update_service_settings_response(request, runtime, cancellation);
+        break;
+    case contracts::ServiceRequestKind::kGetBootCheckHypervisorStatus:
+        response = boot_check_hypervisor_status_response(request, runtime);
+        break;
+    case contracts::ServiceRequestKind::kRefreshBootCheckHypervisorStatus:
+        response = command_response(request, runtime, session, cancellation);
         break;
     }
     if (!response) {

@@ -15,8 +15,8 @@ Item {
         id: closeBtn
         anchors.top: parent.top
         anchors.right: parent.right
-        anchors.topMargin: 10
-        anchors.rightMargin: 10
+        anchors.topMargin: 6
+        anchors.rightMargin: 8
         width: 32
         height: 28
         z: 10
@@ -40,9 +40,8 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        anchors.topMargin: 4
         contentWidth: width
-        contentHeight: mainCol.implicitHeight + 24
+        contentHeight: mainCol.implicitHeight + 16
         clip: true
         boundsBehavior: Flickable.StopAtBounds
 
@@ -53,50 +52,25 @@ Item {
             anchors.top: parent.top
             anchors.leftMargin: 16
             anchors.rightMargin: 16
-            anchors.topMargin: 4
-            spacing: 16
+            spacing: 12
 
-            // ── Language card ─────────────────────────────────────
-            Rectangle {
+            // ── Language ──────────────────────────────────────────
+            ColumnLayout {
                 Layout.fillWidth: true
-                radius: 16
-                gradient: Gradient {
-                    orientation: Gradient.Vertical
-                    GradientStop { position: 0.0; color: Theme.colorCard }
-                    GradientStop { position: 1.0; color: Theme.colorCardEnd }
-                }
-                border.width: 0
-                implicitHeight: langInner.implicitHeight + 40
-
-                ColumnLayout {
-                    id: langInner
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    anchors.margins: 20
-                    spacing: 10
+                spacing: 6
 
                     Text {
                         //% "Language"
                         text: qsTrId("aegra.settings.language")
                         color: Theme.colorTextWhite
-                        font.pixelSize: 15
+                        font.pixelSize: 13
                         font.bold: true
                         font.family: Theme.fontFamily
-                    }
-                    Text {
-                        Layout.fillWidth: true
-                        //% "Choose the display language for the desktop client"
-                        text: qsTrId("aegra.settings.language_desc")
-                        color: Theme.colorTextGrey
-                        font.pixelSize: 12
-                        font.family: Theme.fontFamily
-                        wrapMode: Text.WordWrap
                     }
                     ComboBox {
                         id: languageCombo
                         Layout.preferredWidth: 280
-                        Layout.preferredHeight: 34
+                        Layout.preferredHeight: 30
                         model: localeController.availableLanguages
                         textRole: "label"
                         currentIndex: {
@@ -168,50 +142,25 @@ Item {
                             }
                         }
                     }
-                }
             }
 
-            // ── Theme card ────────────────────────────────────────
-            Rectangle {
+            // ── Theme ─────────────────────────────────────────────
+            ColumnLayout {
                 Layout.fillWidth: true
-                radius: 16
-                gradient: Gradient {
-                    orientation: Gradient.Vertical
-                    GradientStop { position: 0.0; color: Theme.colorCard }
-                    GradientStop { position: 1.0; color: Theme.colorCardEnd }
-                }
-                border.width: 0
-                implicitHeight: themeInner.implicitHeight + 40
-
-                ColumnLayout {
-                    id: themeInner
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    anchors.margins: 20
-                    spacing: 10
+                spacing: 6
 
                     Text {
                         //% "Theme"
                         text: qsTrId("aegra.settings.theme")
                         color: Theme.colorTextWhite
-                        font.pixelSize: 15
+                        font.pixelSize: 13
                         font.bold: true
                         font.family: Theme.fontFamily
-                    }
-                    Text {
-                        Layout.fillWidth: true
-                        //% "Choose a color theme for the desktop client"
-                        text: qsTrId("aegra.settings.theme_desc")
-                        color: Theme.colorTextGrey
-                        font.pixelSize: 12
-                        font.family: Theme.fontFamily
-                        wrapMode: Text.WordWrap
                     }
                     ComboBox {
                         id: themeCombo
                         Layout.preferredWidth: 280
-                        Layout.preferredHeight: 34
+                        Layout.preferredHeight: 30
                         model: Theme.themes
                         currentIndex: {
                             const list = Theme.themes
@@ -283,52 +232,114 @@ Item {
                             }
                         }
                     }
-                }
             }
 
-            // ── Job retention card ────────────────────────────────
-            Rectangle {
+            // ── Close button ──────────────────────────────────────
+            ColumnLayout {
                 Layout.fillWidth: true
-                radius: 16
-                gradient: Gradient {
-                    orientation: Gradient.Vertical
-                    GradientStop { position: 0.0; color: Theme.colorCard }
-                    GradientStop { position: 1.0; color: Theme.colorCardEnd }
-                }
-                border.width: 0
-                implicitHeight: retentionInner.implicitHeight + 40
+                spacing: 6
+
+                    Text {
+                        //% "Close button"
+                        text: qsTrId("aegra.settings.close_action")
+                        color: Theme.colorTextWhite
+                        font.pixelSize: 13
+                        font.bold: true
+                        font.family: Theme.fontFamily
+                    }
+                    ComboBox {
+                        id: closeActionCombo
+                        Layout.preferredWidth: 280
+                        Layout.preferredHeight: 30
+                        model: [
+                            { id: "hide", label: qsTrId("aegra.settings.close_action.hide") },
+                            { id: "quit", label: qsTrId("aegra.settings.close_action.quit") }
+                        ]
+                        textRole: "label"
+                        currentIndex: desktopShell.closeAction === "quit" ? 1 : 0
+                        onActivated: function(index) {
+                            const item = model[index]
+                            if (item)
+                                desktopShell.setCloseAction(item.id)
+                        }
+                        background: Rectangle {
+                            color: Theme.colorInput
+                            radius: 8
+                            border.width: 1
+                            border.color: Theme.colorBorder
+                        }
+                        indicator: ComboBoxIndicator { combo: closeActionCombo }
+                        contentItem: Text {
+                            leftPadding: 12
+                            rightPadding: 24
+                            text: closeActionCombo.displayText
+                            color: Theme.colorTextWhite
+                            font.pixelSize: 13
+                            font.family: Theme.fontFamily
+                            verticalAlignment: Text.AlignVCenter
+                            elide: Text.ElideRight
+                        }
+                        popup: Popup {
+                            y: closeActionCombo.height + 2
+                            width: closeActionCombo.width
+                            padding: 4
+                            implicitHeight: Math.min(200, contentItem.implicitHeight + 8)
+                            contentItem: ListView {
+                                clip: true
+                                implicitHeight: contentHeight
+                                model: closeActionCombo.popup.visible
+                                       ? closeActionCombo.delegateModel : null
+                                currentIndex: closeActionCombo.highlightedIndex
+                            }
+                            background: Rectangle {
+                                color: Theme.colorPopup
+                                border.color: Theme.colorBorder
+                                radius: 8
+                            }
+                        }
+                        delegate: ItemDelegate {
+                            id: closeActionItemDel
+                            width: closeActionCombo.width - 8
+                            height: 32
+                            hoverEnabled: true
+                            highlighted: closeActionCombo.highlightedIndex === index
+                            contentItem: Text {
+                                leftPadding: 10
+                                text: modelData.label
+                                color: Theme.colorTextWhite
+                                font.pixelSize: 13
+                                font.family: Theme.fontFamily
+                                elide: Text.ElideRight
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                radius: 6
+                                color: (closeActionItemDel.hovered || closeActionItemDel.highlighted)
+                                       ? Theme.colorHover : "transparent"
+                            }
+                        }
+                    }
+            }
+
+            // ── Job retention ─────────────────────────────────────
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 6
                 enabled: typeof serviceClient !== "undefined" && serviceClient
                          && serviceClient.serviceSettingsAvailable
-
-                ColumnLayout {
-                    id: retentionInner
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    anchors.margins: 20
-                    spacing: 10
 
                     Text {
                         //% "Job history retention"
                         text: qsTrId("aegra.settings.job_retention")
                         color: Theme.colorTextWhite
-                        font.pixelSize: 15
+                        font.pixelSize: 13
                         font.bold: true
                         font.family: Theme.fontFamily
-                    }
-                    Text {
-                        Layout.fillWidth: true
-                        //% "Completed jobs older than this period are permanently deleted from the service."
-                        text: qsTrId("aegra.settings.job_retention_desc")
-                        color: Theme.colorTextGrey
-                        font.pixelSize: 12
-                        font.family: Theme.fontFamily
-                        wrapMode: Text.WordWrap
                     }
                     ComboBox {
                         id: retentionCombo
                         Layout.preferredWidth: 280
-                        Layout.preferredHeight: 34
+                        Layout.preferredHeight: 30
                         enabled: typeof serviceClient !== "undefined" && serviceClient
                                  && serviceClient.serviceSettingsAvailable
                                  && !serviceClient.serviceSettingsLoading
@@ -433,10 +444,7 @@ Item {
                         font.family: Theme.fontFamily
                         wrapMode: Text.WordWrap
                     }
-                }
             }
-
-            Item { Layout.preferredHeight: 8 }
         }
     }
 

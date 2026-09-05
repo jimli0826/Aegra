@@ -18,7 +18,10 @@ namespace {
     if (error.code == base::ErrorCode::kCorruptData) {
         return "Archive authentication failed; re-backup or pick another recovery point";
     }
-    if (error.code == base::ErrorCode::kNotFound || error.code == base::ErrorCode::kIoFailure) {
+    if (error.code == base::ErrorCode::kNotFound) {
+        return "Archive file does not exist";
+    }
+    if (error.code == base::ErrorCode::kIoFailure) {
         return "Check archive path, repository connectivity, and file permissions";
     }
     return {};

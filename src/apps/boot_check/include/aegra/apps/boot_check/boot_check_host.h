@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
 
 namespace aegra::apps::boot_check {
 
@@ -32,6 +33,12 @@ struct BootCheckHostOptions final {
     std::string capability_user_home;
     /// Trusted absolute powershell.exe (System32); empty = Hyper-V unavailable.
     std::string powershell_path;
+    /// True (default) isolates the VirtualBox job VM in a per-job registry
+    /// (LocalSystem path). The composition root sets this false when the host is
+    /// launched under the logged-on user's token, so the job VM registers in that
+    /// user's default VirtualBox registry and is visible in their VirtualBox
+    /// Manager. Does not affect the capability probe, which stays isolated.
+    bool use_isolated_vbox_home{true};
     std::uint32_t cpu_count{8};
     std::uint32_t memory_mib{4096};
     std::uint64_t overlay_limit_bytes{8ULL * 1024ULL * 1024ULL * 1024ULL};
@@ -75,6 +82,15 @@ run_boot_check_host_request(std::string_view encoded_request, const BootCheckHos
 [[nodiscard]] BootCheckExitCode
 run_boot_check_scavenge(const BootCheckHostOptions& options, const BootCheckHostContext& context,
                         const std::filesystem::path& data_directory);
+
+/// Capability probe mode (--inspect <virtualbox|hyperv>): runs the provider's
+/// inspect() and prints one JSON line {schema_version, kind:"inspect",
+/// hypervisor, available, message_code, provider_version, diagnostic}. An
+/// unusable hypervisor still exits kSucceeded with available=false; only a
+/// malformed argument is rejected.
+[[nodiscard]] base::Result<EncodedBootCheckResult>
+run_boot_check_inspect(std::string_view hypervisor_name, const BootCheckHostOptions& options,
+                       const BootCheckHostContext& context);
 
 /// Diagnostic mode (--present-only): presents the chain as a read-only VMDK
 /// and holds the mount for hold_minutes so an external hypervisor can open it,

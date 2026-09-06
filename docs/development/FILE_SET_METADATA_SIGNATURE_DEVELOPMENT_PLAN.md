@@ -44,7 +44,7 @@
 3. 执行 `git status --short` 和 `git rev-parse --short HEAD`，记录基线；不得覆盖用户或其它 agent 的修改。
 4. 一次只领取一个工作包，将状态改为 `进行中`，记录 owner、基线和文件所有权。
 5. 使用 C++20、RAII、`Result<T>`、有界内存和取消语义；不引入 Windows 类型到 contracts/ports/format/pipeline。
-6. 不新增任何测试代码、fixture、测试脚本、测试 executable 或 CTest；按本计划执行生产构建和人工验证。
+6. 不新增测试源码、fixture、测试 executable 或 CTest；独立验证脚本按 ADR-0031 管理。
 7. 产品未发布：直接替换 current schema 和枚举，不写 migration、alias、dual-read、fallback 或 feature negotiation。
 
 工作包状态只允许 `等待前置`、`可开始`、`进行中`、`阻塞`、`已完成`。一个工作包只有在实现、生产构建、检查、

@@ -70,7 +70,7 @@ Parser 浏览，禁止转向 Mount/Dokan 实现。分发只依据 V7 `content_ki
 10. PIDL 不保存指针、C++ 对象、Archive offset、密码或绝对 NTFS 路径。
 11. 所有外部长度、offset、record size、runlist、page token 和 PIDL 数据先验证再使用；加法和乘法防溢出。
 12. Explorer 关闭、Folder 释放或 Archive 被替换后，所有 Enumerator/Stream 在有界时间内失败并释放资源。
-13. 不新增任何测试代码、测试 Target、CTest、fixture 或测试脚本；使用生产构建、静态检查和人工场景验收。
+13. 不新增测试源码、测试 Target、CTest 或 fixture；独立验证脚本按 ADR-0031 管理。
 14. 不修改与本功能无关的 Desktop、Service、Worker 或 Mount 页面；保留工作树中全部既有用户修改。
 
 ## 4. 参考实现采用与拒绝项

@@ -42,8 +42,14 @@ namespace {
         return run_event_list(session, options);
     case Command::kMountList:
         return run_mount_list(session, options);
+    case Command::kMountStart:
+        return run_mount_start(session, options);
+    case Command::kMountUnmount:
+        return run_mount_unmount(session, options);
     case Command::kSettingsGet:
         return run_settings_get(session, options);
+    case Command::kRestoreRun:
+        return run_restore_run(session, options);
     }
     write_error("unknown command");
     return kExitUsage;

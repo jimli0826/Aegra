@@ -622,8 +622,8 @@ M1 或 M2 单独完成不代表 capability 可以开启。
 
 ## 19. SR10：构建、审计和人工验证
 
-本仓库不新增 unit、integration、regression、smoke、E2E、fuzz、fixture、测试脚本、测试 executable 或
-CTest 注册。验证使用生产 Target 构建、静态/架构审计和可丢弃 VHD/VHDX 人工场景。
+本仓库不新增测试源码、fixture、测试 executable 或 CTest 注册；独立验证脚本按 ADR-0031 管理。验证使用
+生产 Target 构建、静态/架构审计和可丢弃 VHD/VHDX 场景。
 
 ### 19.1 构建
 

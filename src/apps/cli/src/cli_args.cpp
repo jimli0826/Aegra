@@ -23,17 +23,17 @@ namespace {
     if (wide.empty()) {
         return base::Result<std::string>::success(std::string{});
     }
-    const auto required = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide.data(),
-                                              static_cast<int>(wide.size()), nullptr, 0, nullptr,
-                                              nullptr);
+    const auto required =
+        WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide.data(),
+                            static_cast<int>(wide.size()), nullptr, 0, nullptr, nullptr);
     if (required <= 0) {
         return base::Result<std::string>::failure(
             {base::ErrorCode::kInvalidArgument, "command line is not valid UTF-16"});
     }
     std::string utf8(static_cast<std::size_t>(required), '\0');
-    const auto written = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide.data(),
-                                             static_cast<int>(wide.size()), utf8.data(), required,
-                                             nullptr, nullptr);
+    const auto written =
+        WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide.data(),
+                            static_cast<int>(wide.size()), utf8.data(), required, nullptr, nullptr);
     if (written != required) {
         return base::Result<std::string>::failure(
             {base::ErrorCode::kInvalidArgument, "command line is not valid UTF-16"});
@@ -49,6 +49,18 @@ namespace {
     if (parsed.ec != std::errc{} || parsed.ptr != end || value == 0) {
         return base::Result<std::uint32_t>::failure(
             usage_error("timeout must be a positive integer"));
+    }
+    return base::Result<std::uint32_t>::success(value);
+}
+
+[[nodiscard]] base::Result<std::uint32_t> parse_disk_number(const std::string_view text) {
+    std::uint32_t value = 0;
+    const auto* begin = text.data();
+    const auto* end = begin + text.size();
+    const auto parsed = std::from_chars(begin, end, value);
+    if (parsed.ec != std::errc{} || parsed.ptr != end) {
+        return base::Result<std::uint32_t>::failure(
+            usage_error("--source-disk-number must be a non-negative integer"));
     }
     return base::Result<std::uint32_t>::success(value);
 }
@@ -103,8 +115,7 @@ take_option_value(std::vector<std::string>& args, const std::string_view name) {
         usage_error("--scope must be active, terminal, or all"));
 }
 
-[[nodiscard]] base::Result<contracts::JobOperation>
-parse_operation(const std::string_view text) {
+[[nodiscard]] base::Result<contracts::JobOperation> parse_operation(const std::string_view text) {
     if (text == "backup") {
         return base::Result<contracts::JobOperation>::success(contracts::JobOperation::kBackup);
     }
@@ -148,6 +159,8 @@ parse_operation(const std::string_view text) {
                                                     std::vector<std::string>& args) {
     options.json = consume_flag(args, "--json");
     options.wait = consume_flag(args, "--wait");
+    options.preserve_disk_signature = !consume_flag(args, "--regenerate-disk-signature");
+    options.auto_expand_last_partition = !consume_flag(args, "--no-auto-expand");
     const auto enabled = consume_flag(args, "--enabled");
     const auto disabled = consume_flag(args, "--disabled");
     if (enabled && disabled) {
@@ -207,6 +220,37 @@ parse_operation(const std::string_view text) {
         return base::Result<void>::failure(connection.error());
     }
     options.connection_id = std::move(connection.value());
+    auto recovery_point = take_option_value(args, "--recovery-point");
+    if (!recovery_point) {
+        return base::Result<void>::failure(recovery_point.error());
+    }
+    options.recovery_point_id = std::move(recovery_point.value());
+    auto target = take_option_value(args, "--target");
+    if (!target) {
+        return base::Result<void>::failure(target.error());
+    }
+    options.target_source_id = std::move(target.value());
+    auto confirmed_target = take_option_value(args, "--confirm-target");
+    if (!confirmed_target) {
+        return base::Result<void>::failure(confirmed_target.error());
+    }
+    options.confirmed_target_source_id = std::move(confirmed_target.value());
+    auto source_disk = take_option_value(args, "--source-disk-number");
+    if (!source_disk) {
+        return base::Result<void>::failure(source_disk.error());
+    }
+    if (source_disk.value()) {
+        auto parsed = parse_disk_number(*source_disk.value());
+        if (!parsed) {
+            return base::Result<void>::failure(parsed.error());
+        }
+        options.source_disk_number = parsed.value();
+    }
+    auto drive_letter = take_option_value(args, "--drive-letter");
+    if (!drive_letter) {
+        return base::Result<void>::failure(drive_letter.error());
+    }
+    options.preferred_drive_letter = std::move(drive_letter.value());
     return base::Result<void>::success();
 }
 
@@ -234,8 +278,21 @@ parse_operation(const std::string_view text) {
     if (verb == "wait") {
         return base::Result<Command>::success(Command::kJobWait);
     }
+    return base::Result<Command>::failure(usage_error("job verb must be list, cancel, or wait"));
+}
+
+[[nodiscard]] base::Result<Command> parse_mount_verb(const std::string_view verb) {
+    if (verb == "list") {
+        return base::Result<Command>::success(Command::kMountList);
+    }
+    if (verb == "start") {
+        return base::Result<Command>::success(Command::kMountStart);
+    }
+    if (verb == "unmount") {
+        return base::Result<Command>::success(Command::kMountUnmount);
+    }
     return base::Result<Command>::failure(
-        usage_error("job verb must be list, cancel, or wait"));
+        usage_error("mount verb must be list, start, or unmount"));
 }
 
 [[nodiscard]] base::Result<Command> parse_noun_verb(const std::vector<std::string>& args) {
@@ -268,14 +325,17 @@ parse_operation(const std::string_view text) {
                    : base::Result<Command>::failure(usage_error("event verb must be list"));
     }
     if (noun == "mount") {
-        return args.size() <= 1 || args[1] == "list"
-                   ? base::Result<Command>::success(Command::kMountList)
-                   : base::Result<Command>::failure(usage_error("mount verb must be list"));
+        return parse_mount_verb(args.size() <= 1 ? "list" : std::string_view(args[1]));
     }
     if (noun == "settings") {
         return args.size() <= 1 || args[1] == "get"
                    ? base::Result<Command>::success(Command::kSettingsGet)
                    : base::Result<Command>::failure(usage_error("settings verb must be get"));
+    }
+    if (noun == "restore") {
+        return args.size() >= 2 && args[1] == "run"
+                   ? base::Result<Command>::success(Command::kRestoreRun)
+                   : base::Result<Command>::failure(usage_error("restore verb must be run"));
     }
     if (args.size() < 2) {
         return base::Result<Command>::failure(usage_error("missing command verb"));
@@ -291,7 +351,8 @@ parse_operation(const std::string_view text) {
 
 [[nodiscard]] bool command_takes_positional_id(const Command command) noexcept {
     return command == Command::kScheduleRun || command == Command::kScheduleDelete ||
-           command == Command::kJobCancel || command == Command::kJobWait;
+           command == Command::kJobCancel || command == Command::kJobWait ||
+           command == Command::kMountUnmount;
 }
 
 } // namespace
@@ -316,15 +377,23 @@ void print_help() {
     write_line("  job list [--scope active|terminal|all] [--operation backup|restore|verify]");
     write_line("  job cancel --id <job-id>");
     write_line("  job wait --id <job-id>");
+    write_line("  restore run --connection <connection-id> --recovery-point <id>");
+    write_line("              --target <disk.N> --source-disk-number <n>");
+    write_line("              --confirm-target <disk.N> [--regenerate-disk-signature]");
+    write_line("              [--no-auto-expand] [--wait]");
     write_line("  repository list");
     write_line("  recovery-point list [--connection <connection-id>]");
     write_line("  inventory list");
     write_line("  event list");
     write_line("  mount list");
+    write_line("  mount start --connection <connection-id> --recovery-point <id>");
+    write_line("              --source-disk-number <n> [--drive-letter <D-Z>]");
+    write_line("  mount unmount --id <session-id>");
     write_line("  settings get");
     write_line("");
     write_line("Talks to the running Aegra Service over \\\\.\\pipe\\aegra-service-control.");
-    write_line("The CLI does not execute backup or restore data-plane work.");
+    write_line(
+        "Restore requests are preflighted by Service and require an exact target confirmation.");
 }
 
 base::Result<Options> parse_args(const int argc, wchar_t** argv) {

@@ -1,7 +1,7 @@
 # 文件集备份与恢复分阶段开发计划
 
 > 本计划是 agent 执行依据。ADR-0016 接受前只允许完成 F0 文档决策；接受后按工作包前置关系实施。
-> 仓库遵循 ADR-0015：禁止增加测试源码、fixture、测试脚本、测试 Target 或 CTest 注册。验证使用生产 Target
+> 仓库遵循 ADR-0031：禁止增加测试源码、fixture、测试 Target 或 CTest 注册；允许 `tools/` 独立验证脚本。验证使用生产 Target
 > 构建、静态/架构检查和隔离数据上的人工运行/UI 验证。
 
 ## 1. Agent 使用规则
@@ -336,7 +336,7 @@ cmd.exe /d /c scripts\build.cmd Release
 
 **静态门禁：**
 
-- 运行仓库已有 architecture/static/format/secret 检查；缺少的门禁只记录，不新增测试脚本；
+- 运行仓库已有 architecture/static/format/secret 检查；独立验证脚本按 ADR-0031 管理；
 - `git diff --check`；
 - 检查函数、lambda、class、`.h/.cpp` 行数和 dependency direction；
 - 搜索 Desktop 的 `QDir/QFileInfo/std::filesystem` 数据访问和 core 的 Win32/Qt/JSON 泄漏；

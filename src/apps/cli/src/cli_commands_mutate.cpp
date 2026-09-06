@@ -5,6 +5,7 @@
 #include "cli_format.h"
 #include "cli_io.h"
 
+#include <cctype>
 #include <chrono>
 #include <optional>
 #include <thread>
@@ -25,8 +26,8 @@ namespace {
     return state == contracts::ServiceJobState::kSucceeded ? kExitOk : kExitJob;
 }
 
-[[nodiscard]] std::optional<contracts::JobSummary>
-find_job(const contracts::JobPage& page, const std::string& job_id) {
+[[nodiscard]] std::optional<contracts::JobSummary> find_job(const contracts::JobPage& page,
+                                                            const std::string& job_id) {
     for (const auto& item : page.items) {
         if (item.job_id == job_id) {
             return item;
@@ -36,8 +37,7 @@ find_job(const contracts::JobPage& page, const std::string& job_id) {
 }
 
 [[nodiscard]] base::Result<std::optional<contracts::JobSummary>>
-query_job(ServiceSession& session, const std::string& job_id,
-          const contracts::JobListScope scope) {
+query_job(ServiceSession& session, const std::string& job_id, const contracts::JobListScope scope) {
     contracts::JobListRequest request;
     request.page.maximum_results = kCliPageSize;
     request.scope = scope;
@@ -45,8 +45,7 @@ query_job(ServiceSession& session, const std::string& job_id,
     std::size_t collected = 0;
     do {
         request.page.continuation_token = token;
-        auto response =
-            session.transact(contracts::ServiceRequestKind::kListJobs, request, false);
+        auto response = session.transact(contracts::ServiceRequestKind::kListJobs, request, false);
         if (!response) {
             return base::Result<std::optional<contracts::JobSummary>>::failure(response.error());
         }
@@ -61,8 +60,7 @@ query_job(ServiceSession& session, const std::string& job_id,
                 {base::ErrorCode::kCorruptData, "job list payload is missing"});
         }
         if (auto matched = find_job(*page, job_id); matched) {
-            return base::Result<std::optional<contracts::JobSummary>>::success(
-                std::move(matched));
+            return base::Result<std::optional<contracts::JobSummary>>::success(std::move(matched));
         }
         collected += page->items.size();
         auto next = advance_continuation(token, page->continuation_token, collected);
@@ -76,8 +74,8 @@ query_job(ServiceSession& session, const std::string& job_id,
 
 [[nodiscard]] int wait_for_job(ServiceSession& session, const Options& options,
                                const std::string& job_id) {
-    const auto deadline = std::chrono::steady_clock::now() +
-                          std::chrono::milliseconds(options.wait_timeout_ms);
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(options.wait_timeout_ms);
     while (std::chrono::steady_clock::now() < deadline) {
         auto active = query_job(session, job_id, contracts::JobListScope::kActive);
         if (!active) {
@@ -193,6 +191,104 @@ int run_job_wait(ServiceSession& session, const Options& options) {
         return fail_missing_id();
     }
     return wait_for_job(session, options, *options.id);
+}
+
+int run_mount_start(ServiceSession& session, const Options& options) {
+    if (!options.connection_id || !options.recovery_point_id || !options.source_disk_number) {
+        write_error("mount start requires --connection, --recovery-point, and "
+                    "--source-disk-number");
+        return kExitUsage;
+    }
+    auto drive_letter = options.preferred_drive_letter;
+    if (drive_letter) {
+        if (drive_letter->size() != 1) {
+            write_error("--drive-letter must be one letter from D through Z");
+            return kExitUsage;
+        }
+        (*drive_letter)[0] =
+            static_cast<char>(std::toupper(static_cast<unsigned char>((*drive_letter)[0])));
+        if ((*drive_letter)[0] < 'D' || (*drive_letter)[0] > 'Z') {
+            write_error("--drive-letter must be one letter from D through Z");
+            return kExitUsage;
+        }
+    }
+    contracts::MountRecoveryPointCommand command;
+    command.repository_connection_id = *options.connection_id;
+    command.recovery_point_id = *options.recovery_point_id;
+    command.source_disk_number = *options.source_disk_number;
+    command.preferred_drive_letter = std::move(drive_letter);
+    auto response = session.transact(contracts::ServiceRequestKind::kMountRecoveryPoint,
+                                     std::move(command), true);
+    if (!response) {
+        return fail_request(response.error());
+    }
+    return emit_command(session, options, response.value());
+}
+
+int run_mount_unmount(ServiceSession& session, const Options& options) {
+    if (!options.id) {
+        return fail_missing_id();
+    }
+    auto response = session.transact(contracts::ServiceRequestKind::kUnmountSession,
+                                     contracts::ResourceRef{*options.id}, true);
+    if (!response) {
+        return fail_request(response.error());
+    }
+    return emit_command(session, options, response.value());
+}
+
+int run_restore_run(ServiceSession& session, const Options& options) {
+    if (!options.connection_id || !options.recovery_point_id || !options.target_source_id ||
+        !options.source_disk_number || !options.confirmed_target_source_id) {
+        write_error("restore run requires --connection, --recovery-point, --target, "
+                    "--source-disk-number, and --confirm-target");
+        return kExitUsage;
+    }
+    if (!options.target_source_id->starts_with("disk.") ||
+        *options.confirmed_target_source_id != *options.target_source_id) {
+        write_error("--confirm-target must exactly match the disk.N value passed to --target");
+        return kExitUsage;
+    }
+    contracts::RestorePreflightRequest preflight_request;
+    preflight_request.repository_connection_id = *options.connection_id;
+    preflight_request.recovery_point_id = *options.recovery_point_id;
+    preflight_request.target_source_id = *options.target_source_id;
+    preflight_request.source_disk_number = *options.source_disk_number;
+    auto prepared = session.transact(contracts::ServiceRequestKind::kPrepareRestore,
+                                     std::move(preflight_request), false);
+    if (!prepared) {
+        return fail_request(prepared.error());
+    }
+    if (prepared.value().kind == contracts::ServiceResponseKind::kRequestFailed) {
+        return emit_command(session, options, prepared.value());
+    }
+    const auto* preflight = std::get_if<contracts::RestorePreflight>(&prepared.value().payload);
+    if (preflight == nullptr || !preflight->restore_eligible ||
+        preflight->feasibility != contracts::RestoreFeasibility::kEligible) {
+        write_error("restore preflight did not return an eligible target");
+        return kExitRequest;
+    }
+    contracts::StartRestoreCommand command;
+    command.preflight_token = preflight->preflight_token;
+    command.confirmed = true;
+    command.preserve_disk_signature = options.preserve_disk_signature;
+    command.auto_expand_last_partition = options.auto_expand_last_partition;
+    auto started =
+        session.transact(contracts::ServiceRequestKind::kStartRestore, std::move(command), true);
+    if (!started) {
+        return fail_request(started.error());
+    }
+    const auto accepted = emit_command(session, options, started.value());
+    if (accepted != kExitOk || !options.wait) {
+        return accepted;
+    }
+    const auto* acknowledgement =
+        std::get_if<contracts::CommandAcknowledgement>(&started.value().payload);
+    if (acknowledgement == nullptr || !acknowledgement->resource_id) {
+        write_error("start restore did not return a job id");
+        return kExitRequest;
+    }
+    return wait_for_job(session, options, *acknowledgement->resource_id);
 }
 
 } // namespace aegra::apps::cli

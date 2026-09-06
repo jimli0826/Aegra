@@ -1,7 +1,7 @@
 # Desktop 迁移与个人版 Service 完成计划
 
-> 2026-08-04 验证策略更新：根据 [ADR-0015](../adr/0015-no-project-test-suite.md)，本文所有要求新增、维护或
-> 运行测试源码、测试 Target、CTest、E2E 脚本或测试证据的条目均已废止，不再构成工作包门禁。后续工作以
+> 验证策略更新：根据 [ADR-0031](../adr/0031-standalone-validation-scripts.md)，本文所有要求新增、维护或
+> 运行测试源码、测试 Target 或 CTest 的条目均已废止，不再构成工作包门禁；独立验证脚本允许放在 `tools/`。后续工作以
 > 生产 Target 构建、静态/架构检查和必要的人工运行或 UI 验证为准。Repository connection 的 `Test` 命令是
 > 产品业务能力，不属于测试用例。
 
@@ -572,7 +572,7 @@ Desktop → Service Host → `WorkerJobService` → `WorkerSupervisor` → `aegr
 - 人工覆盖首写前取消、首写后取消、I/O 失败、Worker crash、Service restart 和重复 Start；确认 destructive failure
   返回 `restore.target_may_be_partial`，且不会自动重试或把目标重新标为安全。
 - 使用 VS 2026 Insiders 完成 Debug 与 Release 生产构建，运行源码规模、格式、架构边界、秘密扫描和
-  `git diff --check`。遵循项目测试策略，不新增或运行项目测试用例、CTest、测试脚本或测试 executable。
+  `git diff --check`。遵循项目测试策略，不新增 CTest 或测试 executable；独立验证脚本按 ADR-0031 管理。
 
 **文件所有权：** S6 agent 独占新增 Restore Application use case、preflight port/store、专属 SQLite 文件和
 Restore Service handler。公共 Contracts/codec、`service_main.cpp`、Service/Worker 顶层 CMake 和 SQLite schema

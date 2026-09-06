@@ -3,7 +3,7 @@
 > 本计划的 FI0-FI10 部分记录历史 USN 实施。现行实施依据是
 > [ADR-0020](../adr/0020-file-set-metadata-signature-incremental.md) 和
 > [增量架构设计](../architecture/FILE_SET_INCREMENTAL_BACKUP_RESTORE.md)。
-> 仓库禁止新增任何测试源码、fixture、测试脚本、测试 executable、CTest 或其它项目测试资产。
+> 仓库禁止新增测试源码、fixture、测试 executable 或 CTest；独立验证脚本按 ADR-0031 管理。
 >
 > **设计变更 2026-08-09**：file_set Incremental 改为同路径普通文件 `write_time + logical_size`
 > metadata signature 判断变化；USN baseline、journal checkpoints 和 journal continuity 不再是 current design。

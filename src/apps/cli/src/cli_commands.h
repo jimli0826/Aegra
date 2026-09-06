@@ -15,9 +15,12 @@ namespace aegra::apps::cli {
 [[nodiscard]] int run_job_list(ServiceSession& session, const Options& options);
 [[nodiscard]] int run_event_list(ServiceSession& session, const Options& options);
 [[nodiscard]] int run_mount_list(ServiceSession& session, const Options& options);
+[[nodiscard]] int run_mount_start(ServiceSession& session, const Options& options);
+[[nodiscard]] int run_mount_unmount(ServiceSession& session, const Options& options);
 [[nodiscard]] int run_schedule_run(ServiceSession& session, const Options& options);
 [[nodiscard]] int run_schedule_delete(ServiceSession& session, const Options& options);
 [[nodiscard]] int run_job_cancel(ServiceSession& session, const Options& options);
 [[nodiscard]] int run_job_wait(ServiceSession& session, const Options& options);
+[[nodiscard]] int run_restore_run(ServiceSession& session, const Options& options);
 
 } // namespace aegra::apps::cli

@@ -26,6 +26,9 @@ enum class Command : std::uint8_t {
     kEventList = 11,
     kMountList = 12,
     kSettingsGet = 13,
+    kRestoreRun = 14,
+    kMountStart = 15,
+    kMountUnmount = 16,
 };
 
 struct Options final {
@@ -39,6 +42,13 @@ struct Options final {
     contracts::JobListScope job_scope{contracts::JobListScope::kActive};
     std::optional<contracts::JobOperation> job_operation;
     std::optional<std::string> connection_id;
+    std::optional<std::string> recovery_point_id;
+    std::optional<std::string> target_source_id;
+    std::optional<std::string> confirmed_target_source_id;
+    std::optional<std::uint32_t> source_disk_number;
+    std::optional<std::string> preferred_drive_letter;
+    bool preserve_disk_signature{true};
+    bool auto_expand_last_partition{true};
     bool wait{false};
 };
 

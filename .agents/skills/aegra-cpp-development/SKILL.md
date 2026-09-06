@@ -21,7 +21,8 @@ Before changing production code:
 
 1. Inspect the affected targets, direct dependencies, validation paths, and working-tree changes.
 2. Define the smallest coherent change and its allowed dependency direction.
-3. Do not add test cases, test fixtures, test-only scripts, test executables, or CTest registrations.
+3. Do not add test source files, fixtures, golden data, test executables, CTest cases, or CMake test
+   registrations. Standalone test and validation scripts may live under `tools/` per ADR-0031.
 4. Implement in C++20. Keep ownership explicit, use RAII, and depend on ports rather than concrete adapters.
 5. Keep functions at most 80 logical lines, nesting at most four levels, `.h/.hpp` files at most 1000 physical lines, and `.cpp` source files at most 1500 physical lines. Split responsibilities before exceeding a limit.
 6. Do not introduce compatibility code for unreleased legacy formats. Record format or architecture decisions in an ADR when they affect durable contracts.

@@ -17,8 +17,9 @@ ADR 用于记录会长期约束多个模块、持久化格式、外部协议或�
 Windows Service SCM 边界、显式 Named Pipe ACL 与无调用方认证决策见
 [ADR-0014](0014-windows-service-ipc-security.md)。
 
-项目不维护自动化测试用例的仓库级决策见
-[ADR-0015](0015-no-project-test-suite.md)。该决策取代早期 ADR 中的自动化测试要求。
+项目不维护测试源码、测试可执行 Target 或 CTest，但允许 `tools/` 独立测试与验证脚本的现行决策见
+[ADR-0031](0031-standalone-validation-scripts.md)。历史禁用全部测试资产的
+[ADR-0015](0015-no-project-test-suite.md) 已被取代。
 
 文件集备份、恢复、个人 Archive V7 与控制协议升级边界见
 [ADR-0016](0016-file-set-backup-and-restore-boundary.md)。
@@ -61,6 +62,12 @@ BootCheck 经 COM1 发送固定 READY 标识的单向 Guest Probe Protocol V1 �
 
 BootCheck 的用户选择、安装状态 capability、durable plan 快照及禁止 provider 自动回退见
 [ADR-0029](0029-user-selected-boot-check-hypervisor.md)。
+
+隔离测试盘 Backup→Restore→SHA-256 工具的历史专用决策见
+[ADR-0030](0030-isolated-disk-validation-utility.md)，其安全约束已并入 ADR-0031。
+
+独立测试/验证脚本的仓库政策及破坏性脚本安全门禁见
+[ADR-0031](0031-standalone-validation-scripts.md)。
 
 ## 状态
 

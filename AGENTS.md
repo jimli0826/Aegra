@@ -18,4 +18,8 @@ Use QT 6.8.3 from C:\Qt6\6.8.3\msvc2022_64 for UI build.
 
 ## Testing policy
 
-Do not add unit, integration, regression, smoke, end-to-end, or CTest test cases to this repository. Do not add test fixtures, test-only scripts, test executables, or CMake test registrations. Validate changes by building the affected production targets, running the repository's static and architecture checks, and performing focused manual runtime or UI verification when needed.
+Do not add test source files, fixtures, golden data, test executables, CTest cases, or CMake test
+registrations. Standalone test and validation scripts are permitted under `tools/`; keep them out
+of CMake and CTest unless a later approved ADR changes that boundary. Validate production changes
+by building affected production targets, running static and architecture checks, and performing
+focused runtime or UI verification when needed. See ADR-0031.

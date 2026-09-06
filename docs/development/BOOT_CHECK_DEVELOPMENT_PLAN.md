@@ -515,7 +515,7 @@ VirtualBox 7.2.14 上多轮运行独立 Host，结论：
 - 增加选项、eligibility reason、Job/Recovery Point 状态和五语言翻译；
 - 在受控 Windows VM 上人工覆盖 Full/Incremental、Verify 失败、VirtualBox 缺失、启动成功、启动超时、
   overlay 满和 Service 重启；
-- 不增加 CTest、测试可执行文件、fixture 或 test-only script；按仓库政策只构建生产 Target、运行静态/
+- 不增加 CTest、测试可执行文件或 fixture；独立验证脚本按 ADR-0031 管理；构建生产 Target、运行静态/
   架构检查并执行聚焦人工验收。
 
 ## Definition of Done

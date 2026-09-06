@@ -141,6 +141,9 @@ Shell Extension 不加载 Dokan/VHDX 实现。
   - COW sidecar：`<session>/diskN.vhdx.overlay(.map)`，**不得**放在 `mnt/` 内，否则 Dokan 报 `DOKAN_MOUNT_POINT_ERROR`。
 - Tear-down：unmount 命令 → 终止 host → join waiter；Service 析构时 `shutdown()` 清理全部会话。
 - MVP：整盘只读、会话不落盘；崩溃后 list 可见 `mount.host_exited` 失败态。
+- 每个已接受的 Mount 请求按 `session_id` 写入
+  `<data_dir>/logs/mount/YYYYMMDD_HHMMSS_<session_id>.log`，记录 Archive 打开、Dokan、VHDX attach、
+  盘符、会话等待和清理阶段；日志不得记录密码，IPC 不暴露底层 Win32 错误文本。
 
 ## 验证
 

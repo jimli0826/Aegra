@@ -28,6 +28,8 @@ struct WorkerSupervisorConfig final {
     std::string worker_executable_path;
     /// Zero means unlimited concurrent Worker processes.
     std::uint32_t max_concurrent_workers{0};
+    /// Optional dynamic per-operation limit. Zero means no operation-specific limit.
+    std::function<std::uint32_t(contracts::JobOperation)> max_concurrent_for_operation;
     std::chrono::seconds default_job_deadline{3600};
     std::chrono::seconds stop_drain_timeout{10};
 };

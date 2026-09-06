@@ -405,6 +405,22 @@ void print_mounts(const std::vector<contracts::MountSessionSummary>& items) {
 
 void print_settings(const contracts::ServiceSettings& settings) {
     write_line("job_retention_months  " + std::to_string(settings.job_retention_months));
+    write_line(std::string("default_hypervisor    ") +
+               (settings.default_boot_check_hypervisor ==
+                        contracts::BootCheckHypervisor::kHyperV
+                    ? "hyper_v"
+                    : "virtual_box"));
+    write_line("boot_check_cpu_count  " + std::to_string(settings.boot_check_cpu_count));
+    write_line("boot_check_memory_mib " + std::to_string(settings.boot_check_memory_mib));
+    write_line("boot_check_concurrency " + std::to_string(settings.boot_check_concurrency));
+    write_line("effective_concurrency " +
+               std::to_string(settings.boot_check_effective_concurrency));
+    write_line(std::string("verify_scope          ") +
+               (settings.verify_scope == contracts::VerifyScope::kFullChain ? "full_chain"
+                                                                             : "single_file"));
+    write_line("verify_concurrency    " + std::to_string(settings.verify_concurrency));
+    write_line("host_logical_cpus     " + std::to_string(settings.host_logical_cpu_count));
+    write_line("host_memory_mib       " + std::to_string(settings.host_physical_memory_mib));
     write_line("updated               " + format_utc_ms(settings.updated_utc_ms));
 }
 

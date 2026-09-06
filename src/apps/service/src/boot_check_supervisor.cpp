@@ -22,6 +22,7 @@
 #include <exception>
 #include <functional>
 #include <mutex>
+#include <unordered_map>
 #include <stop_token>
 #include <string>
 #include <system_error>
@@ -275,6 +276,13 @@ class RunDeadline final {
 } // namespace
 
 struct BootCheckSupervisor::Impl final {
+    struct RunEntry final {
+        std::uint32_t memory_mib{0};
+        std::optional<BootCheckRunResult> result;
+        std::jthread runner;
+        RunDeadline* deadline{nullptr};
+    };
+
     Impl(Options run_options, ports::IProcessLauncher& process_launcher,
          ports::IControlPlaneDatabase& database, ports::IRepositoryStorageFactory& storage,
          ports::IClock& clock_source, IServiceLog* const service_logger)
@@ -299,13 +307,10 @@ struct BootCheckSupervisor::Impl final {
     bool probing{false};
     contracts::BootCheckHypervisorStatus virtualbox_status;
     contracts::BootCheckHypervisorStatus hyperv_status;
-    std::string active_job_id;
-    std::optional<std::pair<std::string, BootCheckRunResult>> finished;
+    std::unordered_map<std::string, std::unique_ptr<RunEntry>> runs;
     std::function<void()> completion_observer;
-    std::jthread runner;
     std::jthread scavenger;
     std::jthread prober;
-    RunDeadline* active_deadline{nullptr};
 
     /// Runs one `--inspect` probe and publishes the outcome into `status`.
     void probe_one(const char* const hypervisor_name,
@@ -383,6 +388,8 @@ struct BootCheckSupervisor::Impl final {
                   {"job_id", dispatch.boot_check_job_id},
                   {"trace_id", "trace-" + dispatch.boot_check_job_id},
                   {"hypervisor", static_cast<std::uint8_t>(dispatch.hypervisor)},
+                  {"cpu_count", dispatch.cpu_count},
+                  {"memory_mib", dispatch.memory_mib},
                   {"source_refs", std::move(source_refs)},
                   {"credential_refs", std::move(credential_refs)},
                   {"job_directory", path_to_utf8(job_directory)},
@@ -390,7 +397,7 @@ struct BootCheckSupervisor::Impl final {
         return base::Result<std::string>::success(root.dump());
     }
 
-    [[nodiscard]] BootCheckRunResult execute(const BootCheckDispatch& dispatch,
+    [[nodiscard]] BootCheckRunResult execute(const BootCheckDispatch& dispatch, RunEntry& entry,
                                              const std::stop_token stopped) {
         auto request_json = build_request_json(dispatch);
         for (unsigned attempt = 1;
@@ -445,13 +452,13 @@ struct BootCheckSupervisor::Impl final {
         RunDeadline deadline;
         {
             std::lock_guard lock(mutex);
-            active_deadline = &deadline;
+            entry.deadline = &deadline;
         }
         std::stop_callback stop_forward(stopped, [&deadline] { deadline.cancel(); });
         auto exited = launcher.wait(launched.value().pid, deadline.token());
         {
             std::lock_guard lock(mutex);
-            active_deadline = nullptr;
+            entry.deadline = nullptr;
         }
         std::filesystem::remove(request_path, ec);
         if (!exited) {
@@ -463,8 +470,8 @@ struct BootCheckSupervisor::Impl final {
         return parse_host_response(exited.value().output);
     }
 
-    void run(const BootCheckDispatch dispatch, const std::stop_token stopped) {
-        auto result = execute(dispatch, stopped);
+    void run(const BootCheckDispatch dispatch, RunEntry& entry, const std::stop_token stopped) {
+        auto result = execute(dispatch, entry, stopped);
         write_log(logger, result.succeeded ? ServiceLogLevel::kInfo : ServiceLogLevel::kWarning,
                   "post_backup.boot_check_finished",
                   "BootCheck " + dispatch.boot_check_job_id +
@@ -472,8 +479,7 @@ struct BootCheckSupervisor::Impl final {
         std::function<void()> observer;
         {
             std::lock_guard lock(mutex);
-            finished.emplace(dispatch.boot_check_job_id, std::move(result));
-            active_job_id.clear();
+            entry.result.emplace(std::move(result));
             observer = completion_observer;
         }
         if (observer) {
@@ -586,54 +592,101 @@ bool BootCheckSupervisor::try_start(const BootCheckDispatch& dispatch) {
     if (!available() || dispatch.boot_check_job_id.empty()) {
         return false;
     }
-    std::lock_guard lock(impl_->mutex);
-    if (impl_->stopping || impl_->scavenging || !impl_->active_job_id.empty() ||
-        impl_->finished.has_value()) {
+    auto settings = impl_->control_plane.get_service_settings({});
+    if (!settings) {
         return false;
     }
-    // The finished previous thread is joined here (active_job_id empty implies
-    // the runner body completed or never started).
-    impl_->runner = std::jthread([state = impl_.get(), dispatch](const std::stop_token stopped) {
-        state->run(dispatch, stopped);
+    MEMORYSTATUSEX memory{};
+    memory.dwLength = sizeof(memory);
+    if (GlobalMemoryStatusEx(&memory) == FALSE) {
+        return false;
+    }
+    const auto total_mib = memory.ullTotalPhys / (1024ULL * 1024ULL);
+    const auto available_mib = memory.ullAvailPhys / (1024ULL * 1024ULL);
+    const auto reserve_mib = (std::max)(2ULL * 1024ULL, total_mib / 4ULL);
+    const auto budget_mib = total_mib > reserve_mib ? total_mib - reserve_mib : 0;
+    const auto memory_mib = settings.value().boot_check_memory_mib;
+    const auto effective_concurrency = static_cast<std::uint32_t>((std::min)(
+        static_cast<std::uint64_t>(settings.value().boot_check_concurrency),
+        memory_mib == 0 ? 0ULL : budget_mib / memory_mib));
+    if (effective_concurrency == 0 || available_mib < reserve_mib + memory_mib) {
+        return false;
+    }
+    BootCheckDispatch configured = dispatch;
+    configured.cpu_count = (std::min)(
+        settings.value().boot_check_cpu_count,
+        static_cast<std::uint32_t>((std::min)(
+            static_cast<DWORD>(contracts::kMaximumBootCheckCpuCount),
+            (std::max)(1UL, GetActiveProcessorCount(ALL_PROCESSOR_GROUPS)))));
+    configured.memory_mib = memory_mib;
+    std::lock_guard lock(impl_->mutex);
+    const auto active = std::ranges::count_if(impl_->runs, [](const auto& item) {
+        return !item.second->result.has_value();
     });
-    impl_->active_job_id = dispatch.boot_check_job_id;
+    std::uint64_t active_memory_mib = 0;
+    for (const auto& [job_id, run] : impl_->runs) {
+        (void)job_id;
+        if (!run->result) {
+            active_memory_mib += run->memory_mib;
+        }
+    }
+    if (impl_->stopping || impl_->scavenging ||
+        active >= static_cast<std::ptrdiff_t>(effective_concurrency) ||
+        active_memory_mib + configured.memory_mib > budget_mib ||
+        impl_->runs.contains(configured.boot_check_job_id)) {
+        return false;
+    }
+    auto entry = std::make_unique<Impl::RunEntry>();
+    entry->memory_mib = configured.memory_mib;
+    auto* const entry_ptr = entry.get();
+    impl_->runs.emplace(configured.boot_check_job_id, std::move(entry));
+    entry_ptr->runner = std::jthread([state = impl_.get(), configured,
+                                      entry_ptr](const std::stop_token stopped) {
+        state->run(configured, *entry_ptr, stopped);
+    });
     return true;
 }
 
 std::optional<BootCheckRunResult>
 BootCheckSupervisor::take_result(const std::string_view boot_check_job_id) {
-    std::lock_guard lock(impl_->mutex);
-    if (!impl_->finished || impl_->finished->first != boot_check_job_id) {
+    std::unique_ptr<Impl::RunEntry> completed;
+    std::unique_lock lock(impl_->mutex);
+    const auto found = impl_->runs.find(std::string(boot_check_job_id));
+    if (found == impl_->runs.end() || !found->second->result) {
         return std::nullopt;
     }
-    auto result = std::move(impl_->finished->second);
-    impl_->finished.reset();
+    auto result = std::move(*found->second->result);
+    completed = std::move(found->second);
+    impl_->runs.erase(found);
+    lock.unlock();
     return result;
 }
 
 bool BootCheckSupervisor::is_tracking(const std::string_view boot_check_job_id) const {
     std::lock_guard lock(impl_->mutex);
-    return impl_->active_job_id == boot_check_job_id ||
-           (impl_->finished && impl_->finished->first == boot_check_job_id);
+    return impl_->runs.contains(std::string(boot_check_job_id));
 }
 
 void BootCheckSupervisor::shutdown() noexcept {
+    std::unordered_map<std::string, std::unique_ptr<Impl::RunEntry>> runs;
     {
         std::lock_guard lock(impl_->mutex);
         if (impl_->stopping) {
             return;
         }
         impl_->stopping = true;
-        if (impl_->active_deadline != nullptr) {
-            impl_->active_deadline->cancel();
+        for (auto& [job_id, run] : impl_->runs) {
+            (void)job_id;
+            if (run->deadline != nullptr) {
+                run->deadline->cancel();
+            }
+            run->runner.request_stop();
         }
+        runs.swap(impl_->runs);
     }
-    impl_->runner.request_stop();
     impl_->scavenger.request_stop();
     impl_->prober.request_stop();
-    if (impl_->runner.joinable()) {
-        impl_->runner.join();
-    }
+    runs.clear();
     if (impl_->scavenger.joinable()) {
         impl_->scavenger.join();
     }

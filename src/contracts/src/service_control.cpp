@@ -1134,6 +1134,23 @@ base::Result<void> validate_service_settings_query(const ServiceSettingsQuery&) 
 
 base::Result<void> validate_service_settings(const ServiceSettings& settings) {
     if (!is_valid_job_retention_months(settings.job_retention_months) ||
+        !is_known_boot_check_hypervisor(settings.default_boot_check_hypervisor) ||
+        settings.boot_check_cpu_count < kMinimumBootCheckCpuCount ||
+        settings.boot_check_cpu_count > kMaximumBootCheckCpuCount ||
+        settings.boot_check_memory_mib < kMinimumBootCheckMemoryMib ||
+        settings.boot_check_memory_mib > kMaximumBootCheckMemoryMib ||
+        settings.boot_check_concurrency < kMinimumBootCheckConcurrency ||
+        settings.boot_check_concurrency > kMaximumBootCheckConcurrency ||
+        settings.boot_check_effective_concurrency > settings.boot_check_concurrency ||
+        !is_known_verify_scope(settings.verify_scope) ||
+        settings.verify_concurrency < kMinimumVerifyConcurrency ||
+        settings.verify_concurrency > kMaximumVerifyConcurrency ||
+        settings.host_logical_cpu_count < kMinimumBootCheckCpuCount ||
+        settings.host_logical_cpu_count > kMaximumBootCheckCpuCount ||
+        settings.boot_check_cpu_count > settings.host_logical_cpu_count ||
+        settings.host_physical_memory_mib < kMinimumBootCheckMemoryMib ||
+        settings.boot_check_memory_mib > settings.host_physical_memory_mib ||
+        settings.boot_check_memory_budget_mib > settings.host_physical_memory_mib ||
         !valid_wire_integer(settings.updated_utc_ms)) {
         return invalid("service settings are invalid");
     }
@@ -1142,7 +1159,19 @@ base::Result<void> validate_service_settings(const ServiceSettings& settings) {
 
 base::Result<void>
 validate_update_service_settings_command(const UpdateServiceSettingsCommand& command) {
-    if (!is_valid_job_retention_months(command.job_retention_months)) {
+    if (!is_valid_job_retention_months(command.job_retention_months) ||
+        !is_known_boot_check_hypervisor(command.default_boot_check_hypervisor)) {
+        return invalid("update service settings command is invalid");
+    }
+    if (command.boot_check_cpu_count < kMinimumBootCheckCpuCount ||
+        command.boot_check_cpu_count > kMaximumBootCheckCpuCount ||
+        command.boot_check_memory_mib < kMinimumBootCheckMemoryMib ||
+        command.boot_check_memory_mib > kMaximumBootCheckMemoryMib ||
+        command.boot_check_concurrency < kMinimumBootCheckConcurrency ||
+        command.boot_check_concurrency > kMaximumBootCheckConcurrency ||
+        !is_known_verify_scope(command.verify_scope) ||
+        command.verify_concurrency < kMinimumVerifyConcurrency ||
+        command.verify_concurrency > kMaximumVerifyConcurrency) {
         return invalid("update service settings command is invalid");
     }
     return base::Result<void>::success();

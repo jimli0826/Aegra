@@ -38,6 +38,7 @@ Item {
     property string compression: "normal"
     property bool verifyAfterBackup: false
     property bool bootCheckAfterBackup: false
+    property bool bootCheckEnablePending: false
     /// Service wire enum: 0=none, 1=VirtualBox, 2=Hyper-V.
     property int bootCheckHypervisor: 0
     readonly property bool virtualBoxInstalled: typeof serviceClient !== "undefined"
@@ -47,27 +48,9 @@ Item {
                                            && serviceClient
                                            && serviceClient.hyperVInstalled
     readonly property bool anyHypervisorInstalled: virtualBoxInstalled || hyperVInstalled
-    /// Service-side usability probes (AegraBootCheck --inspect, cached by the Service).
-    readonly property bool hypervisorProbing: typeof serviceClient !== "undefined"
-                                              && serviceClient
-                                              && serviceClient.hypervisorProbing
-    readonly property string selectedHypervisorUnavailableText: {
-        if (typeof serviceClient === "undefined" || !serviceClient)
-            return ""
-        if (bootCheckHypervisor === 1)
-            return serviceClient.virtualBoxUnavailableText
-        if (bootCheckHypervisor === 2)
-            return serviceClient.hyperVUnavailableText
-        return ""
-    }
-    /// Blocks Save/Create: boot check is enabled but its hypervisor was probed
-    /// and found unusable, so the scheduled check would fail every run.
-    readonly property bool bootCheckHypervisorUnavailable: bootCheckAfterBackup && !filesMode
-                                                           && bootCheckHypervisor !== 0
-                                                           && selectedHypervisorUnavailableText.length > 0
-
     onFilesModeChanged: {
         if (filesMode) {
+            bootCheckEnablePending = false
             bootCheckAfterBackup = false
             bootCheckHypervisor = 0
         }
@@ -104,29 +87,51 @@ Item {
         return 3
     }
 
-    function defaultBootCheckHypervisor() {
-        if (root.virtualBoxInstalled)
-            return 1
-        if (root.hyperVInstalled)
-            return 2
-        return 0
+    function configuredBootCheckErrorText() {
+        if (typeof serviceClient === "undefined" || !serviceClient)
+            return ""
+        return serviceClient.defaultBootCheckHypervisor === 1
+                ? serviceClient.virtualBoxUnavailableText
+                : serviceClient.hyperVUnavailableText
     }
 
-    function isBootCheckHypervisorInstalled(value) {
-        return value === 1 ? root.virtualBoxInstalled
-                           : (value === 2 ? root.hyperVInstalled : false)
+    function configuredBootCheckAvailable() {
+        if (typeof serviceClient === "undefined" || !serviceClient)
+            return false
+        return serviceClient.defaultBootCheckHypervisor === 1
+                ? serviceClient.virtualBoxAvailable : serviceClient.hyperVAvailable
     }
 
-    /// Product icon shown before a hypervisor name (1 = VirtualBox, 2 = Hyper-V).
-    component HypervisorIcon: Image {
-        property int hv: 0
-        width: 18
-        height: 18
-        source: hv === 1 ? "qrc:/Aegra/icons/virtualbox.png"
-                         : hv === 2 ? "qrc:/Aegra/icons/hyperv.png" : ""
-        fillMode: Image.PreserveAspectFit
-        smooth: true
-        mipmap: true
+    function requestBootCheckEnable() {
+        if (typeof serviceClient === "undefined" || !serviceClient)
+            return
+        root.bootCheckEnablePending = true
+        serviceClient.refreshHypervisorStatus()
+    }
+
+    function toggleBootCheck() {
+        if (root.bootCheckEnablePending)
+            return
+        if (!root.bootCheckAfterBackup) {
+            root.requestBootCheckEnable()
+            return
+        }
+        root.bootCheckAfterBackup = false
+        root.bootCheckHypervisor = 0
+    }
+
+    function finishBootCheckEnableCheck() {
+        if (!root.bootCheckEnablePending || serviceClient.hypervisorProbing)
+            return
+        root.bootCheckEnablePending = false
+        if (root.configuredBootCheckAvailable()) {
+            root.bootCheckHypervisor = serviceClient.defaultBootCheckHypervisor
+            root.bootCheckAfterBackup = true
+            return
+        }
+        const detail = root.configuredBootCheckErrorText()
+        serviceClient.showToast(detail.length > 0 ? detail
+            : qsTrId("aegra.backup.post.boot_check_prerequisites_failed"), true)
     }
 
     function normalizeTimeLabel(value) {
@@ -473,6 +478,7 @@ Item {
         passwordConfirm = ""
         compression = "normal"
         verifyAfterBackup = false
+        bootCheckEnablePending = false
         bootCheckAfterBackup = false
         bootCheckHypervisor = 0
         if (hourCombo) {
@@ -1413,24 +1419,50 @@ Item {
                             onToggled: root.verifyAfterBackup = checked
                         }
 
-                        AppCheckBox {
+                        RowLayout {
                             Layout.fillWidth: true
                             visible: !root.filesMode
-                            //% "Enable boot check"
-                            text: qsTrId("aegra.backup.post.boot_check")
-                            checked: root.bootCheckAfterBackup
-                            enabled: root.bootCheckAfterBackup || root.anyHypervisorInstalled
-                            onToggled: {
-                                root.bootCheckAfterBackup = checked
-                                if (checked) {
-                                    if (!root.isBootCheckHypervisorInstalled(
-                                                root.bootCheckHypervisor))
-                                        root.bootCheckHypervisor =
-                                                root.defaultBootCheckHypervisor()
-                                } else {
-                                    root.bootCheckHypervisor = 0
+                            spacing: 6
+
+                            AppCheckBox {
+                                id: bootCheckOption
+                                //% "Enable boot check"
+                                text: qsTrId("aegra.backup.post.boot_check")
+                                enabled: !root.bootCheckEnablePending
+                                         && (root.bootCheckAfterBackup
+                                             || root.anyHypervisorInstalled)
+                                nextCheckState: function() {
+                                    return bootCheckOption.checkState
+                                }
+                                onClicked: root.toggleBootCheck()
+
+                                Binding {
+                                    target: bootCheckOption
+                                    property: "checked"
+                                    value: root.bootCheckAfterBackup
                                 }
                             }
+
+                            MouseArea {
+                                id: bootCheckHelpArea
+                                Layout.preferredWidth: 20
+                                Layout.preferredHeight: 20
+                                hoverEnabled: true
+                                cursorShape: Qt.WhatsThisCursor
+
+                                NavIcon {
+                                    anchors.fill: parent
+                                    name: "help_circle"
+                                    color: bootCheckHelpArea.containsMouse
+                                           ? Theme.colorAccentBlue : Theme.colorTextGrey
+                                }
+
+                                ToolTip.visible: containsMouse
+                                ToolTip.delay: 300
+                                ToolTip.text: qsTrId("aegra.backup.post.boot_check_help")
+                            }
+
+                            Item { Layout.fillWidth: true }
                         }
 
                         Text {
@@ -1444,190 +1476,6 @@ Item {
                             wrapMode: Text.WordWrap
                         }
 
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            visible: !root.filesMode && root.bootCheckAfterBackup
-                            spacing: 8
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 8
-
-                                Text {
-                                    //% "Hypervisor"
-                                    text: qsTrId("aegra.backup.post.hypervisor")
-                                    color: Theme.colorTextGrey
-                                    font.pixelSize: 12
-                                    font.family: Theme.fontFamily
-                                }
-
-                                Item { Layout.fillWidth: true }
-
-                                // Header right: re-run the Service-side usability probe.
-                                MouseArea {
-                                    id: hypervisorRefreshArea
-                                    Layout.preferredWidth: 28
-                                    Layout.preferredHeight: 28
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    enabled: !root.hypervisorProbing
-                                    onClicked: serviceClient.refreshHypervisorStatus()
-
-                                    Rectangle {
-                                        anchors.fill: parent
-                                        radius: 6
-                                        color: hypervisorRefreshArea.pressed
-                                               ? Theme.colorButtonHover
-                                               : (hypervisorRefreshArea.containsMouse
-                                                  ? Theme.colorHover : "transparent")
-                                        border.width: 0
-
-                                        NavIcon {
-                                            id: hypervisorRefreshIcon
-                                            anchors.centerIn: parent
-                                            width: 16
-                                            height: 16
-                                            name: "refresh"
-                                            color: hypervisorRefreshArea.containsMouse
-                                                   ? Theme.colorAccentBlue : Theme.colorTextGrey
-
-                                            RotationAnimation on rotation {
-                                                running: root.hypervisorProbing
-                                                from: 0
-                                                to: 360
-                                                duration: 1000
-                                                loops: Animation.Infinite
-                                                onRunningChanged: {
-                                                    if (!running)
-                                                        hypervisorRefreshIcon.rotation = 0
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    ToolTip.visible: hypervisorRefreshArea.containsMouse
-                                    ToolTip.delay: 400
-                                    //% "Re-check hypervisor availability"
-                                    ToolTip.text: qsTrId("aegra.backup.post.hypervisor_refresh")
-                                }
-                            }
-
-                            ComboBox {
-                                id: hypervisorCombo
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 36
-                                model: [
-                                    { value: 1, label: "VirtualBox",
-                                      installed: root.virtualBoxInstalled },
-                                    { value: 2, label: "Hyper-V",
-                                      installed: root.hyperVInstalled }
-                                ]
-                                currentIndex: root.bootCheckHypervisor === 1 ? 0
-                                              : root.bootCheckHypervisor === 2 ? 1 : -1
-                                onActivated: function(index) {
-                                    root.bootCheckHypervisor = model[index].value
-                                }
-                                background: Rectangle {
-                                    color: Theme.colorInput
-                                    radius: 8
-                                    border.width: 1
-                                    border.color: Theme.colorBorder
-                                }
-                                contentItem: Row {
-                                    leftPadding: 10
-                                    rightPadding: 22
-                                    spacing: 8
-                                    HypervisorIcon {
-                                        hv: root.bootCheckHypervisor
-                                        visible: root.bootCheckHypervisor !== 0
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
-                                    Text {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: root.bootCheckHypervisor === 1 ? "VirtualBox"
-                                              : root.bootCheckHypervisor === 2 ? "Hyper-V" : ""
-                                        color: Theme.colorTextWhite
-                                        font.pixelSize: 13
-                                        font.family: Theme.fontFamily
-                                    }
-                                }
-                                indicator: ComboBoxIndicator { combo: hypervisorCombo }
-                                popup: Popup {
-                                    y: hypervisorCombo.height + 2
-                                    width: hypervisorCombo.width
-                                    padding: 4
-                                    implicitHeight: Math.min(160, contentItem.implicitHeight + 8)
-                                    contentItem: ListView {
-                                        clip: true
-                                        implicitHeight: contentHeight
-                                        model: hypervisorCombo.popup.visible
-                                               ? hypervisorCombo.delegateModel : null
-                                        currentIndex: hypervisorCombo.highlightedIndex
-                                    }
-                                    background: Rectangle {
-                                        color: Theme.colorPopup
-                                        border.color: Theme.colorBorder
-                                        radius: 8
-                                    }
-                                }
-                                delegate: ItemDelegate {
-                                    id: hypervisorItem
-                                    required property var modelData
-                                    required property int index
-                                    width: hypervisorCombo.width
-                                    height: 32
-                                    hoverEnabled: true
-                                    enabled: modelData.installed
-                                    highlighted: hypervisorCombo.highlightedIndex === index
-                                    contentItem: Row {
-                                        leftPadding: 8
-                                        spacing: 8
-                                        HypervisorIcon {
-                                            hv: hypervisorItem.modelData.value
-                                            opacity: hypervisorItem.modelData.installed ? 1.0 : 0.45
-                                            anchors.verticalCenter: parent.verticalCenter
-                                        }
-                                        Text {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: hypervisorItem.modelData.label
-                                            color: hypervisorItem.modelData.installed
-                                                   ? Theme.colorTextWhite
-                                                   : Theme.colorButtonDisabledText
-                                            font.pixelSize: 13
-                                            font.family: Theme.fontFamily
-                                        }
-                                        Text {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            visible: !hypervisorItem.modelData.installed
-                                            text: qsTrId("aegra.backup.post.not_installed")
-                                            color: Theme.colorButtonDisabledText
-                                            font.pixelSize: 11
-                                            font.family: Theme.fontFamily
-                                        }
-                                    }
-                                    background: Rectangle {
-                                        radius: 4
-                                        color: (hypervisorItem.hovered || hypervisorItem.highlighted)
-                                               ? Theme.colorHover : "transparent"
-                                    }
-                                }
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                visible: root.hypervisorProbing
-                                         || root.selectedHypervisorUnavailableText.length > 0
-                                text: root.hypervisorProbing
-                                      //% "Checking hypervisor availability..."
-                                      ? qsTrId("aegra.backup.post.hypervisor_checking")
-                                      : root.selectedHypervisorUnavailableText
-                                color: root.hypervisorProbing ? Theme.colorTextGrey
-                                                              : Theme.colorAccentRed
-                                font.pixelSize: 12
-                                font.family: Theme.fontFamily
-                                wrapMode: Text.WordWrap
-                            }
-                        }
                     }
                 }
             }
@@ -1652,14 +1500,23 @@ Item {
                 Layout.preferredWidth: 140
                 Layout.preferredHeight: 40
                 primary: true
-                enabled: !root.bootCheckHypervisorUnavailable
                 onClicked: root.createRequested()
-
-                ToolTip.visible: hovered && root.bootCheckHypervisorUnavailable
-                ToolTip.delay: 400
-                //% "The selected hypervisor is unavailable. Fix it, choose another, or turn off boot check to continue."
-                ToolTip.text: qsTrId("aegra.backup.post.hypervisor_blocks_save")
             }
+        }
+    }
+
+    LoadingOverlay {
+        anchors.fill: parent
+        visible: root.bootCheckEnablePending
+        message: qsTrId("aegra.backup.post.hypervisor_checking")
+        actionsVisible: false
+        dimBackground: false
+    }
+
+    Connections {
+        target: typeof serviceClient !== "undefined" ? serviceClient : null
+        function onHypervisorStatusChanged() {
+            root.finishBootCheckEnableCheck()
         }
     }
 }

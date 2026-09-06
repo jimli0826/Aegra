@@ -7,10 +7,251 @@ import "../components"
 Item {
     id: root
     signal closeRequested()
+
+    property int currentSection: 0
+    readonly property int menuWidth: 220
+
+    function valueIndex(model, value) {
+        for (let i = 0; i < model.length; ++i) {
+            if (model[i].value === value)
+                return i
+        }
+        return 0
+    }
+
+    function cpuOptions() {
+        const maximum = (typeof serviceClient !== "undefined" && serviceClient)
+                        ? serviceClient.hostLogicalCpuCount : 1
+        const result = []
+        for (let value = 1; value <= maximum; ++value)
+            result.push({ value: value, label: value.toString() })
+        return result
+    }
+
+    function memoryOptions() {
+        const budget = (typeof serviceClient !== "undefined" && serviceClient)
+                       ? serviceClient.bootCheckMemoryBudgetMib : 4096
+        const system = (typeof serviceClient !== "undefined" && serviceClient)
+                       ? serviceClient.hostPhysicalMemoryMib : 4096
+        const maximum = Math.max(2048, Math.min(32768, budget, system))
+        const result = []
+        for (let value = 2048; value <= maximum; value += 1024)
+            result.push({ value: value, label: (value / 1024).toString() + " GB" })
+        return result
+    }
+
+    function concurrencyOptions(memoryMib) {
+        const budget = (typeof serviceClient !== "undefined" && serviceClient)
+                       ? serviceClient.bootCheckMemoryBudgetMib : 8192
+        const maximum = Math.max(1, Math.min(32, Math.floor(budget / memoryMib)))
+        const result = []
+        for (let value = 1; value <= maximum; ++value)
+            result.push({ value: value, label: value.toString() })
+        return result
+    }
+
+    function defaultHypervisorError() {
+        if (typeof serviceClient === "undefined" || !serviceClient)
+            return ""
+        return serviceClient.defaultBootCheckHypervisor === 1
+                ? serviceClient.virtualBoxUnavailableText
+                : serviceClient.hyperVUnavailableText
+    }
+
     //% "Settings"
     Accessible.name: qsTrId("aegra.nav.settings")
 
-    // Close button — top right
+    component CategoryButton: Item {
+        id: categoryButton
+
+        property string label: ""
+        property string iconName: ""
+        property bool selected: false
+        signal activated()
+
+        readonly property bool hovered: categoryMouse.containsMouse
+
+        Layout.fillWidth: true
+        Layout.preferredHeight: 44
+
+        Rectangle {
+            anchors.fill: parent
+            radius: Theme.radiusControl
+            color: categoryButton.selected ? Theme.colorInput
+                                               : (categoryButton.hovered ? Theme.colorMenuHoverBg
+                                                                         : "transparent")
+            border.width: categoryButton.selected ? 1 : 0
+            border.color: Theme.colorBorder
+        }
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 12
+            anchors.rightMargin: 12
+            spacing: 12
+
+            NavIcon {
+                Layout.preferredWidth: 20
+                Layout.preferredHeight: 20
+                name: categoryButton.iconName
+                color: categoryButton.selected ? Theme.colorAccentBlue : Theme.colorMenuIdle
+            }
+            Text {
+                Layout.fillWidth: true
+                text: categoryButton.label
+                color: categoryButton.selected ? Theme.colorTextWhite : Theme.colorMenuIdle
+                font.pixelSize: 14
+                font.weight: categoryButton.selected ? Font.DemiBold : Font.Normal
+                font.family: Theme.fontFamily
+                elide: Text.ElideRight
+                verticalAlignment: Text.AlignVCenter
+            }
+        }
+
+        MouseArea {
+            id: categoryMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: categoryButton.activated()
+        }
+    }
+
+    component SettingCard: Rectangle {
+        id: settingCard
+
+        property string titleText: ""
+        property string descriptionText: ""
+        property string errorText: ""
+        default property alias controlData: controlHost.data
+
+        Layout.fillWidth: true
+        Layout.preferredHeight: errorText.length > 0 ? 140 : 108
+        radius: Theme.radiusCard
+        color: Theme.colorCard
+        border.width: 1
+        border.color: Theme.colorBorder
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.margins: 18
+            spacing: 24
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 4
+
+                Text {
+                    Layout.fillWidth: true
+                    text: settingCard.titleText
+                    color: Theme.colorTextWhite
+                    font.pixelSize: 14
+                    font.bold: true
+                    font.family: Theme.fontFamily
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: settingCard.descriptionText
+                    color: Theme.colorTextGrey
+                    font.pixelSize: 12
+                    font.family: Theme.fontFamily
+                    wrapMode: Text.WordWrap
+                }
+                Text {
+                    Layout.fillWidth: true
+                    visible: settingCard.errorText.length > 0
+                    text: settingCard.errorText
+                    color: Theme.colorAccentRed
+                    font.pixelSize: 12
+                    font.family: Theme.fontFamily
+                    wrapMode: Text.WordWrap
+                }
+            }
+
+            Item {
+                id: controlHost
+                Layout.preferredWidth: 220
+                Layout.preferredHeight: 34
+            }
+        }
+    }
+
+    Item {
+        id: categoryPane
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.left: parent.left
+        width: root.menuWidth
+
+        Rectangle {
+            anchors.fill: parent
+            radius: Theme.radiusWindow
+            color: Theme.colorSidebar
+        }
+
+        Rectangle {
+            anchors.top: parent.top
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            width: Math.max(0, parent.width - Theme.radiusWindow)
+            color: Theme.colorSidebar
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.topMargin: 18
+            anchors.leftMargin: 12
+            anchors.rightMargin: 12
+            spacing: 6
+
+            Text {
+                Layout.leftMargin: 10
+                Layout.bottomMargin: 10
+                //% "Settings"
+                text: qsTrId("aegra.nav.settings")
+                color: Theme.colorTextWhite
+                font.pixelSize: 18
+                font.bold: true
+                font.family: Theme.fontFamily
+            }
+
+            CategoryButton {
+                label: qsTrId("aegra.settings.category.general")
+                iconName: "settings"
+                selected: root.currentSection === 0
+                onActivated: root.currentSection = 0
+            }
+            CategoryButton {
+                label: qsTrId("aegra.settings.category.appearance")
+                iconName: "appearance"
+                selected: root.currentSection === 2
+                onActivated: root.currentSection = 2
+            }
+            CategoryButton {
+                label: qsTrId("aegra.settings.category.verify")
+                iconName: "verify"
+                selected: root.currentSection === 3
+                onActivated: root.currentSection = 3
+            }
+            CategoryButton {
+                label: qsTrId("aegra.settings.category.boot_check")
+                iconName: "boot_check"
+                selected: root.currentSection === 1
+                onActivated: root.currentSection = 1
+            }
+
+            Item { Layout.fillHeight: true }
+        }
+    }
+
+    Rectangle {
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.left: categoryPane.right
+        width: 1
+        color: Theme.colorSidebarDivider
+    }
+
     Button {
         id: closeBtn
         anchors.top: parent.top
@@ -21,429 +262,484 @@ Item {
         height: 28
         z: 10
         text: "\u2715"
+        Accessible.name: qsTrId("aegra.common.close")
         background: Rectangle {
-            color: parent.hovered ? Theme.colorHover : "transparent"
+            color: closeBtn.hovered ? Theme.colorHover : "transparent"
             radius: 4
         }
         contentItem: Text {
-            text: parent.text
+            text: closeBtn.text
             color: Theme.colorTextWhite
             font.pixelSize: 14
+            font.family: Theme.fontFamily
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
         }
         onClicked: root.closeRequested()
     }
 
-    Flickable {
-        anchors.top: closeBtn.bottom
-        anchors.left: parent.left
-        anchors.right: parent.right
+    StackLayout {
+        anchors.top: parent.top
         anchors.bottom: parent.bottom
-        contentWidth: width
-        contentHeight: mainCol.implicitHeight + 16
-        clip: true
-        boundsBehavior: Flickable.StopAtBounds
+        anchors.left: categoryPane.right
+        anchors.right: parent.right
+        anchors.topMargin: 18
+        anchors.leftMargin: 28
+        anchors.rightMargin: 28
+        currentIndex: root.currentSection
 
-        ColumnLayout {
-            id: mainCol
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.leftMargin: 16
-            anchors.rightMargin: 16
-            spacing: 12
-
-            // ── Language ──────────────────────────────────────────
+        Item {
             ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 6
+                anchors.fill: parent
+                spacing: 16
 
-                    Text {
-                        //% "Language"
-                        text: qsTrId("aegra.settings.language")
-                        color: Theme.colorTextWhite
-                        font.pixelSize: 13
-                        font.bold: true
-                        font.family: Theme.fontFamily
+                PageHeader {
+                    Layout.fillWidth: true
+                    Layout.rightMargin: 32
+                    title: qsTrId("aegra.settings.category.general")
+                }
+
+                Flickable {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    contentWidth: width
+                    contentHeight: generalColumn.implicitHeight + 16
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+                    ScrollBar.vertical: ScrollBar {}
+
+                    ColumnLayout {
+                        id: generalColumn
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        spacing: 12
+
+                        SettingCard {
+                            titleText: qsTrId("aegra.settings.language")
+                            descriptionText: qsTrId("aegra.settings.language_desc")
+
+                            SettingsComboBox {
+                                id: languageCombo
+                                anchors.fill: parent
+                                model: localeController.availableLanguages
+                                currentIndex: {
+                                    const languages = localeController.availableLanguages
+                                    for (let i = 0; i < languages.length; ++i) {
+                                        if (languages[i].tag === localeController.language)
+                                            return i
+                                    }
+                                    return 0
+                                }
+                                onActivated: function(index) {
+                                    const languages = localeController.availableLanguages
+                                    if (index >= 0 && index < languages.length)
+                                        localeController.setLanguage(languages[index].tag)
+                                }
+                            }
+                        }
+
+                        SettingCard {
+                            titleText: qsTrId("aegra.settings.close_action")
+                            descriptionText: qsTrId("aegra.settings.close_action_desc")
+
+                            SettingsComboBox {
+                                id: closeActionCombo
+                                anchors.fill: parent
+                                model: [
+                                    { id: "hide", label: qsTrId("aegra.settings.close_action.hide") },
+                                    { id: "quit", label: qsTrId("aegra.settings.close_action.quit") }
+                                ]
+                                currentIndex: desktopShell.closeAction === "quit" ? 1 : 0
+                                onActivated: function(index) {
+                                    const item = model[index]
+                                    if (item)
+                                        desktopShell.setCloseAction(item.id)
+                                }
+                            }
+                        }
+
+                        SettingCard {
+                            titleText: qsTrId("aegra.settings.job_retention")
+                            descriptionText: qsTrId("aegra.settings.job_retention_desc")
+                            errorText: (typeof serviceClient !== "undefined" && serviceClient)
+                                       ? serviceClient.serviceSettingsErrorText : ""
+                            opacity: retentionCombo.enabled ? 1.0 : 0.65
+
+                            SettingsComboBox {
+                                id: retentionCombo
+                                anchors.fill: parent
+                                enabled: typeof serviceClient !== "undefined" && serviceClient
+                                         && serviceClient.serviceSettingsAvailable
+                                         && !serviceClient.serviceSettingsLoading
+                                         && !serviceClient.serviceSettingsBusy
+                                model: [
+                                    { months: 1, label: qsTrId("aegra.settings.job_retention.1_month") },
+                                    { months: 3, label: qsTrId("aegra.settings.job_retention.3_months") },
+                                    { months: 6, label: qsTrId("aegra.settings.job_retention.6_months") }
+                                ]
+                                currentIndex: {
+                                    if (typeof serviceClient === "undefined" || !serviceClient)
+                                        return 1
+                                    const months = serviceClient.jobRetentionMonths
+                                    return months === 1 ? 0 : (months === 6 ? 2 : 1)
+                                }
+                                onActivated: function(index) {
+                                    if (typeof serviceClient === "undefined" || !serviceClient)
+                                        return
+                                    const item = model[index]
+                                    if (!item)
+                                        return
+                                    if (!serviceClient.setJobRetentionMonths(item.months)) {
+                                        const months = serviceClient.jobRetentionMonths
+                                        currentIndex = months === 1 ? 0 : (months === 6 ? 2 : 1)
+                                    }
+                                }
+                            }
+                        }
+
+                        Item {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 4
+                        }
                     }
-                    ComboBox {
-                        id: languageCombo
-                        Layout.preferredWidth: 280
-                        Layout.preferredHeight: 30
-                        model: localeController.availableLanguages
-                        textRole: "label"
-                        currentIndex: {
-                            const tags = localeController.availableLanguages
-                            for (let i = 0; i < tags.length; ++i) {
-                                if (tags[i].tag === localeController.language)
-                                    return i
-                            }
-                            return 0
-                        }
-                        onActivated: function(index) {
-                            const languages = localeController.availableLanguages
-                            if (index >= 0 && index < languages.length)
-                                localeController.setLanguage(languages[index].tag)
-                        }
-                        background: Rectangle {
-                            color: Theme.colorInput
-                            radius: 8
-                            border.width: 1
-                            border.color: Theme.colorBorder
-                        }
-                        indicator: ComboBoxIndicator { combo: languageCombo }
-                        contentItem: Text {
-                            leftPadding: 12
-                            rightPadding: 24
-                            text: languageCombo.displayText
-                            color: Theme.colorTextWhite
-                            font.pixelSize: 13
-                            font.family: Theme.fontFamily
-                            verticalAlignment: Text.AlignVCenter
-                            elide: Text.ElideRight
-                        }
-                        popup: Popup {
-                            y: languageCombo.height + 2
-                            width: languageCombo.width
-                            padding: 4
-                            implicitHeight: Math.min(200, contentItem.implicitHeight + 8)
-                            contentItem: ListView {
-                                clip: true
-                                implicitHeight: contentHeight
-                                model: languageCombo.popup.visible
-                                       ? languageCombo.delegateModel : null
-                                currentIndex: languageCombo.highlightedIndex
-                            }
-                            background: Rectangle {
-                                color: Theme.colorPopup
-                                border.color: Theme.colorBorder
-                                radius: 8
-                            }
-                        }
-                        delegate: ItemDelegate {
-                            id: langItemDel
-                            width: languageCombo.width - 8
-                            height: 32
-                            hoverEnabled: true
-                            highlighted: languageCombo.highlightedIndex === index
-                            contentItem: Text {
-                                leftPadding: 10
-                                text: modelData.label
-                                color: Theme.colorTextWhite
-                                font.pixelSize: 13
-                                font.family: Theme.fontFamily
-                                elide: Text.ElideRight
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                            background: Rectangle {
-                                radius: 6
-                                color: (langItemDel.hovered || langItemDel.highlighted) ? Theme.colorHover : "transparent"
-                            }
-                        }
-                    }
+                }
             }
+        }
 
-            // ── Theme ─────────────────────────────────────────────
+        Item {
             ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 6
+                anchors.fill: parent
+                spacing: 16
 
-                    Text {
-                        //% "Theme"
-                        text: qsTrId("aegra.settings.theme")
-                        color: Theme.colorTextWhite
-                        font.pixelSize: 13
-                        font.bold: true
-                        font.family: Theme.fontFamily
+                PageHeader {
+                    Layout.fillWidth: true
+                    Layout.rightMargin: 32
+                    title: qsTrId("aegra.settings.category.boot_check")
+                }
+
+                Flickable {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    contentWidth: width
+                    contentHeight: bootCheckColumn.implicitHeight + 16
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+                    ScrollBar.vertical: ScrollBar {}
+
+                    ColumnLayout {
+                        id: bootCheckColumn
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        spacing: 12
+
+                        SettingCard {
+                            titleText: qsTrId("aegra.settings.boot_check.default_hypervisor")
+                            descriptionText: qsTrId(
+                                                 "aegra.settings.boot_check.default_hypervisor_desc")
+                            errorText: serviceClient && serviceClient.serviceSettingsErrorText.length
+                                       ? serviceClient.serviceSettingsErrorText
+                                       : root.defaultHypervisorError()
+
+                            RowLayout {
+                                anchors.fill: parent
+                                spacing: 6
+
+                                SettingsComboBox {
+                                    id: defaultHypervisorCombo
+                                    Layout.fillWidth: true
+                                    enabled: serviceClient && serviceClient.serviceSettingsAvailable
+                                             && !serviceClient.serviceSettingsLoading
+                                             && !serviceClient.serviceSettingsBusy
+                                    model: [
+                                        { value: 1, label: "VirtualBox",
+                                          iconSource: "qrc:/Aegra/icons/virtualbox.png" },
+                                        { value: 2, label: "Hyper-V",
+                                          iconSource: "qrc:/Aegra/icons/hyperv.png" }
+                                    ]
+                                    currentIndex: root.valueIndex(model, serviceClient
+                                        ? serviceClient.defaultBootCheckHypervisor : 1)
+                                    onActivated: function(index) {
+                                        const item = model[index]
+                                        if (item && serviceClient)
+                                            serviceClient.setBootCheckSettings(item.value,
+                                                serviceClient.bootCheckCpuCount,
+                                                serviceClient.bootCheckMemoryMib,
+                                                serviceClient.bootCheckConcurrency)
+                                    }
+                                }
+
+                                MouseArea {
+                                    id: settingsHypervisorRefreshArea
+                                    Layout.preferredWidth: 34
+                                    Layout.preferredHeight: 34
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    enabled: serviceClient && !serviceClient.hypervisorProbing
+                                    onClicked: serviceClient.refreshHypervisorStatus()
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: Theme.radiusControl
+                                        color: settingsHypervisorRefreshArea.pressed
+                                               ? Theme.colorButtonHover
+                                               : (settingsHypervisorRefreshArea.containsMouse
+                                                  ? Theme.colorHover : "transparent")
+
+                                        NavIcon {
+                                            id: settingsHypervisorRefreshIcon
+                                            anchors.centerIn: parent
+                                            width: 17
+                                            height: 17
+                                            name: "refresh"
+                                            color: settingsHypervisorRefreshArea.containsMouse
+                                                   ? Theme.colorAccentBlue : Theme.colorTextGrey
+
+                                            RotationAnimation on rotation {
+                                                running: serviceClient
+                                                         && serviceClient.hypervisorProbing
+                                                from: 0
+                                                to: 360
+                                                duration: 1000
+                                                loops: Animation.Infinite
+                                                onRunningChanged: {
+                                                    if (!running)
+                                                        settingsHypervisorRefreshIcon.rotation = 0
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    ToolTip.visible: containsMouse
+                                    ToolTip.delay: 400
+                                    ToolTip.text: qsTrId(
+                                                      "aegra.backup.post.hypervisor_refresh")
+                                }
+                            }
+                        }
+
+                        SettingCard {
+                            titleText: qsTrId("aegra.settings.boot_check.cpu")
+                            descriptionText: qsTrId("aegra.settings.boot_check.cpu_desc")
+                            errorText: serviceClient ? serviceClient.serviceSettingsErrorText : ""
+
+                            SettingsComboBox {
+                                id: bootCpuCombo
+                                anchors.fill: parent
+                                enabled: serviceClient && serviceClient.serviceSettingsAvailable
+                                         && !serviceClient.serviceSettingsLoading
+                                         && !serviceClient.serviceSettingsBusy
+                                model: root.cpuOptions()
+                                currentIndex: root.valueIndex(model, serviceClient
+                                                             ? serviceClient.bootCheckCpuCount : 1)
+                                onActivated: function(index) {
+                                    const item = model[index]
+                                    if (item && serviceClient)
+                                        serviceClient.setBootCheckSettings(
+                                            serviceClient.defaultBootCheckHypervisor, item.value,
+                                            serviceClient.bootCheckMemoryMib,
+                                            serviceClient.bootCheckConcurrency)
+                                }
+                            }
+                        }
+
+                        SettingCard {
+                            titleText: qsTrId("aegra.settings.boot_check.memory")
+                            descriptionText: qsTrId("aegra.settings.boot_check.memory_desc").arg(
+                                                 serviceClient
+                                                 ? Math.floor(serviceClient.hostPhysicalMemoryMib / 1024)
+                                                 : 0)
+
+                            SettingsComboBox {
+                                id: bootMemoryCombo
+                                anchors.fill: parent
+                                enabled: bootCpuCombo.enabled
+                                model: root.memoryOptions()
+                                currentIndex: root.valueIndex(model, serviceClient
+                                                             ? serviceClient.bootCheckMemoryMib : 4096)
+                                onActivated: function(index) {
+                                    const item = model[index]
+                                    if (!item || !serviceClient)
+                                        return
+                                    const maximum = Math.max(1, Math.min(32, Math.floor(
+                                        serviceClient.bootCheckMemoryBudgetMib / item.value)))
+                                    serviceClient.setBootCheckSettings(
+                                        serviceClient.defaultBootCheckHypervisor,
+                                        serviceClient.bootCheckCpuCount, item.value,
+                                        Math.min(serviceClient.bootCheckConcurrency, maximum))
+                                }
+                            }
+                        }
+
+                        SettingCard {
+                            titleText: qsTrId("aegra.settings.boot_check.concurrency")
+                            descriptionText: qsTrId("aegra.settings.boot_check.concurrency_desc").arg(
+                                                 serviceClient
+                                                 ? serviceClient.bootCheckEffectiveConcurrency : 0)
+
+                            SettingsComboBox {
+                                id: bootConcurrencyCombo
+                                anchors.fill: parent
+                                enabled: bootCpuCombo.enabled
+                                model: root.concurrencyOptions(serviceClient
+                                                               ? serviceClient.bootCheckMemoryMib : 4096)
+                                currentIndex: root.valueIndex(model, serviceClient
+                                                             ? serviceClient.bootCheckConcurrency : 1)
+                                onActivated: function(index) {
+                                    const item = model[index]
+                                    if (item && serviceClient)
+                                        serviceClient.setBootCheckSettings(
+                                            serviceClient.defaultBootCheckHypervisor,
+                                            serviceClient.bootCheckCpuCount,
+                                            serviceClient.bootCheckMemoryMib, item.value)
+                                }
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true; Layout.preferredHeight: 4 }
                     }
-                    ComboBox {
-                        id: themeCombo
-                        Layout.preferredWidth: 280
-                        Layout.preferredHeight: 30
-                        model: Theme.themes
-                        currentIndex: {
-                            const list = Theme.themes
-                            for (let i = 0; i < list.length; ++i) {
-                                if (list[i].id === Theme.themeId)
-                                    return i
-                            }
-                            return 0
-                        }
-                        onActivated: function(index) {
-                            const list = Theme.themes
-                            if (index >= 0 && index < list.length)
-                                Theme.setTheme(list[index].id)
-                        }
-                        background: Rectangle {
-                            color: Theme.colorInput
-                            radius: 8
-                            border.width: 1
-                            border.color: Theme.colorBorder
-                        }
-                        indicator: ComboBoxIndicator { combo: themeCombo }
-                        contentItem: Text {
-                            leftPadding: 12
-                            rightPadding: 24
-                            text: Theme.themeLabel(Theme.themes[themeCombo.currentIndex])
-                            color: Theme.colorTextWhite
-                            font.pixelSize: 13
-                            font.family: Theme.fontFamily
-                            verticalAlignment: Text.AlignVCenter
-                            elide: Text.ElideRight
-                        }
-                        popup: Popup {
-                            y: themeCombo.height + 2
-                            width: themeCombo.width
-                            padding: 4
-                            implicitHeight: Math.min(200, contentItem.implicitHeight + 8)
-                            contentItem: ListView {
-                                clip: true
-                                implicitHeight: contentHeight
-                                model: themeCombo.popup.visible ? themeCombo.delegateModel : null
-                                currentIndex: themeCombo.highlightedIndex
-                            }
-                            background: Rectangle {
-                                color: Theme.colorPopup
-                                border.color: Theme.colorBorder
-                                radius: 8
-                            }
-                        }
-                        delegate: ItemDelegate {
-                            id: themeItemDel
-                            width: themeCombo.width - 8
-                            height: 32
-                            hoverEnabled: true
-                            highlighted: themeCombo.highlightedIndex === index
-                            contentItem: Text {
-                                leftPadding: 10
-                                text: Theme.themeLabel(modelData)
-                                color: Theme.colorTextWhite
-                                font.pixelSize: 13
-                                font.family: Theme.fontFamily
-                                verticalAlignment: Text.AlignVCenter
-                                elide: Text.ElideRight
-                            }
-                            background: Rectangle {
-                                radius: 6
-                                color: themeItemDel.highlighted
-                                       ? Theme.colorHover
-                                       : (themeItemDel.hovered ? Theme.colorHover : "transparent")
-                            }
-                        }
-                    }
+                }
             }
+        }
 
-            // ── Close button ──────────────────────────────────────
+        Item {
             ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 6
+                anchors.fill: parent
+                spacing: 16
 
-                    Text {
-                        //% "Close button"
-                        text: qsTrId("aegra.settings.close_action")
-                        color: Theme.colorTextWhite
-                        font.pixelSize: 13
-                        font.bold: true
-                        font.family: Theme.fontFamily
-                    }
-                    ComboBox {
-                        id: closeActionCombo
-                        Layout.preferredWidth: 280
-                        Layout.preferredHeight: 30
-                        model: [
-                            { id: "hide", label: qsTrId("aegra.settings.close_action.hide") },
-                            { id: "quit", label: qsTrId("aegra.settings.close_action.quit") }
-                        ]
-                        textRole: "label"
-                        currentIndex: desktopShell.closeAction === "quit" ? 1 : 0
-                        onActivated: function(index) {
-                            const item = model[index]
-                            if (item)
-                                desktopShell.setCloseAction(item.id)
-                        }
-                        background: Rectangle {
-                            color: Theme.colorInput
-                            radius: 8
-                            border.width: 1
-                            border.color: Theme.colorBorder
-                        }
-                        indicator: ComboBoxIndicator { combo: closeActionCombo }
-                        contentItem: Text {
-                            leftPadding: 12
-                            rightPadding: 24
-                            text: closeActionCombo.displayText
-                            color: Theme.colorTextWhite
-                            font.pixelSize: 13
-                            font.family: Theme.fontFamily
-                            verticalAlignment: Text.AlignVCenter
-                            elide: Text.ElideRight
-                        }
-                        popup: Popup {
-                            y: closeActionCombo.height + 2
-                            width: closeActionCombo.width
-                            padding: 4
-                            implicitHeight: Math.min(200, contentItem.implicitHeight + 8)
-                            contentItem: ListView {
-                                clip: true
-                                implicitHeight: contentHeight
-                                model: closeActionCombo.popup.visible
-                                       ? closeActionCombo.delegateModel : null
-                                currentIndex: closeActionCombo.highlightedIndex
-                            }
-                            background: Rectangle {
-                                color: Theme.colorPopup
-                                border.color: Theme.colorBorder
-                                radius: 8
+                PageHeader {
+                    Layout.fillWidth: true
+                    Layout.rightMargin: 32
+                    title: qsTrId("aegra.settings.category.appearance")
+                }
+
+                Flickable {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    contentWidth: width
+                    contentHeight: appearanceColumn.implicitHeight + 16
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+                    ScrollBar.vertical: ScrollBar {}
+
+                    ColumnLayout {
+                        id: appearanceColumn
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        spacing: 12
+
+                        SettingCard {
+                            titleText: qsTrId("aegra.settings.theme")
+                            descriptionText: qsTrId("aegra.settings.theme_desc")
+
+                            SettingsComboBox {
+                                id: themeCombo
+                                anchors.fill: parent
+                                model: Theme.themes
+                                useThemeLabels: true
+                                currentIndex: {
+                                    const themes = Theme.themes
+                                    for (let i = 0; i < themes.length; ++i) {
+                                        if (themes[i].id === Theme.themeId)
+                                            return i
+                                    }
+                                    return 0
+                                }
+                                onActivated: function(index) {
+                                    const themes = Theme.themes
+                                    if (index >= 0 && index < themes.length)
+                                        Theme.setTheme(themes[index].id)
+                                }
                             }
                         }
-                        delegate: ItemDelegate {
-                            id: closeActionItemDel
-                            width: closeActionCombo.width - 8
-                            height: 32
-                            hoverEnabled: true
-                            highlighted: closeActionCombo.highlightedIndex === index
-                            contentItem: Text {
-                                leftPadding: 10
-                                text: modelData.label
-                                color: Theme.colorTextWhite
-                                font.pixelSize: 13
-                                font.family: Theme.fontFamily
-                                elide: Text.ElideRight
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                            background: Rectangle {
-                                radius: 6
-                                color: (closeActionItemDel.hovered || closeActionItemDel.highlighted)
-                                       ? Theme.colorHover : "transparent"
-                            }
+
+                        Item {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 4
                         }
                     }
+                }
             }
+        }
 
-            // ── Job retention ─────────────────────────────────────
+        Item {
             ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 6
-                enabled: typeof serviceClient !== "undefined" && serviceClient
-                         && serviceClient.serviceSettingsAvailable
+                anchors.fill: parent
+                spacing: 16
 
-                    Text {
-                        //% "Job history retention"
-                        text: qsTrId("aegra.settings.job_retention")
-                        color: Theme.colorTextWhite
-                        font.pixelSize: 13
-                        font.bold: true
-                        font.family: Theme.fontFamily
+                PageHeader {
+                    Layout.fillWidth: true
+                    Layout.rightMargin: 32
+                    title: qsTrId("aegra.settings.category.verify")
+                }
+
+                Flickable {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    contentWidth: width
+                    contentHeight: verifyColumn.implicitHeight + 16
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+                    ScrollBar.vertical: ScrollBar {}
+
+                    ColumnLayout {
+                        id: verifyColumn
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        spacing: 12
+
+                        SettingCard {
+                            titleText: qsTrId("aegra.settings.verify.scope")
+                            descriptionText: qsTrId("aegra.settings.verify.scope_desc")
+                            errorText: serviceClient ? serviceClient.serviceSettingsErrorText : ""
+
+                            SettingsComboBox {
+                                id: verifyScopeCombo
+                                anchors.fill: parent
+                                enabled: serviceClient && serviceClient.serviceSettingsAvailable
+                                         && !serviceClient.serviceSettingsLoading
+                                         && !serviceClient.serviceSettingsBusy
+                                model: [
+                                    { value: 1, label: qsTrId("aegra.settings.verify.scope.single") },
+                                    { value: 2, label: qsTrId("aegra.settings.verify.scope.full_chain") }
+                                ]
+                                currentIndex: serviceClient && serviceClient.verifyScope === 2 ? 1 : 0
+                                onActivated: function(index) {
+                                    const item = model[index]
+                                    if (item && serviceClient)
+                                        serviceClient.setVerifySettings(item.value,
+                                                                        serviceClient.verifyConcurrency)
+                                }
+                            }
+                        }
+
+                        SettingCard {
+                            titleText: qsTrId("aegra.settings.verify.concurrency")
+                            descriptionText: qsTrId("aegra.settings.verify.concurrency_desc")
+
+                            SettingsComboBox {
+                                id: verifyConcurrencyCombo
+                                anchors.fill: parent
+                                enabled: verifyScopeCombo.enabled
+                                model: {
+                                    const result = []
+                                    for (let value = 1; value <= 32; ++value)
+                                        result.push({ value: value, label: value.toString() })
+                                    return result
+                                }
+                                currentIndex: root.valueIndex(model, serviceClient
+                                                             ? serviceClient.verifyConcurrency : 2)
+                                onActivated: function(index) {
+                                    const item = model[index]
+                                    if (item && serviceClient)
+                                        serviceClient.setVerifySettings(serviceClient.verifyScope,
+                                                                        item.value)
+                                }
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true; Layout.preferredHeight: 4 }
                     }
-                    ComboBox {
-                        id: retentionCombo
-                        Layout.preferredWidth: 280
-                        Layout.preferredHeight: 30
-                        enabled: typeof serviceClient !== "undefined" && serviceClient
-                                 && serviceClient.serviceSettingsAvailable
-                                 && !serviceClient.serviceSettingsLoading
-                                 && !serviceClient.serviceSettingsBusy
-                        model: [
-                            { months: 1, label: qsTrId("aegra.settings.job_retention.1_month") },
-                            { months: 3, label: qsTrId("aegra.settings.job_retention.3_months") },
-                            { months: 6, label: qsTrId("aegra.settings.job_retention.6_months") }
-                        ]
-                        textRole: "label"
-                        currentIndex: {
-                            if (typeof serviceClient === "undefined" || !serviceClient)
-                                return 1
-                            const months = serviceClient.jobRetentionMonths
-                            if (months === 1)
-                                return 0
-                            if (months === 6)
-                                return 2
-                            return 1
-                        }
-                        onActivated: function(index) {
-                            if (typeof serviceClient === "undefined" || !serviceClient)
-                                return
-                            const item = model[index]
-                            if (!item)
-                                return
-                            if (!serviceClient.setJobRetentionMonths(item.months)) {
-                                // Revert combo if the request was not sent.
-                                const months = serviceClient.jobRetentionMonths
-                                if (months === 1)
-                                    currentIndex = 0
-                                else if (months === 6)
-                                    currentIndex = 2
-                                else
-                                    currentIndex = 1
-                            }
-                        }
-                        background: Rectangle {
-                            color: Theme.colorInput
-                            radius: 8
-                            border.width: 1
-                            border.color: Theme.colorBorder
-                        }
-                        indicator: ComboBoxIndicator { combo: retentionCombo }
-                        contentItem: Text {
-                            leftPadding: 12
-                            rightPadding: 24
-                            text: retentionCombo.displayText
-                            color: Theme.colorTextWhite
-                            font.pixelSize: 13
-                            font.family: Theme.fontFamily
-                            verticalAlignment: Text.AlignVCenter
-                            elide: Text.ElideRight
-                        }
-                        popup: Popup {
-                            y: retentionCombo.height + 2
-                            width: retentionCombo.width
-                            padding: 4
-                            implicitHeight: Math.min(200, contentItem.implicitHeight + 8)
-                            contentItem: ListView {
-                                clip: true
-                                implicitHeight: contentHeight
-                                model: retentionCombo.popup.visible
-                                       ? retentionCombo.delegateModel : null
-                                currentIndex: retentionCombo.highlightedIndex
-                            }
-                            background: Rectangle {
-                                color: Theme.colorPopup
-                                border.color: Theme.colorBorder
-                                radius: 8
-                            }
-                        }
-                        delegate: ItemDelegate {
-                            id: retItemDel
-                            width: retentionCombo.width - 8
-                            height: 32
-                            hoverEnabled: true
-                            highlighted: retentionCombo.highlightedIndex === index
-                            contentItem: Text {
-                                leftPadding: 10
-                                text: modelData.label
-                                color: Theme.colorTextWhite
-                                font.pixelSize: 13
-                                font.family: Theme.fontFamily
-                                elide: Text.ElideRight
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                            background: Rectangle {
-                                radius: 6
-                                color: (retItemDel.hovered || retItemDel.highlighted) ? Theme.colorHover : "transparent"
-                            }
-                        }
-                    }
-                    Text {
-                        Layout.fillWidth: true
-                        visible: typeof serviceClient !== "undefined" && serviceClient
-                                 && serviceClient.serviceSettingsErrorText.length > 0
-                        text: (typeof serviceClient !== "undefined" && serviceClient)
-                              ? serviceClient.serviceSettingsErrorText : ""
-                        color: Theme.colorAccentRed
-                        font.pixelSize: 12
-                        font.family: Theme.fontFamily
-                        wrapMode: Text.WordWrap
-                    }
+                }
             }
         }
     }
@@ -454,12 +750,7 @@ Item {
             if (typeof serviceClient === "undefined" || !serviceClient)
                 return
             const months = serviceClient.jobRetentionMonths
-            if (months === 1)
-                retentionCombo.currentIndex = 0
-            else if (months === 6)
-                retentionCombo.currentIndex = 2
-            else
-                retentionCombo.currentIndex = 1
+            retentionCombo.currentIndex = months === 1 ? 0 : (months === 6 ? 2 : 1)
         }
         function onStateChanged() {
             if (typeof serviceClient !== "undefined" && serviceClient

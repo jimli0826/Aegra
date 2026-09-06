@@ -164,6 +164,12 @@ int ServiceClient::virtualBoxProbeState() const noexcept {
     return status != nullptr ? status->probe_state : kBootCheckProbeStateNotProbed;
 }
 
+bool ServiceClient::virtualBoxAvailable() const noexcept {
+    const auto* status = hypervisor_status_for(1);
+    return status != nullptr && status->installed &&
+           status->probe_state == kBootCheckProbeStateProbed && status->available;
+}
+
 QString ServiceClient::virtualBoxUnavailableText() const { return hypervisor_unavailable_text(1); }
 
 int ServiceClient::hyperVProbeState() const noexcept {
@@ -171,10 +177,16 @@ int ServiceClient::hyperVProbeState() const noexcept {
     return status != nullptr ? status->probe_state : kBootCheckProbeStateNotProbed;
 }
 
+bool ServiceClient::hyperVAvailable() const noexcept {
+    const auto* status = hypervisor_status_for(2);
+    return status != nullptr && status->installed &&
+           status->probe_state == kBootCheckProbeStateProbed && status->available;
+}
+
 QString ServiceClient::hyperVUnavailableText() const { return hypervisor_unavailable_text(2); }
 
 bool ServiceClient::hypervisorProbing() const noexcept {
-    if (hypervisor_refresh_busy_) {
+    if (hypervisor_refresh_busy_ || hypervisor_status_loading_) {
         return true;
     }
     return std::ranges::any_of(hypervisor_status_, [](const BootCheckHypervisorStatus& status) {
@@ -196,6 +208,7 @@ void ServiceClient::refreshHypervisorStatus() {
             return handle_hypervisor_refresh_frame(frame_body);
         })) {
         hypervisor_refresh_busy_ = false;
+        hypervisor_status_.clear();
         emit hypervisorStatusChanged();
     }
 }
@@ -265,74 +278,6 @@ bool ServiceClient::taskLogHasMore() const noexcept { return task_log_next_token
 
 QString ServiceClient::taskLogErrorText() const {
     return task_log_error_code_.isEmpty() ? QString{} : localize_message_code(task_log_error_code_);
-}
-
-bool ServiceClient::serviceSettingsAvailable() const noexcept {
-    return service_settings_available_;
-}
-
-bool ServiceClient::serviceSettingsLoading() const noexcept { return service_settings_loading_; }
-
-bool ServiceClient::serviceSettingsBusy() const noexcept { return service_settings_busy_; }
-
-int ServiceClient::jobRetentionMonths() const noexcept { return job_retention_months_; }
-
-QString ServiceClient::serviceSettingsErrorText() const {
-    return service_settings_error_code_.isEmpty()
-               ? QString{}
-               : localize_message_code(service_settings_error_code_);
-}
-
-void ServiceClient::refreshServiceSettings() {
-    if (state_ != State::kReady || !service_settings_available_ || service_settings_loading_ ||
-        service_settings_busy_) {
-        return;
-    }
-    service_settings_loading_ = true;
-    service_settings_error_code_.clear();
-    emit serviceSettingsChanged();
-    const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    service_settings_request_id_ = request_id;
-    const auto body = encode_get_service_settings_request(request_id);
-    if (!coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
-            return handle_get_service_settings_frame(frame_body);
-        })) {
-        service_settings_loading_ = false;
-        service_settings_error_code_ = QStringLiteral("service.send_failed");
-        emit serviceSettingsChanged();
-    }
-}
-
-bool ServiceClient::setJobRetentionMonths(const int months) {
-    if (state_ != State::kReady || !service_settings_available_ || service_settings_busy_ ||
-        service_settings_loading_) {
-        return false;
-    }
-    if (months != kJobRetentionMonths1 && months != kJobRetentionMonths3 &&
-        months != kJobRetentionMonths6) {
-        return false;
-    }
-    if (months == job_retention_months_) {
-        return true;
-    }
-    service_settings_busy_ = true;
-    service_settings_error_code_.clear();
-    pending_job_retention_months_ = months;
-    service_settings_update_idempotency_key_ = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    emit serviceSettingsChanged();
-    const auto request_id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    service_settings_update_request_id_ = request_id;
-    const auto body = encode_update_service_settings_request(
-        request_id, service_settings_update_idempotency_key_, months);
-    if (!coordinator_->begin_request(request_id, body, [this](const QByteArray& frame_body) {
-            return handle_update_service_settings_frame(frame_body);
-        })) {
-        service_settings_busy_ = false;
-        service_settings_error_code_ = QStringLiteral("service.send_failed");
-        emit serviceSettingsChanged();
-        return false;
-    }
-    return true;
 }
 
 SourceInventoryModel* ServiceClient::sources() noexcept { return &sources_; }
@@ -1149,55 +1094,6 @@ void ServiceClient::reset_task_log() {
     emit taskLogChanged();
 }
 
-RequestDisposition ServiceClient::handle_get_service_settings_frame(const QByteArray& body) {
-    QJsonObject root;
-    if (!parse_response_root(body, extract_response_request_id(body), root)) {
-        return RequestDisposition::kProtocolError;
-    }
-    if (is_service_settings_failure_response(root)) {
-        finish_service_settings_failure(root.value(QStringLiteral("message_code")).toString());
-        return RequestDisposition::kFinished;
-    }
-    ServiceSettings settings;
-    if (!parse_service_settings_response(root, settings)) {
-        // Fail safe: an unexpected-but-addressed reply must not leave the
-        // settings UI disabled forever behind a stuck loading flag.
-        finish_service_settings_failure(QStringLiteral("service.settings_failed"));
-        return RequestDisposition::kProtocolError;
-    }
-    job_retention_months_ = settings.job_retention_months;
-    service_settings_loading_ = false;
-    service_settings_error_code_.clear();
-    service_settings_request_id_.clear();
-    emit serviceSettingsChanged();
-    return RequestDisposition::kFinished;
-}
-
-RequestDisposition ServiceClient::handle_update_service_settings_frame(const QByteArray& body) {
-    QJsonObject root;
-    if (!parse_response_root(body, extract_response_request_id(body), root)) {
-        return RequestDisposition::kProtocolError;
-    }
-    if (is_command_failure_response(root, kUpdateServiceSettingsRequestKind)) {
-        finish_service_settings_failure(root.value(QStringLiteral("message_code")).toString());
-        return RequestDisposition::kFinished;
-    }
-    CommandAck ack;
-    if (!parse_command_ack_response(root, kUpdateServiceSettingsRequestKind, ack)) {
-        // Fail safe: an unexpected-but-addressed reply must not leave the
-        // settings UI disabled forever behind a stuck busy flag.
-        finish_service_settings_failure(QStringLiteral("service.settings_update_failed"));
-        return RequestDisposition::kProtocolError;
-    }
-    job_retention_months_ = pending_job_retention_months_;
-    service_settings_busy_ = false;
-    service_settings_error_code_.clear();
-    service_settings_update_request_id_.clear();
-    service_settings_update_idempotency_key_.clear();
-    emit serviceSettingsChanged();
-    return RequestDisposition::kFinished;
-}
-
 RequestDisposition ServiceClient::handle_hypervisor_status_frame(const QByteArray& body) {
     QJsonObject root;
     if (!parse_response_root(body, extract_response_request_id(body), root)) {
@@ -1206,13 +1102,13 @@ RequestDisposition ServiceClient::handle_hypervisor_status_frame(const QByteArra
     hypervisor_status_loading_ = false;
     hypervisor_status_request_id_.clear();
     if (is_boot_check_hypervisor_status_failure_response(root)) {
-        // Status stays at its previous snapshot; the wizard still renders the
-        // installed flags from capabilities.
+        hypervisor_status_.clear();
         emit hypervisorStatusChanged();
         return RequestDisposition::kFinished;
     }
     QList<BootCheckHypervisorStatus> statuses;
     if (!parse_boot_check_hypervisor_status_response(root, statuses)) {
+        hypervisor_status_.clear();
         emit hypervisorStatusChanged();
         return RequestDisposition::kProtocolError;
     }
@@ -1242,33 +1138,11 @@ RequestDisposition ServiceClient::handle_hypervisor_refresh_frame(const QByteArr
         parse_command_ack_response(root, kRefreshBootCheckHypervisorStatusRequestKind, ack)) {
         // Probe accepted: pull the status now so the UI flips into "probing".
         start_hypervisor_status_query();
+    } else {
+        hypervisor_status_.clear();
     }
     emit hypervisorStatusChanged();
     return RequestDisposition::kFinished;
-}
-
-void ServiceClient::finish_service_settings_failure(const QString& message_code) {
-    service_settings_loading_ = false;
-    service_settings_busy_ = false;
-    service_settings_error_code_ =
-        message_code.isEmpty() ? QStringLiteral("service.settings_failed") : message_code;
-    service_settings_request_id_.clear();
-    service_settings_update_request_id_.clear();
-    service_settings_update_idempotency_key_.clear();
-    emit serviceSettingsChanged();
-}
-
-void ServiceClient::reset_service_settings() {
-    service_settings_available_ = false;
-    service_settings_loading_ = false;
-    service_settings_busy_ = false;
-    job_retention_months_ = kDefaultJobRetentionMonths;
-    pending_job_retention_months_ = kDefaultJobRetentionMonths;
-    service_settings_error_code_.clear();
-    service_settings_request_id_.clear();
-    service_settings_update_request_id_.clear();
-    service_settings_update_idempotency_key_.clear();
-    emit serviceSettingsChanged();
 }
 
 void ServiceClient::reset_jobs() {

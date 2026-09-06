@@ -3166,5 +3166,89 @@ for critical volumes now</translation>
         <source>Verification request is invalid</source>
         <translation>Verification request is invalid</translation>
     </message>
+    <message id="aegra.settings.category.general">
+        <source>General</source>
+        <translation>General</translation>
+    </message>
+    <message id="aegra.settings.category.appearance">
+        <source>Appearance</source>
+        <translation>Appearance</translation>
+    </message>
+    <message id="aegra.settings.close_action_desc">
+        <source>Choose what happens when the main window is closed</source>
+        <translation>Choose what happens when the main window is closed</translation>
+    </message>
+    <message id="aegra.settings.category.boot_check">
+        <source>Boot Check</source>
+        <translation>Boot Check</translation>
+    </message>
+    <message id="aegra.settings.boot_check.cpu">
+        <source>VM CPU count</source>
+        <translation>VM CPU count</translation>
+    </message>
+    <message id="aegra.settings.boot_check.cpu_desc">
+        <source>Logical processors assigned to each Boot Check VM. The default is this host's maximum.</source>
+        <translation>Logical processors assigned to each Boot Check VM. The default is this host's maximum.</translation>
+    </message>
+    <message id="aegra.settings.boot_check.memory">
+        <source>VM memory</source>
+        <translation>VM memory</translation>
+    </message>
+    <message id="aegra.settings.boot_check.memory_desc">
+        <source>Memory assigned to each VM (minimum 2 GB). This host has %1 GB in total.</source>
+        <translation>Memory assigned to each VM (minimum 2 GB). This host has %1 GB in total.</translation>
+    </message>
+    <message id="aegra.settings.boot_check.concurrency">
+        <source>Concurrent Boot Checks</source>
+        <translation>Concurrent Boot Checks</translation>
+    </message>
+    <message id="aegra.settings.boot_check.concurrency_desc">
+        <source>Maximum simultaneous VMs after reserving memory for Windows. Current effective limit: %1.</source>
+        <translation>Maximum simultaneous VMs after reserving memory for Windows. Current effective limit: %1.</translation>
+    </message>
+    <message id="aegra.settings.category.verify">
+        <source>Verify</source>
+        <translation>Verify</translation>
+    </message>
+    <message id="aegra.settings.verify.scope">
+        <source>Verification scope</source>
+        <translation>Verification scope</translation>
+    </message>
+    <message id="aegra.settings.verify.scope_desc">
+        <source>Choose whether post-backup verification checks only the new backup file or every file in its recovery chain.</source>
+        <translation>Choose whether post-backup verification checks only the new backup file or every file in its recovery chain.</translation>
+    </message>
+    <message id="aegra.settings.verify.scope.single">
+        <source>Single backup file</source>
+        <translation>Single backup file</translation>
+    </message>
+    <message id="aegra.settings.verify.scope.full_chain">
+        <source>Full recovery chain</source>
+        <translation>Full recovery chain</translation>
+    </message>
+    <message id="aegra.settings.verify.concurrency">
+        <source>Concurrent verifications</source>
+        <translation>Concurrent verifications</translation>
+    </message>
+    <message id="aegra.settings.verify.concurrency_desc">
+        <source>Maximum number of Verify Worker processes that may run at the same time. The default is 2.</source>
+        <translation>Maximum number of Verify Worker processes that may run at the same time. The default is 2.</translation>
+    </message>
+    <message id="aegra.settings.boot_check.default_hypervisor">
+        <source>Default hypervisor</source>
+        <translation>Default hypervisor</translation>
+    </message>
+    <message id="aegra.settings.boot_check.default_hypervisor_desc">
+        <source>Preferred platform for new Boot Check schedules.</source>
+        <translation>Preferred platform for new Boot Check schedules.</translation>
+    </message>
+    <message id="aegra.backup.post.boot_check_help">
+        <source>Boot Check requires VirtualBox or Hyper-V to be installed and available on this computer.</source>
+        <translation>Boot Check requires VirtualBox or Hyper-V to be installed and available on this computer.</translation>
+    </message>
+    <message id="aegra.backup.post.boot_check_prerequisites_failed">
+        <source>Boot Check cannot be enabled because the configured hypervisor is unavailable.</source>
+        <translation>Boot Check cannot be enabled because the configured hypervisor is unavailable.</translation>
+    </message>
 </context>
 </TS>

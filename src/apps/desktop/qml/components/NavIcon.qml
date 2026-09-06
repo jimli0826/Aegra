@@ -217,6 +217,54 @@ Item {
                 rrect(9.5, 15, 4, 4, 1.2)
                 break
 
+            case "appearance": // palette
+                ctx.beginPath()
+                ctx.arc(12, 12, 8.5, Math.PI * 0.15, Math.PI * 1.95, false)
+                ctx.quadraticCurveTo(21, 13, 17.5, 14)
+                ctx.quadraticCurveTo(15, 14.5, 15.5, 17)
+                ctx.quadraticCurveTo(16, 20, 12, 20.5)
+                ctx.stroke()
+                ctx.beginPath()
+                ctx.arc(8, 9, 1, 0, Math.PI * 2)
+                ctx.fill()
+                ctx.beginPath()
+                ctx.arc(12, 7, 1, 0, Math.PI * 2)
+                ctx.fill()
+                ctx.beginPath()
+                ctx.arc(16, 9, 1, 0, Math.PI * 2)
+                ctx.fill()
+                break
+
+            case "boot_check": // monitor-check
+                rrect(3, 4, 18, 13, 2)
+                ctx.beginPath()
+                ctx.moveTo(8, 21)
+                ctx.lineTo(16, 21)
+                ctx.moveTo(12, 17)
+                ctx.lineTo(12, 21)
+                ctx.moveTo(8, 10)
+                ctx.lineTo(11, 13)
+                ctx.lineTo(16, 8)
+                ctx.stroke()
+                break
+
+            case "verify": // shield-check
+                ctx.beginPath()
+                ctx.moveTo(12, 3)
+                ctx.lineTo(20, 6)
+                ctx.lineTo(20, 11)
+                ctx.quadraticCurveTo(20, 17, 12, 21)
+                ctx.quadraticCurveTo(4, 17, 4, 11)
+                ctx.lineTo(4, 6)
+                ctx.closePath()
+                ctx.stroke()
+                ctx.beginPath()
+                ctx.moveTo(8, 12)
+                ctx.lineTo(11, 15)
+                ctx.lineTo(16, 9)
+                ctx.stroke()
+                break
+
             case "feedback": // message-circle
                 circle(12, 11, 7.5)
                 ctx.beginPath()

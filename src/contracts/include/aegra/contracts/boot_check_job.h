@@ -10,13 +10,12 @@
 
 namespace aegra::contracts {
 
-inline constexpr std::uint32_t kBootCheckJobSchemaVersion = 2;
+inline constexpr std::uint32_t kBootCheckJobSchemaVersion = 3;
 inline constexpr std::size_t kMaximumBootCheckChainDepth = 128;
 
 /// One BootCheck job for the single-task AegraBootCheck process. The host
-/// derives everything else (Boot Profile, firmware, VM shape) from the
-/// authenticated archive chain and its trusted configuration; the request never
-/// carries hypervisor paths, VM parameters, or plaintext credentials.
+/// derives everything else from the authenticated archive chain and trusted
+/// Service settings; the request never carries hypervisor paths or plaintext credentials.
 struct BootCheckJobRequest final {
     std::uint32_t schema_version{kBootCheckJobSchemaVersion};
     std::string job_id;
@@ -24,6 +23,8 @@ struct BootCheckJobRequest final {
     /// Provider selected by the user when the owning schedule was saved. The
     /// host must not fall back to another provider.
     BootCheckHypervisor hypervisor{BootCheckHypervisor::kVirtualBox};
+    std::uint32_t cpu_count{8};
+    std::uint32_t memory_mib{4096};
     /// Base-first volume_set archive chain (Full root ... tip).
     std::vector<std::string> source_refs;
     /// One credential per layer; an empty SecretRef means an unencrypted layer.

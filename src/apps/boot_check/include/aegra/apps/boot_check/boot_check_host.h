@@ -39,8 +39,6 @@ struct BootCheckHostOptions final {
     /// user's default VirtualBox registry and is visible in their VirtualBox
     /// Manager. Does not affect the capability probe, which stays isolated.
     bool use_isolated_vbox_home{true};
-    std::uint32_t cpu_count{8};
-    std::uint32_t memory_mib{4096};
     std::uint64_t overlay_limit_bytes{8ULL * 1024ULL * 1024ULL * 1024ULL};
     /// Overlay-growth FALLBACK threshold, used only when the hypervisor guest
     /// heartbeat is unavailable (Hyper-V Integration Services disabled, or

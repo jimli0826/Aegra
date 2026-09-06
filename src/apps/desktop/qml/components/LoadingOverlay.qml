@@ -7,7 +7,7 @@ import ".."
  */
 Rectangle {
     id: root
-    color: Theme.colorScrim
+    color: root.dimBackground ? Theme.colorScrim : "transparent"
     visible: false
     z: 1000
     opacity: visible ? 1 : 0
@@ -17,6 +17,7 @@ Rectangle {
 
     property string message: ""
     property bool actionsVisible: false
+    property bool dimBackground: true
     signal quitRequested()
     signal diagnoseRequested()
 

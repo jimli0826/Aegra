@@ -1050,9 +1050,22 @@ QByteArray encode_get_service_settings_request(const QString& request_id) {
 
 QByteArray encode_update_service_settings_request(const QString& request_id,
                                                   const QString& idempotency_key,
-                                                  const int job_retention_months) {
+                                                  const int job_retention_months,
+                                                  const int default_boot_check_hypervisor,
+                                                  const int boot_check_cpu_count,
+                                                  const int boot_check_memory_mib,
+                                                  const int boot_check_concurrency,
+                                                  const int verify_scope,
+                                                  const int verify_concurrency) {
     const QJsonObject payload{
-        {QStringLiteral("job_retention_months"), static_cast<qint64>(job_retention_months)}};
+        {QStringLiteral("job_retention_months"), static_cast<qint64>(job_retention_months)},
+        {QStringLiteral("default_boot_check_hypervisor"),
+         static_cast<qint64>(default_boot_check_hypervisor)},
+        {QStringLiteral("boot_check_cpu_count"), static_cast<qint64>(boot_check_cpu_count)},
+        {QStringLiteral("boot_check_memory_mib"), static_cast<qint64>(boot_check_memory_mib)},
+        {QStringLiteral("boot_check_concurrency"), static_cast<qint64>(boot_check_concurrency)},
+        {QStringLiteral("verify_scope"), static_cast<qint64>(verify_scope)},
+        {QStringLiteral("verify_concurrency"), static_cast<qint64>(verify_concurrency)}};
     return QJsonDocument(
                QJsonObject{
                    {QStringLiteral("schema_version"), static_cast<qint64>(kServiceSchemaVersion)},
@@ -1078,16 +1091,61 @@ bool parse_service_settings_response(const QJsonObject& root, ServiceSettings& r
     }
     const auto payload = root.value(QStringLiteral("payload")).toObject();
     qint64 months = 0;
+    qint64 default_hypervisor = 0;
+    qint64 cpu_count = 0;
+    qint64 memory_mib = 0;
+    qint64 concurrency = 0;
+    qint64 effective_concurrency = 0;
+    qint64 verify_scope = 0;
+    qint64 verify_concurrency = 0;
+    qint64 logical_cpu_count = 0;
+    qint64 physical_memory_mib = 0;
+    qint64 memory_budget_mib = 0;
     qint64 updated = 0;
-    if (!has_exact_keys(payload, {"job_retention_months", "updated_utc_ms"}) ||
+    if (!has_exact_keys(payload, {"job_retention_months", "default_boot_check_hypervisor",
+                                  "boot_check_cpu_count",
+                                  "boot_check_memory_mib", "boot_check_concurrency",
+                                  "boot_check_effective_concurrency", "verify_scope",
+                                  "verify_concurrency", "host_logical_cpu_count",
+                                  "host_physical_memory_mib", "boot_check_memory_budget_mib",
+                                  "updated_utc_ms"}) ||
         !integer_in_range(payload.value(QStringLiteral("job_retention_months")), 1, 6, months) ||
         (months != kJobRetentionMonths1 && months != kJobRetentionMonths3 &&
          months != kJobRetentionMonths6) ||
+        !integer_in_range(payload.value(QStringLiteral("default_boot_check_hypervisor")), 1, 2,
+                          default_hypervisor) ||
+        !integer_in_range(payload.value(QStringLiteral("boot_check_cpu_count")), 1, 32,
+                          cpu_count) ||
+        !integer_in_range(payload.value(QStringLiteral("boot_check_memory_mib")), 2048, 32768,
+                          memory_mib) ||
+        !integer_in_range(payload.value(QStringLiteral("boot_check_concurrency")), 1, 32,
+                          concurrency) ||
+        !integer_in_range(payload.value(QStringLiteral("boot_check_effective_concurrency")), 0,
+                          32, effective_concurrency) ||
+        !integer_in_range(payload.value(QStringLiteral("verify_scope")), 1, 2, verify_scope) ||
+        !integer_in_range(payload.value(QStringLiteral("verify_concurrency")), 1, 32,
+                          verify_concurrency) ||
+        !integer_in_range(payload.value(QStringLiteral("host_logical_cpu_count")), 1, 32,
+                          logical_cpu_count) ||
+        !integer_in_range(payload.value(QStringLiteral("host_physical_memory_mib")), 2048,
+                          (std::numeric_limits<qint64>::max)(), physical_memory_mib) ||
+        !integer_in_range(payload.value(QStringLiteral("boot_check_memory_budget_mib")), 0,
+                          (std::numeric_limits<qint64>::max)(), memory_budget_mib) ||
         !integer_in_range(payload.value(QStringLiteral("updated_utc_ms")), 0,
                           (std::numeric_limits<qint64>::max)(), updated)) {
         return false;
     }
     result.job_retention_months = static_cast<int>(months);
+    result.default_boot_check_hypervisor = static_cast<int>(default_hypervisor);
+    result.boot_check_cpu_count = static_cast<int>(cpu_count);
+    result.boot_check_memory_mib = static_cast<int>(memory_mib);
+    result.boot_check_concurrency = static_cast<int>(concurrency);
+    result.boot_check_effective_concurrency = static_cast<int>(effective_concurrency);
+    result.verify_scope = static_cast<int>(verify_scope);
+    result.verify_concurrency = static_cast<int>(verify_concurrency);
+    result.host_logical_cpu_count = static_cast<int>(logical_cpu_count);
+    result.host_physical_memory_mib = physical_memory_mib;
+    result.boot_check_memory_budget_mib = memory_budget_mib;
     result.updated_utc_ms = updated;
     return true;
 }

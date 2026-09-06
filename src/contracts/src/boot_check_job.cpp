@@ -52,6 +52,10 @@ base::Result<void> validate_boot_check_job_request(const BootCheckJobRequest& re
     if (!is_known_boot_check_hypervisor(request.hypervisor)) {
         return invalid("boot check hypervisor is invalid");
     }
+    if (request.cpu_count == 0 || request.cpu_count > 32 || request.memory_mib < 2048 ||
+        request.memory_mib > 32768) {
+        return invalid("boot check VM resources are invalid");
+    }
     if (request.source_refs.empty() || request.source_refs.size() > kMaximumBootCheckChainDepth) {
         return invalid("boot check source chain is invalid");
     }

@@ -149,6 +149,16 @@ struct MountSessionPage final {
 
 struct ServiceSettings final {
     int job_retention_months{kDefaultJobRetentionMonths};
+    int default_boot_check_hypervisor{1};
+    int boot_check_cpu_count{1};
+    int boot_check_memory_mib{4096};
+    int boot_check_concurrency{2};
+    int boot_check_effective_concurrency{2};
+    int verify_scope{1};
+    int verify_concurrency{2};
+    int host_logical_cpu_count{1};
+    qint64 host_physical_memory_mib{2048};
+    qint64 boot_check_memory_budget_mib{0};
     qint64 updated_utc_ms{0};
 };
 
@@ -354,8 +364,14 @@ encode_plan_delete_recovery_points_request(const QString& request_id, const QStr
                                                             bool confirmed = true);
 [[nodiscard]] QByteArray encode_get_service_settings_request(const QString& request_id);
 [[nodiscard]] QByteArray encode_update_service_settings_request(const QString& request_id,
-                                                                const QString& idempotency_key,
-                                                                int job_retention_months);
+                                                                 const QString& idempotency_key,
+                                                                 int job_retention_months,
+                                                                 int default_boot_check_hypervisor,
+                                                                 int boot_check_cpu_count,
+                                                                 int boot_check_memory_mib,
+                                                                 int boot_check_concurrency,
+                                                                 int verify_scope,
+                                                                 int verify_concurrency);
 
 [[nodiscard]] bool parse_response_root(const QByteArray& body, const QString& request_id,
                                        QJsonObject& root);

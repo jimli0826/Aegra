@@ -73,6 +73,7 @@ target_compile_definitions(
 target_link_libraries(
     aegra_personal_worker
     PRIVATE
+        Aegra::AppWorkerTaskLog
         Aegra::AppWorkerPersonal
         Aegra::AdapterDokan
         Aegra::AdapterPersonalArchive

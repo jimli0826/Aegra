@@ -375,8 +375,8 @@ make_image_identity(ports::IRandomSource& random, const base::CancellationToken&
     vm_request.job_directory = request.job_directory;
     vm_request.parent_disk_path = resources.parent_disk_path;
     vm_request.firmware = resources.firmware;
-    vm_request.cpu_count = options.cpu_count;
-    vm_request.memory_mib = options.memory_mib;
+    vm_request.cpu_count = request.cpu_count;
+    vm_request.memory_mib = request.memory_mib;
     vm_request.overlay_limit_bytes = options.overlay_limit_bytes;
     auto session = resources.provider->create(vm_request, cancellation);
     if (!session) {
@@ -622,8 +622,8 @@ void log_request(WorkerTaskLog* const log, const contracts::BootCheckJobRequest&
     }
     log->field_u64("password_layers", request.credential_refs.size() - empty_password_layers);
     log->field_u64("empty_password_layers", empty_password_layers);
-    log->field_u64("cpu_count", options.cpu_count);
-    log->field_u64("memory_mib", options.memory_mib);
+    log->field_u64("cpu_count", request.cpu_count);
+    log->field_u64("memory_mib", request.memory_mib);
     log->field_bytes("overlay_limit", options.overlay_limit_bytes);
     log->field_bytes("boot_confirmed_overlay", options.boot_confirmed_overlay_bytes);
     log->field_u64("boot_timeout_ms", options.boot_timeout_ms);

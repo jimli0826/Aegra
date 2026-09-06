@@ -291,12 +291,50 @@ Window {
                     anchors.fill: parent
                     z: 2500
 
-                    Rectangle {
+                    Item {
+                        id: settingsScrim
                         anchors.fill: parent
-                        color: Theme.colorScrim
                         opacity: window.settingsPanelOpen ? 1 : 0
                         visible: opacity > 0.01
                         Behavior on opacity { NumberAnimation { duration: 250 } }
+
+                        Canvas {
+                            id: settingsScrimCanvas
+                            anchors.fill: parent
+                            antialiasing: true
+
+                            onPaint: {
+                                const context = getContext("2d")
+                                const cornerRadius = Math.min(Theme.radiusWindow,
+                                                              width / 2, height / 2)
+                                context.reset()
+                                context.fillStyle = Theme.colorScrim
+                                context.beginPath()
+                                context.moveTo(0, 0)
+                                context.lineTo(width - cornerRadius, 0)
+                                context.quadraticCurveTo(width, 0, width, cornerRadius)
+                                context.lineTo(width, height - cornerRadius)
+                                context.quadraticCurveTo(width, height,
+                                                         width - cornerRadius, height)
+                                context.lineTo(0, height)
+                                context.closePath()
+                                context.fill()
+                            }
+
+                            onWidthChanged: requestPaint()
+                            onHeightChanged: requestPaint()
+
+                            Connections {
+                                target: Theme
+                                function onColorScrimChanged() {
+                                    settingsScrimCanvas.requestPaint()
+                                }
+                                function onRadiusWindowChanged() {
+                                    settingsScrimCanvas.requestPaint()
+                                }
+                            }
+                        }
+
                         MouseArea {
                             anchors.fill: parent
                             enabled: window.settingsPanelOpen
@@ -306,7 +344,8 @@ Window {
 
                     Rectangle {
                         id: settingsPanel
-                        width: Math.max(400, Math.min(parent.width * 0.55, 640))
+                        width: Math.min(parent.width,
+                                        Math.max(720, Math.min(parent.width * 0.88, 1080)))
                         anchors.top: parent.top
                         anchors.bottom: parent.bottom
                         anchors.topMargin: 60

@@ -428,7 +428,7 @@ Archive chain random I/O、timeout/cancel、差分盘配额和 guest probe。
 #### 2026-08-29 独立 BootCheck Host 记录
 
 - `apps/boot_check` 新增单任务 `AegraBootCheck.exe`：stdin 单次 `BootCheckJobRequest`
-  （contracts schema 2，必填 hypervisor；字段名含 password/secret 的明文凭据拒绝），stdout 复用 Worker
+  （contracts schema 3，必填 hypervisor、CPU 数与内存；字段名含 password/secret 的明文凭据拒绝），stdout 复用 Worker
   `WorkerResponse`/`TaskResult` wire shape 与退出码表，Service 后续可复用现有解码器；
 - 阶段流水 `validate_prerequisites → resolve_credentials → open_archive_chain →
   validate_boot_profile → present_vmdk → create_vm(含 attach) → start_vm → wait_boot_probe →

@@ -930,10 +930,54 @@ list_recovery_point_entries_response(const contracts::ServiceRequest& request,
                                           .count());
 }
 
+struct HostBootCheckCapacity final {
+    std::uint32_t logical_cpu_count{1};
+    std::uint64_t physical_memory_mib{contracts::kMinimumBootCheckMemoryMib};
+    std::uint64_t memory_budget_mib{0};
+};
+
+[[nodiscard]] HostBootCheckCapacity host_boot_check_capacity() noexcept {
+    HostBootCheckCapacity capacity;
+    capacity.logical_cpu_count = (std::min)(
+        contracts::kMaximumBootCheckCpuCount,
+        static_cast<std::uint32_t>((std::max)(1UL,
+                                               GetActiveProcessorCount(ALL_PROCESSOR_GROUPS))));
+    MEMORYSTATUSEX memory{};
+    memory.dwLength = sizeof(memory);
+    if (GlobalMemoryStatusEx(&memory) != FALSE) {
+        capacity.physical_memory_mib =
+            (std::max)(static_cast<std::uint64_t>(contracts::kMinimumBootCheckMemoryMib),
+                       memory.ullTotalPhys / (1024ULL * 1024ULL));
+    }
+    const auto reserve =
+        (std::max)(2ULL * 1024ULL, capacity.physical_memory_mib / 4ULL);
+    capacity.memory_budget_mib = capacity.physical_memory_mib > reserve
+                                     ? capacity.physical_memory_mib - reserve
+                                     : 0;
+    return capacity;
+}
+
 [[nodiscard]] contracts::ServiceSettings
 to_service_settings(const ports::ServiceSettingsRecord& record) {
+    const auto capacity = host_boot_check_capacity();
     contracts::ServiceSettings settings;
     settings.job_retention_months = record.job_retention_months;
+    settings.default_boot_check_hypervisor = record.default_boot_check_hypervisor;
+    settings.host_logical_cpu_count = capacity.logical_cpu_count;
+    settings.host_physical_memory_mib = capacity.physical_memory_mib;
+    settings.boot_check_memory_budget_mib = capacity.memory_budget_mib;
+    settings.boot_check_cpu_count =
+        (std::min)(record.boot_check_cpu_count, capacity.logical_cpu_count);
+    settings.boot_check_memory_mib = static_cast<std::uint32_t>((std::min)(
+        static_cast<std::uint64_t>(record.boot_check_memory_mib),
+        (std::min)(capacity.physical_memory_mib,
+                   static_cast<std::uint64_t>(contracts::kMaximumBootCheckMemoryMib))));
+    settings.boot_check_concurrency = record.boot_check_concurrency;
+    settings.verify_scope = record.verify_scope;
+    settings.verify_concurrency = record.verify_concurrency;
+    settings.boot_check_effective_concurrency = static_cast<std::uint32_t>((std::min)(
+        static_cast<std::uint64_t>(record.boot_check_concurrency),
+        capacity.memory_budget_mib / settings.boot_check_memory_mib));
     settings.updated_utc_ms = record.updated_utc_ms;
     return settings;
 }
@@ -997,6 +1041,13 @@ update_service_settings_response(const contracts::ServiceRequest& request,
         return capability_unavailable(request);
     }
     const auto& command = std::get<contracts::UpdateServiceSettingsCommand>(request.payload);
+    const auto capacity = host_boot_check_capacity();
+    if (command.boot_check_cpu_count > capacity.logical_cpu_count ||
+        command.boot_check_memory_mib > capacity.physical_memory_mib) {
+        return base::Result<contracts::ServiceResponse>::success(
+            failure(base::ErrorCode::kInvalidArgument, request.request_id, request.kind,
+                    "service.settings_resource_limit"));
+    }
     auto unit = runtime.control_plane->begin_unit_of_work(cancellation);
     if (!unit) {
         return base::Result<contracts::ServiceResponse>::success(failure(
@@ -1009,8 +1060,17 @@ update_service_settings_response(const contracts::ServiceRequest& request,
             failure(existing.error().code, request.request_id, request.kind,
                     "service.settings_update_failed"));
     }
-    const auto fingerprint = std::string("settings|job_retention_months=") +
-                             std::to_string(static_cast<unsigned>(command.job_retention_months));
+    const auto fingerprint =
+        std::string("settings|job_retention_months=") +
+        std::to_string(static_cast<unsigned>(command.job_retention_months)) +
+        "|default_boot_check_hypervisor=" +
+        std::to_string(static_cast<std::uint8_t>(command.default_boot_check_hypervisor)) +
+        "|boot_check_cpu_count=" + std::to_string(command.boot_check_cpu_count) +
+        "|boot_check_memory_mib=" + std::to_string(command.boot_check_memory_mib) +
+        "|boot_check_concurrency=" + std::to_string(command.boot_check_concurrency) +
+        "|verify_scope=" +
+        std::to_string(static_cast<std::uint8_t>(command.verify_scope)) +
+        "|verify_concurrency=" + std::to_string(command.verify_concurrency);
     if (existing.value()) {
         unit.value()->rollback();
         if (existing.value()->request_fingerprint != fingerprint) {
@@ -1035,6 +1095,12 @@ update_service_settings_response(const contracts::ServiceRequest& request,
     const auto now_utc_ms = host_now_utc_ms();
     ports::ServiceSettingsRecord record;
     record.job_retention_months = command.job_retention_months;
+    record.default_boot_check_hypervisor = command.default_boot_check_hypervisor;
+    record.boot_check_cpu_count = command.boot_check_cpu_count;
+    record.boot_check_memory_mib = command.boot_check_memory_mib;
+    record.boot_check_concurrency = command.boot_check_concurrency;
+    record.verify_scope = command.verify_scope;
+    record.verify_concurrency = command.verify_concurrency;
     record.updated_utc_ms = now_utc_ms;
     auto written = unit.value()->service_settings().upsert(record, cancellation);
     if (!written) {

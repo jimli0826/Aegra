@@ -46,6 +46,11 @@ struct VerifyJobDependencies final {
     ports::IRandomSource* random{nullptr};
 };
 
+[[nodiscard]] base::Result<contracts::StartVerifyCommand>
+expand_verify_scope(const contracts::StartVerifyCommand& command, contracts::VerifyScope scope,
+                    const VerifyJobDependencies& dependencies,
+                    base::CancellationToken cancellation);
+
 [[nodiscard]] base::Result<PreparedWorkerJob>
 prepare_verify_job(const contracts::StartVerifyCommand& command,
                    const std::optional<std::string>& archive_secret_ref,

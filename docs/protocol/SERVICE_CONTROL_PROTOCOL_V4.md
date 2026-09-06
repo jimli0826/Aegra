@@ -379,22 +379,23 @@ Footer，其它任务为 0。file_set backup 成功时 `requested_backup_type` /
 | 9 PrepareRestore | **仅 volume_set** RP；file_set RP 必须用 kind 15 |
 | 11 PlanDeleteRecoveryPoints | 请求 payload 为 `repository_connection_id` + `recovery_point_ids[]` + `archive_password`（exact 3）。`recovery_point_ids` 为 1–10000 个互不相同的 Recovery Point id；Service 对各根做 descendant 子树并集，生成一份 descendant-first 删除计划。响应 `root_recovery_point_id` 为请求中的第一个 id |
 | 12 GetRecoveryPointLayout | payload 增加 `content_kind`（"volume_set"/"file_set"）；volume_set 返回 volume geometry；file_set 返回空 `disks`/`volumes`（无磁盘布局，挂载为只读文件盘符） |
-| 16 GetServiceSettings | 控制面偏好：`job_retention_months` ∈ {1,3,6}，默认 3；`updated_utc_ms` |
+| 16 GetServiceSettings | 控制面偏好与主机资源投影：任务保留期、Verify 范围/并发、Boot Check 默认 hypervisor、CPU/内存/并发、有效并发、主机 CPU/内存/Boot Check 内存预算及 `updated_utc_ms` |
 
 非法对 file_set 使用 volume-only API → `service.content_kind_mismatch`。
 
-### Job retention（kind 16 / 49）
+### Service settings（kind 16 / 49）
 
 | 规则 | 说明 |
 | --- | --- |
 | 存储 | 控制面 SQLite `service_settings` 单行（`id=1`），非 Desktop 本地 QSettings |
-| 取值 | `job_retention_months` 仅允许 `1`、`3`、`6`；默认 `3` |
+| 取值 | `job_retention_months` 仅允许 `1`、`3`、`6`（默认 3）；`verify_scope` 为 1=单个备份文件（默认）或 2=从当前恢复点到 Full 的完整链，`verify_concurrency` 为 1–32（默认 2）；`default_boot_check_hypervisor` 为 1=VirtualBox（默认）或 2=Hyper-V；Boot Check CPU 1–32（默认主机最大值）、内存 2048–32768 MiB（默认 4096 且不得超过物理内存）、请求并发 1–32（默认 2） |
+| 内存保护 | Service 给 Windows 保留 `max(2048 MiB, 物理内存 25%)`；`boot_check_effective_concurrency = min(请求并发, floor(剩余预算 / 单 VM 内存))`。Supervisor 还累计所有活动 VM 的实际内存配置，并在启动时检查当前可用物理内存仍能容纳新 VM 与保留量；动态改设置或宿主内存压力都不得突破预算 |
 | 月长 | 保留窗口按 **30 天/月** 计算（`months * 30 * 86400000` ms），便于确定性 cutoff |
 | 删除对象 | 仅终端 Job（succeeded/failed/cancelled/interrupted）且 `completed_utc_ms < cutoff`；**不**删除 queued/running/cancelling |
 | 触发 | Service 启动时 purge；`UpdateServiceSettings` 成功后同事务 purge |
 | Get 请求 | kind 16，payload `{}`，capability `service.settings` |
-| Get 响应 | `{ "job_retention_months": 3, "updated_utc_ms": 0 }` |
-| Update 请求 | kind 49 命令，`idempotency_key` 必填，payload `{ "job_retention_months": 1\|3\|6 }` |
+| Get 响应 | exact keys：`job_retention_months`、`verify_scope`、`verify_concurrency`、`default_boot_check_hypervisor`、`boot_check_cpu_count`、`boot_check_memory_mib`、`boot_check_concurrency`、`boot_check_effective_concurrency`、`host_logical_cpu_count`、`host_physical_memory_mib`、`boot_check_memory_budget_mib`、`updated_utc_ms` |
+| Update 请求 | kind 49 命令，`idempotency_key` 必填，payload 使用七个持久化字段：任务保留期、Verify 两项、Boot Check 默认 hypervisor 与三项资源设置（不含主机资源投影） |
 | Update 响应 | `CommandAcknowledgement`；message_code `command.accepted` / `command.replayed`（与其他命令一致；Desktop 通用 ack 解析器仅接受这两个） |
 
 ---
@@ -649,6 +650,10 @@ payload 保持 repository/schedule/job 引用形状；若 Schedule 为 file_set�
 `deduplication_enabled`、`split_size_bytes` 或 `compression_level`；这些字段必须进入幂等请求指纹。
 `verify_after_backup`、`boot_check_after_backup` 与 `boot_check_hypervisor` 可更新，均必须进入幂等请求指纹；
 关闭 Verify 会同时关闭 BootCheck。
+
+`boot_check_hypervisor` 保留在 Schedule wire shape 中，但不决定后续执行平台。每次 StartBackup 提交时，
+Service 必须读取当前 `service_settings.default_boot_check_hypervisor` 并将其快照到该次 durable
+post-backup plan；设置变化只影响之后提交的 Backup，不改变已提交运行。
 Service 将 `backup_type` 一律写为 Incremental。
 更换 `repository_connection_id` 清空增量 tip。
 

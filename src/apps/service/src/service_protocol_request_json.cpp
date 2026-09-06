@@ -838,7 +838,14 @@ Json encode_request_payload(const contracts::ServiceRequest& request) {
     }
     case contracts::ServiceRequestKind::kUpdateServiceSettings: {
         const auto& body = std::get<contracts::UpdateServiceSettingsCommand>(request.payload);
-        return Json{{"job_retention_months", body.job_retention_months}};
+        return Json{{"job_retention_months", body.job_retention_months},
+                    {"default_boot_check_hypervisor",
+                     static_cast<std::uint8_t>(body.default_boot_check_hypervisor)},
+                    {"boot_check_cpu_count", body.boot_check_cpu_count},
+                    {"boot_check_memory_mib", body.boot_check_memory_mib},
+                    {"boot_check_concurrency", body.boot_check_concurrency},
+                    {"verify_scope", static_cast<std::uint8_t>(body.verify_scope)},
+                    {"verify_concurrency", body.verify_concurrency}};
     }
     case contracts::ServiceRequestKind::kGetBootCheckHypervisorStatus:
         (void)std::get<contracts::BootCheckHypervisorStatusQuery>(request.payload);
@@ -1017,13 +1024,27 @@ contracts::ServiceRequestPayload parse_request_payload(const contracts::ServiceR
             parse_page_request(payload.at("page"))};
     }
     case contracts::ServiceRequestKind::kUpdateServiceSettings: {
-        constexpr std::array<std::string_view, 1> keys{"job_retention_months"};
+        constexpr std::array<std::string_view, 7> keys{
+            "job_retention_months", "default_boot_check_hypervisor", "boot_check_cpu_count",
+            "boot_check_memory_mib", "boot_check_concurrency", "verify_scope",
+            "verify_concurrency"};
         if (!exact_keys(payload, keys)) {
             throw std::invalid_argument("update service settings fields are invalid");
         }
         contracts::UpdateServiceSettingsCommand command;
         command.job_retention_months =
             unsigned_value<std::uint8_t>(payload, "job_retention_months");
+        command.default_boot_check_hypervisor = static_cast<contracts::BootCheckHypervisor>(
+            unsigned_value<std::uint8_t>(payload, "default_boot_check_hypervisor"));
+        command.boot_check_cpu_count =
+            unsigned_value<std::uint32_t>(payload, "boot_check_cpu_count");
+        command.boot_check_memory_mib =
+            unsigned_value<std::uint32_t>(payload, "boot_check_memory_mib");
+        command.boot_check_concurrency =
+            unsigned_value<std::uint32_t>(payload, "boot_check_concurrency");
+        command.verify_scope = static_cast<contracts::VerifyScope>(
+            unsigned_value<std::uint8_t>(payload, "verify_scope"));
+        command.verify_concurrency = unsigned_value<std::uint32_t>(payload, "verify_concurrency");
         return command;
     }
     case contracts::ServiceRequestKind::kGetBootCheckHypervisorStatus: {

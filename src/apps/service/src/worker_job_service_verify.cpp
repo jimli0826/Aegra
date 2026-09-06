@@ -5,6 +5,7 @@
 #include "aegra/adapters/windows_system/windows_system.h"
 #include "aegra/personal_repository/catalog.h"
 #include "aegra/personal_repository/catalog_scanner.h"
+#include "aegra/personal_repository/chain_graph.h"
 
 #include <algorithm>
 #include <chrono>
@@ -240,6 +241,48 @@ prepare_volume_batch(const VerifyPrepareContext& ctx,
 }
 
 } // namespace
+
+base::Result<contracts::StartVerifyCommand>
+expand_verify_scope(const contracts::StartVerifyCommand& command, const contracts::VerifyScope scope,
+                    const VerifyJobDependencies& dependencies,
+                    const base::CancellationToken cancellation) {
+    if (scope == contracts::VerifyScope::kSingleBackupFile) {
+        return base::Result<contracts::StartVerifyCommand>::success(command);
+    }
+    auto repository = dependencies.control_plane->get_repository_connection(
+        command.repository_connection_id, cancellation);
+    if (!repository || !repository.value()) {
+        return base::Result<contracts::StartVerifyCommand>::failure(
+            !repository ? repository.error()
+                        : base::Error{base::ErrorCode::kNotFound,
+                                      "repository connection was not found"});
+    }
+    auto storage = dependencies.storage_factory->open(repository.value()->locator, cancellation);
+    if (!storage) {
+        return base::Result<contracts::StartVerifyCommand>::failure(storage.error());
+    }
+    personal_repository::RepositoryCatalogScanner scanner(storage.value()->reader(),
+                                                          storage.value()->enumerator());
+    auto loaded = scanner.load_entries(cancellation);
+    if (!loaded) {
+        return base::Result<contracts::StartVerifyCommand>::failure(loaded.error());
+    }
+    auto graph = personal_repository::RecoveryPointGraph::build(std::move(loaded.value().entries));
+    if (!graph) {
+        return base::Result<contracts::StartVerifyCommand>::failure(graph.error());
+    }
+    auto chain = graph.value().resolve_chain(command.recovery_point_ids.front());
+    if (!chain) {
+        return base::Result<contracts::StartVerifyCommand>::failure(chain.error());
+    }
+    contracts::StartVerifyCommand expanded = command;
+    expanded.recovery_point_ids.clear();
+    expanded.recovery_point_ids.reserve(chain.value().size());
+    for (const auto& entry : chain.value()) {
+        expanded.recovery_point_ids.push_back(entry.file_uuid);
+    }
+    return base::Result<contracts::StartVerifyCommand>::success(std::move(expanded));
+}
 
 std::string verify_command_fingerprint(const contracts::StartVerifyCommand& command) {
     auto ids = command.recovery_point_ids;

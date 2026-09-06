@@ -42,7 +42,7 @@ src/adapters/sqlite/
   显式连接探测的持久化快照；list 只读该值，不触发 Repository I/O。
 - `IJobStore`：insert/get/list/CAS `transition`/`mark_active_as_interrupted`/
   `purge_terminal_completed_before`。
-- `IServiceSettingsStore`：get/upsert 单行控制面偏好（job retention）。
+- `IServiceSettingsStore`：get/upsert 单行控制面偏好（job retention、Verify、Boot Check）。
 - `IScheduleStore`：upsert/get/list/remove。
 - `IAuditEventStore`：append/list。
 - `ICommandStore`：按 idempotency key 读取/插入不可变 command record。
@@ -57,7 +57,7 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
 
 ## Schema 与不变量
 
-- `schema_meta.version` 当前为 `27`（`ports::kControlPlaneSchemaVersion`；v21 增加分卷大小，v22 增加压缩级别，v23 增加备份后 Verify 策略，v24 增加 durable `post_backup_plans`，v25 增加 BootCheck hypervisor 选择与 plan 快照，v26 允许 `jobs.operation` 取 BootCheck(5)，BootCheck 运行由 `PostBackupCoordinator` 记录为控制面 Job 供任务日志展示，Verify/BootCheck Job 可携带所属 `schedule_id` 供 UI 按 Schedule 展示后置动作状态，v27 解除 `boot_check_after_backup` 对 `verify_after_backup` 的依赖，两者相互独立）。产品未发布：
+- `schema_meta.version` 当前为 `30`（`ports::kControlPlaneSchemaVersion`；v21 增加分卷大小，v22 增加压缩级别，v23 增加备份后 Verify 策略，v24 增加 durable `post_backup_plans`，v25 增加 BootCheck hypervisor 选择与 plan 快照，v26 允许 `jobs.operation` 取 BootCheck(5)，BootCheck 运行由 `PostBackupCoordinator` 记录为控制面 Job 供任务日志展示，Verify/BootCheck Job 可携带所属 `schedule_id` 供 UI 按 Schedule 展示后置动作状态，v27 解除 `boot_check_after_backup` 对 `verify_after_backup` 的依赖，v28 增加 Boot Check VM 资源与并发设置，v29 增加 Verify 范围与并发设置，v30 增加默认 Boot Check hypervisor）。产品未发布：
   - 新库 `CREATE IF NOT EXISTS` 即为当前完整表结构，再写入当前 version；
   - **不提供** 历史 schema 的 `ALTER` 迁移或兼容读取；旧开发库必须删除后重建；
   - 非 0 且非当前版本 → `kUnsupportedVersion`。
@@ -67,8 +67,12 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
 - schema 20（ADR-0025）：`restore_preflights` 增加 `volume_size_policy`、`feasibility`、
   `minimum_target_bytes`、`relocation_bytes`、`scratch_upper_bound_bytes`、`shrink_plan_digest`、
   `target_binding_digest`；`target_capacity_bytes` 仅要求 `> 0`（允许小于源逻辑大小的 provisional 缩容预检）。
-- `service_settings`（schema 16）：单行 `id=1`；`job_retention_months` ∈ {1,3,6} 默认 3；
-  `updated_utc_ms`。Service 启动与 `UpdateServiceSettings` 时按 30 天/月对终端 Job 做
+- `service_settings`（schema 30）：单行 `id=1`；除 `job_retention_months`
+  ∈ {1,3,6} 默认 3 外，持久化 Verify 范围（1=单个备份文件，2=从当前恢复点到 Full 的完整链；默认 1）
+  与并发数（1–32，默认 2），以及 Boot Check 的默认 hypervisor（VirtualBox/Hyper-V，默认 VirtualBox）、
+  CPU 数（默认 32，Service 按主机逻辑 CPU 截断）、
+  单 VM 内存 MiB（默认 4096，最小 2048）和请求并发数（默认 2）；`updated_utc_ms`。
+  Service 启动与 `UpdateServiceSettings` 时按 30 天/月对终端 Job 做
   `purge_terminal_completed_before` 硬删除。
 - `jobs.schedule_id`：backup Job 必填（拥有方 Schedule）；restore/verify 等为空串。ListJobs 投影到
   JobSummary.schedule_id，供 Desktop 按 schedule 绑定运行状态（同源 Schedule 互不串台）。
@@ -83,7 +87,8 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
   volume `source_ids` 或 file `selection_id` 列表、`repository_connection_id`、exclude、encryption；
   volume 还必须覆盖 `deduplication_enabled` 与 `split_size_bytes`；
   两种 content_kind 都必须覆盖 `compression_level` 与 `verify_after_backup`；volume_set 还覆盖
-  `boot_check_after_backup` 与 `boot_check_hypervisor`；
+  `boot_check_after_backup` 与 `boot_check_hypervisor`；后者不再决定执行平台，Backup 提交时从当前
+  `service_settings.default_boot_check_hypervisor` 解析本次运行平台；
   重放时只比指纹，不从 effective Job 状态猜 demote。有 `idempotency_key` 时指纹不得为空。
 - `jobs` FI7 结果投影（schema 13）：`result_requested_backup_type`、`result_effective_backup_type`、
   `result_effective_parent_uuid`、`result_incremental_downgrade_reason`。终端 transition 从 TaskResult

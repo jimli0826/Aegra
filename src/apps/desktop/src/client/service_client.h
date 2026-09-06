@@ -46,9 +46,11 @@ class ServiceClient final : public QObject {
     /// kBootCheckProbeState* (1 not probed, 2 probing, 3 probed); UnavailableText
     /// is a localized reason, non-empty only for a probed unavailable hypervisor.
     Q_PROPERTY(int virtualBoxProbeState READ virtualBoxProbeState NOTIFY hypervisorStatusChanged)
+    Q_PROPERTY(bool virtualBoxAvailable READ virtualBoxAvailable NOTIFY hypervisorStatusChanged)
     Q_PROPERTY(QString virtualBoxUnavailableText READ virtualBoxUnavailableText NOTIFY
                    hypervisorStatusChanged)
     Q_PROPERTY(int hyperVProbeState READ hyperVProbeState NOTIFY hypervisorStatusChanged)
+    Q_PROPERTY(bool hyperVAvailable READ hyperVAvailable NOTIFY hypervisorStatusChanged)
     Q_PROPERTY(
         QString hyperVUnavailableText READ hyperVUnavailableText NOTIFY hypervisorStatusChanged)
     Q_PROPERTY(bool hypervisorProbing READ hypervisorProbing NOTIFY hypervisorStatusChanged)
@@ -157,6 +159,20 @@ class ServiceClient final : public QObject {
         bool serviceSettingsLoading READ serviceSettingsLoading NOTIFY serviceSettingsChanged)
     Q_PROPERTY(bool serviceSettingsBusy READ serviceSettingsBusy NOTIFY serviceSettingsChanged)
     Q_PROPERTY(int jobRetentionMonths READ jobRetentionMonths NOTIFY serviceSettingsChanged)
+    Q_PROPERTY(int defaultBootCheckHypervisor READ defaultBootCheckHypervisor NOTIFY
+                   serviceSettingsChanged)
+    Q_PROPERTY(int bootCheckCpuCount READ bootCheckCpuCount NOTIFY serviceSettingsChanged)
+    Q_PROPERTY(int bootCheckMemoryMib READ bootCheckMemoryMib NOTIFY serviceSettingsChanged)
+    Q_PROPERTY(int bootCheckConcurrency READ bootCheckConcurrency NOTIFY serviceSettingsChanged)
+    Q_PROPERTY(int bootCheckEffectiveConcurrency READ bootCheckEffectiveConcurrency NOTIFY
+                   serviceSettingsChanged)
+    Q_PROPERTY(int verifyScope READ verifyScope NOTIFY serviceSettingsChanged)
+    Q_PROPERTY(int verifyConcurrency READ verifyConcurrency NOTIFY serviceSettingsChanged)
+    Q_PROPERTY(int hostLogicalCpuCount READ hostLogicalCpuCount NOTIFY serviceSettingsChanged)
+    Q_PROPERTY(qint64 hostPhysicalMemoryMib READ hostPhysicalMemoryMib NOTIFY
+                   serviceSettingsChanged)
+    Q_PROPERTY(qint64 bootCheckMemoryBudgetMib READ bootCheckMemoryBudgetMib NOTIFY
+                   serviceSettingsChanged)
     Q_PROPERTY(QString serviceSettingsErrorText READ serviceSettingsErrorText NOTIFY
                    serviceSettingsChanged)
 
@@ -174,8 +190,10 @@ class ServiceClient final : public QObject {
     [[nodiscard]] bool virtualBoxInstalled() const noexcept;
     [[nodiscard]] bool hyperVInstalled() const noexcept;
     [[nodiscard]] int virtualBoxProbeState() const noexcept;
+    [[nodiscard]] bool virtualBoxAvailable() const noexcept;
     [[nodiscard]] QString virtualBoxUnavailableText() const;
     [[nodiscard]] int hyperVProbeState() const noexcept;
+    [[nodiscard]] bool hyperVAvailable() const noexcept;
     [[nodiscard]] QString hyperVUnavailableText() const;
     [[nodiscard]] bool hypervisorProbing() const noexcept;
     /// Asks the Service to re-probe hypervisor usability, then polls the status
@@ -206,10 +224,23 @@ class ServiceClient final : public QObject {
     [[nodiscard]] bool serviceSettingsLoading() const noexcept;
     [[nodiscard]] bool serviceSettingsBusy() const noexcept;
     [[nodiscard]] int jobRetentionMonths() const noexcept;
+    [[nodiscard]] int defaultBootCheckHypervisor() const noexcept;
+    [[nodiscard]] int bootCheckCpuCount() const noexcept;
+    [[nodiscard]] int bootCheckMemoryMib() const noexcept;
+    [[nodiscard]] int bootCheckConcurrency() const noexcept;
+    [[nodiscard]] int bootCheckEffectiveConcurrency() const noexcept;
+    [[nodiscard]] int verifyScope() const noexcept;
+    [[nodiscard]] int verifyConcurrency() const noexcept;
+    [[nodiscard]] int hostLogicalCpuCount() const noexcept;
+    [[nodiscard]] qint64 hostPhysicalMemoryMib() const noexcept;
+    [[nodiscard]] qint64 bootCheckMemoryBudgetMib() const noexcept;
     [[nodiscard]] QString serviceSettingsErrorText() const;
     Q_INVOKABLE void refreshServiceSettings();
     /// Persist retention months (1, 3, or 6). Service purges expired terminal jobs immediately.
     Q_INVOKABLE bool setJobRetentionMonths(int months);
+    Q_INVOKABLE bool setBootCheckSettings(int default_hypervisor, int cpu_count, int memory_mib,
+                                          int concurrency);
+    Q_INVOKABLE bool setVerifySettings(int scope, int concurrency);
     [[nodiscard]] SourceInventoryModel* sources() noexcept;
     [[nodiscard]] bool inventoryLoading() const noexcept;
     [[nodiscard]] bool inventoryAvailable() const noexcept;
@@ -576,6 +607,7 @@ class ServiceClient final : public QObject {
     [[nodiscard]] RequestDisposition handle_get_service_settings_frame(const QByteArray& body);
     [[nodiscard]] RequestDisposition handle_update_service_settings_frame(const QByteArray& body);
     void finish_service_settings_failure(const QString& message_code);
+    [[nodiscard]] bool begin_service_settings_update();
     void reset_service_settings();
     void start_hypervisor_status_query();
     [[nodiscard]] RequestDisposition handle_hypervisor_status_frame(const QByteArray& body);
@@ -747,6 +779,22 @@ class ServiceClient final : public QObject {
     bool service_settings_busy_{false};
     int job_retention_months_{kDefaultJobRetentionMonths};
     int pending_job_retention_months_{kDefaultJobRetentionMonths};
+    int default_boot_check_hypervisor_{1};
+    int boot_check_cpu_count_{1};
+    int boot_check_memory_mib_{4096};
+    int boot_check_concurrency_{2};
+    int boot_check_effective_concurrency_{2};
+    int verify_scope_{1};
+    int verify_concurrency_{2};
+    int host_logical_cpu_count_{1};
+    qint64 host_physical_memory_mib_{2048};
+    qint64 boot_check_memory_budget_mib_{0};
+    int pending_boot_check_cpu_count_{1};
+    int pending_default_boot_check_hypervisor_{1};
+    int pending_boot_check_memory_mib_{4096};
+    int pending_boot_check_concurrency_{2};
+    int pending_verify_scope_{1};
+    int pending_verify_concurrency_{2};
     QString service_settings_error_code_;
     QString service_settings_request_id_;
     QString service_settings_update_request_id_;

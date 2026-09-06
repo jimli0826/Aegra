@@ -210,10 +210,22 @@ CREATE TABLE IF NOT EXISTS service_settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     job_retention_months INTEGER NOT NULL DEFAULT 3
         CHECK (job_retention_months IN (1, 3, 6)),
+    default_boot_check_hypervisor INTEGER NOT NULL DEFAULT 1
+        CHECK (default_boot_check_hypervisor IN (1, 2)),
+    boot_check_cpu_count INTEGER NOT NULL DEFAULT 32
+        CHECK (boot_check_cpu_count BETWEEN 1 AND 32),
+    boot_check_memory_mib INTEGER NOT NULL DEFAULT 4096
+        CHECK (boot_check_memory_mib BETWEEN 2048 AND 32768),
+    boot_check_concurrency INTEGER NOT NULL DEFAULT 2
+        CHECK (boot_check_concurrency BETWEEN 1 AND 32),
+    verify_scope INTEGER NOT NULL DEFAULT 1 CHECK (verify_scope IN (1, 2)),
+    verify_concurrency INTEGER NOT NULL DEFAULT 2 CHECK (verify_concurrency BETWEEN 1 AND 32),
     updated_utc_ms INTEGER NOT NULL CHECK (updated_utc_ms >= 0)
 );
-INSERT OR IGNORE INTO service_settings(id, job_retention_months, updated_utc_ms)
-VALUES (1, 3, 0);
+INSERT OR IGNORE INTO service_settings(
+    id, job_retention_months, default_boot_check_hypervisor, boot_check_cpu_count,
+    boot_check_memory_mib, boot_check_concurrency, verify_scope, verify_concurrency, updated_utc_ms)
+VALUES (1, 3, 1, 32, 4096, 2, 1, 2, 0);
 )sql";
     return exec_sql(db, kSchema);
 }

@@ -26,6 +26,8 @@ struct BootCheckDispatch final {
     std::string repository_connection_id;
     std::string schedule_id;
     contracts::BootCheckHypervisor hypervisor{contracts::BootCheckHypervisor::kVirtualBox};
+    std::uint32_t cpu_count{contracts::kDefaultBootCheckCpuCount};
+    std::uint32_t memory_mib{contracts::kDefaultBootCheckMemoryMib};
 };
 
 struct BootCheckRunResult final {
@@ -33,7 +35,7 @@ struct BootCheckRunResult final {
     std::string message_code;
 };
 
-/// Runs at most one AegraBootCheck.exe at a time. try_start resolves the
+/// Runs up to the resource-safe configured number of AegraBootCheck processes. try_start resolves the
 /// base-first volume chain from the Catalog, stages the request file under the
 /// Service data directory, launches the host (bounded by a kill watchdog), and
 /// parses the WorkerResponse from captured stdout on a background thread.

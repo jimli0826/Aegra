@@ -8,6 +8,7 @@
 #include "aegra/ports/process_launcher.h"
 #include "aegra/ports/random.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -46,6 +47,7 @@ struct SessionDependencies final {
 struct WorkerSessionState final {
     std::string job_id;
     std::string trace_id;
+    contracts::JobOperation operation{contracts::JobOperation::kBackup};
     std::uint32_t worker_pid{0};
     std::chrono::steady_clock::time_point deadline;
     base::CancellationSource receive_cancel;
@@ -427,7 +429,8 @@ struct WorkerSupervisor::Impl final {
     void monitor(std::stop_token stop) noexcept;
     void reap_completed();
     [[nodiscard]] base::Result<void>
-    reserve_session(const std::shared_ptr<WorkerSessionState>& state);
+    reserve_session(const std::shared_ptr<WorkerSessionState>& state,
+                    std::uint32_t operation_limit);
     void erase_session(std::string_view job_id);
     [[nodiscard]] base::Result<void> launch_worker(const WorkerJobRequest& request,
                                                    const contracts::JobRequest& worker_request,
@@ -488,10 +491,16 @@ void WorkerSupervisor::Impl::monitor(const std::stop_token stop) noexcept {
 }
 
 base::Result<void>
-WorkerSupervisor::Impl::reserve_session(const std::shared_ptr<WorkerSessionState>& state) {
+WorkerSupervisor::Impl::reserve_session(const std::shared_ptr<WorkerSessionState>& state,
+                                        const std::uint32_t operation_limit) {
     std::lock_guard lock(sessions_mutex);
+    const auto operation_count = std::ranges::count_if(sessions, [&state](const auto& item) {
+        return item.second->state->operation == state->operation;
+    });
     if ((config.max_concurrent_workers > 0 &&
          sessions.size() >= config.max_concurrent_workers) ||
+        (operation_limit > 0 &&
+         operation_count >= static_cast<std::ptrdiff_t>(operation_limit)) ||
         sessions.contains(state->job_id)) {
         return base::Result<void>::failure(
             {base::ErrorCode::kConflict, "worker capacity or job id conflict"});
@@ -666,8 +675,13 @@ base::Result<void> WorkerSupervisor::submit(const WorkerJobRequest& request,
     auto state = std::make_shared<WorkerSessionState>();
     state->job_id = worker_request.job_id;
     state->trace_id = worker_request.trace_id;
+    state->operation = worker_request.operation;
     state->deadline = std::chrono::steady_clock::now() + deadline;
-    auto reserved = impl_->reserve_session(state);
+    const auto operation_limit = impl_->config.max_concurrent_for_operation
+                                     ? impl_->config.max_concurrent_for_operation(
+                                           worker_request.operation)
+                                     : 0;
+    auto reserved = impl_->reserve_session(state, operation_limit);
     if (!reserved)
         return reserved;
     auto launched = impl_->launch_worker(request, worker_request, pipe_name.value(), state, cancel);

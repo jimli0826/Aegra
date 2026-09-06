@@ -741,6 +741,14 @@ create_runtime(const ServiceArguments& arguments) {
         });
     service::WorkerSupervisorConfig supervisor_config;
     supervisor_config.worker_executable_path = std::move(worker_path_utf8).value();
+    supervisor_config.max_concurrent_for_operation =
+        [database = components.control_plane.get()](const aegra::contracts::JobOperation operation) {
+            if (operation != aegra::contracts::JobOperation::kVerify) {
+                return 0U;
+            }
+            auto settings = database->get_service_settings({});
+            return settings ? settings.value().verify_concurrency : 1U;
+        };
     // Job lifecycle runs async after backup.start is accepted — log terminal outcomes to file.
     auto* log = components.logger.get();
     auto* jobs_db = components.control_plane.get();

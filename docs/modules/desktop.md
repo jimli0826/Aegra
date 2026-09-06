@@ -59,8 +59,14 @@ src/apps/desktop/
 - Service 只返回稳定 `message_code`；Desktop 通过 `message_code_map` 转为翻译 ID，未知 code 使用通用安全文本。
 - 日期、容量等通过 `LocaleFormat`/`QLocale` 格式化，不在 QML 拼接固定英文单位。
 - Settings 页面：语言/主题/关闭按钮为 Desktop 本地 `QSettings`（`ui/language`、`ui/theme`、
-  `ui/closeAction`）；**任务历史保留**（1/3/6 个月）走 Service
-  `service.settings`（kind 16/49），由控制面 SQLite 持久化并硬删除过期终端 Job，不落在 Desktop 本地。
+  `ui/closeAction`）；**任务历史保留**、**Verify 范围/并发数**与 **Boot Check VM CPU/内存/并发数**走 Service
+  `service.settings`（kind 16/49），由控制面 SQLite 持久化，不落在 Desktop 本地。
+- Settings 页面采用宽幅圆角抽屉、窗口圆角遮罩、左侧分类菜单与右侧设置内容布局；常规分类包含
+  语言、关闭按钮和任务历史保留，外观分类包含主题，Verify 分类包含单文件/全链范围与并发数，
+  Boot Check 分类包含可刷新探测状态的默认 hypervisor、VM CPU、VM 内存和资源安全并发数。
+  Backup Wizard 只显示启用 Boot Check 的开关；每次 Backup 提交时由 Service 使用 Settings 中当时的
+  默认 hypervisor，并把它固定到本次后置动作运行。
+  Desktop 使用 Service 返回的主机 CPU、物理内存和 Boot Check 内存预算约束选项范围。
 - 构建时用 `lrelease` 从 `translations/*.ts` 生成 `.qm`，并由 `resources.qrc` 嵌入 `:/Aegra/i18n/`。
 
 ## 客户端分层（D1 / F9）
@@ -266,8 +272,11 @@ Repository 容量卡片只使用 Service 异步返回的本机 volume inventory 
   - Options 底部显示 **Post Backup** / **Enable verify**；volume_set 还显示
     **Enable boot check**。两项默认关闭、编辑时可修改，且相互独立（不联动、不锁定）；两者都启用时
     执行顺序为 Backup → Verify → BootCheck，只启用 BootCheck 时 Backup 成功后直接执行。
-    启用 BootCheck 后必须在 VirtualBox 与 Hyper-V 中选择一个平台；Desktop
-    只读取 Service capability，未安装项显示“未安装”且禁止选择。Desktop 以 `verify_after_backup`、
+    “Enable boot check” 旁提供独立帮助 Tooltip；用户启用时 Desktop 必须显示阻塞当前向导、背景透明的
+    Loading 卡片，并触发 Service capability probe。仅当 Settings 当前平台已安装且探测可用时才允许勾选，
+    否则保持关闭并显示稳定错误原因；取消后再次启用必须重新探测，不得复用控件内部的临时勾选状态。
+    平台下拉框与手动刷新入口集中在 Settings，实际运行平台由 Service 在每次 Backup 提交时从当前
+    settings 解析。Desktop 以 `verify_after_backup`、
     `boot_check_after_backup` 和 `boot_check_hypervisor` 持久化，不在 GUI 内直接读取 Archive、查询
     hypervisor 安装、执行 Verify 或创建 VM；
     file_set 不显示 BootCheck。

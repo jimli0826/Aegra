@@ -3166,5 +3166,89 @@ for critical volumes now</source>
         <source>Verification request is invalid</source>
         <translation>驗證要求無效</translation>
     </message>
+    <message id="aegra.settings.category.general">
+        <source>General</source>
+        <translation>一般</translation>
+    </message>
+    <message id="aegra.settings.category.appearance">
+        <source>Appearance</source>
+        <translation>外觀</translation>
+    </message>
+    <message id="aegra.settings.close_action_desc">
+        <source>Choose what happens when the main window is closed</source>
+        <translation>選擇關閉主視窗時執行的操作</translation>
+    </message>
+    <message id="aegra.settings.category.boot_check">
+        <source>Boot Check</source>
+        <translation>啟動檢查</translation>
+    </message>
+    <message id="aegra.settings.boot_check.cpu">
+        <source>VM CPU count</source>
+        <translation>虛擬機 CPU 數量</translation>
+    </message>
+    <message id="aegra.settings.boot_check.cpu_desc">
+        <source>Logical processors assigned to each Boot Check VM. The default is this host's maximum.</source>
+        <translation>分配給每個啟動檢查虛擬機的邏輯處理器數，預設使用本機最大值。</translation>
+    </message>
+    <message id="aegra.settings.boot_check.memory">
+        <source>VM memory</source>
+        <translation>虛擬機記憶體</translation>
+    </message>
+    <message id="aegra.settings.boot_check.memory_desc">
+        <source>Memory assigned to each VM (minimum 2 GB). This host has %1 GB in total.</source>
+        <translation>分配給每個虛擬機的記憶體（最小 2 GB）。本機共有 %1 GB。</translation>
+    </message>
+    <message id="aegra.settings.boot_check.concurrency">
+        <source>Concurrent Boot Checks</source>
+        <translation>啟動檢查並行數</translation>
+    </message>
+    <message id="aegra.settings.boot_check.concurrency_desc">
+        <source>Maximum simultaneous VMs after reserving memory for Windows. Current effective limit: %1.</source>
+        <translation>為 Windows 預留記憶體後的最大同時執行數。目前有效上限：%1。</translation>
+    </message>
+    <message id="aegra.settings.category.verify">
+        <source>Verify</source>
+        <translation>驗證</translation>
+    </message>
+    <message id="aegra.settings.verify.scope">
+        <source>Verification scope</source>
+        <translation>驗證範圍</translation>
+    </message>
+    <message id="aegra.settings.verify.scope_desc">
+        <source>Choose whether post-backup verification checks only the new backup file or every file in its recovery chain.</source>
+        <translation>選擇備份後驗證僅檢查新產生的備份檔案，或檢查其復原鏈中的全部檔案。</translation>
+    </message>
+    <message id="aegra.settings.verify.scope.single">
+        <source>Single backup file</source>
+        <translation>單個備份檔案</translation>
+    </message>
+    <message id="aegra.settings.verify.scope.full_chain">
+        <source>Full recovery chain</source>
+        <translation>完整復原鏈</translation>
+    </message>
+    <message id="aegra.settings.verify.concurrency">
+        <source>Concurrent verifications</source>
+        <translation>驗證並行數</translation>
+    </message>
+    <message id="aegra.settings.verify.concurrency_desc">
+        <source>Maximum number of Verify Worker processes that may run at the same time. The default is 2.</source>
+        <translation>允許同時執行的 Verify Worker 最大數量，預設值為 2。</translation>
+    </message>
+    <message id="aegra.settings.boot_check.default_hypervisor">
+        <source>Default hypervisor</source>
+        <translation>預設虛擬化平台</translation>
+    </message>
+    <message id="aegra.settings.boot_check.default_hypervisor_desc">
+        <source>Preferred platform for new Boot Check schedules.</source>
+        <translation>新增啟動檢查排程時優先使用的平台。</translation>
+    </message>
+    <message id="aegra.backup.post.boot_check_help">
+        <source>Boot Check requires VirtualBox or Hyper-V to be installed and available on this computer.</source>
+        <translation>啟動檢查要求目前電腦已安裝並可正常使用 VirtualBox 或 Hyper-V。</translation>
+    </message>
+    <message id="aegra.backup.post.boot_check_prerequisites_failed">
+        <source>Boot Check cannot be enabled because the configured hypervisor is unavailable.</source>
+        <translation>目前設定的虛擬化平台不可用，無法啟用啟動檢查。</translation>
+    </message>
 </context>
 </TS>

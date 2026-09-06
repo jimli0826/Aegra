@@ -120,7 +120,9 @@ Pipe/framing/peer close、Service stop 或响应写失败才结束 session。请
   `source_ids[]`，一个命令只创建一个 Job。Recovery Point chain、delete plan/execute 与 Verify start 的
   handler 已接线，runtime 宣告 `recovery_point.chain`、`recovery_point.delete`、`recovery_point.verify`。
 - `service.settings`：kind 16 `GetServiceSettings` / kind 49 `UpdateServiceSettings`。控制面持久化
-  `job_retention_months`（1/3/6，默认 3）；启动与更新后硬删除过期终端 Job（30 天/月）。
+  `job_retention_months`（1/3/6，默认 3）、Verify 范围（单文件/全链）与并发数，以及 Boot Check
+  默认 hypervisor、VM 资源与请求并发数；启动与更新后硬删除过期终端 Job（30 天/月）。WorkerSupervisor 在每次
+  Verify 提交时读取当前并发上限，并在同一锁内按 operation 计数后预留会话。
 - Repository 响应只包含 Repository UUID 和不含客户 Metadata 的 Catalog 摘要，不包含根路径、Archive key、
   主机名、SID、SecretRef 或原始 Adapter 错误。
 - frame 最大 1 MiB，JSON 根必须是 object，整数必须先检查范围。
@@ -282,13 +284,14 @@ S0-S4 已完成；S5 chain/delete/verify 已接入 composition 并宣告 capabil
   加密备份无需 connection 默认凭据），Service 重启后重扫未完成 plan 继续推进；容量暂满与
   Catalog 尚未可见时保持 pending 重试（有界 attempts）。Verify 失败保留为独立终态，不改写已
   成功的 Backup Job；Backup 非成功终态时动作记 skipped。Schedule 开启 `boot_check_after_backup`
-  （volume_set）时，Verify 成功后 coordinator 经 `BootCheckSupervisor`（并发 1、45 分钟 run
+  （volume_set）时，Verify 成功后 coordinator 经 `BootCheckSupervisor`（资源安全动态并发、45 分钟 run
   budget、超时 terminate）以兄弟路径拉起 `AegraBootCheck.exe --request <staging file>`，
   从 Catalog 解析 base-first 卷链并按 Schedule 密文引用注入凭据，stdout 的 WorkerResponse 回填
   plan 的 boot_check 动作；Verify 失败预置 `bootcheck.verify_prerequisite_failed`，Host 缺失记
   `post_backup.boot_check_unavailable`，重启丢失的运行按 attempts（上限 3）重派。
-- Schedule 的 `boot_check_hypervisor` 在 Backup Job 提交时快照到 durable plan，并进入 BootCheck Job
-  schema 2；Host 只运行指定平台。Service 启动时以 capability 发布 VirtualBox/Hyper-V 安装状态，
+- Backup Job 提交时从当前 Service settings 解析 `default_boot_check_hypervisor`，快照到 durable plan，
+  再进入 BootCheck Job schema 3，并携带当前 VM CPU/内存设置；Schedule 中旧的平台值不决定运行平台，
+  同一次运行也不会因后续 settings 更新而中途切换。Host 只运行指定平台。Service 启动时以 capability 发布 VirtualBox/Hyper-V 安装状态，
   Desktop 不直接查询注册表、SCM 或 PowerShell。
 - **Capabilities**（在 volume 根可用时）：`file.browse`、`schedule.file_set`；F8 另声明
   `file.restore`。

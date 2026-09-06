@@ -54,6 +54,13 @@ Verify Job 使用 `verify_recovery_point_ids`（1..1000，同一备份集从早�
 的原始错误文本。ADR-0022 另增加非负 `deduplicated_block_count` / `deduplicated_logical_bytes`；仅成功的
 volume_set backup 可为非零，其它任务固定为 0。
 
+`service_control.h` 的 `VerifyScope` 定义 `kSingleBackupFile=1` 与 `kFullChain=2`。Service settings
+默认单文件、并发 2，允许并发范围 1–32；全链模式由 Service 按当前恢复点解析到 Full 的父链，
+再把按时间从早到晚的恢复点列表提交给既有 Verify Worker 合同。
+Service settings 还持久化 `default_boot_check_hypervisor`（VirtualBox/Hyper-V，默认 VirtualBox）；
+每次 Backup 提交时 Service 从当前 settings 解析该值，并快照到本次 durable post-backup plan；
+同一次运行不会因后续设置变更而中途切换平台。
+
 `file_set.h` 定义 `ContentKind`、名称编码、`FileSourceRef`、`FileEntryDesc`、`StableFileIdentity`、
 `FileSelectionFingerprint`、
 `FileContentStorage`、`IncrementalDowngradeReason`、`FileRestoreTarget`、`PartialRestoreStats` 与
@@ -68,7 +75,8 @@ Archive、Catalog 和 IPC 只表达 selection fingerprint、`FileChangeDetection
 `boot_check.h` 定义 vendor-neutral `BootCheckHypervisor`（VirtualBox=1、Hyper-V=2）与历史
 `kBootCheckProbeProtocolVersion`（Manifest V7 Boot Profile 字段仍写该值；COM1 Guest Probe 判据
 已于 2026-09-03 移除，READY 标识常量随之删除，见 [ADR-0028](../adr/0028-boot-check-guest-probe-protocol.md)）。
-`BootCheckJobRequest` schema 2 必须携带用户选择的 hypervisor；Host 不允许自动改选 provider（ADR-0029）。
+`BootCheckJobRequest` schema 3 必须携带用户选择的 hypervisor，以及 Service 从可信设置解析后的
+`cpu_count` / `memory_mib`；Host 不允许自动改选 provider（ADR-0029）。
 `JobOperation` 含 `kBootCheck=5`：Service 侧为任务日志记录的 BootCheck 运行，只出现在控制面 Job 与
 `ListJobs`/`JobSummary`，`validate_job_request` 拒绝它作为 Worker 请求。
 

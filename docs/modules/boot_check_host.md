@@ -14,9 +14,9 @@ BootCheck 是独立进程而不是 Worker 操作：不占用 Worker 数据面槽
 
 ## 请求与响应
 
-- 请求：stdin 单次 UTF-8 JSON，上限 1 MiB，契约为 `contracts::BootCheckJobRequest`（schema 2）：
+- 请求：stdin 单次 UTF-8 JSON，上限 1 MiB，契约为 `contracts::BootCheckJobRequest`（schema 3）：
   `job_id`（小写字母数字与 `-`，≤64，成为 VM 名/pipe 名）、`trace_id`、必填 `hypervisor`
-  （VirtualBox=1、Hyper-V=2）、base-first `source_refs`、
+  （VirtualBox=1、Hyper-V=2）、由 Service 可信设置投影的 `cpu_count` / `memory_mib`、base-first `source_refs`、
   逐层 `credential_refs`（空 = 未加密层）、`job_directory`（本 Job 私有空目录）、可选
   `deadline_utc_ms`。字段名含 `password`/`secret` 的明文凭据一律拒绝。VM 形状（CPU/内存/差分盘
   配额/boot timeout）与 `VBoxManage.exe`/`powershell.exe` 路径来自受信任 Host 配置，不从消息接收。

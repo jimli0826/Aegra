@@ -74,6 +74,14 @@ base::Result<contracts::BootCheckJobRequest> invalid_request(const char* message
     }
     request.hypervisor =
         static_cast<contracts::BootCheckHypervisor>(static_cast<std::uint8_t>(hypervisor));
+    const auto cpu_count = required_unsigned(root, "cpu_count");
+    const auto memory_mib = required_unsigned(root, "memory_mib");
+    if (cpu_count > (std::numeric_limits<std::uint32_t>::max)() ||
+        memory_mib > (std::numeric_limits<std::uint32_t>::max)()) {
+        throw std::out_of_range("boot check VM resources are out of range");
+    }
+    request.cpu_count = static_cast<std::uint32_t>(cpu_count);
+    request.memory_mib = static_cast<std::uint32_t>(memory_mib);
     request.source_refs = root.at("source_refs").get<std::vector<std::string>>();
     for (const auto& reference : root.at("credential_refs").get<std::vector<std::string>>()) {
         request.credential_refs.push_back(contracts::SecretRef{reference});
@@ -127,9 +135,10 @@ decode_boot_check_job_request(const std::string_view encoded) {
         if (!root.is_object()) {
             return invalid_request("boot check request root must be an object");
         }
-        constexpr std::array<std::string_view, 8> keys{
+        constexpr std::array<std::string_view, 10> keys{
             "schema_version", "job_id",       "trace_id",      "hypervisor",
-            "source_refs",    "credential_refs", "job_directory", "deadline_utc_ms"};
+            "cpu_count",      "memory_mib",    "source_refs",   "credential_refs",
+            "job_directory",  "deadline_utc_ms"};
         if (root.size() != keys.size() ||
             !std::ranges::all_of(keys, [&root](const auto key) { return root.contains(key); })) {
             return invalid_request("boot check request fields are invalid");

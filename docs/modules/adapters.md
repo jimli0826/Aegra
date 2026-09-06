@@ -205,6 +205,10 @@ NtfsCore 模块说明见 [ntfs_core.md](ntfs_core.md)。
 - 锁顺序固定为布局锁，再到 backing/overlay 锁；禁止持锁调用未知回调。
 - Dokan C 回调使用静态跳板进入实例，不使用全局实例。
 - 对原始备份视图的任何写入都不得修改 Recovery Point。
+- Virtual Disk API 失败在 Adapter `Error` 中保留操作名与 Win32 数字错误码；物理磁盘路径解析失败时还保留
+  API 返回的设备路径和字符数，供 Mount Host 本机任务日志诊断；Host 必须在 IPC 边界映射回稳定
+  `mount.*` code，不向 Desktop 暴露底层错误文本。
+- Windows 返回的 `PhysicalDrive` 设备路径按 ASCII 大小写不敏感规则解析，并严格要求磁盘号后缀为十进制数字。
 
 `ReadOnlyVmdkPresentation` 是 BootCheck 的只读 VMDK 呈现入口：调用方提供生命周期更长的整盘
 `IRandomAccessReader`、空的本地 NTFS mount directory，以及本次 Job 生成的 CID、image UUID 和

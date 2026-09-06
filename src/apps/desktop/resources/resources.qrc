@@ -41,6 +41,7 @@
         <file alias="qml/components/SidebarNavItem.qml">../qml/components/SidebarNavItem.qml</file>
         <file alias="qml/components/NavIcon.qml">../qml/components/NavIcon.qml</file>
         <file alias="qml/components/ScheduleTypeIcon.qml">../qml/components/ScheduleTypeIcon.qml</file>
+        <file alias="qml/components/SettingsComboBox.qml">../qml/components/SettingsComboBox.qml</file>
         <file alias="qml/components/StatusGlyph.qml">../qml/components/StatusGlyph.qml</file>
         <file alias="qml/components/SplashOverlay.qml">../qml/components/SplashOverlay.qml</file>
         <file alias="qml/components/TaskProgressBar.qml">../qml/components/TaskProgressBar.qml</file>

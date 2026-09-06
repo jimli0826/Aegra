@@ -8,12 +8,13 @@
 
 ## 任务日志
 
-每个已接受的 Backup / Restore / Verify 任务写入一份独立文本日志（对齐旧版 `logs/backup` 风格）：
+每个已接受的 Backup / Restore / Verify / Mount 任务写入一份独立文本日志（对齐旧版
+`logs/backup` 风格）：
 
 | 项 | 规则 |
 | --- | --- |
 | 根目录 | 优先 `AEGRA_DATA_DIR`（Service 启动时注入）；否则 `%LOCALAPPDATA%\Aegra` 或 `%ProgramData%\Aegra` |
-| 路径 | `<data_dir>/logs/<operation>/YYYYMMDD_HHMMSS[_job-id].log`，`operation` 为 `backup` / `restore` / `verify`；文件名附带 `job_id` 便于检索 |
+| 路径 | `<data_dir>/logs/<operation>/YYYYMMDD_HHMMSS[_job-id].log`，`operation` 为 `backup` / `restore` / `verify` / `mount`；文件名附带 `job_id` 或 Mount `session_id` 便于检索 |
 | 格式 | `[YYYY-MM-DD HH:MM:SS.mmm] [level] ...`，仅文件、无控制台；章节用 `[Section]`，字段用 `  key : value` |
 | 结构 | 文件头（operation/path）→ `[Job]` / `[Request]` → 若干 `[Stage: name] begin|OK|FAILED` → `[Result]` |
 | 字节/时长 | 人类可读双写，例如 `3.0 GiB (3203399680 bytes)`、`14 ms` / `2.136 s` |
@@ -22,6 +23,7 @@
 | Restore 阶段 | 直接卷：`resolve_credentials` → `open_chain_reader` → `open_volume_reader` → `open_volume_sink` → `restore_pipeline`；缩容卷：`analyze_shrink_plan`（校验 digest，记录源/目标容量与簇数）→ `prepare_scratch_directory` → `open_scratch_store` → `invalidate_boot` → 前缀 `restore_pipeline` → ordinary/critical relocate → Target-only audit → 持锁 Boot commit → 关闭原始句柄 → CHKDSK/postcheck；整盘：`plan_disk_volumes` → `prepare_target_disk`+`open_disk_sink` → `restore_pipeline` → `rebuild_partition_table` |
 | Restore Request | `mode` 为 `volume` / `volume_shrink` / `disk`；`volume_size_policy` 写可读名（`require_source_size` / `allow_ntfs_relocation`）；仅缩容时输出 `shrink_plan_digest` 与 `source_chain_fingerprint` |
 | Verify 阶段 | volume_set：对每个恢复点 `resolve_credentials` → `open_archive` → `verify_pipeline`（同一进程从早到晚）；file_set：对每个 tip prefix `resolve_credentials` → `open_chain` → `verify_recoverability`；成功、失败和取消均写 `[Result]` 汇总 |
+| Mount 阶段 | `check_dokan` → 打开 Archive 链 → volume_set `open_whole_disk_reader` + `present_and_attach_virtual_disk`，或 file_set `mount_file_namespace` → `mounted_session` → `unmount_and_cleanup`；VHDX 失败在本机日志保留 Win32 数字错误码，IPC 只返回稳定 `mount.*` code |
 | 禁止 | 密码、SecretRef 明文、凭据材料；可记 `password=present|empty` 或层计数 |
 
 Worker 任务日志允许记录诊断所需的源/目标路径、Volume GUID、卷标、主机名和 Archive 信息，但不得记录

@@ -1,16 +1,12 @@
 #include "service_protocol_json.h"
-
 #include "aegra/contracts/service_control.h"
-
 #include <algorithm>
 #include <array>
 #include <stdexcept>
 #include <utility>
 #include <vector>
-
 namespace aegra::apps::service::protocol_json {
 namespace {
-
 [[nodiscard]] Json encode_service_info(const contracts::ServiceInfo& service) {
     return Json{{"minimum_api_version", service.minimum_api_version},
                 {"api_version", service.api_version},
@@ -18,7 +14,6 @@ namespace {
                 {"service_version", service.service_version},
                 {"capabilities", service.capabilities}};
 }
-
 [[nodiscard]] contracts::ServiceInfo parse_service_info(const Json& payload) {
     constexpr std::array<std::string_view, 5> keys{"minimum_api_version", "api_version", "state",
                                                    "service_version", "capabilities"};
@@ -34,7 +29,6 @@ namespace {
     service.capabilities = payload.at("capabilities").get<std::vector<std::string>>();
     return service;
 }
-
 [[nodiscard]] Json encode_recovery_point(const contracts::RecoveryPointSummary& point) {
     return Json{{"file_uuid", point.file_uuid},
                 {"backup_set_uuid", point.backup_set_uuid},
@@ -50,7 +44,6 @@ namespace {
                 {"source_count", point.source_count},
                 {"has_sidecar", point.has_sidecar}};
 }
-
 [[nodiscard]] contracts::RecoveryPointSummary parse_recovery_point(const Json& payload) {
     constexpr std::array<std::string_view, 13> keys{"file_uuid",
                                                     "backup_set_uuid",
@@ -1242,6 +1235,18 @@ Json encode_response_payload(const contracts::ServiceResponse& response) {
     case contracts::ServiceRequestKind::kGetServiceSettings: {
         const auto& settings = std::get<contracts::ServiceSettings>(response.payload);
         return Json{{"job_retention_months", settings.job_retention_months},
+                    {"default_boot_check_hypervisor",
+                     static_cast<std::uint8_t>(settings.default_boot_check_hypervisor)},
+                    {"boot_check_cpu_count", settings.boot_check_cpu_count},
+                    {"boot_check_memory_mib", settings.boot_check_memory_mib},
+                    {"boot_check_concurrency", settings.boot_check_concurrency},
+                    {"boot_check_effective_concurrency",
+                     settings.boot_check_effective_concurrency},
+                    {"verify_scope", static_cast<std::uint8_t>(settings.verify_scope)},
+                    {"verify_concurrency", settings.verify_concurrency},
+                    {"host_logical_cpu_count", settings.host_logical_cpu_count},
+                    {"host_physical_memory_mib", settings.host_physical_memory_mib},
+                    {"boot_check_memory_budget_mib", settings.boot_check_memory_budget_mib},
                     {"updated_utc_ms", settings.updated_utc_ms}};
     }
     case contracts::ServiceRequestKind::kGetBootCheckHypervisorStatus: {
@@ -1402,13 +1407,36 @@ parse_response_payload(const contracts::ServiceResponseKind response_kind,
         return preflight;
     }
     case contracts::ServiceRequestKind::kGetServiceSettings: {
-        constexpr std::array<std::string_view, 2> keys{"job_retention_months", "updated_utc_ms"};
+        constexpr std::array<std::string_view, 12> keys{
+            "job_retention_months", "default_boot_check_hypervisor", "boot_check_cpu_count",
+            "boot_check_memory_mib", "boot_check_concurrency", "boot_check_effective_concurrency",
+            "verify_scope", "verify_concurrency", "host_logical_cpu_count",
+            "host_physical_memory_mib", "boot_check_memory_budget_mib", "updated_utc_ms"};
         if (!exact_keys(payload, keys)) {
             throw std::invalid_argument("service settings fields are invalid");
         }
         contracts::ServiceSettings settings;
-        settings.job_retention_months =
-            unsigned_value<std::uint8_t>(payload, "job_retention_months");
+        settings.job_retention_months = unsigned_value<std::uint8_t>(
+            payload, "job_retention_months");
+        settings.default_boot_check_hypervisor = static_cast<contracts::BootCheckHypervisor>(
+            unsigned_value<std::uint8_t>(payload, "default_boot_check_hypervisor"));
+        settings.boot_check_cpu_count = unsigned_value<std::uint32_t>(
+            payload, "boot_check_cpu_count");
+        settings.boot_check_memory_mib =
+            unsigned_value<std::uint32_t>(payload, "boot_check_memory_mib");
+        settings.boot_check_concurrency =
+            unsigned_value<std::uint32_t>(payload, "boot_check_concurrency");
+        settings.boot_check_effective_concurrency =
+            unsigned_value<std::uint32_t>(payload, "boot_check_effective_concurrency");
+        settings.verify_scope = static_cast<contracts::VerifyScope>(unsigned_value<std::uint8_t>(
+            payload, "verify_scope"));
+        settings.verify_concurrency = unsigned_value<std::uint32_t>(payload, "verify_concurrency");
+        settings.host_logical_cpu_count =
+            unsigned_value<std::uint32_t>(payload, "host_logical_cpu_count");
+        settings.host_physical_memory_mib =
+            unsigned_value<std::uint64_t>(payload, "host_physical_memory_mib");
+        settings.boot_check_memory_budget_mib =
+            unsigned_value<std::uint64_t>(payload, "boot_check_memory_budget_mib");
         settings.updated_utc_ms = unsigned_value<std::uint64_t>(payload, "updated_utc_ms");
         return settings;
     }

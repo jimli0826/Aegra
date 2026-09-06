@@ -677,6 +677,27 @@ struct StartFileRestoreCommand final {
 
 /// Allowed job history retention windows (calendar months approximated as 30 days).
 inline constexpr std::uint8_t kDefaultJobRetentionMonths = 3;
+inline constexpr std::uint32_t kMinimumBootCheckCpuCount = 1;
+inline constexpr std::uint32_t kMaximumBootCheckCpuCount = 32;
+inline constexpr std::uint32_t kDefaultBootCheckCpuCount = kMaximumBootCheckCpuCount;
+inline constexpr std::uint32_t kMinimumBootCheckMemoryMib = 2U * 1024U;
+inline constexpr std::uint32_t kMaximumBootCheckMemoryMib = 32U * 1024U;
+inline constexpr std::uint32_t kDefaultBootCheckMemoryMib = 4U * 1024U;
+inline constexpr std::uint32_t kMinimumBootCheckConcurrency = 1;
+inline constexpr std::uint32_t kMaximumBootCheckConcurrency = 32;
+inline constexpr std::uint32_t kDefaultBootCheckConcurrency = 2;
+inline constexpr std::uint32_t kMinimumVerifyConcurrency = 1;
+inline constexpr std::uint32_t kMaximumVerifyConcurrency = 32;
+inline constexpr std::uint32_t kDefaultVerifyConcurrency = 2;
+
+enum class VerifyScope : std::uint8_t {
+    kSingleBackupFile = 1,
+    kFullChain = 2,
+};
+
+[[nodiscard]] constexpr bool is_known_verify_scope(const VerifyScope scope) noexcept {
+    return scope == VerifyScope::kSingleBackupFile || scope == VerifyScope::kFullChain;
+}
 inline constexpr std::uint64_t kMillisecondsPerRetentionMonth =
     30ULL * 24ULL * 60ULL * 60ULL * 1000ULL;
 
@@ -690,11 +711,27 @@ struct ServiceSettingsQuery final {};
 /// Wire projection of control-plane service preferences.
 struct ServiceSettings final {
     std::uint8_t job_retention_months{kDefaultJobRetentionMonths};
+    BootCheckHypervisor default_boot_check_hypervisor{BootCheckHypervisor::kVirtualBox};
+    std::uint32_t boot_check_cpu_count{kDefaultBootCheckCpuCount};
+    std::uint32_t boot_check_memory_mib{kDefaultBootCheckMemoryMib};
+    std::uint32_t boot_check_concurrency{kDefaultBootCheckConcurrency};
+    std::uint32_t boot_check_effective_concurrency{kDefaultBootCheckConcurrency};
+    VerifyScope verify_scope{VerifyScope::kSingleBackupFile};
+    std::uint32_t verify_concurrency{kDefaultVerifyConcurrency};
+    std::uint32_t host_logical_cpu_count{kDefaultBootCheckCpuCount};
+    std::uint64_t host_physical_memory_mib{0};
+    std::uint64_t boot_check_memory_budget_mib{0};
     std::uint64_t updated_utc_ms{0};
 };
 
 struct UpdateServiceSettingsCommand final {
     std::uint8_t job_retention_months{kDefaultJobRetentionMonths};
+    BootCheckHypervisor default_boot_check_hypervisor{BootCheckHypervisor::kVirtualBox};
+    std::uint32_t boot_check_cpu_count{kDefaultBootCheckCpuCount};
+    std::uint32_t boot_check_memory_mib{kDefaultBootCheckMemoryMib};
+    std::uint32_t boot_check_concurrency{kDefaultBootCheckConcurrency};
+    VerifyScope verify_scope{VerifyScope::kSingleBackupFile};
+    std::uint32_t verify_concurrency{kDefaultVerifyConcurrency};
 };
 
 /// Empty body for GetBootCheckHypervisorStatus (exact_keys {}).

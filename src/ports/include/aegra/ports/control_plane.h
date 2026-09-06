@@ -27,7 +27,10 @@ namespace aegra::ports {
 // v24: durable post_backup_plans (crash-safe post-backup Verify/BootCheck actions).
 // v26: jobs.operation accepts BootCheck (5) so boot check runs appear in the task log.
 // v27: schedules no longer require verify_after_backup when boot check is enabled.
-inline constexpr std::uint32_t kControlPlaneSchemaVersion = 27;
+// v28: Boot Check VM CPU, memory, and requested concurrency in service_settings.
+// v29: Verify scope and concurrent Worker limit in service_settings.
+// v30: Default Boot Check hypervisor in service_settings.
+inline constexpr std::uint32_t kControlPlaneSchemaVersion = 30;
 
 // ---- Durable records (control-plane only; no plaintext secrets, no RP authority) ----
 
@@ -138,6 +141,13 @@ struct AuditEventRecord final {
 /// Single-row control-plane preferences (id = 1).
 struct ServiceSettingsRecord final {
     std::uint8_t job_retention_months{contracts::kDefaultJobRetentionMonths};
+    contracts::BootCheckHypervisor default_boot_check_hypervisor{
+        contracts::BootCheckHypervisor::kVirtualBox};
+    std::uint32_t boot_check_cpu_count{contracts::kDefaultBootCheckCpuCount};
+    std::uint32_t boot_check_memory_mib{contracts::kDefaultBootCheckMemoryMib};
+    std::uint32_t boot_check_concurrency{contracts::kDefaultBootCheckConcurrency};
+    contracts::VerifyScope verify_scope{contracts::VerifyScope::kSingleBackupFile};
+    std::uint32_t verify_concurrency{contracts::kDefaultVerifyConcurrency};
     std::uint64_t updated_utc_ms{0};
 };
 

@@ -232,10 +232,6 @@ struct ResolvedBackupPlan final {
     fingerprint += plan.verify_after_backup ? "1" : "0";
     fingerprint += "|bc:";
     fingerprint += plan.boot_check_after_backup ? "1" : "0";
-    fingerprint += "|bch:";
-    fingerprint += plan.boot_check_hypervisor
-                       ? std::to_string(static_cast<int>(*plan.boot_check_hypervisor))
-                       : "-";
     return fingerprint;
 }
 
@@ -343,7 +339,13 @@ resolve_backup_plan(ports::IControlPlaneDatabase& control_plane,
     plan.compression_level = record.compression_level;
     plan.verify_after_backup = record.verify_after_backup;
     plan.boot_check_after_backup = record.boot_check_after_backup;
-    plan.boot_check_hypervisor = record.boot_check_hypervisor;
+    if (plan.boot_check_after_backup) {
+        auto settings = control_plane.get_service_settings(cancellation);
+        if (!settings) {
+            return base::Result<ResolvedBackupPlan>::failure(settings.error());
+        }
+        plan.boot_check_hypervisor = settings.value().default_boot_check_hypervisor;
+    }
     plan.backup_set_uuid = record.backup_set_uuid;
     plan.last_recovery_point_id = record.last_recovery_point_id;
     return base::Result<ResolvedBackupPlan>::success(std::move(plan));
@@ -1171,6 +1173,18 @@ WorkerJobService::start_post_backup_verify(const PostBackupVerifyRequest& reques
     contracts::StartVerifyCommand command;
     command.repository_connection_id = request.repository_connection_id;
     command.recovery_point_ids = {request.recovery_point_id};
+    auto settings = control_plane_.get_service_settings(cancellation);
+    if (!settings) {
+        return base::Result<contracts::CommandAcknowledgement>::failure(settings.error());
+    }
+    auto scoped = worker_job_detail::expand_verify_scope(
+        command, settings.value().verify_scope,
+        worker_job_detail::VerifyJobDependencies{&control_plane_, &storage_factory_, &random_},
+        cancellation);
+    if (!scoped) {
+        return base::Result<contracts::CommandAcknowledgement>::failure(scoped.error());
+    }
+    command = std::move(scoped).value();
     auto prepared = worker_job_detail::prepare_verify_job(
         command, planned_verify_secret_ref(control_plane_, request.schedule_id, cancellation),
         worker_job_detail::VerifyJobDependencies{&control_plane_, &storage_factory_, &random_},

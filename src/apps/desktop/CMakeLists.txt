@@ -18,6 +18,7 @@ set(AEGRA_DESKTOP_SOURCES
     src/client/ipc_frame_transport.cpp
     src/client/ipc_frame_transport.h
     src/client/service_client.cpp
+    src/client/service_client_settings.cpp
     src/client/service_client.h
     src/client/service_protocol.cpp
     src/client/service_protocol.h

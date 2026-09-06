@@ -206,8 +206,12 @@ create_dokan_vhdx(ports::IRandomAccessReader& reader, std::uint32_t disk_number,
     // Match old backup host: COW sidecars are *outside* the Dokan mount folder.
     // Putting them under mount_dir makes the folder non-empty and Dokan fails
     // with DOKAN_MOUNT_POINT_ERROR (-6) → mount.dokan_failed.
+    // Writable backing: the disk is attached with writable media so it can be
+    // brought online under Windows Server SAN policy (a read-only attach cannot
+    // clear the OFFLINE bit — ERROR_WRITE_PROTECT). Stray writes are absorbed by
+    // the CoW overlay and discarded at unmount; the archive is never modified.
     auto backing = std::make_unique<CowBackingStore>();
-    if (!backing->open_reader(&reader, overlay_base, /*read_only=*/true)) {
+    if (!backing->open_reader(&reader, overlay_base, /*read_only=*/false)) {
         return base::Result<std::unique_ptr<DokanFileSystem>>::failure(
             make_error(base::ErrorCode::kIoFailure, kMsgDokanFailed));
     }
@@ -225,7 +229,10 @@ create_dokan_vhdx(ports::IRandomAccessReader& reader, std::uint32_t disk_number,
     std::vector<VirtualDiskEntry> entries;
     entries.push_back(std::move(entry));
 
-    auto fs = std::make_unique<DokanFileSystem>(std::move(entries), /*read_only=*/true);
+    // Writable so the physical attach can write VHDX metadata / NTFS mount state
+    // into the CoW overlay; user-facing read-only is enforced at the disk level
+    // (DISK_ATTRIBUTE_READ_ONLY) after the disk is brought online.
+    auto fs = std::make_unique<DokanFileSystem>(std::move(entries), /*read_only=*/false);
     const int status = fs->mount(mount_dir);
     if (status != DOKAN_SUCCESS) {
         cleanup_overlay_files(overlay_base);
@@ -331,8 +338,13 @@ mount_whole_disk_readonly(ports::IRandomAccessReader& reader,
         cleanup_overlay_files(overlay_base);
         remove_directory_tree(session_root_utf8);
         info.message_code = kMsgAttachFailed;
+        std::string diagnostic = kMsgAttachFailed;
+        if (!attach.error.empty()) {
+            diagnostic.append(": ");
+            diagnostic.append(attach.error);
+        }
         return base::Result<MountSessionInfo>::failure(
-            make_error(base::ErrorCode::kIoFailure, kMsgAttachFailed));
+            make_error(base::ErrorCode::kIoFailure, std::move(diagnostic)));
     }
 
     auto session = std::make_unique<ActiveMountSession>();

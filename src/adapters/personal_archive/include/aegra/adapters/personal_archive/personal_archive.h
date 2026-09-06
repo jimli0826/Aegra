@@ -472,9 +472,19 @@ class WholeDiskByteReader final : public ports::IRandomAccessReader {
     /// cache_chunk_count bounds the decompressed-chunk LRU that absorbs the
     /// interleaved random reads of a mounted or booting guest (memory upper
     /// bound = cache_chunk_count * chunk logical size).
+    ///
+    /// assign_unique_disk_identity rewrites the presented disk's MBR signature
+    /// and GPT DiskGUID (in memory only; the archive is untouched) to fresh
+    /// random values. Set it when attaching the image as a physical disk on a
+    /// host that may already have the source disk online: identical signatures
+    /// make Windows keep the read-only attachment OFFLINE (signature collision),
+    /// so no volumes ever surface. Leave it false for boot-check, which hands the
+    /// image to a hypervisor (never a host physical disk) and must preserve the
+    /// on-disk signature that a BIOS/MBR boot configuration relies on.
     [[nodiscard]] static base::Result<std::unique_ptr<WholeDiskByteReader>>
     open(ports::IRecoveryPointReader& inner, const format::Manifest& manifest,
-         std::uint32_t source_disk_number, std::size_t cache_chunk_count = 8);
+         std::uint32_t source_disk_number, std::size_t cache_chunk_count = 8,
+         bool assign_unique_disk_identity = false);
 
     [[nodiscard]] std::uint64_t size_bytes() const noexcept override;
     [[nodiscard]] base::Result<std::size_t> read_at(std::uint64_t offset,

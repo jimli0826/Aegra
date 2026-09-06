@@ -3,11 +3,15 @@
 #include "aegra/base/error.h"
 
 #include <algorithm>
+#include <array>
+#include <cstdint>
 #include <cstring>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <random>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -16,6 +20,82 @@ namespace {
 
 [[nodiscard]] base::Error make_error(const base::ErrorCode code, std::string message) {
     return {code, std::move(message)};
+}
+
+[[nodiscard]] std::uint32_t crc32_ieee(const std::span<const std::byte> data) noexcept {
+    std::uint32_t crc = 0xFFFFFFFFU;
+    for (const auto byte : data) {
+        crc ^= static_cast<std::uint32_t>(std::to_integer<unsigned char>(byte));
+        for (int bit = 0; bit < 8; ++bit) {
+            const auto mask = static_cast<std::uint32_t>(-(static_cast<std::int32_t>(crc & 1U)));
+            crc = (crc >> 1U) ^ (0xEDB88320U & mask);
+        }
+    }
+    return ~crc;
+}
+
+void write_le32(std::vector<std::byte>& buffer, const std::size_t offset,
+                const std::uint32_t value) noexcept {
+    if (offset + 4 > buffer.size()) {
+        return;
+    }
+    buffer[offset] = static_cast<std::byte>(value & 0xFFU);
+    buffer[offset + 1] = static_cast<std::byte>((value >> 8U) & 0xFFU);
+    buffer[offset + 2] = static_cast<std::byte>((value >> 16U) & 0xFFU);
+    buffer[offset + 3] = static_cast<std::byte>((value >> 24U) & 0xFFU);
+}
+
+[[nodiscard]] std::uint32_t read_le32(const std::byte* data) noexcept {
+    std::uint32_t value = 0;
+    std::memcpy(&value, data, sizeof(value));
+    return value;
+}
+
+// Give the presented disk a fresh MBR signature and GPT DiskGUID so it cannot
+// collide with a still-online source disk on the host. Edits the caller's
+// in-memory raw-layout copy only; the archive on disk is never modified.
+void randomize_disk_identity(format::RawDiskLayout& layout,
+                             const format::PartitionStyle partition_style) {
+    std::random_device device;
+
+    // MBR disk signature at offset 0x1B8 (present in a real MBR and in the
+    // protective MBR of a GPT disk).
+    if (layout.mbr_sector.size() >= 512U) {
+        write_le32(layout.mbr_sector, 0x1B8U, static_cast<std::uint32_t>(device()));
+    }
+
+    if (partition_style != format::PartitionStyle::kGpt) {
+        return;
+    }
+
+    // 16-byte GPT DiskGUID; primary and backup headers must carry the same one.
+    std::array<std::byte, 16> disk_guid{};
+    for (auto& item : disk_guid) {
+        item = static_cast<std::byte>(device() & 0xFFU);
+    }
+
+    // GPT header layout (little-endian): 12 HeaderSize, 16 HeaderCRC32,
+    // 56 DiskGUID (16 bytes), 88 PartitionEntryArrayCRC32. Only the DiskGUID
+    // changes, so the entry-array CRC stays valid; recompute the header CRC over
+    // HeaderSize bytes with the CRC field zeroed.
+    const auto patch_gpt_header = [&disk_guid](std::vector<std::byte>& header) {
+        constexpr std::size_t kMinHeaderSize = 92;
+        constexpr std::size_t kDiskGuidOffset = 56;
+        constexpr std::size_t kHeaderCrcOffset = 16;
+        if (header.size() < kMinHeaderSize) {
+            return;
+        }
+        std::memcpy(header.data() + kDiskGuidOffset, disk_guid.data(), disk_guid.size());
+        write_le32(header, kHeaderCrcOffset, 0);
+        std::uint32_t header_size = read_le32(header.data() + 12);
+        if (header_size < kMinHeaderSize || header_size > header.size()) {
+            header_size = kMinHeaderSize;
+        }
+        write_le32(header, kHeaderCrcOffset,
+                   crc32_ieee(std::span<const std::byte>(header.data(), header_size)));
+    };
+    patch_gpt_header(layout.gpt_primary_header);
+    patch_gpt_header(layout.gpt_backup_header);
 }
 
 [[nodiscard]] const format::Disk* find_disk(const format::Manifest& manifest,
@@ -335,7 +415,8 @@ WholeDiskByteReader::~WholeDiskByteReader() = default;
 base::Result<std::unique_ptr<WholeDiskByteReader>>
 WholeDiskByteReader::open(ports::IRecoveryPointReader& inner, const format::Manifest& manifest,
                           const std::uint32_t source_disk_number,
-                          const std::size_t cache_chunk_count) {
+                          const std::size_t cache_chunk_count,
+                          const bool assign_unique_disk_identity) {
     const auto* disk = find_disk(manifest, source_disk_number);
     if (disk == nullptr) {
         return base::Result<std::unique_ptr<WholeDiskByteReader>>::failure(make_error(
@@ -362,6 +443,9 @@ WholeDiskByteReader::open(ports::IRecoveryPointReader& inner, const format::Mani
     implementation->sector_size = disk->bytes_per_sector > 0 ? disk->bytes_per_sector : 512U;
     implementation->partition_style = disk->partition_style;
     implementation->raw_layout = disk->raw_layout;
+    if (assign_unique_disk_identity) {
+        randomize_disk_identity(implementation->raw_layout, implementation->partition_style);
+    }
     implementation->regions = std::move(regions).value();
     implementation->volumes = std::move(volumes).value();
     return base::Result<std::unique_ptr<WholeDiskByteReader>>::success(

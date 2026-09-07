@@ -178,7 +178,8 @@ VM 使用 headless 模式并采用最小设备集：
 - boot order 只允许 disk，不创建或挂载 challenge ISO/DVD；
 - NIC、共享目录、clipboard、drag-and-drop、USB、audio、VRDE 全部关闭；
 - 新 VM UUID，不复制原机硬件 UUID；虚拟盘内 disk identity 保持不变；
-- VM 配置、VirtualBox 日志、差分盘和截图只存在于该 Job 私有目录。
+- VM 配置、VirtualBox 日志和差分盘只存在于该 Job 私有目录；最终截图在清理前写入受控的
+  `<data_dir>/logs/bootcheck`，与对应任务日志同名并使用 `.png` 扩展名。
 
 VirtualBox capability 只有在以下条件同时满足时声明：受支持版本、签名可信的绝对
 `VBoxManage.exe`、Host driver 可用、headless 启动探测成功、Dokan/VMDK presenter 可用。移除或损坏
@@ -226,6 +227,7 @@ create_vm
 attach_media
 start_vm
 wait_boot_confirmation
+capture_screenshot
 cleanup
 ```
 
@@ -248,10 +250,13 @@ cleanup
 - `bootcheck.boot_not_confirmed`
 - `bootcheck.overlay_full`
 - `bootcheck.cancelled`
+- `bootcheck.screenshot_failed`
 - `bootcheck.cleanup_incomplete`
 
-截图只能在 VM start 后按明确诊断策略采集，视为敏感用户数据，使用 job 目录 ACL 和短保留期；协议响应和
-普通 Service 日志不返回截图内容。
+VM session 已创建时，成功、失败和取消均在 cleanup 前采集最终截图；VirtualBox 使用 provider 原生 PNG，
+Hyper-V 使用 WMI thumbnail 转为 PNG。截图视为敏感用户数据，沿用任务日志目录的访问控制与保留策略；
+协议响应和普通 Service 日志不返回截图内容或像素。截图使用独立 30 秒预算，失败只记录
+`bootcheck.screenshot_failed`，不改写原始 BootCheck 结果。VM 创建前失败时没有可截图对象。
 
 ## 取消、清理与崩溃恢复
 

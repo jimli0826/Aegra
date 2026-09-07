@@ -118,6 +118,26 @@ void grant_active_user_access(const std::filesystem::path& directory) noexcept {
     LocalFree(merged_dacl);
 }
 
+/// User-token launches get a fresh profile environment (no Service inherit), so
+/// AEGRA_DATA_DIR must be stamped and the interactive user must be able to write
+/// job files and task logs under the Service data directory.
+void apply_boot_check_host_environment(ports::ProcessLaunchRequest& launch,
+                                       const std::filesystem::path& data_directory,
+                                       const bool as_active_user) {
+    launch.environment_overrides.push_back(
+        ports::ProcessEnvironmentVariable{"AEGRA_DATA_DIR", path_to_utf8(data_directory)});
+    if (!as_active_user) {
+        return;
+    }
+    grant_active_user_access(data_directory / L"bootcheck");
+    std::error_code error;
+    const auto log_directory = data_directory / L"logs" / L"bootcheck";
+    std::filesystem::create_directories(log_directory, error);
+    if (!error) {
+        grant_active_user_access(log_directory);
+    }
+}
+
 /// tip -> Full chain of catalog entries for a volume recovery point (base-first).
 [[nodiscard]] base::Result<std::vector<personal_repository::CatalogEntry>>
 resolve_volume_chain(ports::IControlPlaneDatabase& control_plane,
@@ -319,6 +339,7 @@ struct BootCheckSupervisor::Impl final {
         launch.executable_path = path_to_utf8(options.host_executable_path);
         launch.arguments = {"--inspect", hypervisor_name};
         launch.capture_output = true;
+        apply_boot_check_host_environment(launch, options.data_directory, false);
         InspectOutcome outcome;
         auto launched = launcher.launch(launch);
         if (launched) {
@@ -434,14 +455,12 @@ struct BootCheckSupervisor::Impl final {
         // Hyper-V VMs are global (System launch keeps the required privileges).
         const bool user_visible =
             dispatch.hypervisor == contracts::BootCheckHypervisor::kVirtualBox;
-        if (user_visible) {
-            grant_active_user_access(options.data_directory / L"bootcheck");
-        }
         ports::ProcessLaunchRequest launch;
         launch.executable_path = path_to_utf8(options.host_executable_path);
         launch.arguments = {"--request", path_to_utf8(request_path)};
         launch.capture_output = true;
         launch.run_as_active_user = user_visible;
+        apply_boot_check_host_environment(launch, options.data_directory, user_visible);
         auto launched = launcher.launch(launch);
         if (!launched) {
             std::filesystem::remove(request_path, ec);
@@ -525,6 +544,7 @@ void BootCheckSupervisor::begin_scavenge() {
             launch.executable_path = path_to_utf8(state->options.host_executable_path);
             launch.arguments = {"--scavenge"};
             launch.run_as_active_user = as_active_user;
+            apply_boot_check_host_environment(launch, state->options.data_directory, as_active_user);
             auto launched = state->launcher.launch(launch);
             if (!launched) {
                 write_log(state->logger, ServiceLogLevel::kWarning,

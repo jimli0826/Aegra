@@ -62,10 +62,21 @@ create_vm               # 选中 provider 创建：VBox createvm/VDI 差分/atta
                         # -Differencing/New-VM（Notes 写入 aegra-bootcheck 标记）
 start_vm
 wait_boot_confirmation  # 每 10 秒查 Hyper-V 心跳/VM 状态、每 2 秒查 overlay；boot timeout（默认 10 分钟）+ 配额 + 外部取消
+settle_after_boot       # 启动确认后再让 guest 运行 boot_settle_ms（默认 90 秒），期间仍监控掉电/配额/取消；
+                        # 心跳在 Windows 转圈阶段即已就绪，不等待则截图几乎不会到登录界面
+capture_screenshot      # VM 已创建时，无论启动确认成功/失败/取消均在 cleanup 前保存最终画面
 cleanup                 # session cleanup -> Dokan 关闭 -> reader 释放 -> 删除 job_directory
 ```
 
 日志不记录密码或 SecretRef；凭据只记 `present|empty` 层计数。
+
+最终画面与对应任务日志使用相同文件名，保存为 `<data_dir>/logs/bootcheck/*.png`；因此不会随
+`job_directory` 清理而删除。VirtualBox 使用 `VBoxManage controlvm ... screenshotpng`，Hyper-V 使用
+`Msvm_VirtualSystemManagementService.GetVirtualSystemThumbnailImage`，`TargetSystem` 使用
+`Msvm_ComputerSystem` 引用（WQL 过滤值必须自带引号 `ElementName='...'`），获取 640×480 RGB565 画面并编码为 PNG；
+`ImageData` 可能比 width×height×2 多出少量尾部字节（实测 +4），只复制前 614400 字节，长度不足才报错。截图阶段有 30 秒独立预算且不复用
+已经取消的任务 token；截图失败只记录
+`bootcheck.screenshot_failed`（可附带有界 PowerShell 诊断），不改变原始 BootCheck 结论。VM 尚未创建的前置失败没有可截图对象。
 
 ## 结果判据与 message code
 
@@ -104,6 +115,10 @@ Supervisor 的职责。
   签名与 7.1/7.2 版本校验仍在 provider `inspect` 内执行。
 - capability 探测使用 `<data_dir>\bootcheck\capability` 隔离 `VBOX_USER_HOME`。
 - 数据目录顺序与任务日志一致：`AEGRA_DATA_DIR` → `%LOCALAPPDATA%\Aegra` → `%ProgramData%\Aegra`。
+  Service 以交互用户 token 拉起 VirtualBox BootCheck 时，`CreateEnvironmentBlock` 不继承
+  Service 环境，因此 Supervisor 必须把 `AEGRA_DATA_DIR` 作为 environment override 注入，并把
+  该用户的可继承写权限授给 `<data_dir>/bootcheck` 与 `<data_dir>/logs/bootcheck`，保证任务日志
+  和最终截图与 Service 同树（SCM 下即 `%ProgramData%\Aegra\logs\bootcheck`）。
 - 构建产物复制到 `AegraService.exe` 同目录，供后续 Service Supervisor 以兄弟路径解析。
 
 ## 验证与完成标准

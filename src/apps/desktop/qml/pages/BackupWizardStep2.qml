@@ -102,6 +102,12 @@ Item {
                 ? serviceClient.virtualBoxAvailable : serviceClient.hyperVAvailable
     }
 
+    // BackupPage Create/Save still gates on this after the wizard dropped the hypervisor picker.
+    function isBootCheckHypervisorInstalled(value) {
+        return value === 1 ? root.virtualBoxInstalled
+                           : (value === 2 ? root.hyperVInstalled : false)
+    }
+
     function requestBootCheckEnable() {
         if (typeof serviceClient === "undefined" || !serviceClient)
             return

@@ -32,6 +32,7 @@ constexpr const char* kHyperVConflict = "bootcheck.virtualbox_hyperv_conflict";
 constexpr const char* kNoHardwareVirt = "bootcheck.virtualbox_no_hardware_virt";
 constexpr const char* kVmCreateFailed = "bootcheck.vm_create_failed";
 constexpr const char* kVmStartFailed = "bootcheck.vm_start_failed";
+constexpr const char* kScreenshotFailed = "bootcheck.screenshot_failed";
 constexpr const char* kCleanupIncomplete = "bootcheck.cleanup_incomplete";
 
 base::Error stable_error(const base::ErrorCode code, const char* message) {
@@ -345,6 +346,9 @@ class VirtualBoxVmSession final : public virtualization::IBootCheckVmSession {
     guest_heartbeat_ok(base::CancellationToken) override {
         return base::Result<bool>::success(false);
     }
+    [[nodiscard]] base::Result<void>
+    capture_screenshot(const std::string& destination_path,
+                       base::CancellationToken cancellation) override;
     [[nodiscard]] base::Result<void> power_off(base::CancellationToken cancellation) override;
     [[nodiscard]] base::Result<void> cleanup(base::CancellationToken cancellation) override;
 
@@ -445,6 +449,17 @@ VirtualBoxVmSession::state(const base::CancellationToken cancellation) {
         return base::Result<BootCheckVmState>::failure(output.error());
     }
     return base::Result<BootCheckVmState>::success(parse_vm_state(output.value()));
+}
+
+base::Result<void>
+VirtualBoxVmSession::capture_screenshot(const std::string& destination_path,
+                                        const base::CancellationToken cancellation) {
+    if (!vm_registered_ || destination_path.empty()) {
+        return base::Result<void>::failure(
+            stable_error(base::ErrorCode::kConflict, kScreenshotFailed));
+    }
+    return command({"controlvm", layout_.vm_name, "screenshotpng", destination_path, "0"},
+                   kScreenshotFailed, cancellation);
 }
 
 base::Result<void> VirtualBoxVmSession::power_off(const base::CancellationToken cancellation) {

@@ -813,7 +813,8 @@ Item {
         var bootCheckAfterBackup = (!filesMode && s2) ? !!s2.bootCheckAfterBackup : false
         var bootCheckHypervisor = bootCheckAfterBackup ? s2.bootCheckHypervisor : 0
         if (bootCheckAfterBackup &&
-                (!s2 || !s2.isBootCheckHypervisorInstalled(bootCheckHypervisor))) {
+                (!s2 || typeof s2.isBootCheckHypervisorInstalled !== "function"
+                 || !s2.isBootCheckHypervisorInstalled(bootCheckHypervisor))) {
             serviceClient.showToast(qsTrId("aegra.backup.post.hypervisor_unavailable"), true)
             return
         }
@@ -985,7 +986,8 @@ Item {
                                   ? (s2 ? s2.bootCheckHypervisor
                                         : (item.bootCheckHypervisor || 0)) : 0
         if (bootCheckAfterBackup &&
-                (!s2 || !s2.isBootCheckHypervisorInstalled(bootCheckHypervisor))) {
+                (!s2 || typeof s2.isBootCheckHypervisorInstalled !== "function"
+                 || !s2.isBootCheckHypervisorInstalled(bootCheckHypervisor))) {
             serviceClient.showToast(qsTrId("aegra.backup.post.hypervisor_unavailable"), true)
             return
         }

@@ -10,6 +10,7 @@
 #include "aegra/ports/credential.h"
 #include "aegra/virtualization/boot_check_provider.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <condition_variable>
@@ -50,6 +51,7 @@ constexpr const char* kPresentHoldCompleted = "bootcheck.present_hold_completed"
 
 constexpr auto kOverlayPollInterval = std::chrono::seconds(2);
 constexpr auto kVmStatePollInterval = std::chrono::seconds(10);
+constexpr auto kScreenshotBudget = std::chrono::seconds(30);
 constexpr auto kCleanupBudget = std::chrono::minutes(2);
 
 [[nodiscard]] base::Error stage_error(const base::ErrorCode code, const char* message_code) {
@@ -85,25 +87,25 @@ struct TaskResources final {
     bool owns_job_directory{false};
 };
 
-/// Requests stop after a fixed budget so cleanup can never hang the host.
-class CleanupDeadline final {
+/// Requests stop after a fixed budget so finalization work cannot hang the host.
+class FinalizationDeadline final {
   public:
-    CleanupDeadline()
-        : watchdog_([this](const std::stop_token stopped) {
+    explicit FinalizationDeadline(const std::chrono::milliseconds budget)
+        : watchdog_([this, budget](const std::stop_token stopped) {
               std::unique_lock lock(mutex_);
-              changed_.wait_for(lock, stopped, kCleanupBudget, [] { return false; });
+              changed_.wait_for(lock, stopped, budget, [] { return false; });
               if (!stopped.stop_requested()) {
                   cancellation_.request_stop();
               }
           }) {}
 
-    ~CleanupDeadline() {
+    ~FinalizationDeadline() {
         watchdog_.request_stop();
         changed_.notify_all();
     }
 
-    CleanupDeadline(const CleanupDeadline&) = delete;
-    CleanupDeadline& operator=(const CleanupDeadline&) = delete;
+    FinalizationDeadline(const FinalizationDeadline&) = delete;
+    FinalizationDeadline& operator=(const FinalizationDeadline&) = delete;
 
     [[nodiscard]] base::CancellationToken token() const noexcept {
         return cancellation_.get_token();
@@ -484,9 +486,70 @@ make_image_identity(ports::IRandomSource& random, const base::CancellationToken&
     }
 }
 
+/// Keeps the confirmed guest running for options.boot_settle_ms so the final
+/// screenshot shows a settled desktop/logon screen rather than the boot spinner.
+/// A guest that powers off, exhausts the overlay quota, or is cancelled during
+/// the settle window still fails the check.
+[[nodiscard]] base::Result<void> settle_after_boot(TaskResources& resources,
+                                                   const BootCheckHostOptions& options,
+                                                   const base::CancellationToken& cancellation,
+                                                   ScopedStage& stage) {
+    const auto settle = std::chrono::milliseconds(options.boot_settle_ms);
+    stage.note_u64("settle_ms", options.boot_settle_ms);
+    if (settle.count() == 0) {
+        return base::Result<void>::success();
+    }
+    const auto overlay_path = path_from_utf8(resources.session->info().child_medium_path);
+    const auto started = std::chrono::steady_clock::now();
+    const auto deadline = started + settle;
+    auto next_state_poll = started + kVmStatePollInterval;
+    std::uint64_t overlay_bytes = 0;
+    const auto fail = [&stage, &overlay_bytes](const base::ErrorCode code,
+                                               const char* const message_code) {
+        stage.note_bytes("overlay_bytes", overlay_bytes);
+        const base::Error error = stage_error(code, message_code);
+        stage.fail(error, "settle_after_boot");
+        return base::Result<void>::failure(error);
+    };
+    std::mutex mutex;
+    std::condition_variable_any changed;
+    for (;;) {
+        if (cancellation.stop_requested()) {
+            return fail(base::ErrorCode::kCancelled, kCancelled);
+        }
+        std::error_code file_error;
+        const auto size = std::filesystem::file_size(overlay_path, file_error);
+        if (!file_error) {
+            overlay_bytes = size;
+        }
+        if (overlay_bytes > options.overlay_limit_bytes) {
+            return fail(base::ErrorCode::kInsufficientSpace, kOverlayFull);
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) {
+            stage.note_bytes("overlay_bytes", overlay_bytes);
+            return base::Result<void>::success();
+        }
+        if (now >= next_state_poll) {
+            next_state_poll = now + kVmStatePollInterval;
+            auto state = resources.session->state(cancellation);
+            const bool powered_off =
+                state && (state.value() == virtualization::BootCheckVmState::kPoweredOff ||
+                          state.value() == virtualization::BootCheckVmState::kAborted);
+            if (powered_off) {
+                return fail(base::ErrorCode::kIoFailure, kGuestPoweredOff);
+            }
+        }
+        const auto wait = (std::min)(deadline - now,
+                                     std::chrono::steady_clock::duration(kOverlayPollInterval));
+        std::unique_lock lock(mutex);
+        changed.wait_for(lock, cancellation, wait, [] { return false; });
+    }
+}
+
 [[nodiscard]] bool run_cleanup(TaskResources& resources, WorkerTaskLog* const log) {
     ScopedStage stage(log, "cleanup");
-    CleanupDeadline deadline;
+    FinalizationDeadline deadline(kCleanupBudget);
     bool clean = true;
     if (resources.session) {
         if (!resources.session->cleanup(deadline.token())) {
@@ -516,6 +579,23 @@ make_image_identity(ports::IRandomSource& random, const base::CancellationToken&
         stage.fail(stage_error(base::ErrorCode::kIoFailure, kCleanupIncomplete), "cleanup");
     }
     return clean;
+}
+
+void capture_final_screenshot(TaskResources& resources, WorkerTaskLog* const log) {
+    if (!resources.session || log == nullptr || log->path().empty()) {
+        return;
+    }
+    ScopedStage stage(log, "capture_screenshot");
+    auto screenshot_path = path_from_utf8(std::string(log->path()));
+    screenshot_path.replace_extension(L".png");
+    const auto display_path = apps::worker::path_display(screenshot_path);
+    FinalizationDeadline deadline(kScreenshotBudget);
+    auto captured = resources.session->capture_screenshot(display_path, deadline.token());
+    if (!captured) {
+        stage.fail(captured.error(), "capture_screenshot");
+        return;
+    }
+    stage.note("screenshot", display_path);
 }
 
 [[nodiscard]] base::Result<void>
@@ -598,7 +678,14 @@ run_presentation_stages(const contracts::BootCheckJobRequest& request,
     }
     {
         ScopedStage stage(log, "wait_boot_confirmation");
-        return wait_boot_confirmation(resources, options, cancellation, stage);
+        if (auto confirmed = wait_boot_confirmation(resources, options, cancellation, stage);
+            !confirmed) {
+            return confirmed;
+        }
+    }
+    {
+        ScopedStage stage(log, "settle_after_boot");
+        return settle_after_boot(resources, options, cancellation, stage);
     }
 }
 
@@ -627,6 +714,7 @@ void log_request(WorkerTaskLog* const log, const contracts::BootCheckJobRequest&
     log->field_bytes("overlay_limit", options.overlay_limit_bytes);
     log->field_bytes("boot_confirmed_overlay", options.boot_confirmed_overlay_bytes);
     log->field_u64("boot_timeout_ms", options.boot_timeout_ms);
+    log->field_u64("boot_settle_ms", options.boot_settle_ms);
 }
 
 void log_result(WorkerTaskLog* const log, const contracts::TaskResult& result,
@@ -706,6 +794,7 @@ run_boot_check_task(const contracts::BootCheckJobRequest& request,
         outcome = run_stages(request, options, context, cancellation, resources, task_log.get());
     }
     const std::uint64_t disk_bytes = resources.disk ? resources.disk->size_bytes() : 0;
+    capture_final_screenshot(resources, task_log.get());
     const bool clean = run_cleanup(resources, task_log.get());
 
     auto result = make_task_result(request, outcome, disk_bytes, clean);

@@ -81,6 +81,13 @@ class IBootCheckVmSession {
     // error is reported as false, not a failure: the caller keeps polling.
     [[nodiscard]] virtual base::Result<bool>
     guest_heartbeat_ok(base::CancellationToken cancellation) = 0;
+    // Captures the current guest display to an absolute PNG path. The caller
+    // invokes this before cleanup on every terminal path for which a VM session
+    // exists. Providers must not change VM state or remove the destination on
+    // failure.
+    [[nodiscard]] virtual base::Result<void>
+    capture_screenshot(const std::string& destination_path,
+                       base::CancellationToken cancellation) = 0;
     [[nodiscard]] virtual base::Result<void> power_off(base::CancellationToken cancellation) = 0;
     [[nodiscard]] virtual base::Result<void> cleanup(base::CancellationToken cancellation) = 0;
 };

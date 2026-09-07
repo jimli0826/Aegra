@@ -47,6 +47,11 @@ struct BootCheckHostOptions final {
     /// early-boot spinner. The primary signal is the guest heartbeat.
     std::uint64_t boot_confirmed_overlay_bytes{60ULL * 1024ULL * 1024ULL};
     std::uint64_t boot_timeout_ms{10ULL * 60ULL * 1000ULL};
+    /// Extra time the guest keeps running after boot is confirmed, before the
+    /// final screenshot. The heartbeat comes up early in boot (still on the
+    /// Windows spinner), so without this the screenshot rarely shows the logon
+    /// screen. The VM is still watched for power-off/quota/cancel meanwhile.
+    std::uint64_t boot_settle_ms{90ULL * 1000ULL};
     /// Upper bound for a single archive chunk during chain random access.
     std::uint64_t maximum_chunk_bytes{256ULL * 1024ULL * 1024ULL};
     /// Decompressed-chunk LRU entries for guest random reads (memory upper

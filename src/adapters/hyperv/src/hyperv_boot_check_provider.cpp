@@ -6,6 +6,7 @@
 #include <cctype>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <mutex>
@@ -25,8 +26,11 @@ using virtualization::BootCheckVmState;
 constexpr const char* kProviderUnavailable = "bootcheck.provider_unavailable";
 constexpr const char* kVmCreateFailed = "bootcheck.vm_create_failed";
 constexpr const char* kVmStartFailed = "bootcheck.vm_start_failed";
+constexpr const char* kScreenshotFailed = "bootcheck.screenshot_failed";
 constexpr const char* kCleanupIncomplete = "bootcheck.cleanup_incomplete";
 constexpr std::string_view kReadyMarker = "aegra-hyperv-ready";
+constexpr std::uint16_t kScreenshotWidth = 640;
+constexpr std::uint16_t kScreenshotHeight = 480;
 
 [[nodiscard]] base::Error stable_error(const base::ErrorCode code, const char* message) {
     return base::Error{code, message};
@@ -121,6 +125,78 @@ prepare_job_layout(const virtualization::BootCheckVmRequest& request) {
         return BootCheckVmState::kPoweredOff;
     }
     return BootCheckVmState::kUnknown;
+}
+
+[[nodiscard]] std::string clipped_powershell_output(const std::string_view output) {
+    std::string clipped;
+    clipped.reserve((std::min)(output.size(), static_cast<std::size_t>(240)));
+    for (std::size_t index = 0; index < output.size() && clipped.size() < 240; ++index) {
+        const auto character = static_cast<unsigned char>(output[index]);
+        if (character == '\r' || character == '\n' || character == '\t') {
+            if (!clipped.empty() && clipped.back() != ' ') {
+                clipped.push_back(' ');
+            }
+            continue;
+        }
+        if (character >= 0x20 && character != 0x7F) {
+            clipped.push_back(static_cast<char>(character));
+        }
+    }
+    return clipped;
+}
+
+[[nodiscard]] base::Error screenshot_io_error(const std::string_view output) {
+    auto message = std::string(kScreenshotFailed);
+    if (const auto clipped = clipped_powershell_output(output); !clipped.empty()) {
+        message.append(": ");
+        message.append(clipped);
+    }
+    return {base::ErrorCode::kIoFailure, std::move(message)};
+}
+
+/// TargetSystem is Msvm_ComputerSystem (CIM REF), not VirtualSystemSettingData.
+/// $input is a PowerShell automatic variable and cannot carry method parameters.
+/// The WQL filter value must itself be quoted (ElementName='name'); vm_name is
+/// restricted to [A-Za-z0-9-] by safe_job_id, so no WQL escaping is needed.
+/// ImageData may carry a few trailing bytes beyond width*height*2 (observed +4 on
+/// Hyper-V 10.0.26100); only the leading RGB565 payload is copied into the bitmap.
+[[nodiscard]] std::string make_screenshot_script(const std::string& vm_name,
+                                                 const std::string& destination_path) {
+    const auto vm = quote_powershell(vm_name);
+    const auto destination = quote_powershell(destination_path);
+    const auto expected_bytes =
+        std::to_string(static_cast<unsigned>(kScreenshotWidth) * kScreenshotHeight * 2U);
+    return "$ProgressPreference='SilentlyContinue'; Add-Type -AssemblyName System.Drawing; "
+           "$ns='root\\virtualization\\v2'; "
+           "$vm=Get-WmiObject -Namespace $ns -Class Msvm_ComputerSystem -Filter "
+           "(\"ElementName='\" + " +
+           vm +
+           " + \"'\"); if ($null -eq $vm) { throw 'VM missing' }; "
+           "$service=Get-WmiObject -Namespace $ns -Class "
+           "Msvm_VirtualSystemManagementService; "
+           "$params=$service.GetMethodParameters('GetVirtualSystemThumbnailImage'); "
+           "$params.TargetSystem=$vm.__PATH; "
+           "$params.WidthPixels=[uint16]" +
+           std::to_string(kScreenshotWidth) +
+           "; $params.HeightPixels=[uint16]" + std::to_string(kScreenshotHeight) +
+           "; $result=$service.InvokeMethod('GetVirtualSystemThumbnailImage',$params,$null); "
+           "if ($result.ReturnValue -ne 0) { throw ('Thumbnail failed: ' + "
+           "$result.ReturnValue) }; [byte[]]$pixels=$result.ImageData; "
+           "if ($null -eq $pixels) { throw 'Empty thumbnail' }; "
+           "if ($pixels.Length -lt " +
+           expected_bytes +
+           ") { throw ('Thumbnail too small ' + $pixels.Length) }; "
+           "$bitmap=New-Object System.Drawing.Bitmap(" +
+           std::to_string(kScreenshotWidth) + "," + std::to_string(kScreenshotHeight) +
+           ",[System.Drawing.Imaging.PixelFormat]::Format16bppRgb565); "
+           "$rect=New-Object System.Drawing.Rectangle(0,0,$bitmap.Width,$bitmap.Height); "
+           "$bits=$bitmap.LockBits($rect,[System.Drawing.Imaging.ImageLockMode]::WriteOnly,"
+           "$bitmap.PixelFormat); try { [Runtime.InteropServices.Marshal]::Copy("
+           "$pixels,0,$bits.Scan0," +
+           expected_bytes + ") } finally { $bitmap.UnlockBits($bits) }; "
+           "try { $bitmap.Save(" +
+           destination +
+           ",[System.Drawing.Imaging.ImageFormat]::Png) } finally { $bitmap.Dispose() }";
 }
 
 class HyperVVmSession final : public virtualization::IBootCheckVmSession {
@@ -244,6 +320,27 @@ class HyperVVmSession final : public virtualization::IBootCheckVmSession {
             return base::Result<bool>::success(false);
         }
         return base::Result<bool>::success(result.value().output.find("Ok") != std::string::npos);
+    }
+
+    [[nodiscard]] base::Result<void>
+    capture_screenshot(const std::string& destination_path,
+                       const base::CancellationToken cancellation) override {
+        if (!vm_created_ || destination_path.empty()) {
+            return base::Result<void>::failure(
+                stable_error(base::ErrorCode::kConflict, kScreenshotFailed));
+        }
+        auto ran = runner_.run(make_screenshot_script(layout_.vm_name, destination_path),
+                               cancellation);
+        if (!ran) {
+            if (ran.error().code == base::ErrorCode::kCancelled) {
+                return base::Result<void>::failure(ran.error());
+            }
+            return base::Result<void>::failure(screenshot_io_error(ran.error().message));
+        }
+        if (ran.value().exit_code != 0) {
+            return base::Result<void>::failure(screenshot_io_error(ran.value().output));
+        }
+        return base::Result<void>::success();
     }
 
     [[nodiscard]] base::Result<void>

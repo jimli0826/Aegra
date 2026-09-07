@@ -46,12 +46,14 @@ VM 运行状态不能作为 Windows 启动成功判据。主判据是 Hyper-V In
 （`kVmdk`=VirtualBox、`kVhdx`=Hyper-V），Host 据此选择 Dokan 呈现形态；`BootCheckVmRequest`
 携带格式无关的 `parent_disk_path`。
 
-当前 `IBootCheckProvider` 只描述单次隔离 VM 的 capability、创建、启动、状态、关机和清理，不暴露
+当前 `IBootCheckProvider` 只描述单次隔离 VM 的 capability、创建、启动、状态、截图、关机和清理，不暴露
 `VBoxManage`、厂商 enum 或 Win32 handle。Session 是单调用方对象；`create` 成功后调用方必须在所有终态
 显式调用 `cleanup`，析构只执行 15 秒有界的 best-effort 清理。启动确认由调用方（BootCheck Host）编排：
 Host 轮询 `guest_heartbeat_ok`（主）与 `BootCheckVmInfo::child_medium_path` 增长（兜底）及 session 状态，
 超过 request 的 `overlay_limit_bytes` 时 Host 必须先停止 VM，再清理 session；Provider 只经
 `guest_heartbeat_ok` 暴露 hypervisor 自带的 guest 心跳（Hyper-V），不注入 agent，也不承担文件系统 quota。
+Host 在所有已有 VM session 的终态、清理之前调用 `capture_screenshot`，Provider 将当前 guest display
+写到 Host 指定的绝对 PNG 路径；该诊断制品失败不改写启动检查结果。
 
 `inspect` 对 provider 缺失、版本不支持、host driver 不可用或 headless probe 失败返回
 `available=false` 和稳定 message code；取消返回 `Result` failure。VirtualBox 只接受 7.1/7.2；

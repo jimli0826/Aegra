@@ -292,6 +292,33 @@ parse_plan_delete_request(const Json& payload) {
             payload.at("recovery_point_ids").get<std::vector<std::string>>()};
 }
 
+[[nodiscard]] Json encode_start_boot_check(const contracts::StartBootCheckCommand& command) {
+    return Json{{"repository_connection_id", command.repository_connection_id},
+                {"recovery_point_id", command.recovery_point_id},
+                {"hypervisor", command.hypervisor
+                                   ? Json(static_cast<std::uint8_t>(*command.hypervisor))
+                                   : Json(nullptr)}};
+}
+
+[[nodiscard]] contracts::StartBootCheckCommand parse_start_boot_check(const Json& payload) {
+    constexpr std::array<std::string_view, 3> keys{"repository_connection_id",
+                                                   "recovery_point_id", "hypervisor"};
+    if (!exact_keys(payload, keys) || !payload.at("repository_connection_id").is_string() ||
+        !payload.at("recovery_point_id").is_string() ||
+        !(payload.at("hypervisor").is_null() ||
+          payload.at("hypervisor").is_number_unsigned())) {
+        throw std::invalid_argument("start boot check fields are invalid");
+    }
+    contracts::StartBootCheckCommand command;
+    command.repository_connection_id = payload.at("repository_connection_id").get<std::string>();
+    command.recovery_point_id = payload.at("recovery_point_id").get<std::string>();
+    if (!payload.at("hypervisor").is_null()) {
+        command.hypervisor = static_cast<contracts::BootCheckHypervisor>(
+            payload.at("hypervisor").get<std::uint8_t>());
+    }
+    return command;
+}
+
 [[nodiscard]] Json encode_execute_delete_plan(const contracts::ExecuteDeletePlanCommand& command) {
     return Json{{"plan_token", command.plan_token}, {"confirmed", command.confirmed}};
 }
@@ -765,6 +792,9 @@ Json encode_request_payload(const contracts::ServiceRequest& request) {
         return encode_start_backup(std::get<contracts::StartBackupCommand>(request.payload));
     case contracts::ServiceRequestKind::kStartVerify:
         return encode_start_verify(std::get<contracts::StartVerifyCommand>(request.payload));
+    case contracts::ServiceRequestKind::kStartBootCheck:
+        return encode_start_boot_check(
+            std::get<contracts::StartBootCheckCommand>(request.payload));
     case contracts::ServiceRequestKind::kStartRestore:
         return encode_start_restore(std::get<contracts::StartRestoreCommand>(request.payload));
     case contracts::ServiceRequestKind::kMountRecoveryPoint:
@@ -909,6 +939,8 @@ contracts::ServiceRequestPayload parse_request_payload(const contracts::ServiceR
         return parse_start_backup(payload);
     case contracts::ServiceRequestKind::kStartVerify:
         return parse_start_verify(payload);
+    case contracts::ServiceRequestKind::kStartBootCheck:
+        return parse_start_boot_check(payload);
     case contracts::ServiceRequestKind::kStartRestore:
         return parse_start_restore(payload);
     case contracts::ServiceRequestKind::kMountRecoveryPoint:

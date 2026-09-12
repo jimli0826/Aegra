@@ -3250,5 +3250,141 @@ for critical volumes now</source>
         <source>Boot Check cannot be enabled because the configured hypervisor is unavailable.</source>
         <translation>目前設定的虛擬化平台不可用，無法啟用啟動檢查。</translation>
     </message>
+    <message id="aegra.repository.bootcheck.submitted">
+        <source>Boot check jobs submitted. See Tasks and Event Log for results.</source>
+        <translation>啟動驗證工作已提交，請在工作和事件記錄中查看結果。</translation>
+    </message>
+    <message id="aegra.repository.bootcheck.submission_failed">
+        <source>Boot check could not be submitted.</source>
+        <translation>無法提交啟動驗證工作。</translation>
+    </message>
+    <message id="aegra.repository.bootcheck.finished">
+        <source>Boot check completed.</source>
+        <translation>啟動驗證已完成。</translation>
+    </message>
+    <message id="aegra.repository.bootcheck.failed">
+        <source>Boot check failed.</source>
+        <translation>啟動驗證失敗。</translation>
+    </message>
+    <message id="aegra.repository.bootcheck.select_hint">
+        <source>Select volume recovery points</source>
+        <translation>請選擇要啟動驗證的磁碟區還原點</translation>
+    </message>
+    <message id="aegra.error.bootcheck.volume_set_required">
+        <source>Boot check requires a volume recovery point</source>
+        <translation>啟動驗證需要磁碟區還原點</translation>
+    </message>
+    <message id="aegra.repository.bootcheck.status.queued">
+        <source>Boot check queued</source>
+        <translation>啟動驗證排隊</translation>
+    </message>
+    <message id="aegra.repository.bootcheck.status.running">
+        <source>Boot checking</source>
+        <translation>啟動驗證中</translation>
+    </message>
+    <message id="aegra.repository.bootcheck.status.succeeded">
+        <source>Boot verified</source>
+        <translation>啟動驗證通過</translation>
+    </message>
+    <message id="aegra.repository.bootcheck.status.failed">
+        <source>Boot check failed</source>
+        <translation>啟動驗證失敗</translation>
+    </message>
+    <message id="aegra.error.bootcheck.archive_open_failed">
+        <source>Boot check could not open the archive. Check that the backup files still exist in the repository.</source>
+        <translation>啟動驗證無法開啟映像檔，請確認備份檔案仍在 Repository 中。</translation>
+    </message>
+    <message id="aegra.error.bootcheck.source_not_system_disk">
+        <source>The recovery point does not contain a bootable system disk</source>
+        <translation>還原點不包含可開機的系統磁碟</translation>
+    </message>
+    <message id="aegra.error.bootcheck.unsupported_boot_profile">
+        <source>The recovery point's boot configuration is not supported for boot check</source>
+        <translation>還原點的開機設定不支援啟動驗證</translation>
+    </message>
+    <message id="aegra.error.bootcheck.vmdk_present_failed">
+        <source>Boot check could not present the virtual disk</source>
+        <translation>啟動驗證無法呈現虛擬磁碟</translation>
+    </message>
+    <message id="aegra.error.bootcheck.vm_create_failed">
+        <source>Boot check could not create the virtual machine</source>
+        <translation>啟動驗證無法建立虛擬機器</translation>
+    </message>
+    <message id="aegra.error.bootcheck.vm_start_failed">
+        <source>Boot check could not start the virtual machine</source>
+        <translation>啟動驗證無法啟動虛擬機器</translation>
+    </message>
+    <message id="aegra.error.bootcheck.guest_powered_off">
+        <source>The virtual machine powered off before boot was confirmed</source>
+        <translation>虛擬機器在確認開機前已關機</translation>
+    </message>
+    <message id="aegra.error.bootcheck.boot_not_confirmed">
+        <source>The system did not boot within the time limit</source>
+        <translation>系統未在限定時間內完成開機</translation>
+    </message>
+    <message id="aegra.error.bootcheck.overlay_full">
+        <source>Boot check stopped because the temporary disk space was exhausted</source>
+        <translation>啟動驗證因暫存磁碟空間耗盡而停止</translation>
+    </message>
+    <message id="aegra.error.bootcheck.cancelled">
+        <source>Boot check was cancelled</source>
+        <translation>啟動驗證已取消</translation>
+    </message>
+    <message id="aegra.error.bootcheck.cleanup_incomplete">
+        <source>Boot check finished but could not fully remove its temporary virtual machine</source>
+        <translation>啟動驗證已完成，但未能完全清理暫存虛擬機器</translation>
+    </message>
+    <message id="aegra.error.bootcheck.host_failed">
+        <source>The boot check host process failed</source>
+        <translation>啟動驗證主機處理程序失敗</translation>
+    </message>
+    <message id="aegra.error.bootcheck.request_rejected">
+        <source>The boot check request was rejected</source>
+        <translation>啟動驗證要求被拒絕</translation>
+    </message>
+    <message id="aegra.error.bootcheck.host_unavailable">
+        <source>Boot check is not available on this computer</source>
+        <translation>此電腦上無法使用啟動驗證</translation>
+    </message>
+    <message id="aegra.error.bootcheck.interrupted">
+        <source>Boot check was interrupted by a service restart</source>
+        <translation>啟動驗證因服務重新啟動而中斷</translation>
+    </message>
+    <message id="aegra.error.bootcheck.timeout">
+        <source>Boot check exceeded its run time budget</source>
+        <translation>啟動驗證超過執行時間預算</translation>
+    </message>
+    <message id="aegra.error.bootcheck.dispatch_failed">
+        <source>Boot check could not be started</source>
+        <translation>無法啟動啟動驗證工作</translation>
+    </message>
+    <message id="aegra.error.bootcheck.archive_missing">
+        <source>Archive file does not exist</source>
+        <translation>映像檔不存在</translation>
+    </message>
+    <message id="aegra.error.bootcheck.archive_credential_unavailable">
+        <source>Archive password is unavailable</source>
+        <translation>映像檔密碼無法使用</translation>
+    </message>
+    <message id="aegra.error.bootcheck.archive_corrupt">
+        <source>Archive authentication failed</source>
+        <translation>映像檔驗證失敗</translation>
+    </message>
+    <message id="aegra.repository.column.verify_status">
+        <source>Verify</source>
+        <translation>驗證</translation>
+    </message>
+    <message id="aegra.repository.column.boot_check_status">
+        <source>Boot check</source>
+        <translation>啟動驗證</translation>
+    </message>
+    <message id="aegra.repository.check.na">
+        <source>N/A</source>
+        <translation>N/A</translation>
+    </message>
+    <message id="aegra.repository.check.partial">
+        <source>Partially checked</source>
+        <translation>部分已檢查</translation>
+    </message>
 </context>
 </TS>

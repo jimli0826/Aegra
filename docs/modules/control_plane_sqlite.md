@@ -57,7 +57,8 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
 
 ## Schema 与不变量
 
-- `schema_meta.version` 当前为 `30`（`ports::kControlPlaneSchemaVersion`；v21 增加分卷大小，v22 增加压缩级别，v23 增加备份后 Verify 策略，v24 增加 durable `post_backup_plans`，v25 增加 BootCheck hypervisor 选择与 plan 快照，v26 允许 `jobs.operation` 取 BootCheck(5)，BootCheck 运行由 `PostBackupCoordinator` 记录为控制面 Job 供任务日志展示，Verify/BootCheck Job 可携带所属 `schedule_id` 供 UI 按 Schedule 展示后置动作状态，v27 解除 `boot_check_after_backup` 对 `verify_after_backup` 的依赖，v28 增加 Boot Check VM 资源与并发设置，v29 增加 Verify 范围与并发设置，v30 增加默认 Boot Check hypervisor）。产品未发布：
+- `schema_meta.version` 当前为 `31`（`ports::kControlPlaneSchemaVersion`；v21 增加分卷大小，v22 增加压缩级别，v23 增加备份后 Verify 策略，v24 增加 durable `post_backup_plans`，v25 增加 BootCheck hypervisor 选择与 plan 快照，v26 允许 `jobs.operation` 取 BootCheck(5)，BootCheck 运行由 `PostBackupCoordinator` 记录为控制面 Job 供任务日志展示，Verify/BootCheck Job 可携带所属 `schedule_id` 供 UI 按 Schedule 展示后置动作状态，v27 解除 `boot_check_after_backup` 对 `verify_after_backup` 的依赖，v28 增加 Boot Check VM 资源与并发设置，v29 增加 Verify 范围与并发设置，v30 增加默认 Boot Check hypervisor，v31 增加 `recovery_point_checks`
+  恢复点最近一次 Verify/BootCheck 终态投影）。产品未发布：
   - 新库 `CREATE IF NOT EXISTS` 即为当前完整表结构，再写入当前 version；
   - **不提供** 历史 schema 的 `ALTER` 迁移或兼容读取；旧开发库必须删除后重建；
   - 非 0 且非当前版本 → `kUnsupportedVersion`。
@@ -109,6 +110,12 @@ Service 启动应对 `queued`、`running` 与 `cancelling` 调用 `mark_active_a
   `verify_after_backup=true`（校验 fail-closed）。v25 的 `boot_check_hypervisor` 在启用时必须为
   VirtualBox(1) 或 Hyper-V(2)，关闭时必须为 null。V4 upsert 两字段同时为 null = 更新保留既有值 /
   创建为关闭；关闭 Verify 会同时关闭 BootCheck。ScheduleSummary 返回两个字段。
+- `recovery_point_checks`（v31，ADR-0033）：主键 `(repository_connection_id, recovery_point_id,
+  operation)`，`operation` 仅 Verify(3)/BootCheck(5)，`state` 1=Succeeded 2=Failed 3=Cancelled
+  4=Interrupted，另有 `message_code`、`job_id`、`completed_utc_ms`。每次终态运行 `INSERT OR REPLACE`；
+  **不**外键到 `jobs`，任务保留期清理后仍保留，供 ListRecoveryPoints 投影到 `verify_check` /
+  `boot_check`。写入方：Worker Verify 完成回调（按批内停止位置逐点记录）与 `PostBackupCoordinator`
+  BootCheck 终态。
 - `post_backup_plans`（v24）：每个启用后置动作的 Backup Job 一行，与 JobRecord **同事务**写入
   （`FOREIGN KEY backup_job_id → jobs ON DELETE CASCADE`，随 Job 保留期清除）。字段：
   `schedule_id` / `recovery_point_id`（file_uuid）/ `repository_connection_id`、

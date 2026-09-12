@@ -143,6 +143,9 @@ template <typename Payload, typename Validator>
         return validate_payload<StartBackupCommand>(request, validate_start_backup_command);
     case ServiceRequestKind::kStartVerify:
         return validate_payload<StartVerifyCommand>(request, validate_start_verify_command);
+    case ServiceRequestKind::kStartBootCheck:
+        return validate_payload<StartBootCheckCommand>(request,
+                                                       validate_start_boot_check_command);
     case ServiceRequestKind::kStartRestore:
         return validate_payload<StartRestoreCommand>(request, validate_start_restore_command);
     case ServiceRequestKind::kMountRecoveryPoint:
@@ -274,7 +277,8 @@ bool is_service_command_kind(const ServiceRequestKind kind) noexcept {
            kind == ServiceRequestKind::kConnectRepositoryLocation ||
            kind == ServiceRequestKind::kArmPeRestore ||
            kind == ServiceRequestKind::kCancelPeRestore ||
-           kind == ServiceRequestKind::kRefreshBootCheckHypervisorStatus;
+           kind == ServiceRequestKind::kRefreshBootCheckHypervisorStatus ||
+           kind == ServiceRequestKind::kStartBootCheck;
 }
 
 base::Result<void> validate_service_request(const ServiceRequest& request) {

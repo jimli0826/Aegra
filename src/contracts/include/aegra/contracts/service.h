@@ -79,6 +79,8 @@ enum class ServiceRequestKind : std::uint8_t {
     kCancelPeRestore = 52,
     /// Start an asynchronous re-probe of every installed boot-check hypervisor.
     kRefreshBootCheckHypervisorStatus = 53,
+    /// User-initiated boot check of one volume_set recovery point (ADR-0032).
+    kStartBootCheck = 54,
 };
 
 enum class ServiceResponseKind : std::uint8_t {
@@ -112,7 +114,7 @@ using ServiceRequestPayload = std::variant<
     RepositoryDirectoryListRequest, ListRecoveryPointEntriesRequest, PrepareFileRestoreRequest,
     StartFileRestoreCommand, ServiceSettingsQuery, UpdateServiceSettingsCommand,
     PeRestoreStateRequest, ArmPeRestoreCommand, BootCheckHypervisorStatusQuery,
-    RefreshBootCheckHypervisorStatusCommand>;
+    RefreshBootCheckHypervisorStatusCommand, StartBootCheckCommand>;
 
 struct ServiceRequest final {
     std::uint32_t schema_version{kServiceRequestSchemaVersion};

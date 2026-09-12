@@ -339,6 +339,15 @@ struct StartVerifyCommand final {
     std::vector<std::string> recovery_point_ids;
 };
 
+/// User-initiated boot check of one volume_set recovery point in an isolated VM.
+/// Runs through the same durable plan/coordinator path as post-backup boot checks.
+struct StartBootCheckCommand final {
+    std::string repository_connection_id;
+    std::string recovery_point_id;
+    /// Absent = the current service_settings default hypervisor.
+    std::optional<BootCheckHypervisor> hypervisor;
+};
+
 enum class RecoveryPointStructuralState : std::uint8_t {
     kComplete = 1,
     kIncomplete = 2,
@@ -836,6 +845,8 @@ validate_repository_connection_input(const RepositoryConnectionInput& input);
 validate_plan_delete_recovery_points_request(const PlanDeleteRecoveryPointsRequest& request);
 [[nodiscard]] base::Result<void> validate_start_backup_command(const StartBackupCommand& command);
 [[nodiscard]] base::Result<void> validate_start_verify_command(const StartVerifyCommand& command);
+[[nodiscard]] base::Result<void>
+validate_start_boot_check_command(const StartBootCheckCommand& command);
 [[nodiscard]] base::Result<void>
 validate_restore_preflight_request(const RestorePreflightRequest& request);
 [[nodiscard]] base::Result<void> validate_restore_preflight(const RestorePreflight& preflight);

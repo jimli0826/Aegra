@@ -5,6 +5,7 @@ add_library(aegra_adapter_sqlite STATIC
     src/sqlite_job_store.cpp
     src/sqlite_page_token.cpp
     src/sqlite_post_backup_plan_store.cpp
+    src/sqlite_recovery_point_check_store.cpp
     src/sqlite_repository_connection_store.cpp
     src/sqlite_restore_preflight_store.cpp
     src/sqlite_schedule_store.cpp

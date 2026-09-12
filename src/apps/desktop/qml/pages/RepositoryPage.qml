@@ -8,84 +8,111 @@ Item {
     id: root
     property var pointDetails: ({})
     readonly property int jobsRevision: serviceClient.jobs ? serviceClient.jobs.revision : 0
-    function recoveryPointStatusKey(fileUuid) {
-        var _r = root.jobsRevision
-        if (!serviceClient.jobs || !fileUuid)
-            return "none"
-        var status = serviceClient.jobs.recoveryPointVerifyStatus(fileUuid)
-        return status && status.key ? status.key : "none"
+    /// points: objects with fileUuid, or plain fileUuid strings.
+    function pointFileUuid(point) {
+        return typeof point === "string" ? point : (point ? point.fileUuid : "")
     }
-    function backupSetStatusKey(points) {
+    /// Merged Verify (operation 3) / Boot Check (operation 5) status for one point:
+    /// a live job wins while active or when newer than the persisted outcome;
+    /// otherwise the Service-recorded outcome; "na" when the check never ran.
+    function recoveryPointCheckStatus(fileUuid, operation) {
         var _r = root.jobsRevision
-        var anyRunning = false
-        var anyQueued = false
-        var anyFailed = false
-        var anyCancelled = false
-        var anySucceeded = false
-        var anyNone = false
+        var _c = serviceClient.recoveryPointCount
+        if (!fileUuid)
+            return { key: "na", messageText: "" }
+        var live = serviceClient.jobs
+                   ? serviceClient.jobs.recoveryPointOperationStatus(fileUuid, operation) : null
+        var checks = serviceClient.recoveryPoints
+                     ? serviceClient.recoveryPoints.recoveryPointChecks(fileUuid) : null
+        var persisted = checks ? (operation === 5 ? checks.bootCheck : checks.verifyCheck) : null
+        if (persisted && !persisted.key)
+            persisted = null
+        var liveKey = live && live.key ? live.key : "none"
+        if (liveKey === "running" || liveKey === "queued")
+            return { key: liveKey, messageText: "" }
+        if (liveKey !== "none"
+                && (!persisted
+                    || Number(live.createdUtcMs || 0) > Number(persisted.completedUtcMs || 0)))
+            return { key: liveKey, messageText: live.messageText || "" }
+        if (persisted)
+            return { key: persisted.key, messageText: persisted.messageText || "" }
+        return { key: "na", messageText: "" }
+    }
+    function recoveryPointCheckKey(fileUuid, operation) {
+        return root.recoveryPointCheckStatus(fileUuid, operation).key
+    }
+    /// Backup-set aggregate: activity first, then any failure, then "partial" when
+    /// only some points were ever checked, "na" when none were.
+    function backupSetCheckKey(points, operation) {
+        var _r = root.jobsRevision
+        var counts = { running: 0, queued: 0, failed: 0, cancelled: 0, succeeded: 0, na: 0 }
         for (var i = 0; i < points.length; ++i) {
-            var key = root.recoveryPointStatusKey(points[i].fileUuid)
-            if (key === "running")
-                anyRunning = true
-            else if (key === "queued")
-                anyQueued = true
-            else if (key === "failed")
-                anyFailed = true
-            else if (key === "cancelled")
-                anyCancelled = true
-            else if (key === "succeeded")
-                anySucceeded = true
-            else
-                anyNone = true
+            var key = root.recoveryPointCheckKey(root.pointFileUuid(points[i]), operation)
+            counts[key in counts ? key : "na"] += 1
         }
-        if (anyRunning)
+        if (counts.running > 0)
             return "running"
-        if (anyQueued)
+        if (counts.queued > 0)
             return "queued"
-        if (anyFailed)
+        if (counts.failed > 0)
             return "failed"
-        if (anyCancelled)
+        if (counts.cancelled > 0)
             return "cancelled"
-        if (anySucceeded && !anyNone)
-            return "succeeded"
-        return "none"
+        if (counts.succeeded > 0)
+            return counts.na > 0 ? "partial" : "succeeded"
+        return "na"
     }
-    function statusTextForKey(key, fallback) {
+    /// operation 5 = boot check wording; anything else uses the verify wording.
+    function checkStatusText(key, operation) {
+        var bootCheck = Number(operation) === 5
         if (key === "running")
-            return qsTrId("aegra.repository.verify.status.running")
+            //% "Boot checking"
+            return bootCheck ? qsTrId("aegra.repository.bootcheck.status.running")
+                             : qsTrId("aegra.repository.verify.status.running")
         if (key === "queued")
-            return qsTrId("aegra.repository.verify.status.queued")
+            //% "Boot check queued"
+            return bootCheck ? qsTrId("aegra.repository.bootcheck.status.queued")
+                             : qsTrId("aegra.repository.verify.status.queued")
         if (key === "succeeded")
-            return qsTrId("aegra.repository.verify.status.succeeded")
+            //% "Boot verified"
+            return bootCheck ? qsTrId("aegra.repository.bootcheck.status.succeeded")
+                             : qsTrId("aegra.repository.verify.status.succeeded")
         if (key === "failed")
-            return qsTrId("aegra.repository.verify.status.failed")
+            //% "Boot check failed"
+            return bootCheck ? qsTrId("aegra.repository.bootcheck.status.failed")
+                             : qsTrId("aegra.repository.verify.status.failed")
         if (key === "cancelled")
             return qsTrId("aegra.repository.verify.status.cancelled")
-        return fallback
+        if (key === "partial")
+            //% "Partially checked"
+            return qsTrId("aegra.repository.check.partial")
+        //% "N/A"
+        return qsTrId("aegra.repository.check.na")
     }
-    function recoveryPointStatusLabel(fileUuid, fallback) {
-        var st = serviceClient.jobs.recoveryPointVerifyStatus(fileUuid)
-        if (st && st.messageText)
+    function recoveryPointCheckLabel(fileUuid, operation) {
+        var st = root.recoveryPointCheckStatus(fileUuid, operation)
+        if ((st.key === "failed" || st.key === "cancelled") && st.messageText)
             return st.messageText
-        var key = st && st.key ? st.key : "none"
-        return root.statusTextForKey(key, fallback)
+        return root.checkStatusText(st.key, operation)
     }
-    function backupSetStatusLabel(points, fallback) {
-        var key = root.backupSetStatusKey(points)
+    function backupSetCheckLabel(points, operation) {
+        var key = root.backupSetCheckKey(points, operation)
         if (key === "failed" || key === "cancelled") {
             for (var i = 0; i < points.length; ++i) {
-                var st = serviceClient.jobs.recoveryPointVerifyStatus(points[i].fileUuid)
-                if (st && st.messageText)
+                var st = root.recoveryPointCheckStatus(root.pointFileUuid(points[i]), operation)
+                if (st.key === key && st.messageText)
                     return st.messageText
             }
         }
-        return root.statusTextForKey(key, fallback)
+        return root.checkStatusText(key, operation)
     }
-    function statusGlyphKind(key, chainComplete) {
+    function checkGlyphKind(key) {
+        if (key === "partial")
+            return "incomplete"
         if (key === "running" || key === "queued" || key === "succeeded"
                 || key === "failed" || key === "cancelled")
             return key
-        return chainComplete ? "succeeded" : "incomplete"
+        return "na"
     }
     function backupSetPresentation(group) {
         var schedules = serviceClient.schedules
@@ -105,7 +132,10 @@ Item {
     property int selectedRecoveryPointCount: 0
     property bool recoveryPointDeleteMode: false
     property bool recoveryPointVerifyMode: false
+    /// Boot Check: any number of volume_set recovery points, one StartBootCheck (kind 54) each.
+    property bool recoveryPointBootCheckMode: false
     readonly property bool recoveryPointSelectionMode: recoveryPointDeleteMode || recoveryPointVerifyMode
+                                                       || recoveryPointBootCheckMode
     property var expandedBackupSetSet: ({})
     property int expandedBackupSetEpoch: 0
     readonly property var backupSetGroups: {
@@ -186,7 +216,51 @@ Item {
     function exitRecoveryPointDeleteMode() {
         root.recoveryPointDeleteMode = false
         root.recoveryPointVerifyMode = false
+        root.recoveryPointBootCheckMode = false
         root.clearRecoveryPointSelection()
+    }
+
+    function expandAllBackupSets() {
+        var groups = root.backupSetGroups
+        var next = Object.assign({}, root.expandedBackupSetSet)
+        for (var i = 0; i < groups.length; ++i)
+            next[groups[i].backupSetUuid] = true
+        root.expandedBackupSetSet = next
+        root.expandedBackupSetEpoch++
+    }
+
+    function isBootCheckCandidate(fileUuid) {
+        if (!fileUuid || !serviceClient.recoveryPoints)
+            return false
+        var details = serviceClient.recoveryPoints.recoveryPointDetails(fileUuid)
+        return !!details && Number(details.contentKind) === 1
+    }
+
+    /// Boot check selection is per point (no chain expansion) and only volume_set.
+    function toggleBootCheckCandidate(fileUuid) {
+        if (!root.isBootCheckCandidate(fileUuid))
+            return
+        root.applyFileUuidSelection([fileUuid], !root.selectedRecoveryPointSet[fileUuid])
+    }
+
+    function bootCheckCandidates(ids) {
+        var out = []
+        for (var i = 0; i < ids.length; ++i) {
+            if (root.isBootCheckCandidate(ids[i]))
+                out.push(ids[i])
+        }
+        return out
+    }
+
+    function startSelectedBootCheck() {
+        var ids = Object.keys(root.selectedRecoveryPointSet)
+        if (ids.length === 0)
+            return
+        if (serviceClient.bootCheckRecoveryPoints(ids))
+            root.exitRecoveryPointDeleteMode()
+        else
+            //% "Boot check could not be submitted."
+            serviceClient.showToast(qsTrId("aegra.repository.bootcheck.submission_failed"), true)
     }
 
     function clearBackupSetExpansion() {
@@ -234,6 +308,10 @@ Item {
     }
 
     function toggleRecoveryPoint(fileUuid) {
+        if (root.recoveryPointBootCheckMode) {
+            root.toggleBootCheckCandidate(fileUuid)
+            return
+        }
         if (!root.recoveryPointDeleteMode)
             return
         if (!fileUuid || fileUuid.length === 0 || !serviceClient.recoveryPoints)
@@ -270,6 +348,8 @@ Item {
         if (!serviceClient.recoveryPoints || !backupSetUuid)
             return
         var ids = serviceClient.recoveryPoints.fileUuidsInSet(backupSetUuid)
+        if (root.recoveryPointBootCheckMode)
+            ids = root.bootCheckCandidates(ids)
         if (!ids || ids.length === 0)
             return
         var selected = root.backupSetSelectedCount(backupSetUuid)
@@ -281,12 +361,14 @@ Item {
             return
         if (!serviceClient.recoveryPoints)
             return
+        var ids = serviceClient.recoveryPoints.fileUuids()
+        if (root.recoveryPointBootCheckMode)
+            ids = root.bootCheckCandidates(ids)
         if (root.selectedRecoveryPointCount > 0
-                && root.selectedRecoveryPointCount === serviceClient.recoveryPointCount) {
+                && root.selectedRecoveryPointCount === ids.length) {
             root.clearRecoveryPointSelection()
             return
         }
-        var ids = serviceClient.recoveryPoints.fileUuids()
         var next = {}
         for (var i = 0; i < ids.length; ++i)
             next[ids[i]] = true
@@ -1546,6 +1628,7 @@ Item {
                         danger: true
                         enabled: serviceClient.connected
                                  && !root.recoveryPointVerifyMode
+                                 && !root.recoveryPointBootCheckMode
                                  && !serviceClient.repositoryCommandBusy
                                  && !serviceClient.deletePlanBusy
                                  && !serviceClient.repositoryLoading
@@ -1565,6 +1648,7 @@ Item {
                                  && !serviceClient.repositoryLoading
                                  && !serviceClient.repositoryCommandBusy
                                  && !root.recoveryPointDeleteMode
+                                 && !root.recoveryPointBootCheckMode
                                  && (!root.recoveryPointVerifyMode || root.selectedRecoveryPointCount > 0)
                         onClicked: {
                             if (!root.recoveryPointVerifyMode) {
@@ -1579,12 +1663,42 @@ Item {
                         }
                     }
                     AppButton {
+                        // First click enters selection mode (volume_set points only);
+                        // second click submits one StartBootCheck per selected point.
+                        text: qsTrId("aegra.job.operation.bootcheck")
+                        enabled: serviceClient.connected && serviceClient.bootCheckAvailable()
+                                 && !serviceClient.repositoryLoading
+                                 && !serviceClient.repositoryCommandBusy
+                                 && !root.recoveryPointDeleteMode
+                                 && !root.recoveryPointVerifyMode
+                                 && (!root.recoveryPointBootCheckMode || root.selectedRecoveryPointCount > 0)
+                        onClicked: {
+                            if (!root.recoveryPointBootCheckMode) {
+                                root.clearRecoveryPointSelection()
+                                root.recoveryPointBootCheckMode = true
+                                root.expandAllBackupSets()
+                                return
+                            }
+                            root.startSelectedBootCheck()
+                        }
+                    }
+                    AppButton {
                         //% "Cancel"
                         text: qsTrId("aegra.common.cancel")
                         visible: root.recoveryPointSelectionMode
                         onClicked: root.exitRecoveryPointDeleteMode()
                     }
                     Item { Layout.fillWidth: true }
+                    Text {
+                        visible: root.recoveryPointBootCheckMode && root.selectedRecoveryPointCount === 0
+                        //% "Select volume recovery points"
+                        text: qsTrId("aegra.repository.bootcheck.select_hint")
+                        color: Theme.colorTextGrey
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 11
+                        elide: Text.ElideRight
+                        Layout.maximumWidth: 260
+                    }
                     Text {
                         visible: root.selectedRecoveryPointCount > 0
                         text: root.selectedRecoveryPointSummary
@@ -1700,9 +1814,21 @@ Item {
                             font.family: Theme.fontFamily
                         }
                         Text {
-                            Layout.preferredWidth: 96
-                            //% "Status"
-                            text: qsTrId("aegra.repository.column.rp_status").toUpperCase()
+                            Layout.preferredWidth: 88
+                            horizontalAlignment: Text.AlignHCenter
+                            //% "Verify"
+                            text: qsTrId("aegra.repository.column.verify_status").toUpperCase()
+                            color: Theme.colorTextDim
+                            font.pixelSize: 11
+                            font.bold: true
+                            font.letterSpacing: 0.8
+                            font.family: Theme.fontFamily
+                        }
+                        Text {
+                            Layout.preferredWidth: 88
+                            horizontalAlignment: Text.AlignHCenter
+                            //% "Boot check"
+                            text: qsTrId("aegra.repository.column.boot_check_status").toUpperCase()
                             color: Theme.colorTextDim
                             font.pixelSize: 11
                             font.bold: true
@@ -1733,6 +1859,14 @@ Item {
                                              ? serviceClient.recoveryPoints.recoveryPointsInSet(
                                                    backupSetUuid)
                                              : []
+                        // Status aggregation must not depend on expansion: the row
+                        // model above is intentionally empty while collapsed.
+                        readonly property var statusFileUuids: {
+                            var _c = serviceClient.recoveryPointCount
+                            return serviceClient.recoveryPoints
+                                   ? serviceClient.recoveryPoints.fileUuidsInSet(backupSetUuid)
+                                   : []
+                        }
 
                         Column {
                             id: groupColumn
@@ -1861,24 +1995,36 @@ Item {
 
                                 Item { Layout.preferredWidth: 80 }
                                 Item {
-                                    Layout.preferredWidth: 96
+                                    Layout.preferredWidth: 88
                                     Layout.fillHeight: true
                                     StatusGlyph {
                                         anchors.centerIn: parent
                                         size: 16
                                         kind: {
                                             var _r = root.jobsRevision
-                                            var key = root.backupSetStatusKey(backupSetGroup.points)
-                                            return root.statusGlyphKind(key,
-                                                                        modelData.chainComplete === true)
+                                            return root.checkGlyphKind(
+                                                root.backupSetCheckKey(backupSetGroup.statusFileUuids, 3))
                                         }
                                         label: {
                                             var _r = root.jobsRevision
-                                            var fallback = modelData.chainComplete
-                                                  ? qsTrId("aegra.repository.chain.complete")
-                                                  : qsTrId("aegra.repository.chain.incomplete")
-                                            return root.backupSetStatusLabel(
-                                                backupSetGroup.points, fallback)
+                                            return root.backupSetCheckLabel(backupSetGroup.statusFileUuids, 3)
+                                        }
+                                    }
+                                }
+                                Item {
+                                    Layout.preferredWidth: 88
+                                    Layout.fillHeight: true
+                                    StatusGlyph {
+                                        anchors.centerIn: parent
+                                        size: 16
+                                        kind: {
+                                            var _r = root.jobsRevision
+                                            return root.checkGlyphKind(
+                                                root.backupSetCheckKey(backupSetGroup.statusFileUuids, 5))
+                                        }
+                                        label: {
+                                            var _r = root.jobsRevision
+                                            return root.backupSetCheckLabel(backupSetGroup.statusFileUuids, 5)
                                         }
                                     }
                                 }
@@ -1932,8 +2078,14 @@ Item {
                                     Item { Layout.preferredWidth: 40 }
 
                                     Rectangle {
-                                        visible: root.recoveryPointDeleteMode
-                                        Layout.preferredWidth: root.recoveryPointDeleteMode ? 16 : 0
+                                        readonly property bool bootCheckSelectable:
+                                            root.recoveryPointBootCheckMode
+                                            && Number(modelData.contentKind) === 1
+                                        readonly property bool pointSelectable:
+                                            root.recoveryPointDeleteMode || bootCheckSelectable
+                                        visible: root.recoveryPointDeleteMode || root.recoveryPointBootCheckMode
+                                        opacity: pointSelectable ? 1 : 0.3
+                                        Layout.preferredWidth: visible ? 16 : 0
                                         Layout.preferredHeight: 16
                                         radius: 3
                                         color: selected ? Theme.colorAccentBlue : Theme.colorInput
@@ -1950,7 +2102,7 @@ Item {
                                         }
                                         MouseArea {
                                             anchors.fill: parent
-                                            enabled: root.recoveryPointDeleteMode
+                                            enabled: parent.pointSelectable
                                             cursorShape: Qt.PointingHandCursor
                                             onClicked: {
                                                 mouse.accepted = true
@@ -2008,23 +2160,41 @@ Item {
                                         font.pixelSize: 12
                                     }
                                     Item {
-                                        Layout.preferredWidth: 96
+                                        Layout.preferredWidth: 88
                                         Layout.fillHeight: true
                                         StatusGlyph {
                                             anchors.centerIn: parent
                                             size: 16
                                             kind: {
                                                 var _r = root.jobsRevision
-                                                var key = root.recoveryPointStatusKey(
-                                                              modelData.fileUuid)
-                                                return root.statusGlyphKind(
-                                                    key, modelData.chainComplete === true)
+                                                var key = root.recoveryPointCheckKey(modelData.fileUuid, 3)
+                                                if (key === "na" && modelData.chainComplete !== true)
+                                                    return "incomplete"
+                                                return root.checkGlyphKind(key)
                                             }
                                             label: {
                                                 var _r = root.jobsRevision
-                                                return root.recoveryPointStatusLabel(
-                                                    modelData.fileUuid,
-                                                    modelData.chainStateText || "")
+                                                var key = root.recoveryPointCheckKey(modelData.fileUuid, 3)
+                                                if (key === "na" && modelData.chainComplete !== true)
+                                                    return modelData.chainStateText || ""
+                                                return root.recoveryPointCheckLabel(modelData.fileUuid, 3)
+                                            }
+                                        }
+                                    }
+                                    Item {
+                                        Layout.preferredWidth: 88
+                                        Layout.fillHeight: true
+                                        StatusGlyph {
+                                            anchors.centerIn: parent
+                                            size: 16
+                                            kind: {
+                                                var _r = root.jobsRevision
+                                                return root.checkGlyphKind(
+                                                    root.recoveryPointCheckKey(modelData.fileUuid, 5))
+                                            }
+                                            label: {
+                                                var _r = root.jobsRevision
+                                                return root.recoveryPointCheckLabel(modelData.fileUuid, 5)
                                             }
                                         }
                                     }

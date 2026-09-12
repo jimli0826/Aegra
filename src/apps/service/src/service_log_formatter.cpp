@@ -161,6 +161,8 @@ void omit_trace_fields(Json& value) {
         return "Cancel job";
     case contracts::ServiceRequestKind::kStartVerify:
         return "Start verification";
+    case contracts::ServiceRequestKind::kStartBootCheck:
+        return "Start boot check";
     case contracts::ServiceRequestKind::kStartRestore:
         return "Start restore";
     case contracts::ServiceRequestKind::kMountRecoveryPoint:

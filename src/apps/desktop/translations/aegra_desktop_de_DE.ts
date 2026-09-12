@@ -3250,5 +3250,141 @@ Offsite-Coldbackup für kritische Volumes</translation>
         <source>Boot Check cannot be enabled because the configured hypervisor is unavailable.</source>
         <translation>Die Startprüfung kann nicht aktiviert werden, da der konfigurierte Hypervisor nicht verfügbar ist.</translation>
     </message>
+    <message id="aegra.repository.bootcheck.submitted">
+        <source>Boot check jobs submitted. See Tasks and Event Log for results.</source>
+        <translation>Startprüfungen übermittelt. Ergebnisse unter Aufgaben und Ereignisprotokoll.</translation>
+    </message>
+    <message id="aegra.repository.bootcheck.submission_failed">
+        <source>Boot check could not be submitted.</source>
+        <translation>Startprüfung konnte nicht übermittelt werden.</translation>
+    </message>
+    <message id="aegra.repository.bootcheck.finished">
+        <source>Boot check completed.</source>
+        <translation>Startprüfung abgeschlossen.</translation>
+    </message>
+    <message id="aegra.repository.bootcheck.failed">
+        <source>Boot check failed.</source>
+        <translation>Startprüfung fehlgeschlagen.</translation>
+    </message>
+    <message id="aegra.repository.bootcheck.select_hint">
+        <source>Select volume recovery points</source>
+        <translation>Volume-Wiederherstellungspunkte auswählen</translation>
+    </message>
+    <message id="aegra.error.bootcheck.volume_set_required">
+        <source>Boot check requires a volume recovery point</source>
+        <translation>Startprüfung erfordert einen Volume-Wiederherstellungspunkt</translation>
+    </message>
+    <message id="aegra.repository.bootcheck.status.queued">
+        <source>Boot check queued</source>
+        <translation>Startprüfung wartend</translation>
+    </message>
+    <message id="aegra.repository.bootcheck.status.running">
+        <source>Boot checking</source>
+        <translation>Startprüfung läuft</translation>
+    </message>
+    <message id="aegra.repository.bootcheck.status.succeeded">
+        <source>Boot verified</source>
+        <translation>Start geprüft</translation>
+    </message>
+    <message id="aegra.repository.bootcheck.status.failed">
+        <source>Boot check failed</source>
+        <translation>Startprüfung fehlgeschlagen</translation>
+    </message>
+    <message id="aegra.error.bootcheck.archive_open_failed">
+        <source>Boot check could not open the archive. Check that the backup files still exist in the repository.</source>
+        <translation>Startprüfung konnte das Archiv nicht öffnen. Prüfen Sie, ob die Sicherungsdateien noch im Repository liegen.</translation>
+    </message>
+    <message id="aegra.error.bootcheck.source_not_system_disk">
+        <source>The recovery point does not contain a bootable system disk</source>
+        <translation>Der Wiederherstellungspunkt enthält keinen startfähigen Systemdatenträger</translation>
+    </message>
+    <message id="aegra.error.bootcheck.unsupported_boot_profile">
+        <source>The recovery point's boot configuration is not supported for boot check</source>
+        <translation>Die Startkonfiguration des Wiederherstellungspunkts wird für die Startprüfung nicht unterstützt</translation>
+    </message>
+    <message id="aegra.error.bootcheck.vmdk_present_failed">
+        <source>Boot check could not present the virtual disk</source>
+        <translation>Startprüfung konnte den virtuellen Datenträger nicht bereitstellen</translation>
+    </message>
+    <message id="aegra.error.bootcheck.vm_create_failed">
+        <source>Boot check could not create the virtual machine</source>
+        <translation>Startprüfung konnte die virtuelle Maschine nicht erstellen</translation>
+    </message>
+    <message id="aegra.error.bootcheck.vm_start_failed">
+        <source>Boot check could not start the virtual machine</source>
+        <translation>Startprüfung konnte die virtuelle Maschine nicht starten</translation>
+    </message>
+    <message id="aegra.error.bootcheck.guest_powered_off">
+        <source>The virtual machine powered off before boot was confirmed</source>
+        <translation>Die virtuelle Maschine wurde vor der Startbestätigung ausgeschaltet</translation>
+    </message>
+    <message id="aegra.error.bootcheck.boot_not_confirmed">
+        <source>The system did not boot within the time limit</source>
+        <translation>Das System ist nicht innerhalb des Zeitlimits gestartet</translation>
+    </message>
+    <message id="aegra.error.bootcheck.overlay_full">
+        <source>Boot check stopped because the temporary disk space was exhausted</source>
+        <translation>Startprüfung abgebrochen, da der temporäre Speicherplatz erschöpft ist</translation>
+    </message>
+    <message id="aegra.error.bootcheck.cancelled">
+        <source>Boot check was cancelled</source>
+        <translation>Startprüfung wurde abgebrochen</translation>
+    </message>
+    <message id="aegra.error.bootcheck.cleanup_incomplete">
+        <source>Boot check finished but could not fully remove its temporary virtual machine</source>
+        <translation>Startprüfung abgeschlossen, temporäre virtuelle Maschine konnte jedoch nicht vollständig entfernt werden</translation>
+    </message>
+    <message id="aegra.error.bootcheck.host_failed">
+        <source>The boot check host process failed</source>
+        <translation>Der Startprüfungs-Hostprozess ist fehlgeschlagen</translation>
+    </message>
+    <message id="aegra.error.bootcheck.request_rejected">
+        <source>The boot check request was rejected</source>
+        <translation>Die Startprüfungsanforderung wurde abgelehnt</translation>
+    </message>
+    <message id="aegra.error.bootcheck.host_unavailable">
+        <source>Boot check is not available on this computer</source>
+        <translation>Startprüfung ist auf diesem Computer nicht verfügbar</translation>
+    </message>
+    <message id="aegra.error.bootcheck.interrupted">
+        <source>Boot check was interrupted by a service restart</source>
+        <translation>Startprüfung wurde durch einen Dienstneustart unterbrochen</translation>
+    </message>
+    <message id="aegra.error.bootcheck.timeout">
+        <source>Boot check exceeded its run time budget</source>
+        <translation>Startprüfung hat das Zeitbudget überschritten</translation>
+    </message>
+    <message id="aegra.error.bootcheck.dispatch_failed">
+        <source>Boot check could not be started</source>
+        <translation>Startprüfung konnte nicht gestartet werden</translation>
+    </message>
+    <message id="aegra.error.bootcheck.archive_missing">
+        <source>Archive file does not exist</source>
+        <translation>Archivdatei existiert nicht</translation>
+    </message>
+    <message id="aegra.error.bootcheck.archive_credential_unavailable">
+        <source>Archive password is unavailable</source>
+        <translation>Archivkennwort ist nicht verfügbar</translation>
+    </message>
+    <message id="aegra.error.bootcheck.archive_corrupt">
+        <source>Archive authentication failed</source>
+        <translation>Archivauthentifizierung fehlgeschlagen</translation>
+    </message>
+    <message id="aegra.repository.column.verify_status">
+        <source>Verify</source>
+        <translation>Prüfung</translation>
+    </message>
+    <message id="aegra.repository.column.boot_check_status">
+        <source>Boot check</source>
+        <translation>Startprüfung</translation>
+    </message>
+    <message id="aegra.repository.check.na">
+        <source>N/A</source>
+        <translation>N/A</translation>
+    </message>
+    <message id="aegra.repository.check.partial">
+        <source>Partially checked</source>
+        <translation>Teilweise geprüft</translation>
+    </message>
 </context>
 </TS>

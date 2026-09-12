@@ -9,10 +9,20 @@
 #include <QVector>
 
 #include <cstdint>
+#include <optional>
 
 namespace aegra::desktop {
 
 class LocaleFormat;
+
+/// Latest terminal Verify or Boot Check outcome the Service recorded for a point
+/// (ADR-0033). state: 1 succeeded, 2 failed, 3 cancelled, 4 interrupted.
+struct RecoveryPointCheckRow final {
+    std::int64_t state{0};
+    QString message_code;
+    QString job_id;
+    std::int64_t completed_utc_ms{0};
+};
 
 struct RecoveryPointRow final {
     QString file_uuid;
@@ -29,6 +39,8 @@ struct RecoveryPointRow final {
     std::int64_t deduplicated_logical_bytes{0};
     std::int64_t source_count{0};
     bool has_sidecar{false};
+    std::optional<RecoveryPointCheckRow> verify_check;
+    std::optional<RecoveryPointCheckRow> boot_check;
 };
 
 // Domain list model for Recovery Points. Owns row data; QML binds to display roles only and does
@@ -109,6 +121,10 @@ class RecoveryPointModel final : public QAbstractListModel {
     Q_INVOKABLE [[nodiscard]] QVariantList checkpointsForDate(const QString& date_ymd) const;
     /// Safe parent summary for details panel: parent time plus short identifier.
     Q_INVOKABLE [[nodiscard]] QVariantMap recoveryPointDetails(const QString& file_uuid) const;
+    /// Persisted check outcomes: verifyCheck / bootCheck, each an invalid variant (never run)
+    /// or a map with key (succeeded|failed|cancelled), state, messageCode, messageText,
+    /// jobId, completedUtcMs, completedText.
+    Q_INVOKABLE [[nodiscard]] QVariantMap recoveryPointChecks(const QString& file_uuid) const;
 
   signals:
     void countChanged();
@@ -122,6 +138,7 @@ class RecoveryPointModel final : public QAbstractListModel {
     [[nodiscard]] QString content_kind_text(std::int64_t content_kind) const;
     [[nodiscard]] QString parent_summary_text(const RecoveryPointRow& row) const;
     [[nodiscard]] QVariantMap list_item_from_row(const RecoveryPointRow& row) const;
+    [[nodiscard]] QVariant check_variant(const std::optional<RecoveryPointCheckRow>& check) const;
     [[nodiscard]] int chain_depth_for(const RecoveryPointRow& row) const;
     [[nodiscard]] const RecoveryPointRow* find_row(const QString& file_uuid) const;
     [[nodiscard]] QHash<QString, QStringList> children_by_parent() const;

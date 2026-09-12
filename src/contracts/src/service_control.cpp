@@ -545,6 +545,15 @@ base::Result<void> validate_start_verify_command(const StartVerifyCommand& comma
     return base::Result<void>::success();
 }
 
+base::Result<void> validate_start_boot_check_command(const StartBootCheckCommand& command) {
+    if (!valid_stable_value(command.repository_connection_id, kMaximumIdentifierBytes) ||
+        !valid_stable_value(command.recovery_point_id, kMaximumIdentifierBytes) ||
+        (command.hypervisor && !is_known_boot_check_hypervisor(*command.hypervisor))) {
+        return invalid("start boot check command is invalid");
+    }
+    return base::Result<void>::success();
+}
+
 [[nodiscard]] bool is_known_volume_size_policy(const VolumeSizePolicy policy) noexcept {
     return policy == VolumeSizePolicy::kRequireSourceSize ||
            policy == VolumeSizePolicy::kAllowNtfsRelocation;

@@ -267,6 +267,9 @@ class ServiceClient final : public QObject {
     [[nodiscard]] bool repositoryCommandBusy() const noexcept;
     Q_INVOKABLE bool verifyRecoveryPoints(const QStringList& recovery_point_ids);
     Q_INVOKABLE bool verifyAvailable() const;
+    /// One StartBootCheck (kind 54) per volume_set recovery point, submitted sequentially.
+    Q_INVOKABLE bool bootCheckRecoveryPoints(const QStringList& recovery_point_ids);
+    Q_INVOKABLE bool bootCheckAvailable() const;
     [[nodiscard]] QString repositoryCommandErrorText() const;
     [[nodiscard]] QString repositoryCommandErrorCode() const;
     [[nodiscard]] bool repositoryDirectoriesLoading() const noexcept;
@@ -631,6 +634,11 @@ class ServiceClient final : public QObject {
     void finish_repository_command_failure(const QString& message_code);
     bool submit_next_repository_verify();
     void observe_accepted_verify_job(const QString& job_id, const QStringList& recovery_point_ids);
+    bool submit_next_repository_boot_check();
+    void observe_accepted_boot_check_job(const QString& job_id, const QString& recovery_point_id);
+    void finish_boot_check_submission_failure(const QString& message_code);
+    /// Recovery points still to submit; the front one is in flight.
+    QStringList repository_boot_check_pending_;
     [[nodiscard]] static QString terminal_job_toast_text(const JobRow& row);
     QList<QStringList> repository_verify_pending_;
     void finish_backup_command_failure(const QString& message_code);

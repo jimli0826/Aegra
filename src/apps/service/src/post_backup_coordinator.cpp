@@ -1,8 +1,11 @@
 #include "aegra/apps/service/post_backup_coordinator.h"
 
 #include "aegra/apps/service/boot_check_supervisor.h"
+#include "aegra/apps/service/recovery_point_check_recorder.h"
 #include "aegra/apps/service/service_host.h"
 #include "aegra/apps/service/worker_job_service.h"
+#include "aegra/personal_repository/catalog.h"
+#include "aegra/personal_repository/catalog_scanner.h"
 
 #include <algorithm>
 #include <array>
@@ -10,6 +13,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <mutex>
+#include <optional>
 #include <stop_token>
 #include <string>
 #include <thread>
@@ -31,6 +35,7 @@ constexpr const char* kVerifySubmitFailed = "post_backup.verify_submit_failed";
 constexpr const char* kVerifyJobMissing = "post_backup.verify_job_missing";
 constexpr const char* kBootCheckUnavailable = "post_backup.boot_check_unavailable";
 constexpr const char* kBootCheckInterrupted = "post_backup.boot_check_interrupted";
+constexpr const char* kBootCheckSubmitted = "post_backup.boot_check_submitted";
 
 void write_log(IServiceLog* const logger, const ServiceLogLevel level, const std::string_view code,
                const std::string_view detail) noexcept {
@@ -59,6 +64,26 @@ void write_log(IServiceLog* const logger, const ServiceLogLevel level, const std
     return suffix;
 }
 
+[[nodiscard]] std::string
+manual_boot_check_fingerprint(const contracts::StartBootCheckCommand& command) {
+    std::string fingerprint = "start-boot-check|" + command.repository_connection_id + "|" +
+                              command.recovery_point_id + "|";
+    fingerprint += command.hypervisor
+                       ? std::to_string(static_cast<unsigned>(*command.hypervisor))
+                       : std::string("default");
+    return fingerprint;
+}
+
+[[nodiscard]] contracts::CommandAcknowledgement
+acknowledge(const std::string_view idempotency_key, const contracts::CommandDisposition disposition,
+            std::string job_id) {
+    contracts::CommandAcknowledgement acknowledgement;
+    acknowledgement.command_id = std::string(idempotency_key);
+    acknowledgement.disposition = disposition;
+    acknowledgement.resource_id = std::move(job_id);
+    return acknowledgement;
+}
+
 [[nodiscard]] std::string random_owner_id(ports::IRandomSource& random) {
     std::array<std::byte, 8> bytes{};
     std::string owner = "post-backup-coordinator-";
@@ -77,12 +102,14 @@ void write_log(IServiceLog* const logger, const ServiceLogLevel level, const std
 } // namespace
 
 struct PostBackupCoordinator::Impl final {
-    Impl(ports::IControlPlaneDatabase& database, ports::IClock& clock_source,
-         ports::IRandomSource& random_source, IServiceLog* const service_logger)
-        : control_plane(database), clock(clock_source), random(random_source),
-          logger(service_logger) {}
+    Impl(ports::IControlPlaneDatabase& database, ports::IRepositoryStorageFactory& storage,
+         ports::IClock& clock_source, ports::IRandomSource& random_source,
+         IServiceLog* const service_logger)
+        : control_plane(database), storage_factory(storage), clock(clock_source),
+          random(random_source), logger(service_logger) {}
 
     ports::IControlPlaneDatabase& control_plane;
+    ports::IRepositoryStorageFactory& storage_factory;
     ports::IClock& clock;
     ports::IRandomSource& random;
     IServiceLog* logger{nullptr};
@@ -213,6 +240,10 @@ struct PostBackupCoordinator::Impl final {
             skip_remaining_actions(plan, "post_backup.backup_job_missing");
             return;
         }
+        if (backup.value()->operation == contracts::JobOperation::kBootCheck) {
+            drive_manual_boot_check(plan, *backup.value());
+            return;
+        }
         if (!ports::is_terminal_job_state(backup.value()->state)) {
             return;
         }
@@ -286,13 +317,40 @@ struct PostBackupCoordinator::Impl final {
     void record_boot_check_job_terminal(const ports::PostBackupPlanRecord& plan,
                                         const std::string& job_id, const bool succeeded,
                                         const std::string& result_message_code) {
+        transition_boot_check_job(plan, job_id, contracts::ServiceJobState::kRunning,
+                                  succeeded ? contracts::ServiceJobState::kSucceeded
+                                            : contracts::ServiceJobState::kFailed,
+                                  result_message_code);
+        record_boot_check_outcome(control_plane, logger, plan.repository_connection_id,
+                                  plan.recovery_point_id, job_id,
+                                  succeeded ? contracts::RecoveryPointCheckState::kSucceeded
+                                            : contracts::RecoveryPointCheckState::kFailed,
+                                  result_message_code.empty() ? std::string("bootcheck.completed")
+                                                              : result_message_code,
+                                  now_utc_ms());
+    }
+
+    void transition_boot_check_job(const ports::PostBackupPlanRecord& plan,
+                                   const std::string& job_id,
+                                   const contracts::ServiceJobState expected_state,
+                                   const contracts::ServiceJobState next_state,
+                                   const std::string& result_message_code) {
         ports::JobStateTransition transition;
         transition.job_id = job_id;
-        transition.expected_state = contracts::ServiceJobState::kRunning;
-        transition.next_state = succeeded ? contracts::ServiceJobState::kSucceeded
-                                          : contracts::ServiceJobState::kFailed;
+        transition.expected_state = expected_state;
+        transition.next_state = next_state;
         transition.transition_utc_ms = now_utc_ms();
-        transition.message_code = succeeded ? "job.succeeded" : "job.failed";
+        switch (next_state) {
+        case contracts::ServiceJobState::kRunning:
+            transition.message_code = "job.running";
+            break;
+        case contracts::ServiceJobState::kSucceeded:
+            transition.message_code = "job.succeeded";
+            break;
+        default:
+            transition.message_code = "job.failed";
+            break;
+        }
         if (!result_message_code.empty()) {
             transition.result_message_code = result_message_code;
         }
@@ -368,6 +426,289 @@ struct PostBackupCoordinator::Impl final {
         if (!boot_check->is_tracking(child)) {
             plan.boot_check.state = ports::PostBackupActionState::kPending;
         }
+    }
+
+    // Manual plan (StartBootCheck): the anchor job *is* the boot check job. It
+    // starts Queued, turns Running on dispatch, and ends with the host result.
+    // A run lost to a Service restart is not re-dispatched; the startup sweep
+    // already marked the anchor Interrupted and the user can simply retry.
+    void drive_manual_boot_check(ports::PostBackupPlanRecord& plan,
+                                 const ports::JobRecord& anchor) {
+        const auto& job_id = plan.backup_job_id;
+        if (ports::is_terminal_job_state(anchor.state)) {
+            plan.boot_check.state = anchor.state == contracts::ServiceJobState::kSucceeded
+                                        ? ports::PostBackupActionState::kSucceeded
+                                        : ports::PostBackupActionState::kFailed;
+            plan.boot_check.message_code =
+                anchor.result_message_code.value_or(anchor.message_code);
+            // Startup sweep ended the run (Interrupted): keep the persisted status honest.
+            record_boot_check_outcome(control_plane, logger, plan.repository_connection_id,
+                                      plan.recovery_point_id, job_id,
+                                      check_state_for_job_state(anchor.state),
+                                      plan.boot_check.message_code,
+                                      anchor.completed_utc_ms.value_or(now_utc_ms()));
+            log_action(ServiceLogLevel::kInfo, "bootcheck.manual_anchor_terminal", plan,
+                       "boot check job already terminal; state=" +
+                           std::to_string(static_cast<unsigned>(anchor.state)));
+            return;
+        }
+        if (anchor.state == contracts::ServiceJobState::kQueued) {
+            if (boot_check == nullptr || !boot_check->available()) {
+                plan.boot_check.state = ports::PostBackupActionState::kSkipped;
+                plan.boot_check.message_code = kBootCheckUnavailable;
+                transition_boot_check_job(plan, job_id, contracts::ServiceJobState::kQueued,
+                                          contracts::ServiceJobState::kFailed,
+                                          kBootCheckUnavailable);
+                log_action(ServiceLogLevel::kWarning, kBootCheckUnavailable, plan,
+                           "boot check host is unavailable");
+                return;
+            }
+            BootCheckDispatch dispatch;
+            dispatch.boot_check_job_id = job_id;
+            dispatch.recovery_point_id = plan.recovery_point_id;
+            dispatch.repository_connection_id = plan.repository_connection_id;
+            dispatch.schedule_id = plan.schedule_id;
+            dispatch.hypervisor = *plan.boot_check_hypervisor;
+            if (boot_check->try_start(dispatch)) {
+                plan.boot_check.state = ports::PostBackupActionState::kRunning;
+                plan.boot_check.child_job_id = job_id;
+                plan.boot_check.message_code = kBootCheckSubmitted;
+                plan.boot_check.attempts += 1;
+                transition_boot_check_job(plan, job_id, contracts::ServiceJobState::kQueued,
+                                          contracts::ServiceJobState::kRunning, {});
+                log_action(ServiceLogLevel::kInfo, kBootCheckSubmitted, plan,
+                           "boot_check_job=" + job_id);
+            }
+            return; // capacity or scavenge in progress: retry on the next scan
+        }
+        std::optional<BootCheckRunResult> result;
+        if (boot_check != nullptr) {
+            result = boot_check->take_result(job_id);
+        }
+        if (result) {
+            plan.boot_check.state = result->succeeded ? ports::PostBackupActionState::kSucceeded
+                                                      : ports::PostBackupActionState::kFailed;
+            plan.boot_check.message_code = result->message_code;
+            record_boot_check_job_terminal(plan, job_id, result->succeeded, result->message_code);
+            log_action(result->succeeded ? ServiceLogLevel::kInfo : ServiceLogLevel::kError,
+                       result->succeeded ? "post_backup.boot_check_succeeded"
+                                         : "post_backup.boot_check_failed",
+                       plan, "boot_check_job=" + job_id + " message=" + result->message_code);
+            return;
+        }
+        if (boot_check == nullptr || !boot_check->is_tracking(job_id)) {
+            plan.boot_check.state = ports::PostBackupActionState::kFailed;
+            plan.boot_check.message_code = kBootCheckInterrupted;
+            record_boot_check_job_terminal(plan, job_id, false, kBootCheckInterrupted);
+            log_action(ServiceLogLevel::kError, kBootCheckInterrupted, plan,
+                       "boot check run is no longer tracked");
+        }
+    }
+
+    // Catalog lookup for StartBootCheck: the recovery point must exist in the
+    // connected repository and be a volume_set archive.
+    [[nodiscard]] base::Result<personal_repository::CatalogEntry>
+    find_volume_recovery_point(const contracts::StartBootCheckCommand& command,
+                               const base::CancellationToken cancellation) {
+        using Outcome = base::Result<personal_repository::CatalogEntry>;
+        auto repository =
+            control_plane.get_repository_connection(command.repository_connection_id, cancellation);
+        if (!repository) {
+            return Outcome::failure(repository.error());
+        }
+        if (!repository.value() ||
+            repository.value()->state != contracts::RepositoryConnectionState::kAvailable) {
+            return Outcome::failure(
+                {base::ErrorCode::kConflict, "repository connection is unavailable"});
+        }
+        auto storage = storage_factory.open(repository.value()->locator, cancellation);
+        if (!storage) {
+            return Outcome::failure(storage.error());
+        }
+        personal_repository::RepositoryCatalogScanner catalog(storage.value()->reader(),
+                                                              storage.value()->enumerator());
+        auto loaded = catalog.load_entries(cancellation);
+        if (!loaded) {
+            return Outcome::failure(loaded.error());
+        }
+        for (auto& entry : loaded.value().entries) {
+            if (entry.file_uuid != command.recovery_point_id) {
+                continue;
+            }
+            if (entry.content_kind != personal_repository::kCatalogContentKindVolumeSet) {
+                return Outcome::failure(
+                    {base::ErrorCode::kInvalidArgument, "bootcheck.volume_set_required"});
+            }
+            return Outcome::success(std::move(entry));
+        }
+        return Outcome::failure({base::ErrorCode::kNotFound, "recovery point was not found"});
+    }
+
+    // Schedule owning the backup set (credential source and friendly source
+    // names); empty when the schedule has been deleted.
+    [[nodiscard]] std::string schedule_id_for_backup_set(const std::string& backup_set_uuid,
+                                                          const base::CancellationToken cancellation) {
+        contracts::ScheduleListRequest request;
+        request.page.maximum_results = contracts::kMaximumServicePageResults;
+        for (;;) {
+            auto page = control_plane.list_schedules(request, cancellation);
+            if (!page) {
+                return {};
+            }
+            for (const auto& schedule : page.value().items) {
+                if (schedule.backup_set_uuid == backup_set_uuid) {
+                    return schedule.schedule_id;
+                }
+            }
+            if (!page.value().continuation_token || page.value().items.empty()) {
+                return {};
+            }
+            request.page.continuation_token = page.value().continuation_token;
+        }
+    }
+
+    [[nodiscard]] base::Result<contracts::BootCheckHypervisor>
+    resolve_hypervisor(const contracts::StartBootCheckCommand& command,
+                       const base::CancellationToken cancellation) {
+        using Outcome = base::Result<contracts::BootCheckHypervisor>;
+        auto hypervisor = command.hypervisor;
+        if (!hypervisor) {
+            auto settings = control_plane.get_service_settings(cancellation);
+            if (!settings) {
+                return Outcome::failure(settings.error());
+            }
+            hypervisor = settings.value().default_boot_check_hypervisor;
+        }
+        // Fail fast on a probed-unavailable provider so the Desktop can show the
+        // stable bootcheck.* reason instead of a job that fails minutes later.
+        const auto report = boot_check->hypervisor_status();
+        for (const auto& status : report.hypervisors) {
+            if (status.hypervisor == *hypervisor &&
+                status.probe_state == contracts::BootCheckProbeState::kProbed &&
+                !status.available) {
+                return Outcome::failure({base::ErrorCode::kConflict,
+                                         status.message_code.empty()
+                                             ? std::string("bootcheck.provider_unavailable")
+                                             : status.message_code});
+            }
+        }
+        return Outcome::success(*hypervisor);
+    }
+
+    // Queued anchor job + durable plan in one transaction (FK: plan -> job).
+    [[nodiscard]] base::Result<void>
+    record_manual_boot_check(const std::string& job_id, const std::string& fingerprint,
+                             const std::string_view idempotency_key,
+                             const contracts::StartBootCheckCommand& command,
+                             const std::string& schedule_id,
+                             const contracts::BootCheckHypervisor hypervisor,
+                             const base::CancellationToken cancellation) {
+        const auto now = now_utc_ms();
+        ports::JobRecord record;
+        record.job_id = job_id;
+        record.trace_id = "trace-" + job_id;
+        record.operation = contracts::JobOperation::kBootCheck;
+        record.state = contracts::ServiceJobState::kQueued;
+        record.content_kind = contracts::ContentKind::kVolumeSet;
+        record.created_utc_ms = now;
+        if (!schedule_id.empty()) {
+            if (auto schedule = control_plane.get_schedule(schedule_id, cancellation);
+                schedule && schedule.value() && !schedule.value()->source_ids.empty()) {
+                record.source_ids = schedule.value()->source_ids;
+            }
+        }
+        if (record.source_ids.empty()) {
+            record.source_ids.push_back(command.recovery_point_id);
+        }
+        // Deliberately no schedule_id: a manual run is not part of the schedule's
+        // post-backup chain, so the Backup page must not show it as that chain's
+        // "C" step. The plan keeps the schedule for credentials and volume names.
+        record.repository_connection_id = command.repository_connection_id;
+        record.message_code = "job.queued";
+        record.idempotency_key = std::string(idempotency_key);
+        record.request_fingerprint = fingerprint;
+
+        ports::PostBackupPlanRecord plan;
+        plan.backup_job_id = job_id;
+        plan.schedule_id = schedule_id;
+        plan.recovery_point_id = command.recovery_point_id;
+        plan.repository_connection_id = command.repository_connection_id;
+        plan.boot_check_required = true;
+        plan.boot_check_hypervisor = hypervisor;
+        plan.created_utc_ms = now;
+        plan.updated_utc_ms = now;
+
+        auto unit = begin_unit_retry();
+        if (!unit) {
+            return base::Result<void>::failure(unit.error());
+        }
+        if (auto inserted = unit.value()->jobs().insert(record, cancellation); !inserted) {
+            unit.value()->rollback();
+            return base::Result<void>::failure(inserted.error());
+        }
+        if (auto stored = unit.value()->post_backup_plans().upsert(plan, cancellation); !stored) {
+            unit.value()->rollback();
+            return base::Result<void>::failure(stored.error());
+        }
+        return unit.value()->commit(cancellation);
+    }
+
+    [[nodiscard]] base::Result<contracts::CommandAcknowledgement>
+    start_boot_check(const contracts::StartBootCheckCommand& command,
+                     const std::string_view idempotency_key,
+                     const base::CancellationToken cancellation) {
+        using Outcome = base::Result<contracts::CommandAcknowledgement>;
+        if (auto valid = contracts::validate_start_boot_check_command(command); !valid) {
+            return Outcome::failure(valid.error());
+        }
+        if (idempotency_key.empty()) {
+            return Outcome::failure(
+                {base::ErrorCode::kInvalidArgument, "idempotency key is required"});
+        }
+        const auto fingerprint = manual_boot_check_fingerprint(command);
+        auto existing = control_plane.get_job_by_idempotency_key(idempotency_key, cancellation);
+        if (!existing) {
+            return Outcome::failure(existing.error());
+        }
+        if (existing.value()) {
+            if (existing.value()->operation != contracts::JobOperation::kBootCheck ||
+                existing.value()->request_fingerprint != fingerprint) {
+                return Outcome::failure(
+                    {base::ErrorCode::kConflict, "idempotency key request mismatch"});
+            }
+            return Outcome::success(acknowledge(idempotency_key,
+                                                contracts::CommandDisposition::kReplayed,
+                                                existing.value()->job_id));
+        }
+        if (boot_check == nullptr || !boot_check->available()) {
+            return Outcome::failure({base::ErrorCode::kConflict, "boot check host is unavailable"});
+        }
+        auto hypervisor = resolve_hypervisor(command, cancellation);
+        if (!hypervisor) {
+            return Outcome::failure(hypervisor.error());
+        }
+        auto entry = find_volume_recovery_point(command, cancellation);
+        if (!entry) {
+            return Outcome::failure(entry.error());
+        }
+        const auto schedule_id =
+            schedule_id_for_backup_set(entry.value().backup_set_uuid, cancellation);
+        const auto suffix = random_run_suffix(random);
+        if (suffix.empty()) {
+            return Outcome::failure({base::ErrorCode::kInternal, "random source failed"});
+        }
+        // Session-unique id: host job id, VM name suffix, and private job directory.
+        const auto job_id = "bootcheck-" + command.recovery_point_id + "-m-" + suffix;
+        if (auto recorded = record_manual_boot_check(job_id, fingerprint, idempotency_key, command,
+                                                     schedule_id, hypervisor.value(), cancellation);
+            !recorded) {
+            return Outcome::failure(recorded.error());
+        }
+        write_log(logger, ServiceLogLevel::kInfo, "bootcheck.manual_submitted",
+                  "Boot check job " + job_id + " queued for recovery point " +
+                      command.recovery_point_id);
+        return Outcome::success(
+            acknowledge(idempotency_key, contracts::CommandDisposition::kAccepted, job_id));
     }
 
     void persist_plan(ports::PostBackupPlanRecord& plan) {
@@ -452,9 +793,10 @@ struct PostBackupCoordinator::Impl final {
 };
 
 PostBackupCoordinator::PostBackupCoordinator(ports::IControlPlaneDatabase& control_plane,
+                                             ports::IRepositoryStorageFactory& storage_factory,
                                              ports::IClock& clock, ports::IRandomSource& random,
                                              IServiceLog* const logger)
-    : impl_(std::make_unique<Impl>(control_plane, clock, random, logger)) {}
+    : impl_(std::make_unique<Impl>(control_plane, storage_factory, clock, random, logger)) {}
 
 PostBackupCoordinator::~PostBackupCoordinator() { shutdown(); }
 
@@ -469,6 +811,17 @@ void PostBackupCoordinator::start(WorkerJobService& worker_jobs,
     impl_->claim_owner = random_owner_id(impl_->random);
     impl_->scanner =
         std::jthread([state = impl_.get()](const std::stop_token stopped) { state->run(stopped); });
+}
+
+base::Result<contracts::CommandAcknowledgement>
+PostBackupCoordinator::start_boot_check(const contracts::StartBootCheckCommand& command,
+                                        const std::string_view idempotency_key,
+                                        const base::CancellationToken cancellation) {
+    auto accepted = impl_->start_boot_check(command, idempotency_key, cancellation);
+    if (accepted && accepted.value().disposition == contracts::CommandDisposition::kAccepted) {
+        kick();
+    }
+    return accepted;
 }
 
 void PostBackupCoordinator::kick() noexcept {

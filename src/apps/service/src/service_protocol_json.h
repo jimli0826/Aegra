@@ -50,6 +50,12 @@ template <typename Integer>
 [[nodiscard]] Json encode_message_arguments(const contracts::MessageArguments& arguments);
 [[nodiscard]] contracts::MessageArguments parse_message_arguments(const Json& value);
 
+/// RecoveryPointSummary V4 page codec (service_protocol_recovery_point_json.cpp).
+[[nodiscard]] Json
+encode_service_recovery_point_page(const contracts::ServiceRecoveryPointPage& page);
+[[nodiscard]] contracts::ServiceRecoveryPointPage
+parse_service_recovery_point_page(const Json& payload);
+
 [[nodiscard]] Json encode_request_payload(const contracts::ServiceRequest& request);
 [[nodiscard]] contracts::ServiceRequestPayload
 parse_request_payload(contracts::ServiceRequestKind kind, const Json& payload);

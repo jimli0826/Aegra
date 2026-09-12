@@ -118,6 +118,7 @@ struct RequestState final {
     case Kind::kUpdateServiceSettings:
     case Kind::kArmPeRestore:
     case Kind::kCancelPeRestore:
+    case Kind::kStartBootCheck:
         return 3;
     default:
         return 0;

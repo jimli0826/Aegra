@@ -39,6 +39,9 @@ constexpr const char* kSourceNotSystemDisk = "bootcheck.source_not_system_disk";
 constexpr const char* kUnsupportedBootProfile = "bootcheck.unsupported_boot_profile";
 constexpr const char* kProviderUnavailable = "bootcheck.provider_unavailable";
 constexpr const char* kArchiveOpenFailed = "bootcheck.archive_open_failed";
+constexpr const char* kArchiveMissing = "bootcheck.archive_missing";
+constexpr const char* kArchiveCredentialUnavailable = "bootcheck.archive_credential_unavailable";
+constexpr const char* kArchiveCorrupt = "bootcheck.archive_corrupt";
 constexpr const char* kVmdkPresentFailed = "bootcheck.vmdk_present_failed";
 constexpr const char* kVmCreateFailed = "bootcheck.vm_create_failed";
 constexpr const char* kVmStartFailed = "bootcheck.vm_start_failed";
@@ -56,6 +59,22 @@ constexpr auto kCleanupBudget = std::chrono::minutes(2);
 
 [[nodiscard]] base::Error stage_error(const base::ErrorCode code, const char* message_code) {
     return base::Error{code, message_code};
+}
+
+/// Archive open failures carry the cause so the Desktop can say "file does not
+/// exist" instead of a generic "could not open"; other causes keep the
+/// documented umbrella code.
+[[nodiscard]] const char* archive_open_message_code(const base::ErrorCode code) noexcept {
+    switch (code) {
+    case base::ErrorCode::kNotFound:
+        return kArchiveMissing;
+    case base::ErrorCode::kUnauthorized:
+        return kArchiveCredentialUnavailable;
+    case base::ErrorCode::kCorruptData:
+        return kArchiveCorrupt;
+    default:
+        return kArchiveOpenFailed;
+    }
 }
 
 [[nodiscard]] std::filesystem::path path_from_utf8(const std::string& value) {
@@ -137,7 +156,9 @@ resolve_secrets(const contracts::BootCheckJobRequest& request,
                                   ? base::ErrorCode::kCancelled
                                   : base::ErrorCode::kUnauthorized;
             return base::Result<std::vector<std::unique_ptr<ports::IResolvedSecret>>>::failure(
-                stage_error(code, kArchiveOpenFailed));
+                stage_error(code, code == base::ErrorCode::kCancelled
+                                      ? kArchiveOpenFailed
+                                      : kArchiveCredentialUnavailable));
         }
         secrets.push_back(std::move(secret).value());
     }
@@ -191,7 +212,8 @@ open_archive_chain(const contracts::BootCheckJobRequest& request,
     auto chain = adapters::personal_archive::PersonalArchiveChainReader::open(open_request);
     if (!chain) {
         stage.fail(chain.error(), "PersonalArchiveChainReader::open");
-        return base::Result<void>::failure(stage_error(chain.error().code, kArchiveOpenFailed));
+        return base::Result<void>::failure(
+            stage_error(chain.error().code, archive_open_message_code(chain.error().code)));
     }
     resources.chain = std::move(chain).value();
     stage.note_u64("layers", request.source_refs.size());

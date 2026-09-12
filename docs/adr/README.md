@@ -69,6 +69,13 @@ BootCheck 的用户选择、安装状态 capability、durable plan 快照及禁�
 独立测试/验证脚本的仓库政策及破坏性脚本安全门禁见
 [ADR-0031](0031-standalone-validation-scripts.md)。
 
+用户手动触发单个恢复点 BootCheck（StartBootCheck kind 54，以 BootCheck Job 为锚点复用 durable plan）见
+[ADR-0032](0032-manual-boot-check-command.md)。
+
+恢复点最近一次 Verify / BootCheck 结果的控制面持久化（`recovery_point_checks`，schema v31）、
+`RecoveryPointSummary.verify_check/boot_check` 与 Desktop 双列状态见
+[ADR-0033](0033-recovery-point-check-status.md)。
+
 ## 状态
 
 - `Proposed`：讨论中，不构成实现依据。

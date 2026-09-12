@@ -127,10 +127,15 @@ class JobModel final : public QAbstractListModel {
     /// Returns 0 when no restore job is active — used to reattach the Restore summary page.
     Q_INVOKABLE [[nodiscard]] qint64 earliestActiveRestoreCreatedUtcMs() const;
 
-    /// Latest verify job that includes this recovery point.
-    /// Keys: key (none|queued|running|succeeded|failed|cancelled).
+    /// Latest verify or boot check job that targets this recovery point.
+    /// Keys: key (none|queued|running|succeeded|failed|cancelled), operation (3 verify,
+    /// 5 boot check; absent when key is none), messageText (failed/cancelled only).
     Q_INVOKABLE [[nodiscard]] QVariantMap recoveryPointVerifyStatus(
         const QString& file_uuid) const;
+    /// Same, restricted to one operation (3 verify, 5 boot check; 0 = any). Adds createdUtcMs
+    /// of the matched job so callers can compare against a persisted outcome.
+    Q_INVOKABLE [[nodiscard]] QVariantMap recoveryPointOperationStatus(const QString& file_uuid,
+                                                                       int operation) const;
 
     /// Aggregate job counts by operation type.
     /// Keys: backup, restore, verify, other, total.

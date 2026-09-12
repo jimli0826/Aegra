@@ -34,6 +34,17 @@ constexpr std::size_t kMaximumContinuationTokenBytes = 1'024;
            (value[19] == '8' || value[19] == '9' || value[19] == 'a' || value[19] == 'b');
 }
 
+[[nodiscard]] bool valid_check_status(const std::optional<RecoveryPointCheckStatus>& check) noexcept {
+    constexpr std::size_t kMaximumCodeBytes = 128;
+    if (!check) {
+        return true;
+    }
+    return is_known_recovery_point_check_state(check->state) && !check->message_code.empty() &&
+           check->message_code.size() <= kMaximumCodeBytes && !check->job_id.empty() &&
+           check->job_id.size() <= kMaximumCodeBytes &&
+           check->completed_utc_ms <= kMaximumWireInteger;
+}
+
 [[nodiscard]] bool valid_token(const std::optional<std::string>& token) noexcept {
     if (!token) {
         return true;
@@ -94,6 +105,9 @@ base::Result<void> validate_recovery_point_summary(const RecoveryPointSummary& s
         summary.deduplicated_block_count > kMaximumWireInteger ||
         summary.deduplicated_logical_bytes > kMaximumWireInteger) {
         return invalid("recovery point summary integer exceeds the service wire range");
+    }
+    if (!valid_check_status(summary.verify_check) || !valid_check_status(summary.boot_check)) {
+        return invalid("recovery point check status is invalid");
     }
     if ((summary.deduplicated_block_count == 0) != (summary.deduplicated_logical_bytes == 0)) {
         return invalid("recovery point summary dedup counters are inconsistent");

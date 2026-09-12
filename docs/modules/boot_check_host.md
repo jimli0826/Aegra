@@ -91,7 +91,9 @@ cleanup                 # 先记录 guest 读路径计数（guest_read_calls/gue
   （`guest_heartbeat` 或 `overlay_growth`）。
 - `bootcheck.source_not_system_disk`（无 Boot Profile / 非 volume_set）、
   `bootcheck.unsupported_boot_profile`（非 x64、非 512B 扇区、BitLocker enabled）、
-  `bootcheck.provider_unavailable`、`bootcheck.archive_open_failed`、`bootcheck.vmdk_present_failed`、
+  `bootcheck.provider_unavailable`、`bootcheck.archive_missing`（文件不存在）、
+  `bootcheck.archive_credential_unavailable`（密码不可用）、`bootcheck.archive_corrupt`（认证失败）、
+  `bootcheck.archive_open_failed`（其它打开失败）、`bootcheck.vmdk_present_failed`、
   `bootcheck.vm_create_failed`、`bootcheck.vm_start_failed`、`bootcheck.boot_not_confirmed`（boot
   timeout 内 overlay 未达阈值）、`bootcheck.guest_powered_off`（等待期间 VM 已 poweroff/aborted）、
   `bootcheck.overlay_full`（差分盘超配额，`kInsufficientSpace`）、`bootcheck.cancelled`、

@@ -3250,5 +3250,141 @@ for critical volumes now</source>
         <source>Boot Check cannot be enabled because the configured hypervisor is unavailable.</source>
         <translation>設定されたハイパーバイザーが利用できないため、起動チェックを有効にできません。</translation>
     </message>
+    <message id="aegra.repository.bootcheck.submitted">
+        <source>Boot check jobs submitted. See Tasks and Event Log for results.</source>
+        <translation>起動チェックジョブを送信しました。タスクとイベントログで結果を確認できます。</translation>
+    </message>
+    <message id="aegra.repository.bootcheck.submission_failed">
+        <source>Boot check could not be submitted.</source>
+        <translation>起動チェックを送信できませんでした。</translation>
+    </message>
+    <message id="aegra.repository.bootcheck.finished">
+        <source>Boot check completed.</source>
+        <translation>起動チェックが完了しました。</translation>
+    </message>
+    <message id="aegra.repository.bootcheck.failed">
+        <source>Boot check failed.</source>
+        <translation>起動チェックに失敗しました。</translation>
+    </message>
+    <message id="aegra.repository.bootcheck.select_hint">
+        <source>Select volume recovery points</source>
+        <translation>起動チェックするボリュームの復元ポイントを選択してください</translation>
+    </message>
+    <message id="aegra.error.bootcheck.volume_set_required">
+        <source>Boot check requires a volume recovery point</source>
+        <translation>起動チェックにはボリュームの復元ポイントが必要です</translation>
+    </message>
+    <message id="aegra.repository.bootcheck.status.queued">
+        <source>Boot check queued</source>
+        <translation>起動チェック待機中</translation>
+    </message>
+    <message id="aegra.repository.bootcheck.status.running">
+        <source>Boot checking</source>
+        <translation>起動チェック中</translation>
+    </message>
+    <message id="aegra.repository.bootcheck.status.succeeded">
+        <source>Boot verified</source>
+        <translation>起動確認済み</translation>
+    </message>
+    <message id="aegra.repository.bootcheck.status.failed">
+        <source>Boot check failed</source>
+        <translation>起動チェック失敗</translation>
+    </message>
+    <message id="aegra.error.bootcheck.archive_open_failed">
+        <source>Boot check could not open the archive. Check that the backup files still exist in the repository.</source>
+        <translation>起動チェックでアーカイブを開けません。バックアップファイルがリポジトリに存在するか確認してください。</translation>
+    </message>
+    <message id="aegra.error.bootcheck.source_not_system_disk">
+        <source>The recovery point does not contain a bootable system disk</source>
+        <translation>復元ポイントに起動可能なシステムディスクが含まれていません</translation>
+    </message>
+    <message id="aegra.error.bootcheck.unsupported_boot_profile">
+        <source>The recovery point's boot configuration is not supported for boot check</source>
+        <translation>復元ポイントの起動構成は起動チェックに対応していません</translation>
+    </message>
+    <message id="aegra.error.bootcheck.vmdk_present_failed">
+        <source>Boot check could not present the virtual disk</source>
+        <translation>起動チェックで仮想ディスクを提示できません</translation>
+    </message>
+    <message id="aegra.error.bootcheck.vm_create_failed">
+        <source>Boot check could not create the virtual machine</source>
+        <translation>起動チェックで仮想マシンを作成できません</translation>
+    </message>
+    <message id="aegra.error.bootcheck.vm_start_failed">
+        <source>Boot check could not start the virtual machine</source>
+        <translation>起動チェックで仮想マシンを起動できません</translation>
+    </message>
+    <message id="aegra.error.bootcheck.guest_powered_off">
+        <source>The virtual machine powered off before boot was confirmed</source>
+        <translation>起動確認前に仮想マシンの電源が切れました</translation>
+    </message>
+    <message id="aegra.error.bootcheck.boot_not_confirmed">
+        <source>The system did not boot within the time limit</source>
+        <translation>システムは制限時間内に起動しませんでした</translation>
+    </message>
+    <message id="aegra.error.bootcheck.overlay_full">
+        <source>Boot check stopped because the temporary disk space was exhausted</source>
+        <translation>一時ディスク領域が不足したため起動チェックを停止しました</translation>
+    </message>
+    <message id="aegra.error.bootcheck.cancelled">
+        <source>Boot check was cancelled</source>
+        <translation>起動チェックがキャンセルされました</translation>
+    </message>
+    <message id="aegra.error.bootcheck.cleanup_incomplete">
+        <source>Boot check finished but could not fully remove its temporary virtual machine</source>
+        <translation>起動チェックは完了しましたが、一時的な仮想マシンを完全に削除できませんでした</translation>
+    </message>
+    <message id="aegra.error.bootcheck.host_failed">
+        <source>The boot check host process failed</source>
+        <translation>起動チェックのホストプロセスが失敗しました</translation>
+    </message>
+    <message id="aegra.error.bootcheck.request_rejected">
+        <source>The boot check request was rejected</source>
+        <translation>起動チェックのリクエストが拒否されました</translation>
+    </message>
+    <message id="aegra.error.bootcheck.host_unavailable">
+        <source>Boot check is not available on this computer</source>
+        <translation>このコンピューターでは起動チェックを利用できません</translation>
+    </message>
+    <message id="aegra.error.bootcheck.interrupted">
+        <source>Boot check was interrupted by a service restart</source>
+        <translation>サービスの再起動により起動チェックが中断されました</translation>
+    </message>
+    <message id="aegra.error.bootcheck.timeout">
+        <source>Boot check exceeded its run time budget</source>
+        <translation>起動チェックが実行時間の上限を超えました</translation>
+    </message>
+    <message id="aegra.error.bootcheck.dispatch_failed">
+        <source>Boot check could not be started</source>
+        <translation>起動チェックを開始できませんでした</translation>
+    </message>
+    <message id="aegra.error.bootcheck.archive_missing">
+        <source>Archive file does not exist</source>
+        <translation>アーカイブファイルが存在しません</translation>
+    </message>
+    <message id="aegra.error.bootcheck.archive_credential_unavailable">
+        <source>Archive password is unavailable</source>
+        <translation>アーカイブのパスワードを利用できません</translation>
+    </message>
+    <message id="aegra.error.bootcheck.archive_corrupt">
+        <source>Archive authentication failed</source>
+        <translation>アーカイブの認証に失敗しました</translation>
+    </message>
+    <message id="aegra.repository.column.verify_status">
+        <source>Verify</source>
+        <translation>検証</translation>
+    </message>
+    <message id="aegra.repository.column.boot_check_status">
+        <source>Boot check</source>
+        <translation>起動チェック</translation>
+    </message>
+    <message id="aegra.repository.check.na">
+        <source>N/A</source>
+        <translation>N/A</translation>
+    </message>
+    <message id="aegra.repository.check.partial">
+        <source>Partially checked</source>
+        <translation>一部のみチェック済み</translation>
+    </message>
 </context>
 </TS>

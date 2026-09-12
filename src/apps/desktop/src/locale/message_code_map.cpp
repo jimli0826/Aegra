@@ -260,6 +260,45 @@ namespace {
          QStringLiteral("aegra.error.bootcheck.virtualbox_hyperv_conflict")},
         {QStringLiteral("bootcheck.virtualbox_no_hardware_virt"),
          QStringLiteral("aegra.error.bootcheck.virtualbox_no_hardware_virt")},
+        {QStringLiteral("bootcheck.volume_set_required"),
+         QStringLiteral("aegra.error.bootcheck.volume_set_required")},
+        {QStringLiteral("bootcheck.archive_missing"),
+         QStringLiteral("aegra.error.bootcheck.archive_missing")},
+        {QStringLiteral("bootcheck.archive_credential_unavailable"),
+         QStringLiteral("aegra.error.bootcheck.archive_credential_unavailable")},
+        {QStringLiteral("bootcheck.archive_corrupt"),
+         QStringLiteral("aegra.error.bootcheck.archive_corrupt")},
+        {QStringLiteral("bootcheck.archive_open_failed"),
+         QStringLiteral("aegra.error.bootcheck.archive_open_failed")},
+        {QStringLiteral("bootcheck.source_not_system_disk"),
+         QStringLiteral("aegra.error.bootcheck.source_not_system_disk")},
+        {QStringLiteral("bootcheck.unsupported_boot_profile"),
+         QStringLiteral("aegra.error.bootcheck.unsupported_boot_profile")},
+        {QStringLiteral("bootcheck.vmdk_present_failed"),
+         QStringLiteral("aegra.error.bootcheck.vmdk_present_failed")},
+        {QStringLiteral("bootcheck.vm_create_failed"),
+         QStringLiteral("aegra.error.bootcheck.vm_create_failed")},
+        {QStringLiteral("bootcheck.vm_start_failed"),
+         QStringLiteral("aegra.error.bootcheck.vm_start_failed")},
+        {QStringLiteral("bootcheck.guest_powered_off"),
+         QStringLiteral("aegra.error.bootcheck.guest_powered_off")},
+        {QStringLiteral("bootcheck.boot_not_confirmed"),
+         QStringLiteral("aegra.error.bootcheck.boot_not_confirmed")},
+        {QStringLiteral("bootcheck.overlay_full"),
+         QStringLiteral("aegra.error.bootcheck.overlay_full")},
+        {QStringLiteral("bootcheck.cancelled"),
+         QStringLiteral("aegra.error.bootcheck.cancelled")},
+        {QStringLiteral("bootcheck.cleanup_incomplete"),
+         QStringLiteral("aegra.error.bootcheck.cleanup_incomplete")},
+        {QStringLiteral("bootcheck.host_failed"),
+         QStringLiteral("aegra.error.bootcheck.host_failed")},
+        {QStringLiteral("bootcheck.request_rejected"),
+         QStringLiteral("aegra.error.bootcheck.request_rejected")},
+        {QStringLiteral("post_backup.boot_check_unavailable"), QStringLiteral("aegra.error.bootcheck.host_unavailable")},
+        {QStringLiteral("post_backup.boot_check_interrupted"), QStringLiteral("aegra.error.bootcheck.interrupted")},
+        {QStringLiteral("post_backup.boot_check_timeout"), QStringLiteral("aegra.error.bootcheck.timeout")},
+        {QStringLiteral("post_backup.boot_check_dispatch_failed"), QStringLiteral("aegra.error.bootcheck.dispatch_failed")},
+        {QStringLiteral("post_backup.boot_check_host_failed"), QStringLiteral("aegra.error.bootcheck.host_failed")},
         {QStringLiteral("verify.archive_missing"),
          QStringLiteral("aegra.error.verify.archive_missing")},
         {QStringLiteral("verify.source_unavailable"),
@@ -326,6 +365,48 @@ QString translation_id_for_message_code(const QString& message_code) {
     qtTrId("aegra.error.bootcheck.virtualbox_hyperv_conflict");
     //% "Hardware virtualization (VT-x/AMD-V) is not available. Enable it in the BIOS/UEFI firmware settings."
     qtTrId("aegra.error.bootcheck.virtualbox_no_hardware_virt");
+    //% "Boot check requires a volume recovery point"
+    qtTrId("aegra.error.bootcheck.volume_set_required");
+    //% "Archive file does not exist"
+    qtTrId("aegra.error.bootcheck.archive_missing");
+    //% "Archive password is unavailable"
+    qtTrId("aegra.error.bootcheck.archive_credential_unavailable");
+    //% "Archive authentication failed"
+    qtTrId("aegra.error.bootcheck.archive_corrupt");
+    //% "Boot check could not open the archive. Check that the backup files still exist in the repository."
+    qtTrId("aegra.error.bootcheck.archive_open_failed");
+    //% "The recovery point does not contain a bootable system disk"
+    qtTrId("aegra.error.bootcheck.source_not_system_disk");
+    //% "The recovery point's boot configuration is not supported for boot check"
+    qtTrId("aegra.error.bootcheck.unsupported_boot_profile");
+    //% "Boot check could not present the virtual disk"
+    qtTrId("aegra.error.bootcheck.vmdk_present_failed");
+    //% "Boot check could not create the virtual machine"
+    qtTrId("aegra.error.bootcheck.vm_create_failed");
+    //% "Boot check could not start the virtual machine"
+    qtTrId("aegra.error.bootcheck.vm_start_failed");
+    //% "The virtual machine powered off before boot was confirmed"
+    qtTrId("aegra.error.bootcheck.guest_powered_off");
+    //% "The system did not boot within the time limit"
+    qtTrId("aegra.error.bootcheck.boot_not_confirmed");
+    //% "Boot check stopped because the temporary disk space was exhausted"
+    qtTrId("aegra.error.bootcheck.overlay_full");
+    //% "Boot check was cancelled"
+    qtTrId("aegra.error.bootcheck.cancelled");
+    //% "Boot check finished but could not fully remove its temporary virtual machine"
+    qtTrId("aegra.error.bootcheck.cleanup_incomplete");
+    //% "The boot check host process failed"
+    qtTrId("aegra.error.bootcheck.host_failed");
+    //% "The boot check request was rejected"
+    qtTrId("aegra.error.bootcheck.request_rejected");
+    //% "Boot check is not available on this computer"
+    qtTrId("aegra.error.bootcheck.host_unavailable");
+    //% "Boot check was interrupted by a service restart"
+    qtTrId("aegra.error.bootcheck.interrupted");
+    //% "Boot check exceeded its run time budget"
+    qtTrId("aegra.error.bootcheck.timeout");
+    //% "Boot check could not be started"
+    qtTrId("aegra.error.bootcheck.dispatch_failed");
     //% "Archive file does not exist"
     qtTrId("aegra.error.verify.archive_missing");
     //% "Archive could not be opened. Check the path, repository connection, and file permissions."

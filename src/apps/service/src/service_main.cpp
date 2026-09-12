@@ -21,6 +21,7 @@
 #include "aegra/apps/service/boot_check_supervisor.h"
 #include "aegra/apps/service/mount_supervisor.h"
 #include "aegra/apps/service/post_backup_coordinator.h"
+#include "aegra/apps/service/recovery_point_check_recorder.h"
 #include "aegra/apps/service/schedule_engine.h"
 #include "aegra/apps/service/schedule_execution_coordinator.h"
 #include "aegra/apps/service/schedule_service.h"
@@ -513,7 +514,8 @@ create_service_log(const std::filesystem::path& data_dir, const bool service_mod
 [[nodiscard]] std::vector<std::string> runtime_capabilities(const bool file_browse_enabled,
                                                             const bool pe_restore_enabled,
                                                             const bool virtualbox_installed,
-                                                            const bool hyperv_installed) {
+                                                            const bool hyperv_installed,
+                                                            const bool boot_check_enabled) {
     // F8 enables file.restore (PrepareFileRestore + StartFileRestore) when browse is available.
     std::vector<std::string> capabilities{
         "backup.start",
@@ -552,6 +554,10 @@ create_service_log(const std::filesystem::path& data_dir, const bool service_mod
     }
     if (hyperv_installed) {
         capabilities.push_back("boot_check.hypervisor.hyperv.installed");
+    }
+    if (boot_check_enabled) {
+        // StartBootCheck (kind 54): the AegraBootCheck host is present and dispatchable.
+        capabilities.push_back("recovery_point.boot_check");
     }
     std::ranges::sort(capabilities);
     return capabilities;
@@ -729,7 +735,8 @@ create_runtime(const ServiceArguments& arguments) {
         components.boot_check_supervisor->begin_hypervisor_probe();
     }
     components.post_backup_coordinator = std::make_shared<service::PostBackupCoordinator>(
-        *components.control_plane, *components.clock, *components.random, components.logger.get());
+        *components.control_plane, *components.storage_factory, *components.clock,
+        *components.random, components.logger.get());
     // A finished boot check run nudges an immediate coordinator scan so the job
     // record turns terminal without waiting for the next poll interval.
     components.boot_check_supervisor->set_completion_observer(
@@ -755,14 +762,46 @@ create_runtime(const ServiceArguments& arguments) {
     auto catalog_registrar = components.backup_catalog_registrar;
     std::weak_ptr<service::PostBackupCoordinator> post_backup_coordinator =
         components.post_backup_coordinator;
+    // `components` is moved out of this function, so the callback must not point
+    // into it. A heap cell owned by the lambda receives the supervisor pointer
+    // right after construction; jobs complete long after that.
+    auto supervisor_slot = std::make_shared<service::WorkerSupervisor*>(nullptr);
+    auto* const clock = components.clock.get();
     components.supervisor = std::make_unique<service::WorkerSupervisor>(
         std::move(supervisor_config), *components.process_launcher, *components.control_plane,
         *components.clock, *components.random, service::SupervisorProgressCallback{},
-        [log, jobs_db, catalog_registrar,
-         post_backup_coordinator](const service::WorkerJobRequest& request,
-                                  const aegra::contracts::ServiceJobState final_state,
-                                  const aegra::contracts::WorkerResponse* response) {
+        [log, jobs_db, catalog_registrar, post_backup_coordinator, supervisor_slot,
+         clock](const service::WorkerJobRequest& request,
+                const aegra::contracts::ServiceJobState final_state,
+                const aegra::contracts::WorkerResponse* response) {
             const auto& job_id = request.worker_request.job_id;
+            if (request.worker_request.operation == aegra::contracts::JobOperation::kVerify &&
+                jobs_db != nullptr) {
+                // Durable per-recovery-point verify outcome (ADR-0033). The Worker's
+                // last progress snapshot names the item it stopped on.
+                std::string current;
+                if (*supervisor_slot != nullptr) {
+                    if (auto progress = (*supervisor_slot)->last_progress(job_id)) {
+                        current = progress->recovery_point_id;
+                    }
+                }
+                std::string message = "job.failed";
+                if (response != nullptr && response->task_result &&
+                    !response->task_result->message_code.empty()) {
+                    message = response->task_result->message_code;
+                } else if (response != nullptr && !response->message_code.empty()) {
+                    message = response->message_code;
+                } else if (final_state == aegra::contracts::ServiceJobState::kCancelled) {
+                    message = "job.cancelled";
+                } else if (final_state == aegra::contracts::ServiceJobState::kInterrupted) {
+                    message = "job.interrupted";
+                }
+                const auto now = clock != nullptr ? clock->now_utc_ms() : 0;
+                service::record_verify_check_outcomes(
+                    *jobs_db, log, request.repository_connection_id, request.source_ids, current,
+                    job_id, final_state, message,
+                    now < 0 ? 0ULL : static_cast<std::uint64_t>(now));
+            }
             bool catalog_ready = false;
             if (response != nullptr && catalog_registrar != nullptr) {
                 auto registered = catalog_registrar->publish(request, *response, {});
@@ -823,6 +862,7 @@ create_runtime(const ServiceArguments& arguments) {
                                    : service::ServiceLogLevel::kWarning;
             log->write(level, "job.terminal", detail);
         });
+    *supervisor_slot = components.supervisor.get();
     bool file_browse_enabled = false;
     auto browse_roots = build_browse_roots(*components.source_inventory);
     if (browse_roots && !browse_roots.value().empty()) {
@@ -920,7 +960,9 @@ create_runtime(const ServiceArguments& arguments) {
     components.runtime = {
         .service_version = AEGRA_APPLICATION_VERSION,
         .capabilities = runtime_capabilities(file_browse_enabled, pe_restore_enabled,
-                                             virtualbox_installed, hyperv_installed),
+                                             virtualbox_installed, hyperv_installed,
+                                             components.boot_check_supervisor != nullptr &&
+                                                 components.boot_check_supervisor->available()),
         .logger = components.logger.get(),
         .repository_query = components.repository_query.get(),
         .connected_repository_query = components.connected_query.get(),
@@ -935,6 +977,7 @@ create_runtime(const ServiceArguments& arguments) {
         .worker_supervisor = components.supervisor.get(),
         .mount_supervisor = components.mount_supervisor.get(),
         .boot_check = components.boot_check_supervisor.get(),
+        .post_backup_coordinator = components.post_backup_coordinator.get(),
         .control_plane = components.control_plane.get(),
         .storage_factory = components.storage_factory.get(),
     };

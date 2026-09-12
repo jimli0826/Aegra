@@ -5,6 +5,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 add_library(aegra_app_service_protocol STATIC
     src/service_protocol.cpp
     src/service_protocol_request_json.cpp
+    src/service_protocol_recovery_point_json.cpp
     src/service_protocol_response_json.cpp
 )
 add_library(Aegra::AppServiceProtocol ALIAS aegra_app_service_protocol)
@@ -30,6 +31,7 @@ add_library(aegra_app_service STATIC
     src/pe_secret_sealer.cpp
     src/boot_check_supervisor.cpp
     src/post_backup_coordinator.cpp
+    src/recovery_point_check_recorder.cpp
     src/recovery_point_layout_service.cpp
     src/schedule_engine.cpp
     src/schedule_next_run.cpp

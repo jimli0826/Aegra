@@ -30,7 +30,9 @@ namespace aegra::ports {
 // v28: Boot Check VM CPU, memory, and requested concurrency in service_settings.
 // v29: Verify scope and concurrent Worker limit in service_settings.
 // v30: Default Boot Check hypervisor in service_settings.
-inline constexpr std::uint32_t kControlPlaneSchemaVersion = 30;
+// v31: recovery_point_checks — latest terminal Verify/BootCheck outcome per recovery point,
+//      kept independently of job retention so the Repository page can show it after restart.
+inline constexpr std::uint32_t kControlPlaneSchemaVersion = 31;
 
 // ---- Durable records (control-plane only; no plaintext secrets, no RP authority) ----
 
@@ -237,6 +239,20 @@ is_complete_post_backup_plan(const PostBackupPlanRecord& plan) noexcept {
            (!plan.boot_check_required ||
             is_terminal_post_backup_action_state(plan.boot_check.state));
 }
+
+/// Latest terminal Verify (operation 3) or BootCheck (operation 5) outcome for one
+/// recovery point of one repository connection. One row per (connection, point,
+/// operation); each new terminal run replaces the previous row. Not cascaded from
+/// jobs: it outlives the job retention purge (ADR-0033).
+struct RecoveryPointCheckRecord final {
+    std::string repository_connection_id;
+    std::string recovery_point_id;
+    contracts::JobOperation operation{contracts::JobOperation::kVerify};
+    contracts::RecoveryPointCheckState state{contracts::RecoveryPointCheckState::kFailed};
+    std::string message_code;
+    std::string job_id;
+    std::uint64_t completed_utc_ms{0};
+};
 
 struct PostBackupPlanClaimRequest final {
     std::string claim_owner;
@@ -471,6 +487,24 @@ class IPostBackupPlanStore {
                      base::CancellationToken cancellation) = 0;
 };
 
+class IRecoveryPointCheckStore {
+  public:
+    IRecoveryPointCheckStore() = default;
+    virtual ~IRecoveryPointCheckStore() = default;
+    IRecoveryPointCheckStore(const IRecoveryPointCheckStore&) = delete;
+    IRecoveryPointCheckStore& operator=(const IRecoveryPointCheckStore&) = delete;
+    IRecoveryPointCheckStore(IRecoveryPointCheckStore&&) = delete;
+    IRecoveryPointCheckStore& operator=(IRecoveryPointCheckStore&&) = delete;
+
+    // Insert or replace by (repository_connection_id, recovery_point_id, operation).
+    [[nodiscard]] virtual base::Result<void> upsert(const RecoveryPointCheckRecord& record,
+                                                    base::CancellationToken cancellation) = 0;
+
+    // Every recorded outcome for one repository connection (both operations).
+    [[nodiscard]] virtual base::Result<std::vector<RecoveryPointCheckRecord>>
+    list(std::string_view repository_connection_id, base::CancellationToken cancellation) = 0;
+};
+
 class IRestorePreflightStore {
   public:
     IRestorePreflightStore() = default;
@@ -506,6 +540,7 @@ class IControlPlaneUnitOfWork {
     [[nodiscard]] virtual IRestorePreflightStore& restore_preflights() noexcept = 0;
     [[nodiscard]] virtual IServiceSettingsStore& service_settings() noexcept = 0;
     [[nodiscard]] virtual IPostBackupPlanStore& post_backup_plans() noexcept = 0;
+    [[nodiscard]] virtual IRecoveryPointCheckStore& recovery_point_checks() noexcept = 0;
 
     [[nodiscard]] virtual base::Result<void> commit(base::CancellationToken cancellation) = 0;
     virtual void rollback() noexcept = 0;
@@ -560,6 +595,9 @@ class IControlPlaneDatabase {
     get_service_settings(base::CancellationToken cancellation) = 0;
     [[nodiscard]] virtual base::Result<std::optional<PostBackupPlanRecord>>
     get_post_backup_plan(std::string_view backup_job_id, base::CancellationToken cancellation) = 0;
+    [[nodiscard]] virtual base::Result<std::vector<RecoveryPointCheckRecord>>
+    list_recovery_point_checks(std::string_view repository_connection_id,
+                               base::CancellationToken cancellation) = 0;
 };
 
 } // namespace aegra::ports

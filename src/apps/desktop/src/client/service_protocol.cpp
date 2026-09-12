@@ -114,6 +114,35 @@ constexpr qsizetype kMaximumStableCodeCharacters = 128;
     return true;
 }
 
+/// verify_check / boot_check: null (never run) or {state 1..4, message_code, job_id,
+/// completed_utc_ms}. Emits an invalid QVariant for null.
+[[nodiscard]] bool parse_recovery_point_check(const QJsonValue& value, QVariant& result) {
+    result = QVariant();
+    if (value.isNull()) {
+        return true;
+    }
+    if (!value.isObject()) {
+        return false;
+    }
+    const auto object = value.toObject();
+    qint64 state = 0;
+    qint64 completed_utc_ms = 0;
+    if (!has_exact_keys(object, {"state", "message_code", "job_id", "completed_utc_ms"}) ||
+        !integer_in_range(object.value(QStringLiteral("state")), 1, 4, state) ||
+        !object.value(QStringLiteral("message_code")).isString() ||
+        !object.value(QStringLiteral("job_id")).isString() ||
+        !integer_in_range(object.value(QStringLiteral("completed_utc_ms")), 0,
+                          (std::numeric_limits<qint64>::max)(), completed_utc_ms)) {
+        return false;
+    }
+    result = QVariantMap{
+        {QStringLiteral("state"), state},
+        {QStringLiteral("messageCode"), object.value(QStringLiteral("message_code")).toString()},
+        {QStringLiteral("jobId"), object.value(QStringLiteral("job_id")).toString()},
+        {QStringLiteral("completedUtcMs"), completed_utc_ms}};
+    return true;
+}
+
 [[nodiscard]] bool parse_recovery_point(const QJsonValue& value, QVariantMap& result) {
     if (!value.isObject()) {
         return false;
@@ -123,7 +152,13 @@ constexpr qsizetype kMaximumStableCodeCharacters = 128;
                                  "content_kind", "chain_state", "created_utc_ms",
                                  "logical_size_bytes", "stored_size_bytes",
                                  "deduplicated_block_count", "deduplicated_logical_bytes",
-                                 "source_count", "has_sidecar"})) {
+                                 "source_count", "has_sidecar", "verify_check", "boot_check"})) {
+        return false;
+    }
+    QVariant verify_check;
+    QVariant boot_check;
+    if (!parse_recovery_point_check(object.value(QStringLiteral("verify_check")), verify_check) ||
+        !parse_recovery_point_check(object.value(QStringLiteral("boot_check")), boot_check)) {
         return false;
     }
     const auto file_uuid = object.value(QStringLiteral("file_uuid")).toString();
@@ -187,7 +222,9 @@ constexpr qsizetype kMaximumStableCodeCharacters = 128;
               {QStringLiteral("deduplicatedBlockCount"), deduplicated_block_count},
               {QStringLiteral("deduplicatedLogicalBytes"), deduplicated_logical_bytes},
               {QStringLiteral("sourceCount"), source_count},
-              {QStringLiteral("hasSidecar"), object.value(QStringLiteral("has_sidecar")).toBool()}};
+              {QStringLiteral("hasSidecar"), object.value(QStringLiteral("has_sidecar")).toBool()},
+              {QStringLiteral("verifyCheck"), verify_check},
+              {QStringLiteral("bootCheck"), boot_check}};
     return true;
 }
 

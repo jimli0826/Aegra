@@ -6,7 +6,7 @@ import ".."
 Item {
     id: root
     property int size: 16
-    /// succeeded | failed | cancelled | running | queued | incomplete
+    /// succeeded | failed | cancelled | running | queued | na | incomplete
     property string kind: "succeeded"
     property string label: ""
 
@@ -143,6 +143,17 @@ Item {
                     ctx.lineTo(cx, cy)
                     ctx.lineTo(cx + 2.4, cy + 1.4)
                     ctx.stroke()
+                    return
+                }
+                if (kind === "na") {
+                    // Never run: a quiet dash, no ring, so it reads as "no data".
+                    ctx.strokeStyle = greyColor
+                    ctx.globalAlpha = 0.55
+                    ctx.beginPath()
+                    ctx.moveTo(cx - 3.6, cy)
+                    ctx.lineTo(cx + 3.6, cy)
+                    ctx.stroke()
+                    ctx.globalAlpha = 1.0
                     return
                 }
                 ctx.strokeStyle = redColor

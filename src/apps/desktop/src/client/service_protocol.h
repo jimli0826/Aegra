@@ -53,6 +53,12 @@ inline constexpr int kGetBootCheckHypervisorStatusRequestKind = 21;
 inline constexpr int kArmPeRestoreRequestKind = 51;
 inline constexpr int kCancelPeRestoreRequestKind = 52;
 inline constexpr int kRefreshBootCheckHypervisorStatusRequestKind = 53;
+/// StartBootCheck (ADR-0032): one volume_set recovery point; null hypervisor = Service default.
+inline constexpr int kStartBootCheckRequestKind = 54;
+[[nodiscard]] QByteArray encode_start_boot_check_request(const QString& request_id,
+                                                         const QString& idempotency_key,
+                                                         const QString& connection_id,
+                                                         const QString& recovery_point_id);
 /// BootCheckHypervisorStatus.probe_state (contracts::BootCheckProbeState).
 inline constexpr int kBootCheckProbeStateNotProbed = 1;
 inline constexpr int kBootCheckProbeStateProbing = 2;

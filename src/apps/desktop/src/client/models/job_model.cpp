@@ -543,14 +543,52 @@ qint64 JobModel::earliestActiveRestoreCreatedUtcMs() const {
     return earliest;
 }
 
+namespace {
+
+[[nodiscard]] QString boot_check_item_key(const JobRow& job) noexcept {
+    if (job.state == kStateQueued) {
+        return QStringLiteral("queued");
+    }
+    if (job.state == kStateRunning || job.state == kStateCancelling) {
+        return QStringLiteral("running");
+    }
+    if (job.state == kStateSucceeded) {
+        return QStringLiteral("succeeded");
+    }
+    if (job.state == kStateCancelled) {
+        return QStringLiteral("cancelled");
+    }
+    return QStringLiteral("failed");
+}
+
+/// Boot check rows name the recovery point through the Service progress
+/// projection (durable plan) or, for the optimistic row, through source_ids.
+[[nodiscard]] bool job_targets_recovery_point(const JobRow& row, const QString& file_uuid) {
+    if (row.operation == 3) {
+        return row.source_ids.contains(file_uuid);
+    }
+    if (row.operation == kOperationBootCheck) {
+        return row.progress_recovery_point_id == file_uuid || row.source_ids.contains(file_uuid);
+    }
+    return false;
+}
+
+} // namespace
+
 QVariantMap JobModel::recoveryPointVerifyStatus(const QString& file_uuid) const {
+    return recoveryPointOperationStatus(file_uuid, 0);
+}
+
+QVariantMap JobModel::recoveryPointOperationStatus(const QString& file_uuid,
+                                                   const int operation) const {
     QVariantMap result{{QStringLiteral("key"), QStringLiteral("none")}};
     if (file_uuid.isEmpty()) {
         return result;
     }
     const JobRow* latest = nullptr;
     for (const auto& row : rows_) {
-        if (row.operation != 3 || !row.source_ids.contains(file_uuid)) {
+        if ((operation != 0 && row.operation != operation) ||
+            !job_targets_recovery_point(row, file_uuid)) {
             continue;
         }
         if (latest == nullptr || row.created_utc_ms >= latest->created_utc_ms) {
@@ -558,6 +596,18 @@ QVariantMap JobModel::recoveryPointVerifyStatus(const QString& file_uuid) const 
         }
     }
     if (latest == nullptr) {
+        return result;
+    }
+    result.insert(QStringLiteral("operation"), static_cast<qint64>(latest->operation));
+    result.insert(QStringLiteral("createdUtcMs"), static_cast<qint64>(latest->created_utc_ms));
+    if (latest->operation == kOperationBootCheck) {
+        const auto boot_key = boot_check_item_key(*latest);
+        result.insert(QStringLiteral("key"), boot_key);
+        if ((boot_key == QLatin1String("failed") || boot_key == QLatin1String("cancelled")) &&
+            !latest->message_code.isEmpty()) {
+            result.insert(QStringLiteral("messageText"),
+                          localize_message_code(latest->message_code));
+        }
         return result;
     }
     const auto index = latest->source_ids.indexOf(file_uuid);

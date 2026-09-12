@@ -244,6 +244,21 @@ class PostBackupPlanStore final : public ports::IPostBackupPlanStore {
     const bool* unit_of_work_active_{nullptr};
 };
 
+class RecoveryPointCheckStore final : public ports::IRecoveryPointCheckStore {
+  public:
+    explicit RecoveryPointCheckStore(SqliteControlPlaneState& state,
+                                     const bool* unit_of_work_active = nullptr) noexcept;
+    [[nodiscard]] base::Result<void> upsert(const ports::RecoveryPointCheckRecord& record,
+                                            base::CancellationToken cancellation) override;
+    [[nodiscard]] base::Result<std::vector<ports::RecoveryPointCheckRecord>>
+    list(std::string_view repository_connection_id,
+         base::CancellationToken cancellation) override;
+
+  private:
+    SqliteControlPlaneState& state_;
+    const bool* unit_of_work_active_{nullptr};
+};
+
 class ControlPlaneUnitOfWork final : public ports::IControlPlaneUnitOfWork {
   public:
     // write_lock must own state->mutex for the full unit-of-work lifetime.
@@ -258,6 +273,7 @@ class ControlPlaneUnitOfWork final : public ports::IControlPlaneUnitOfWork {
     [[nodiscard]] ports::IRestorePreflightStore& restore_preflights() noexcept override;
     [[nodiscard]] ports::IServiceSettingsStore& service_settings() noexcept override;
     [[nodiscard]] ports::IPostBackupPlanStore& post_backup_plans() noexcept override;
+    [[nodiscard]] ports::IRecoveryPointCheckStore& recovery_point_checks() noexcept override;
     [[nodiscard]] base::Result<void> commit(base::CancellationToken cancellation) override;
     void rollback() noexcept override;
 
@@ -275,6 +291,7 @@ class ControlPlaneUnitOfWork final : public ports::IControlPlaneUnitOfWork {
     RestorePreflightStore restore_preflights_;
     ServiceSettingsStore service_settings_;
     PostBackupPlanStore post_backup_plans_;
+    RecoveryPointCheckStore recovery_point_checks_;
 };
 
 // Opaque continuation: v1|<scope>|<filter>|<created_utc_ms>|<id>, bound to list kind + filters.

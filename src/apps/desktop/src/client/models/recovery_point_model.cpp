@@ -1,6 +1,7 @@
 #include "client/models/recovery_point_model.h"
 
 #include "locale/locale_format.h"
+#include "locale/message_code_map.h"
 
 #include <QClipboard>
 #include <QDateTime>
@@ -311,6 +312,38 @@ QStringList RecoveryPointModel::fileUuids() const {
     return ids;
 }
 
+QVariant RecoveryPointModel::check_variant(const std::optional<RecoveryPointCheckRow>& check) const {
+    if (!check) {
+        return {};
+    }
+    QString key = QStringLiteral("failed");
+    if (check->state == 1) {
+        key = QStringLiteral("succeeded");
+    } else if (check->state == 3) {
+        key = QStringLiteral("cancelled");
+    }
+    return QVariantMap{
+        {QStringLiteral("key"), key},
+        {QStringLiteral("state"), static_cast<qint64>(check->state)},
+        {QStringLiteral("messageCode"), check->message_code},
+        {QStringLiteral("messageText"),
+         check->message_code.isEmpty() ? QString{} : localize_message_code(check->message_code)},
+        {QStringLiteral("jobId"), check->job_id},
+        {QStringLiteral("completedUtcMs"), static_cast<qint64>(check->completed_utc_ms)},
+        {QStringLiteral("completedText"),
+         format_ != nullptr ? format_->format_date_time_utc_ms(check->completed_utc_ms)
+                            : QString{}}};
+}
+
+QVariantMap RecoveryPointModel::recoveryPointChecks(const QString& file_uuid) const {
+    const auto* row = find_row(file_uuid);
+    if (row == nullptr) {
+        return {};
+    }
+    return {{QStringLiteral("verifyCheck"), check_variant(row->verify_check)},
+            {QStringLiteral("bootCheck"), check_variant(row->boot_check)}};
+}
+
 QVariantMap RecoveryPointModel::list_item_from_row(const RecoveryPointRow& row) const {
     return {{QStringLiteral("fileUuid"), row.file_uuid},
             {QStringLiteral("displayTitle"), point_title(row)},
@@ -327,9 +360,13 @@ QVariantMap RecoveryPointModel::list_item_from_row(const RecoveryPointRow& row) 
                                 : QString{}},
             {QStringLiteral("chainStateText"), chain_state_text(row.chain_state)},
             {QStringLiteral("chainComplete"), row.chain_state == 1},
+            // 1 volume_set, 2 file_set: the Repository page gates Boot Check selection on it.
+            {QStringLiteral("contentKind"), static_cast<qint64>(row.content_kind)},
             {QStringLiteral("parentSummaryText"), parent_summary_text(row)},
             {QStringLiteral("chainDepth"), chain_depth_for(row)},
-            {QStringLiteral("isBaseline"), row.backup_type == 1}};
+            {QStringLiteral("isBaseline"), row.backup_type == 1},
+            {QStringLiteral("verifyCheck"), check_variant(row.verify_check)},
+            {QStringLiteral("bootCheck"), check_variant(row.boot_check)}};
 }
 
 QHash<QString, QStringList> RecoveryPointModel::children_by_parent() const {
@@ -595,6 +632,26 @@ QVariantList RecoveryPointModel::checkpointsForDate(const QString& date_ymd) con
     return out;
 }
 
+namespace {
+
+[[nodiscard]] std::optional<RecoveryPointCheckRow> check_row_from_variant(const QVariant& value) {
+    if (!value.isValid() || !value.canConvert<QVariantMap>()) {
+        return std::nullopt;
+    }
+    const auto map = value.toMap();
+    RecoveryPointCheckRow check;
+    check.state = map.value(QStringLiteral("state")).toLongLong();
+    if (check.state < 1 || check.state > 4) {
+        return std::nullopt;
+    }
+    check.message_code = map.value(QStringLiteral("messageCode")).toString();
+    check.job_id = map.value(QStringLiteral("jobId")).toString();
+    check.completed_utc_ms = map.value(QStringLiteral("completedUtcMs")).toLongLong();
+    return check;
+}
+
+} // namespace
+
 QVector<RecoveryPointRow> recovery_points_from_variant_list(const QVariantList& items) {
     QVector<RecoveryPointRow> rows;
     rows.reserve(items.size());
@@ -619,6 +676,8 @@ QVector<RecoveryPointRow> recovery_points_from_variant_list(const QVariantList& 
             map.value(QStringLiteral("deduplicatedLogicalBytes")).toLongLong();
         row.source_count = map.value(QStringLiteral("sourceCount")).toLongLong();
         row.has_sidecar = map.value(QStringLiteral("hasSidecar")).toBool();
+        row.verify_check = check_row_from_variant(map.value(QStringLiteral("verifyCheck")));
+        row.boot_check = check_row_from_variant(map.value(QStringLiteral("bootCheck")));
         rows.push_back(std::move(row));
     }
     return rows;

@@ -166,6 +166,7 @@ Job list 的 `progress`：仅合并 Worker 监督器缓存中的真实 progress�
 | 51 | ArmPeRestore | Command |
 | 52 | CancelPeRestore | Command |
 | 53 | RefreshBootCheckHypervisorStatus | Command |
+| 54 | StartBootCheck | Command |
 
 ---
 
@@ -299,11 +300,18 @@ Daily/Weekly 的 `day_of_month_mask` 必须为 0；Monthly 必须非 0，且 `we
 
 ### 4.9 RecoveryPointSummary V4
 
-exact keys（13）：
+exact keys（15）：
 
 `file_uuid`, `backup_set_uuid`, `parent_uuid`, `backup_type`, `content_kind`, `chain_state`,
 `created_utc_ms`, `logical_size_bytes`, `stored_size_bytes`, `deduplicated_block_count`,
-`deduplicated_logical_bytes`, `source_count`, `has_sidecar`
+`deduplicated_logical_bytes`, `source_count`, `has_sidecar`, `verify_check`, `boot_check`
+
+- `verify_check` / `boot_check`（ADR-0033）：object | null。null 表示该恢复点从未运行过该检查
+  （Desktop 显示 N/A）。object exact keys（4）：`state`（1=Succeeded、2=Failed、3=Cancelled、
+  4=Interrupted）、`message_code`（稳定结果码，如 `verify.completed`、`verify.archive_missing`、
+  `bootcheck.completed`、`bootcheck.archive_missing`）、`job_id`、`completed_utc_ms`。来源为控制面
+  `recovery_point_checks`（不随任务保留期清理），仅在指定 `repository_connection_id` 的查询中填充；
+  排队/运行中状态不在此投影，Desktop 由 ListJobs 合并。
 
 - `content_kind`：1 或 2；
 - 两个 dedup 字段来自 Catalog V2；file_set 固定 0；
@@ -914,10 +922,40 @@ volume_set：每个恢复点一份独立 Archive。file_set：最长选中链 ba
 **成功：** CommandAcknowledgement，`resource_id = job_id`。Job `source_ids` 为排序后的恢复点 id。
 进度 `recovery_point_id` 标识当前项。
 
+### 7.4b kind 54 — StartBootCheck
+
+**Capability：** `recovery_point.boot_check`（AegraBootCheck Host 可派发时声明）
+**幂等命令**（ADR-0032）
+
+**请求 payload（exact 3）：**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `repository_connection_id` | string | 恢复点所在 Repository connection |
+| `recovery_point_id` | string | **一个** volume_set 恢复点 file_uuid |
+| `hypervisor` | number \| null | VirtualBox=1、Hyper-V=2；null 表示使用当前 `service_settings.default_boot_check_hypervisor` |
+
+Service 从 Catalog 校验恢复点存在且为 volume_set，解析其备份集所属 Schedule（凭据与友好卷名来源；
+Schedule 已删除时无凭据、`source_ids` 退化为恢复点 id），然后在**同一事务**写入一条 Queued 的
+BootCheck JobRecord（`operation=5`）和一条以该 job 为锚点的 `post_backup_plans` 行
+（`backup_job_id = job_id`，`verify_required=false`，`boot_check_required=true`）。
+`PostBackupCoordinator` 随后按与备份后 BootCheck 完全相同的 Supervisor 路径派发隔离 VM；Job 状态
+Queued → Running → Succeeded/Failed 出现在任务列表与事件日志。手动运行不做多次重派：Service 重启后
+锚点 Job 被启动扫描置为 Interrupted，plan 随之终态，用户重新提交即可。
+
+**成功：** CommandAcknowledgement，`resource_id = job_id`。同一 `idempotency_key` 重放返回同一 job。
+多个恢复点由 Desktop 各发一次 StartBootCheck。ListJobs（kind 5）对手动 boot check Job 投影
+`progress`（`recovery_point_id` = 目标恢复点，字节计数为 0，phase 随状态为 Preparing/Reading/Completed），
+Desktop 以此把任务映射到恢复点状态列。
+
+**失败（`message_code`）：** 稳定 `bootcheck.*` 码直接透传，例如 `bootcheck.provider_unavailable`
+（所选 hypervisor 已探测为不可用）、`bootcheck.volume_set_required`（file_set 恢复点）；其余走
+`service.request_failed`。Host 缺失时 capability 未声明，返回 `service.capability_unavailable`。
+
 ### 7.5 其它命令 32–38、41–47、50
 
 字段级形状与 V3 相同（版本号 4），除非 Contracts 明确收紧。`StartRestore` 见 §7.4（**不是**仅 volume）。
-`StartVerify`（kind 39）见 §7.4a（`recovery_point_ids[]`，不是单个 id）。
+`StartVerify`（kind 39）见 §7.4a（`recovery_point_ids[]`，不是单个 id）；`StartBootCheck`（kind 54）见 §7.4b。
 
 Repository 网络命令失败使用以下稳定 `message_code`，不得返回 Win32 原始错误文本：
 

@@ -612,6 +612,23 @@ QByteArray encode_start_verify_request(const QString& request_id, const QString&
         .toJson(QJsonDocument::Compact);
 }
 
+QByteArray encode_start_boot_check_request(const QString& request_id,
+                                           const QString& idempotency_key,
+                                           const QString& connection_id,
+                                           const QString& recovery_point_id) {
+    const QJsonObject payload{{QStringLiteral("repository_connection_id"), connection_id},
+                              {QStringLiteral("recovery_point_id"), recovery_point_id},
+                              {QStringLiteral("hypervisor"), QJsonValue(QJsonValue::Null)}};
+    return QJsonDocument(QJsonObject{{QStringLiteral("schema_version"),
+                                      static_cast<qint64>(kServiceSchemaVersion)},
+                                     {QStringLiteral("message_type"), 1},
+                                     {QStringLiteral("request_id"), request_id},
+                                     {QStringLiteral("kind"), kStartBootCheckRequestKind},
+                                     {QStringLiteral("idempotency_key"), idempotency_key},
+                                     {QStringLiteral("payload"), payload}})
+        .toJson(QJsonDocument::Compact);
+}
+
 QByteArray encode_mount_recovery_point_request(
     const QString& request_id, const QString& idempotency_key, const QString& connection_id,
     const QString& recovery_point_id, const int source_disk_number,

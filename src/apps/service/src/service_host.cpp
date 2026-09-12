@@ -8,6 +8,7 @@
 #include "aegra/application/repository_connection_service.h"
 #include "aegra/application/source_inventory_query.h"
 #include "aegra/apps/service/boot_check_supervisor.h"
+#include "aegra/apps/service/post_backup_coordinator.h"
 #include "aegra/apps/service/mount_supervisor.h"
 #include "aegra/apps/service/schedule_service.h"
 
@@ -70,6 +71,8 @@ void write_interaction_log(const ServiceRuntimeInfo& runtime, const std::string_
         return "recovery_point.delete";
     case contracts::ServiceRequestKind::kStartVerify:
         return "recovery_point.verify";
+    case contracts::ServiceRequestKind::kStartBootCheck:
+        return "recovery_point.boot_check";
     case contracts::ServiceRequestKind::kListRecoveryPointEntries:
         return "file.recover_browse";
     case contracts::ServiceRequestKind::kPrepareFileRestore:
@@ -177,6 +180,44 @@ service_info_response(const contracts::ServiceRequest& request, const ServiceRun
     return base::Result<contracts::ServiceResponse>::success(std::move(response));
 }
 
+/// ADR-0033: attach the latest recorded Verify / BootCheck outcome to every
+/// catalog item. Absent rows stay null (Desktop shows N/A); a lookup failure is
+/// logged and the page is returned without projections.
+void attach_recovery_point_checks(contracts::ServiceRecoveryPointPage& page,
+                                  const ServiceRuntimeInfo& runtime,
+                                  const std::optional<std::string>& requested_connection_id,
+                                  const base::CancellationToken cancellation) {
+    const auto& connection_id =
+        page.repository_connection_id ? page.repository_connection_id : requested_connection_id;
+    if (runtime.control_plane == nullptr || !connection_id || connection_id->empty() ||
+        page.catalog.items.empty()) {
+        return;
+    }
+    auto records = runtime.control_plane->list_recovery_point_checks(*connection_id, cancellation);
+    if (!records) {
+        write_log(runtime, ServiceLogLevel::kWarning, "recovery_point_check.query_failed",
+                  "error=" + std::string(base::error_code_name(records.error().code)));
+        return;
+    }
+    for (auto& item : page.catalog.items) {
+        for (const auto& record : records.value()) {
+            if (record.recovery_point_id != item.file_uuid) {
+                continue;
+            }
+            contracts::RecoveryPointCheckStatus status;
+            status.state = record.state;
+            status.message_code = record.message_code;
+            status.job_id = record.job_id;
+            status.completed_utc_ms = record.completed_utc_ms;
+            if (record.operation == contracts::JobOperation::kVerify) {
+                item.verify_check = std::move(status);
+            } else if (record.operation == contracts::JobOperation::kBootCheck) {
+                item.boot_check = std::move(status);
+            }
+        }
+    }
+}
+
 [[nodiscard]] base::Result<contracts::ServiceResponse>
 recovery_point_response(const contracts::ServiceRequest& request, const ServiceRuntimeInfo& runtime,
                         const base::CancellationToken cancellation) {
@@ -209,9 +250,17 @@ recovery_point_response(const contracts::ServiceRequest& request, const ServiceR
         return base::Result<contracts::ServiceRecoveryPointPage>::failure(
             {base::ErrorCode::kConflict, "repository query unavailable"});
     };
+    const auto fetch_with_checks = [&](const std::uint32_t maximum_results) {
+        auto page = fetch(maximum_results);
+        if (page) {
+            attach_recovery_point_checks(page.value(), runtime, query.repository_connection_id,
+                                         cancellation);
+        }
+        return page;
+    };
 
     auto fitted = fetch_payload_within_frame_budget<contracts::ServiceRecoveryPointPage>(
-        response, query.page.maximum_results, fetch,
+        response, query.page.maximum_results, fetch_with_checks,
         [](const contracts::ServiceRecoveryPointPage& page) { return page.catalog.items.size(); });
     if (!fitted) {
         return base::Result<contracts::ServiceResponse>::success(failure(
@@ -551,6 +600,12 @@ command_response(const contracts::ServiceRequest& request, const ServiceRuntimeI
         result = runtime.worker_jobs->start_verify(
             std::get<contracts::StartVerifyCommand>(request.payload), *request.idempotency_key,
             cancellation);
+    } else if (runtime.post_backup_coordinator && request.idempotency_key &&
+               request.kind == contracts::ServiceRequestKind::kStartBootCheck) {
+        handled = true;
+        result = runtime.post_backup_coordinator->start_boot_check(
+            std::get<contracts::StartBootCheckCommand>(request.payload),
+            *request.idempotency_key, cancellation);
     } else if (runtime.recovery_point_operations && request.idempotency_key &&
                request.kind == contracts::ServiceRequestKind::kExecuteDeletePlan) {
         handled = true;
@@ -632,6 +687,8 @@ command_response(const contracts::ServiceRequest& request, const ServiceRuntimeI
             message_code = repository_failure_message_code(result.error());
         } else if (detail.rfind("mount.", 0) == 0) {
             message_code = detail;
+        } else if (detail.rfind("bootcheck.", 0) == 0) {
+            message_code = detail;
         } else if (detail.find("repository is unavailable") != std::string::npos) {
             message_code = "backup.repository_unavailable";
         } else if (detail.find("source is not selectable") != std::string::npos) {
@@ -693,16 +750,45 @@ capability_unavailable(const contracts::ServiceRequest& request) {
                 {{"request_kind", std::to_string(static_cast<std::uint8_t>(request.kind))}}));
 }
 
-void merge_job_progress(contracts::JobPage& page, WorkerSupervisor* supervisor) {
-    if (supervisor == nullptr) {
+/// Manual boot check (ADR-0032): the durable plan is keyed by the boot check job
+/// id, so its recovery point can be projected into progress.recovery_point_id.
+/// The Desktop uses it to map the job onto the Repository status column; byte
+/// counters stay zero (the run has no byte progress).
+void project_boot_check_recovery_point(contracts::JobSummary& item,
+                                       ports::IControlPlaneDatabase* const control_plane) {
+    if (item.progress || item.operation != contracts::JobOperation::kBootCheck ||
+        control_plane == nullptr) {
         return;
     }
+    auto plan = control_plane->get_post_backup_plan(item.job_id, {});
+    if (!plan || !plan.value() || plan.value()->recovery_point_id.empty()) {
+        return;
+    }
+    contracts::TaskProgress progress;
+    progress.job_id = item.job_id;
+    progress.trace_id = item.trace_id;
+    if (item.state == contracts::ServiceJobState::kQueued) {
+        progress.phase = contracts::TaskPhase::kPreparing;
+    } else if (ports::is_terminal_job_state(item.state)) {
+        progress.phase = contracts::TaskPhase::kCompleted;
+    } else {
+        progress.phase = contracts::TaskPhase::kReading;
+    }
+    progress.message_code = item.message_code.empty() ? "job.running" : item.message_code;
+    progress.recovery_point_id = plan.value()->recovery_point_id;
+    item.progress = std::move(progress);
+}
+
+void merge_job_progress(contracts::JobPage& page, const ServiceRuntimeInfo& runtime) {
     // Prefer supervisor cache (live quantums + TaskResult snapshot on completion).
     // When cache is cold, leave progress null — do not invent synthetic 1/1 bytes.
     for (auto& item : page.items) {
-        if (auto live = supervisor->last_progress(item.job_id)) {
-            item.progress = std::move(*live);
+        if (runtime.worker_supervisor != nullptr) {
+            if (auto live = runtime.worker_supervisor->last_progress(item.job_id)) {
+                item.progress = std::move(*live);
+            }
         }
+        project_boot_check_recovery_point(item, runtime.control_plane);
         if (item.progress && item.progress->message_code.empty()) {
             item.progress->message_code = "job.running";
         }
@@ -731,7 +817,7 @@ jobs_response(const contracts::ServiceRequest& request, const ServiceRuntimeInfo
             if (!page) {
                 return page;
             }
-            merge_job_progress(page.value(), runtime.worker_supervisor);
+            merge_job_progress(page.value(), runtime);
             return page;
         });
     if (!fitted) {
@@ -1250,6 +1336,7 @@ dispatch_service_request(const contracts::ServiceRequest& request,
     case contracts::ServiceRequestKind::kConnectRepositoryLocation:
     case contracts::ServiceRequestKind::kStartBackup:
     case contracts::ServiceRequestKind::kStartVerify:
+    case contracts::ServiceRequestKind::kStartBootCheck:
     case contracts::ServiceRequestKind::kStartRestore:
     case contracts::ServiceRequestKind::kStartFileRestore:
     case contracts::ServiceRequestKind::kExecuteDeletePlan:

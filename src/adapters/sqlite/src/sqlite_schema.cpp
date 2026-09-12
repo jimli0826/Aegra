@@ -206,6 +206,16 @@ CREATE TABLE IF NOT EXISTS post_backup_plans (
 );
 CREATE INDEX IF NOT EXISTS ix_post_backup_plans_created
     ON post_backup_plans(created_utc_ms ASC, backup_job_id ASC);
+CREATE TABLE IF NOT EXISTS recovery_point_checks (
+    repository_connection_id TEXT NOT NULL,
+    recovery_point_id TEXT NOT NULL,
+    operation INTEGER NOT NULL CHECK (operation IN (3, 5)),
+    state INTEGER NOT NULL CHECK (state BETWEEN 1 AND 4),
+    message_code TEXT NOT NULL,
+    job_id TEXT NOT NULL,
+    completed_utc_ms INTEGER NOT NULL CHECK (completed_utc_ms >= 0),
+    PRIMARY KEY (repository_connection_id, recovery_point_id, operation)
+);
 CREATE TABLE IF NOT EXISTS service_settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     job_retention_months INTEGER NOT NULL DEFAULT 3

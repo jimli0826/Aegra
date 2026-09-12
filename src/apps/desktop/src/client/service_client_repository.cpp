@@ -919,6 +919,23 @@ RequestDisposition ServiceClient::handle_repository_command_frame(const QByteArr
         }
         return RequestDisposition::kFinished;
     }
+    if (repository_command_kind_ == kStartBootCheckRequestKind) {
+        if (!acknowledgement.has_resource_id) {
+            return RequestDisposition::kProtocolError;
+        }
+        const auto accepted_id = repository_boot_check_pending_.isEmpty()
+                                     ? QString{}
+                                     : repository_boot_check_pending_.takeFirst();
+        observe_accepted_boot_check_job(acknowledgement.resource_id, accepted_id);
+        if (repository_boot_check_pending_.isEmpty()) {
+            reset_repository_command();
+            //% "Boot check jobs submitted. See Tasks and Event Log for results."
+            show_toast(qtTrId("aegra.repository.bootcheck.submitted"));
+        } else {
+            submit_next_repository_boot_check();
+        }
+        return RequestDisposition::kFinished;
+    }
     const auto completed_kind = repository_command_kind_;
     const bool location_probe = completed_kind == kConnectRepositoryLocationRequestKind;
     const bool refresh_probe =
@@ -1020,6 +1037,8 @@ void ServiceClient::finish_repository_command_failure(const QString& message_cod
     if (repository_command_kind_ == kStartVerifyRequestKind) {
         repository_verify_pending_.clear();
         show_toast(qtTrId("aegra.repository.verify.submission_failed"));
+    } else if (repository_command_kind_ == kStartBootCheckRequestKind) {
+        finish_boot_check_submission_failure(message_code);
     }
     const bool test_probe = repository_command_kind_ == kTestRepositoryConnectionRequestKind;
     const bool refresh_probe = repository_refresh_running_ && test_probe;
@@ -1046,6 +1065,7 @@ void ServiceClient::finish_repository_command_failure(const QString& message_cod
 
 void ServiceClient::reset_repository_command() {
     repository_verify_pending_.clear();
+    repository_boot_check_pending_.clear();
     repository_command_busy_ = false;
     repository_command_request_id_.clear();
     repository_command_idempotency_key_.clear();
@@ -1137,6 +1157,12 @@ QString ServiceClient::terminal_job_toast_text(const JobRow& row) {
             return qtTrId("aegra.repository.verify.cancelled");
         }
         return qtTrId("aegra.repository.verify.failed");
+    }
+    if (row.operation == 5) {
+        //% "Boot check completed."
+        return row.state == 4 ? qtTrId("aegra.repository.bootcheck.finished")
+                              //% "Boot check failed."
+                              : qtTrId("aegra.repository.bootcheck.failed");
     }
     QString state_text;
     switch (row.state) {

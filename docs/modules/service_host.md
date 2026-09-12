@@ -52,6 +52,7 @@ src/apps/service/
     ├── service_main.cpp
     ├── service_protocol.cpp
     ├── service_protocol_request_json.cpp
+    ├── service_protocol_recovery_point_json.cpp  # RecoveryPointSummary/Page 编解码（§4.9）
     ├── service_protocol_response_json.cpp
     ├── service_response_fit.cpp           # list 响应按 1 MiB 帧预算收口
     ├── service_security_host.cpp
@@ -59,6 +60,7 @@ src/apps/service/
     ├── windows_service_control_win32.cpp
     ├── windows_service_scm_host.cpp
     ├── worker_job_service.cpp
+    ├── recovery_point_check_recorder.cpp  # Verify/BootCheck 终态按恢复点持久化（ADR-0033）
     ├── worker_job_service_verify.cpp      # StartVerify 备份集批处理准备
     ├── worker_job_service_file_restore.cpp  # PrepareFileRestore + StartFileRestore
     ├── worker_job_service_restore.cpp      # volume PrepareRestore + StartRestore
@@ -289,6 +291,20 @@ S0-S4 已完成；S5 chain/delete/verify 已接入 composition 并宣告 capabil
   从 Catalog 解析 base-first 卷链并按 Schedule 密文引用注入凭据，stdout 的 WorkerResponse 回填
   plan 的 boot_check 动作；Verify 失败预置 `bootcheck.verify_prerequisite_failed`，Host 缺失记
   `post_backup.boot_check_unavailable`，重启丢失的运行按 attempts（上限 3）重派。
+- **手动 BootCheck（StartBootCheck，kind 54，ADR-0032）**：`PostBackupCoordinator::start_boot_check`
+  从 Catalog 校验 volume_set 恢复点、按备份集解析 Schedule，在同一事务写入 Queued 的 BootCheck
+  JobRecord（`schedule_id` 留空，避免被 Backup 页当作该 Schedule 的后置链动作）与以该 job 为锚点的
+  `post_backup_plans` 行（`verify_required=false`，plan 保留 schedule 供凭据与卷名），随后 kick 扫描。
+  `drive_plan` 依锚点 `operation=BootCheck` 进入手动分支：Queued 时派发（`boot_check_job_id = job_id`）
+  并将 Job 置 Running，取到 Host 结果后置终态；重启后锚点被启动扫描置 Interrupted，plan 随之终态，
+  不做多次重派。runtime 在 Host 可派发时声明 `recovery_point.boot_check`。ListJobs 对手动 boot check
+  Job（plan 以 job id 为键）投影 `progress.recovery_point_id`，供 Desktop 恢复点状态列匹配。
+- **恢复点检查状态持久化（ADR-0033）**：`recovery_point_check_recorder.cpp` 在 Verify Worker 完成回调
+  （`service_main` supervisor completion，按 `source_ids` 顺序与最后进度的 `recovery_point_id` 判定
+  停止位置：之前项 Succeeded、当前项取终态、之后项不改写）与 `PostBackupCoordinator` BootCheck 终态
+  （含手动锚点被启动扫描置 Interrupted）写入 `recovery_point_checks`。`ListRecoveryPoints` 在
+  `recovery_point_response` 中按 connection 读取该表并填充每项的 `verify_check` / `boot_check`；
+  查询失败只记日志，不影响目录返回。
 - Backup Job 提交时从当前 Service settings 解析 `default_boot_check_hypervisor`，快照到 durable plan，
   再进入 BootCheck Job schema 3，并携带当前 VM CPU/内存设置；Schedule 中旧的平台值不决定运行平台，
   同一次运行也不会因后续 settings 更新而中途切换。Host 只运行指定平台。Service 启动时以 capability 发布 VirtualBox/Hyper-V 安装状态，

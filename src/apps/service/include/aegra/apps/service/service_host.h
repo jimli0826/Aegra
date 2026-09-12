@@ -31,6 +31,7 @@ class BootCheckSupervisor;
 class IWorkerJobService;
 class MountSupervisor;
 class PeRestoreJobService;
+class PostBackupCoordinator;
 class RepositoryLocationBrowseRegistry;
 class ScheduleService;
 class WorkerSupervisor;
@@ -78,6 +79,8 @@ struct ServiceRuntimeInfo final {
     WorkerSupervisor* worker_supervisor{nullptr};
     MountSupervisor* mount_supervisor{nullptr};
     BootCheckSupervisor* boot_check{nullptr};
+    /// Owns durable boot-check plans; serves StartBootCheck (kind 54).
+    PostBackupCoordinator* post_backup_coordinator{nullptr};
     ports::IControlPlaneDatabase* control_plane{nullptr};
     ports::IRepositoryStorageFactory* storage_factory{nullptr};
 };

@@ -164,6 +164,19 @@ Delete 后的 Verify 进入独立选择模式，只允许一级备份集选择�
 未在校验时回退为备份链完整（勾）或不完整（警告）。一批中第一项失败之后的恢复点不再显示为成功。
 失败、超时或断线停止后续提交，已接受的任务保留。删除与校验模式互斥。
 
+Verify 右侧的 **Boot Check** 按钮（capability `recovery_point.boot_check` 时可用）进入选择模式：
+自动展开全部备份集，只有 volume_set 恢复点可勾选（file_set 行灰显），逐点勾选、不展开链；备份集级
+与全选复选框只作用于 volume_set 恢复点。选中一个或多个后再次点击 Boot Check，Desktop 按选择顺序逐个
+发送 StartBootCheck（kind 54，`hypervisor=null` 使用 Settings 默认平台），收到接受响应后才提交下一个；
+每个接受立即把 Queued 的 Boot Check Job 乐观写入任务列表并轮询，Service 按 VM 并发上限依次运行。
+恢复点表把原 Status 列拆为 **Verify** 与 **Boot check** 两列（ADR-0033），各自独立显示：活动中的任务
+（排队/运行）优先，其次比较任务创建时间与 Service 持久化结果的完成时间取更新者，否则显示
+ListRecoveryPoints 返回的 `verify_check` / `boot_check` 持久化终态（成功/失败/已取消，失败原因悬停
+可见），从未运行过显示 **N/A**（短横线）。Verify 列在 N/A 且备份链不完整时仍显示链不完整警告。备份集
+行按列聚合：有运行/排队优先，其次失败/取消，全部通过显示通过，部分通过部分 N/A 显示“部分已检查”，
+全部 N/A 显示 N/A。持久化状态随目录刷新加载，Desktop 或 Service 重启后仍可见。Job 终态弹出完成/失败提示。提交失败时稳定 `bootcheck.*` 原因（如所选平台不可用、需要卷恢复点）
+本地化显示，其余显示通用提交失败提示，已接受的任务保留。删除、校验与 Boot Check 三种模式互斥。
+
 备份集名称前复用 ScheduleTypeIcon（volume：硬盘，files：文件夹），颜色绑定 Theme。
 分组不显示 Volume set/File set 类型文字；无关联计划时标题显示备份源数量，备份链状态保持原列对齐。
 

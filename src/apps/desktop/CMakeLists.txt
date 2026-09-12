@@ -27,6 +27,7 @@ set(AEGRA_DESKTOP_SOURCES
     src/client/service_request_coordinator.cpp
     src/client/service_request_coordinator.h
     src/client/service_client_backup.cpp
+    src/client/service_client_boot_check.cpp
     src/client/service_client_file.cpp
     src/client/service_client_mount.cpp
     src/client/service_client_repository.cpp

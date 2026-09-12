@@ -17,7 +17,10 @@ namespace aegra::apps::worker {
 
 struct WindowsPersonalBackupTaskOptions final {
     std::uint32_t block_size_bytes{0};
+    /// volume_set physical Volume Chunk size (also the ADR-0022 dedup window).
     std::uint32_t chunk_size_bytes{0};
+    /// file_set physical chunk size; the stream write quantum is derived from it.
+    std::uint32_t file_set_chunk_size_bytes{0};
     std::size_t memory_budget_bytes{0};
     std::uint64_t kdf_opslimit{3};
     std::uint64_t kdf_memlimit_bytes{256ULL * 1024ULL * 1024ULL};

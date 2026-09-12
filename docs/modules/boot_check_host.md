@@ -65,7 +65,7 @@ wait_boot_confirmation  # 每 10 秒查 Hyper-V 心跳/VM 状态、每 2 秒查 
 settle_after_boot       # 启动确认后再让 guest 运行 boot_settle_ms（默认 90 秒），期间仍监控掉电/配额/取消；
                         # 心跳在 Windows 转圈阶段即已就绪，不等待则截图几乎不会到登录界面
 capture_screenshot      # VM 已创建时，无论启动确认成功/失败/取消均在 cleanup 前保存最终画面
-cleanup                 # session cleanup -> Dokan 关闭 -> reader 释放 -> 删除 job_directory
+cleanup                 # 先记录 guest 读路径计数（guest_read_calls/guest_bytes_read、chain_* 解码与缓存、layer_* 阶段）-> session cleanup -> Dokan 关闭 -> reader 释放 -> 删除 job_directory
 ```
 
 日志不记录密码或 SecretRef；凭据只记 `present|empty` 层计数。

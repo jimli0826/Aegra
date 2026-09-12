@@ -55,12 +55,19 @@ std::string hostname() {
 
 aegra::apps::worker::WindowsPersonalBackupTaskOptions trusted_options() {
     aegra::apps::worker::WindowsPersonalBackupTaskOptions options;
-    // Volume geometry (product default): 64 KiB logical blocks, 64 MiB physical
-    // Volume Chunks. Format allows up to 512 MiB payload per chunk. Hash/compress
-    // still fan out across hardware_concurrency inside PersonalArchive prep.
-    // memory_budget must be >= chunk_size; hold several 64 MiB chunks in flight.
+    // Volume geometry (product default): 64 KiB logical blocks, 16 MiB physical
+    // Volume Chunks. Format allows up to 512 MiB payload per chunk. The chunk is the
+    // unit a mounted or booting guest must decode for any random read, so it trades
+    // the ADR-0022 dedup window (one chunk) against read latency: 64 MiB made a
+    // Server 2019 boot check read 104 GiB of archive to serve 1.2 GiB of guest I/O
+    // (85x), 16 MiB cuts the per-miss cost and quadruples the cache's chunk count.
+    // Hash/compress still fan out across hardware_concurrency inside PersonalArchive
+    // prep. file_set keeps 64 MiB: its stream write quantum derives from the chunk
+    // size and shrinking it inflates File Index leaf pages.
+    // memory_budget must be >= both chunk sizes; holds several chunks in flight.
     options.block_size_bytes = 64U * 1024U;
-    options.chunk_size_bytes = 64U * 1024U * 1024U;
+    options.chunk_size_bytes = 16U * 1024U * 1024U;
+    options.file_set_chunk_size_bytes = 64U * 1024U * 1024U;
     options.memory_budget_bytes = std::size_t{256} * 1024U * 1024U;
     options.application_version = AEGRA_APPLICATION_VERSION;
     options.hostname = hostname();

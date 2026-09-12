@@ -2,6 +2,11 @@
 //
 // Read-only original bytes come from ports::IRandomAccessReader (never modified).
 // Optional overlay + bitmap support write paths; read-only mounts reject writes.
+//
+// Concurrency: Dokan dispatches reads from several threads. Reads of original bytes run
+// without holding lock_, so the reader must be thread-safe (WholeDiskByteReader is);
+// lock_ is taken shared only to consult the bitmap and exclusive for every overlay access
+// (the overlay handle is positioned with SetFilePointerEx) and every mutation.
 #pragma once
 
 #include "dokan_ntstatus.h"
@@ -9,7 +14,6 @@
 #include "aegra/ports/random_access.h"
 
 #include <cstdint>
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -51,13 +55,21 @@ class CowBackingStore final {
     [[nodiscard]] bool is_read_only() const noexcept { return read_only_; }
 
   private:
+    /// Bytes [offset, offset + length) whose COW blocks all share one source.
+    struct ReadRun final {
+        DWORD length{0};
+        bool from_overlay{false};
+    };
+
     [[nodiscard]] bool block_present(std::uint64_t block_index) const;
+    [[nodiscard]] ReadRun classify_run(LONGLONG offset, DWORD remaining) const;
     void ensure_bitmap_capacity(std::uint64_t block_count);
     void mark_present(std::uint64_t block_index);
     void flush_bitmap_locked();
     void restore_bitmap();
 
     [[nodiscard]] bool read_original_at(void* buffer, DWORD len, LONGLONG offset);
+    [[nodiscard]] bool read_overlay_run(void* buffer, DWORD len, LONGLONG offset);
 
     [[nodiscard]] static bool raw_read_at(HANDLE h, void* buffer, DWORD len,
                                           LONGLONG offset);
@@ -68,8 +80,10 @@ class CowBackingStore final {
     std::wstring map_path_;
     HANDLE overlay_{INVALID_HANDLE_VALUE};
     ports::IRandomAccessReader* reader_{nullptr};
+    // lock_ guards bitmap_, size_, the overlay handle position, and the map file.
+    // overlay_, reader_, read_only_ and the paths are fixed after open_reader().
+    mutable SRWLOCK lock_ = SRWLOCK_INIT;
     std::vector<std::uint8_t> bitmap_;
-    mutable std::mutex mutex_;
     LONGLONG size_{0};
     bool read_only_{true};
 };

@@ -48,7 +48,10 @@ Volume Incremental 已通过加密 Sidecar 比较父层块哈希并省略未变�
 
 ## 影响
 
-- 默认 64 MiB 物理 Chunk 形成约 64 MiB 去重窗口（格式上限 512 MiB），内存随单 Chunk 有界，不需要持久化去重数据库。
+- 物理 Chunk 大小即去重窗口（格式上限 512 MiB），内存随单 Chunk 有界，不需要持久化去重数据库。Worker 默认
+  Chunk 从 64 MiB 调整为 16 MiB（2026-09）：Chunk 同时是挂载与 boot-check 随机读的最小解码单位，64 MiB 使
+  Server 2019 boot-check 为 1.2 GiB guest I/O 读取 104 GiB 归档；16 MiB 把单次 miss 成本降到四分之一，
+  去重窗口相应缩小为 256 个 64 KiB block。
 - 相距超过一个 Chunk 的重复内容不会被发现，不能把个人版能力宣传为全局去重。
 - canonical payload 只压缩和加密一次；恢复可在认证后缓存 canonical 明文并复制到多个逻辑块。
 - Incremental 链、Sidecar 完整基线、分卷提交和 Repository Catalog 权威边界保持不变。

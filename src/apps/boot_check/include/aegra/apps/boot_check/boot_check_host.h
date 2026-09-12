@@ -54,9 +54,8 @@ struct BootCheckHostOptions final {
     std::uint64_t boot_settle_ms{90ULL * 1000ULL};
     /// Upper bound for a single archive chunk during chain random access.
     std::uint64_t maximum_chunk_bytes{256ULL * 1024ULL * 1024ULL};
-    /// Decompressed-chunk LRU entries for guest random reads (memory upper
-    /// bound = entries * chunk logical size; 16 * 64 MiB = 1 GiB by default).
-    std::size_t chunk_cache_entries{16};
+    /// Byte budget of decoded archive chunks kept for the guest's random reads.
+    std::uint64_t chunk_cache_budget_bytes{1024ULL * 1024ULL * 1024ULL};
 };
 
 struct BootCheckHostContext final {

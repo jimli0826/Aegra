@@ -62,8 +62,9 @@ base::Result<void> validate_task(const contracts::JobRequest& job,
                         job.backup->type != contracts::BackupType::kIncremental)) {
         return invalid("file_set backup task requires full or incremental type");
     }
-    if (options.block_size_bytes == 0 || options.chunk_size_bytes < options.block_size_bytes ||
-        options.memory_budget_bytes < options.chunk_size_bytes) {
+    if (options.block_size_bytes == 0 ||
+        options.file_set_chunk_size_bytes < options.block_size_bytes ||
+        options.memory_budget_bytes < options.file_set_chunk_size_bytes) {
         return invalid("file_set backup task geometry is invalid");
     }
     if (options.kdf_opslimit == 0 || options.kdf_memlimit_bytes == 0 ||
@@ -305,10 +306,10 @@ WindowsFileSetBackupRequest make_backup_request(const contracts::JobRequest& job
     }
     // File index leaf pages are capped at 1 MiB plain. Each stream extent maps to one
     // block-sized write; a 64 KiB volume-style quantum inflates leaf CBOR past the budget
-    // after only a few hundred MiB of payload. Use the Worker chunk size (clamped to the
-    // format max block size) as the file_set stream quantum.
+    // after only a few hundred MiB of payload. Use the file_set chunk size (clamped to
+    // the format max block size) as the stream quantum.
     namespace archive = format::personal_archive;
-    auto block = options.chunk_size_bytes;
+    auto block = options.file_set_chunk_size_bytes;
     if (block > archive::kMaximumBlockSizeBytes) {
         block = archive::kMaximumBlockSizeBytes;
     }
@@ -317,7 +318,7 @@ WindowsFileSetBackupRequest make_backup_request(const contracts::JobRequest& job
     }
     block -= block % archive::kFileBlockSizeAlignment;
     request.block_size_bytes = block;
-    request.chunk_size_bytes = options.chunk_size_bytes;
+    request.chunk_size_bytes = options.file_set_chunk_size_bytes;
     if (request.chunk_size_bytes < request.block_size_bytes ||
         request.chunk_size_bytes % request.block_size_bytes != 0) {
         request.chunk_size_bytes = request.block_size_bytes;

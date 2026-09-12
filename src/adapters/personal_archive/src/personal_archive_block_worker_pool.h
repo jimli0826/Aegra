@@ -26,8 +26,10 @@ struct BlockWorkerLocal final {
 };
 
 /// Session-scoped worker pool: threads live for the session, not per physical chunk.
-/// At most one `parallel_for` runs at a time (PersonalArchiveSession is single-writer).
-/// Each worker participates in a given job epoch exactly once (no re-entry while active).
+/// `parallel_for` may be called from several threads (concurrent chunk decodes of a mounted
+/// archive); calls are serialized so at most one job runs at a time and each caller
+/// observes only its own job's outcome. Each worker participates in a given job epoch
+/// exactly once (no re-entry while active).
 class BlockWorkerPool final {
   public:
     using WorkFn =
@@ -57,6 +59,8 @@ class BlockWorkerPool final {
     const std::uint32_t worker_count_;
     std::vector<WorkerSlot> workers_;
 
+    /// Held by one parallel_for caller for the whole job (publish through result).
+    std::mutex job_mutex_;
     std::mutex mutex_;
     std::condition_variable work_cv_;
     std::condition_variable done_cv_;

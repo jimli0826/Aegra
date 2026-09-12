@@ -176,6 +176,9 @@ open_archive_chain(const contracts::BootCheckJobRequest& request,
     adapters::personal_archive::ArchiveChainOpenRequest open_request;
     open_request.maximum_chain_depth =
         static_cast<std::uint32_t>(contracts::kMaximumBootCheckChainDepth);
+    // A booting guest reads at random: cache what it touched, never decode ahead of it.
+    open_request.range_cache_budget_bytes = options.chunk_cache_budget_bytes;
+    open_request.range_prefetch_threads = 0;
     open_request.layers.reserve(request.source_refs.size());
     for (std::size_t index = 0; index < request.source_refs.size(); ++index) {
         adapters::personal_archive::ArchiveOpenRequest layer;
@@ -198,7 +201,6 @@ open_archive_chain(const contracts::BootCheckJobRequest& request,
 }
 
 [[nodiscard]] base::Result<void> validate_boot_profile(TaskResources& resources,
-                                                       const BootCheckHostOptions& options,
                                                        ScopedStage& stage) {
     const auto& manifest = resources.chain->manifest();
     if (manifest.content_kind != format::kManifestContentKindVolumeSet || !manifest.boot_profile) {
@@ -222,8 +224,11 @@ open_archive_chain(const contracts::BootCheckJobRequest& request,
     resources.firmware = profile.firmware_mode == format::BootFirmwareMode::kUefi
                              ? virtualization::BootFirmware::kUefi
                              : virtualization::BootFirmware::kBios;
+    // The archived disk identity is what the guest's boot configuration expects.
+    const adapters::personal_archive::WholeDiskReaderOptions reader_options{
+        .disk_identity = adapters::personal_archive::WholeDiskIdentity::kPreserve};
     auto disk = adapters::personal_archive::WholeDiskByteReader::open(
-        *resources.chain, manifest, profile.system_disk_number, options.chunk_cache_entries);
+        *resources.chain, manifest, profile.system_disk_number, reader_options);
     if (!disk) {
         stage.fail(disk.error(), "WholeDiskByteReader::open");
         return base::Result<void>::failure(stage_error(disk.error().code, kSourceNotSystemDisk));
@@ -547,8 +552,33 @@ make_image_identity(ports::IRandomSource& random, const base::CancellationToken&
     }
 }
 
+/// Guest read-path counters, so a slow boot can be split into decode stalls (chunk misses
+/// on a 64 MiB base chunk) versus the guest's own work.
+void note_guest_read_statistics(ScopedStage& stage, const TaskResources& resources) {
+    if (resources.disk == nullptr || resources.chain == nullptr) {
+        return;
+    }
+    const auto disk = resources.disk->statistics();
+    stage.note_u64("guest_read_calls", disk.read_calls);
+    stage.note_bytes("guest_bytes_read", disk.bytes_read);
+    const auto chain = resources.chain->statistics();
+    stage.note_u64("chain_piece_cache_hits", chain.piece_cache_hits);
+    stage.note_u64("chain_piece_load_waits", chain.piece_load_waits);
+    stage.note_u64("chain_base_decodes", chain.base_decodes);
+    stage.note_u64("chain_base_decode_ms", chain.base_decode_microseconds / 1000U);
+    stage.note_u64("chain_overlay_decodes", chain.overlay_decodes);
+    stage.note_u64("chain_overlay_decode_ms", chain.overlay_decode_microseconds / 1000U);
+    stage.note_u64("chain_on_demand_decode_ms", chain.on_demand_decode_microseconds / 1000U);
+    stage.note_u64("chain_cache_evictions", chain.cache_evictions);
+    stage.note_bytes("layer_stored_bytes_read", chain.layers.stored_bytes_read);
+    stage.note_u64("layer_stored_read_ms", chain.layers.stored_read_microseconds / 1000U);
+    stage.note_u64("layer_authenticate_ms", chain.layers.authenticate_microseconds / 1000U);
+    stage.note_u64("layer_expand_ms", chain.layers.expand_microseconds / 1000U);
+}
+
 [[nodiscard]] bool run_cleanup(TaskResources& resources, WorkerTaskLog* const log) {
     ScopedStage stage(log, "cleanup");
+    note_guest_read_statistics(stage, resources);
     FinalizationDeadline deadline(kCleanupBudget);
     bool clean = true;
     if (resources.session) {
@@ -632,7 +662,7 @@ run_presentation_stages(const contracts::BootCheckJobRequest& request,
     }
     {
         ScopedStage stage(log, "validate_boot_profile");
-        if (auto valid = validate_boot_profile(resources, options, stage); !valid) {
+        if (auto valid = validate_boot_profile(resources, stage); !valid) {
             return valid;
         }
     }

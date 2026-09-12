@@ -4,11 +4,10 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
-#include <limits>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <random>
 #include <span>
@@ -108,83 +107,13 @@ void randomize_disk_identity(format::RawDiskLayout& layout,
     return nullptr;
 }
 
+/// One source volume's extent on the presented disk. volume_base is the volume offset of
+/// the extent's first byte (0: single-extent volumes only, enforced by build_disk_regions).
 struct DiskRegion final {
     std::uint64_t disk_offset{0};
     std::uint64_t length{0};
     std::uint32_t volume_index{0};
     std::uint64_t volume_base{0};
-    std::uint64_t volume_size{0};
-};
-
-struct VolumeChunkSpan final {
-    std::uint64_t logical_offset{0};
-    std::uint64_t logical_size{0};
-    std::uint64_t inner_chunk_index{0};
-};
-
-struct VolumeIndex final {
-    std::uint32_t volume_index{0};
-    std::uint64_t volume_size{0};
-    std::vector<VolumeChunkSpan> chunks;
-};
-
-using ChunkPayload = std::shared_ptr<const std::vector<std::byte>>;
-
-/// Bounded LRU of decompressed chunks. Interleaved random reads (a booting or
-/// mounted guest) alternate between chunks, so a single-entry cache thrashes
-/// into a full read+authenticate+decompress per request. Entries are shared so
-/// a reader thread keeps a payload alive even after a concurrent miss evicts it.
-class ChunkCache final {
-  public:
-    explicit ChunkCache(const std::size_t capacity) : capacity_(capacity == 0 ? 1 : capacity) {}
-
-    [[nodiscard]] ChunkPayload find(const std::uint64_t chunk_index) {
-        std::lock_guard lock(mutex_);
-        for (auto& entry : entries_) {
-            if (entry.chunk_index == chunk_index) {
-                entry.last_used = ++use_counter_;
-                return entry.payload;
-            }
-        }
-        return nullptr;
-    }
-
-    void insert(const std::uint64_t chunk_index, ChunkPayload payload) {
-        std::lock_guard lock(mutex_);
-        for (auto& entry : entries_) {
-            if (entry.chunk_index == chunk_index) {
-                entry.payload = std::move(payload);
-                entry.last_used = ++use_counter_;
-                return;
-            }
-        }
-        if (entries_.size() < capacity_) {
-            entries_.push_back(Entry{chunk_index, std::move(payload), ++use_counter_});
-            return;
-        }
-        auto oldest = std::min_element(
-            entries_.begin(), entries_.end(),
-            [](const Entry& left, const Entry& right) { return left.last_used < right.last_used; });
-        *oldest = Entry{chunk_index, std::move(payload), ++use_counter_};
-    }
-
-  private:
-    struct Entry final {
-        std::uint64_t chunk_index{0};
-        ChunkPayload payload;
-        std::uint64_t last_used{0};
-    };
-
-    std::mutex mutex_;
-    std::size_t capacity_{1};
-    std::uint64_t use_counter_{0};
-    std::vector<Entry> entries_;
-};
-
-/// Chunk provider handed through the read path: authoritative reader + cache.
-struct ChunkSource final {
-    ports::IRecoveryPointReader& inner;
-    ChunkCache& cache;
 };
 
 void overlay_region(const std::uint64_t request_offset, const std::uint64_t request_end,
@@ -201,50 +130,6 @@ void overlay_region(const std::uint64_t request_offset, const std::uint64_t requ
     }
     std::memcpy(buffer.data() + (from - request_offset), bytes.data() + (from - region_offset),
                 static_cast<std::size_t>(to - from));
-}
-
-[[nodiscard]] base::Result<std::vector<VolumeIndex>>
-build_volume_indices(ports::IRecoveryPointReader& inner, const format::Manifest& manifest) {
-    std::vector<VolumeIndex> indices;
-    indices.reserve(manifest.volumes.size());
-    for (const auto& volume : manifest.volumes) {
-        VolumeIndex index;
-        index.volume_index = volume.volume_index;
-        index.volume_size = volume.total_size;
-        indices.push_back(std::move(index));
-    }
-
-    for (std::uint64_t chunk_index = 0; chunk_index < inner.chunk_count(); ++chunk_index) {
-        auto descriptor = inner.describe_chunk(chunk_index);
-        if (!descriptor) {
-            return base::Result<std::vector<VolumeIndex>>::failure(descriptor.error());
-        }
-        const auto source = descriptor.value().source_index;
-        auto volume =
-            std::find_if(indices.begin(), indices.end(), [source](const VolumeIndex& candidate) {
-                return candidate.volume_index == source;
-            });
-        if (volume == indices.end()) {
-            continue;
-        }
-        if (descriptor.value().logical_size == 0) {
-            return base::Result<std::vector<VolumeIndex>>::failure(
-                make_error(base::ErrorCode::kCorruptData, "chunk logical size is zero"));
-        }
-        volume->chunks.push_back(VolumeChunkSpan{
-            .logical_offset = descriptor.value().logical_offset,
-            .logical_size = descriptor.value().logical_size,
-            .inner_chunk_index = chunk_index,
-        });
-    }
-
-    for (auto& volume : indices) {
-        std::sort(volume.chunks.begin(), volume.chunks.end(),
-                  [](const VolumeChunkSpan& left, const VolumeChunkSpan& right) {
-                      return left.logical_offset < right.logical_offset;
-                  });
-    }
-    return base::Result<std::vector<VolumeIndex>>::success(std::move(indices));
 }
 
 [[nodiscard]] base::Result<std::vector<DiskRegion>>
@@ -286,82 +171,12 @@ build_disk_regions(const format::Manifest& manifest, const std::uint32_t disk_nu
             .length = volume.total_size,
             .volume_index = volume.volume_index,
             .volume_base = 0,
-            .volume_size = volume.total_size,
         });
     }
     std::sort(regions.begin(), regions.end(), [](const DiskRegion& left, const DiskRegion& right) {
         return left.disk_offset < right.disk_offset;
     });
     return base::Result<std::vector<DiskRegion>>::success(std::move(regions));
-}
-
-[[nodiscard]] const VolumeIndex* find_volume(const std::vector<VolumeIndex>& volumes,
-                                             const std::uint32_t volume_index) noexcept {
-    for (const auto& volume : volumes) {
-        if (volume.volume_index == volume_index) {
-            return &volume;
-        }
-    }
-    return nullptr;
-}
-
-[[nodiscard]] base::Result<ChunkPayload> load_chunk(const ChunkSource& source,
-                                                    const std::uint64_t inner_chunk_index,
-                                                    const base::CancellationToken cancellation) {
-    if (auto cached = source.cache.find(inner_chunk_index)) {
-        return base::Result<ChunkPayload>::success(std::move(cached));
-    }
-    auto chunk = source.inner.read_chunk(inner_chunk_index, cancellation);
-    if (!chunk) {
-        return base::Result<ChunkPayload>::failure(chunk.error());
-    }
-    auto payload = std::make_shared<const std::vector<std::byte>>(std::move(chunk).value().payload);
-    source.cache.insert(inner_chunk_index, payload);
-    return base::Result<ChunkPayload>::success(std::move(payload));
-}
-
-[[nodiscard]] base::Result<void> read_volume_range(const ChunkSource& source,
-                                                   const VolumeIndex& volume,
-                                                   const std::uint64_t volume_offset,
-                                                   const std::span<std::byte> destination,
-                                                   const base::CancellationToken cancellation) {
-    if (destination.empty() || volume_offset >= volume.volume_size) {
-        return base::Result<void>::success();
-    }
-    auto remaining = destination;
-    auto cursor = volume_offset;
-    while (!remaining.empty() && cursor < volume.volume_size) {
-        const auto chunk =
-            std::lower_bound(volume.chunks.begin(), volume.chunks.end(), cursor,
-                             [](const VolumeChunkSpan& span, const std::uint64_t offset) {
-                                 return span.logical_offset + span.logical_size <= offset;
-                             });
-        if (chunk == volume.chunks.end() || cursor < chunk->logical_offset) {
-            const auto gap_end =
-                chunk == volume.chunks.end() ? volume.volume_size : chunk->logical_offset;
-            const auto skip =
-                (std::min)(static_cast<std::uint64_t>(remaining.size()), gap_end - cursor);
-            remaining = remaining.subspan(static_cast<std::size_t>(skip));
-            cursor += skip;
-            continue;
-        }
-        const auto into_chunk = cursor - chunk->logical_offset;
-        auto payload = load_chunk(source, chunk->inner_chunk_index, cancellation);
-        if (!payload) {
-            return base::Result<void>::failure(payload.error());
-        }
-        if (payload.value()->size() < chunk->logical_size) {
-            return base::Result<void>::failure(make_error(
-                base::ErrorCode::kCorruptData, "chunk payload is shorter than logical size"));
-        }
-        const auto copy_size = (std::min)(static_cast<std::uint64_t>(remaining.size()),
-                                          chunk->logical_size - into_chunk);
-        std::memcpy(remaining.data(), payload.value()->data() + into_chunk,
-                    static_cast<std::size_t>(copy_size));
-        remaining = remaining.subspan(static_cast<std::size_t>(copy_size));
-        cursor += copy_size;
-    }
-    return base::Result<void>::success();
 }
 
 void overlay_raw_layout(const format::RawDiskLayout& raw_layout,
@@ -393,9 +208,10 @@ void overlay_raw_layout(const format::RawDiskLayout& raw_layout,
 } // namespace
 
 struct WholeDiskByteReader::Impl final {
-    explicit Impl(const std::size_t cache_chunk_count) : cache(cache_chunk_count) {}
+    explicit Impl(PersonalArchiveChainReader& chain_reader) : chain(&chain_reader) {}
 
-    ports::IRecoveryPointReader* inner{nullptr};
+    // Everything below is immutable after open(); the counters are the only mutable state.
+    PersonalArchiveChainReader* chain{nullptr};
     format::Disk disk{};
     std::uint32_t disk_number{0};
     std::uint64_t disk_size{0};
@@ -403,8 +219,10 @@ struct WholeDiskByteReader::Impl final {
     format::PartitionStyle partition_style{format::PartitionStyle::kRaw};
     format::RawDiskLayout raw_layout{};
     std::vector<DiskRegion> regions;
-    std::vector<VolumeIndex> volumes;
-    mutable ChunkCache cache;
+
+    // Default (sequentially consistent) ordering: diagnostics only, never control flow.
+    std::atomic<std::uint64_t> read_calls{0};
+    std::atomic<std::uint64_t> bytes_read{0};
 };
 
 WholeDiskByteReader::WholeDiskByteReader(std::unique_ptr<Impl> implementation) noexcept
@@ -413,10 +231,9 @@ WholeDiskByteReader::WholeDiskByteReader(std::unique_ptr<Impl> implementation) n
 WholeDiskByteReader::~WholeDiskByteReader() = default;
 
 base::Result<std::unique_ptr<WholeDiskByteReader>>
-WholeDiskByteReader::open(ports::IRecoveryPointReader& inner, const format::Manifest& manifest,
+WholeDiskByteReader::open(PersonalArchiveChainReader& chain, const format::Manifest& manifest,
                           const std::uint32_t source_disk_number,
-                          const std::size_t cache_chunk_count,
-                          const bool assign_unique_disk_identity) {
+                          const WholeDiskReaderOptions& options) {
     const auto* disk = find_disk(manifest, source_disk_number);
     if (disk == nullptr) {
         return base::Result<std::unique_ptr<WholeDiskByteReader>>::failure(make_error(
@@ -430,24 +247,18 @@ WholeDiskByteReader::open(ports::IRecoveryPointReader& inner, const format::Mani
     if (!regions) {
         return base::Result<std::unique_ptr<WholeDiskByteReader>>::failure(regions.error());
     }
-    auto volumes = build_volume_indices(inner, manifest);
-    if (!volumes) {
-        return base::Result<std::unique_ptr<WholeDiskByteReader>>::failure(volumes.error());
-    }
 
-    auto implementation = std::make_unique<Impl>(cache_chunk_count);
-    implementation->inner = &inner;
+    auto implementation = std::make_unique<Impl>(chain);
     implementation->disk = *disk;
     implementation->disk_number = source_disk_number;
     implementation->disk_size = disk->disk_size;
     implementation->sector_size = disk->bytes_per_sector > 0 ? disk->bytes_per_sector : 512U;
     implementation->partition_style = disk->partition_style;
     implementation->raw_layout = disk->raw_layout;
-    if (assign_unique_disk_identity) {
+    if (options.disk_identity == WholeDiskIdentity::kAssignUnique) {
         randomize_disk_identity(implementation->raw_layout, implementation->partition_style);
     }
     implementation->regions = std::move(regions).value();
-    implementation->volumes = std::move(volumes).value();
     return base::Result<std::unique_ptr<WholeDiskByteReader>>::success(
         std::unique_ptr<WholeDiskByteReader>(new WholeDiskByteReader(std::move(implementation))));
 }
@@ -488,16 +299,11 @@ base::Result<std::size_t> WholeDiskByteReader::read_at(const std::uint64_t offse
         if (from >= to) {
             continue;
         }
-        const auto* volume = find_volume(implementation_->volumes, region.volume_index);
-        if (volume == nullptr) {
-            return base::Result<std::size_t>::failure(
-                make_error(base::ErrorCode::kNotFound, "volume index is missing from chunk map"));
-        }
         const auto volume_offset = region.volume_base + (from - region.disk_offset);
         const auto slice = window.subspan(static_cast<std::size_t>(from - offset),
                                           static_cast<std::size_t>(to - from));
-        const ChunkSource chunk_source{*implementation_->inner, implementation_->cache};
-        auto filled = read_volume_range(chunk_source, *volume, volume_offset, slice, cancellation);
+        auto filled = implementation_->chain->read_range(region.volume_index, volume_offset, slice,
+                                                         cancellation);
         if (!filled) {
             return base::Result<std::size_t>::failure(filled.error());
         }
@@ -505,7 +311,16 @@ base::Result<std::size_t> WholeDiskByteReader::read_at(const std::uint64_t offse
 
     overlay_raw_layout(implementation_->raw_layout, implementation_->partition_style,
                        implementation_->sector_size, implementation_->disk_size, offset, window);
+    ++implementation_->read_calls;
+    implementation_->bytes_read += to_read;
     return base::Result<std::size_t>::success(to_read);
+}
+
+WholeDiskReadStatistics WholeDiskByteReader::statistics() const noexcept {
+    WholeDiskReadStatistics result;
+    result.read_calls = implementation_->read_calls.load();
+    result.bytes_read = implementation_->bytes_read.load();
+    return result;
 }
 
 } // namespace aegra::adapters::personal_archive

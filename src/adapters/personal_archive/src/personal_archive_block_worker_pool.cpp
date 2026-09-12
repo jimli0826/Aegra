@@ -147,6 +147,9 @@ base::Result<void> BlockWorkerPool::parallel_for(const std::size_t work_count, W
             internal_error("archive block worker pool is not running"));
     }
 
+    // One job at a time end to end: a second caller must not publish its job (and reset
+    // failed_/first_error_) between this caller's completion and its result read.
+    const std::scoped_lock job_lock(job_mutex_);
     {
         std::unique_lock lock(mutex_);
         done_cv_.wait(lock, [this] { return !job_active_; });

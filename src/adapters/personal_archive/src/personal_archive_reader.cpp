@@ -12,6 +12,8 @@
 #include "aegra/format/personal_archive.h"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstring>
 
@@ -134,21 +136,26 @@ class PayloadInput final {
         if (size == 0) {
             return PayloadReadResult::success({});
         }
-        std::vector<std::byte> result(size);
-        const std::scoped_lock lock(io_mutex_);
-        LARGE_INTEGER position{};
-        position.QuadPart = static_cast<LONGLONG>(offset);
-        if (!::SetFilePointerEx(handle_, position, nullptr, FILE_BEGIN)) {
+        if (offset > static_cast<std::uint64_t>((std::numeric_limits<LONGLONG>::max)()) ||
+            size > static_cast<std::uint64_t>((std::numeric_limits<LONGLONG>::max)()) - offset) {
             return PayloadReadResult::failure(
-                error(base::ErrorCode::kIoFailure, "failed to seek personal archive payload"));
+                error(base::ErrorCode::kCorruptData, "personal archive payload offset overflows"));
         }
+        std::vector<std::byte> result(size);
+        // Positional reads through OVERLAPPED on a synchronous handle never touch the shared
+        // file pointer, so concurrent chunk decodes may read the same part at once.
         std::size_t total = 0;
         while (total < size) {
             constexpr std::size_t maximum_request = 64ULL * 1024ULL * 1024ULL;
             const auto request =
                 static_cast<DWORD>((std::min)(size - total, maximum_request));
+            const auto position = offset + total;
+            OVERLAPPED overlapped{};
+            overlapped.Offset = static_cast<DWORD>(position & 0xFFFFFFFFULL);
+            overlapped.OffsetHigh = static_cast<DWORD>(position >> 32U);
             DWORD transferred = 0;
-            if (::ReadFile(handle_, result.data() + total, request, &transferred, nullptr) == FALSE ||
+            if (::ReadFile(handle_, result.data() + total, request, &transferred, &overlapped) ==
+                    FALSE ||
                 transferred == 0) {
                 return PayloadReadResult::failure(
                     error(base::ErrorCode::kIoFailure, "personal archive is truncated"));
@@ -167,7 +174,6 @@ class PayloadInput final {
     }
 
     HANDLE handle_{INVALID_HANDLE_VALUE};
-    mutable std::mutex io_mutex_;
 };
 
 [[nodiscard]] base::Result<std::vector<PayloadInput>>
@@ -1021,12 +1027,26 @@ expand_dedup_entries(const ChunkRecord& record, const std::span<const EntryOutpu
     return base::Result<void>::success();
 }
 
+/// Wall-clock split of one decode, folded into the reader counters by read_chunk.
+struct DecodeTimings final {
+    std::uint64_t authenticate_microseconds{0};
+    std::uint64_t expand_microseconds{0};
+};
+
+[[nodiscard]] std::uint64_t microseconds_since(const std::chrono::steady_clock::time_point since) {
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() -
+                                                              since)
+            .count());
+}
+
 struct ChunkDecodeContext final {
     std::uint32_t block_size{0};
     std::uint64_t volume_size{0};
     base::CancellationToken cancellation;
     const crypto_sodium::PayloadCipher* payload_cipher{nullptr};
     detail::BlockWorkerPool& workers;
+    DecodeTimings& timings;
 };
 
 [[nodiscard]] base::Result<std::vector<std::byte>>
@@ -1037,11 +1057,14 @@ read_record_payload(const ChunkRecord& record, std::vector<std::byte> stored_pay
             error(base::ErrorCode::kCancelled, "restore cancelled"));
     }
     // Authenticate AEAD before releasing any current-chunk data to the sink.
+    const auto authenticate_started = std::chrono::steady_clock::now();
     auto plaintext =
         authenticate_payload(record, std::move(stored_payload), context.payload_cipher);
+    context.timings.authenticate_microseconds = microseconds_since(authenticate_started);
     if (!plaintext) {
         return base::Result<std::vector<std::byte>>::failure(plaintext.error());
     }
+    const auto expand_started = std::chrono::steady_clock::now();
     if (record.descriptor.logical_size > (std::numeric_limits<std::size_t>::max)()) {
         return base::Result<std::vector<std::byte>>::failure(
             error(base::ErrorCode::kCorruptData, "archive chunk logical size exceeds process limit"));
@@ -1061,10 +1084,50 @@ read_record_payload(const ChunkRecord& record, std::vector<std::byte> stored_pay
     if (!deduplicated) {
         return base::Result<std::vector<std::byte>>::failure(deduplicated.error());
     }
+    context.timings.expand_microseconds = microseconds_since(expand_started);
     return base::Result<std::vector<std::byte>>::success(std::move(result));
 }
 
+/// Atomic mirror of ArchiveReadStatistics; read_chunk may run on several threads.
+/// Default (sequentially consistent) ordering: diagnostics only, never control flow.
+struct ReadCounters final {
+    std::atomic<std::uint64_t> chunks_read{0};
+    std::atomic<std::uint64_t> stored_bytes_read{0};
+    std::atomic<std::uint64_t> stored_read_microseconds{0};
+    std::atomic<std::uint64_t> authenticate_microseconds{0};
+    std::atomic<std::uint64_t> expand_microseconds{0};
+
+    void record(const std::size_t stored_bytes, const std::uint64_t stored_read_microseconds_value,
+                const DecodeTimings& timings) {
+        ++chunks_read;
+        stored_bytes_read += stored_bytes;
+        stored_read_microseconds += stored_read_microseconds_value;
+        authenticate_microseconds += timings.authenticate_microseconds;
+        expand_microseconds += timings.expand_microseconds;
+    }
+
+    [[nodiscard]] ArchiveReadStatistics snapshot() const noexcept {
+        ArchiveReadStatistics result;
+        result.chunks_read = chunks_read.load();
+        result.stored_bytes_read = stored_bytes_read.load();
+        result.stored_read_microseconds = stored_read_microseconds.load();
+        result.authenticate_microseconds = authenticate_microseconds.load();
+        result.expand_microseconds = expand_microseconds.load();
+        return result;
+    }
+};
+
 } // namespace
+
+ArchiveReadStatistics&
+ArchiveReadStatistics::operator+=(const ArchiveReadStatistics& other) noexcept {
+    chunks_read += other.chunks_read;
+    stored_bytes_read += other.stored_bytes_read;
+    stored_read_microseconds += other.stored_read_microseconds;
+    authenticate_microseconds += other.authenticate_microseconds;
+    expand_microseconds += other.expand_microseconds;
+    return *this;
+}
 
 struct PersonalArchiveReader::Impl final {
     explicit Impl(std::shared_ptr<detail::BlockWorkerPool> workers)
@@ -1106,6 +1169,7 @@ struct PersonalArchiveReader::Impl final {
     std::unique_ptr<crypto_sodium::PayloadCipher> payload_cipher;
     std::shared_ptr<detail::BlockWorkerPool> block_workers;
     std::unique_ptr<PayloadPrefetcher> payload_prefetcher;
+    ReadCounters counters;
 };
 
 PersonalArchiveReader::PersonalArchiveReader(std::unique_ptr<Impl> implementation) noexcept
@@ -1251,10 +1315,12 @@ PersonalArchiveReader::read_chunk(const std::uint64_t chunk_index,
             error(base::ErrorCode::kCorruptData, "archive chunk references an unknown volume"));
     }
     const auto record_index = static_cast<std::size_t>(chunk_index);
+    const auto stored_read_started = std::chrono::steady_clock::now();
     auto stored_payload =
         implementation_->payload_prefetcher != nullptr
             ? implementation_->payload_prefetcher->read(record_index, cancellation)
             : implementation_->read_stored_payload(record_index);
+    const auto stored_read_microseconds = microseconds_since(stored_read_started);
     if (!stored_payload) {
         return base::Result<ports::ChunkData>::failure(stored_payload.error());
     }
@@ -1266,15 +1332,22 @@ PersonalArchiveReader::read_chunk(const std::uint64_t chunk_index,
             return base::Result<ports::ChunkData>::failure(prefetched.error());
         }
     }
+    const auto stored_bytes = stored_payload.value().size();
+    DecodeTimings timings;
     const ChunkDecodeContext context{implementation_->block_size, volume->total_size, cancellation,
                                      implementation_->payload_cipher.get(),
-                                     *implementation_->block_workers};
+                                     *implementation_->block_workers, timings};
     auto payload = read_record_payload(record, std::move(stored_payload).value(), context);
     if (!payload) {
         return base::Result<ports::ChunkData>::failure(payload.error());
     }
+    implementation_->counters.record(stored_bytes, stored_read_microseconds, timings);
     return base::Result<ports::ChunkData>::success(
         {descriptor.value(), std::move(payload).value()});
+}
+
+ArchiveReadStatistics PersonalArchiveReader::read_statistics() const noexcept {
+    return implementation_->counters.snapshot();
 }
 
 } // namespace aegra::adapters::personal_archive

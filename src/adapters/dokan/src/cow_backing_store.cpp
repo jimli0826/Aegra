@@ -1,5 +1,7 @@
 #include "cow_backing_store.h"
 
+#include "srw_lock.h"
+
 #include "aegra/base/cancellation.h"
 
 #include <winioctl.h>
@@ -188,33 +190,57 @@ bool CowBackingStore::raw_write_at(HANDLE h, const void* buffer, DWORD len, LONG
     return WriteFile(h, buffer, len, written, nullptr) != FALSE;
 }
 
+CowBackingStore::ReadRun CowBackingStore::classify_run(const LONGLONG offset,
+                                                       const DWORD remaining) const {
+    SharedSrwLock lock(lock_);
+    const bool overlay_available = overlay_ != INVALID_HANDLE_VALUE;
+    ReadRun run;
+    LONGLONG cur = offset;
+    while (run.length < remaining) {
+        const std::uint64_t block_index = static_cast<std::uint64_t>(cur) / kBlockSize;
+        const bool from_overlay = overlay_available && block_present(block_index);
+        if (run.length == 0) {
+            run.from_overlay = from_overlay;
+        } else if (from_overlay != run.from_overlay) {
+            break;
+        }
+        const std::uint64_t block_end = (block_index + 1) * kBlockSize;
+        DWORD chunk = static_cast<DWORD>(block_end - static_cast<std::uint64_t>(cur));
+        if (chunk > remaining - run.length) {
+            chunk = remaining - run.length;
+        }
+        run.length += chunk;
+        cur += chunk;
+    }
+    return run;
+}
+
+bool CowBackingStore::read_overlay_run(void* buffer, const DWORD len, const LONGLONG offset) {
+    ExclusiveSrwLock lock(lock_);
+    return raw_read_at(overlay_, buffer, len, offset);
+}
+
 NTSTATUS CowBackingStore::read(void* buffer, DWORD buffer_len, LPDWORD bytes_read,
                                LONGLONG offset) {
-    std::lock_guard lock(mutex_);
-
     auto* out = static_cast<std::uint8_t*>(buffer);
     LONGLONG cur = offset;
     DWORD remaining = buffer_len;
 
+    // Consecutive blocks with the same source are read in one call so the reader sees the
+    // request at Dokan granularity instead of kBlockSize pieces. Original bytes are read
+    // without lock_: a write racing this read targets sectors the file system above never
+    // has in flight for both directions at once.
     while (remaining > 0) {
-        const std::uint64_t block_index = static_cast<std::uint64_t>(cur) / kBlockSize;
-        const std::uint64_t block_start = block_index * kBlockSize;
-        const DWORD in_block_off = static_cast<DWORD>(cur - block_start);
-        DWORD chunk = kBlockSize - in_block_off;
-        if (chunk > remaining) {
-            chunk = remaining;
-        }
-
-        const bool ok = (block_present(block_index) && overlay_ != INVALID_HANDLE_VALUE)
-                            ? raw_read_at(overlay_, out, chunk, cur)
-                            : read_original_at(out, chunk, cur);
+        const ReadRun run = classify_run(cur, remaining);
+        const bool ok = run.from_overlay ? read_overlay_run(out, run.length, cur)
+                                         : read_original_at(out, run.length, cur);
         if (!ok) {
             return DokanNtStatusFromWin32(GetLastError());
         }
 
-        out += chunk;
-        cur += chunk;
-        remaining -= chunk;
+        out += run.length;
+        cur += run.length;
+        remaining -= run.length;
     }
 
     if (bytes_read) {
@@ -229,7 +255,7 @@ NTSTATUS CowBackingStore::write(const void* buffer, DWORD bytes_to_write, LPDWOR
         return STATUS_MEDIA_WRITE_PROTECTED;
     }
 
-    std::lock_guard lock(mutex_);
+    ExclusiveSrwLock lock(lock_);
 
     const auto* in = static_cast<const std::uint8_t*>(buffer);
     LONGLONG cur = offset;
@@ -297,7 +323,7 @@ void CowBackingStore::get_times(FILETIME* create, FILETIME* access, FILETIME* wr
 }
 
 void CowBackingStore::flush() {
-    std::lock_guard lock(mutex_);
+    ExclusiveSrwLock lock(lock_);
     if (overlay_ != INVALID_HANDLE_VALUE) {
         FlushFileBuffers(overlay_);
     }
@@ -309,7 +335,7 @@ NTSTATUS CowBackingStore::resize(LONGLONG raw_eof) {
         return STATUS_MEDIA_WRITE_PROTECTED;
     }
 
-    std::lock_guard lock(mutex_);
+    ExclusiveSrwLock lock(lock_);
     if (overlay_ != INVALID_HANDLE_VALUE) {
         LARGE_INTEGER li{};
         li.QuadPart = raw_eof;
@@ -322,7 +348,7 @@ NTSTATUS CowBackingStore::resize(LONGLONG raw_eof) {
 }
 
 void CowBackingStore::set_overlay_attributes(DWORD attributes) {
-    std::lock_guard lock(mutex_);
+    ExclusiveSrwLock lock(lock_);
     if (!overlay_path_.empty()) {
         SetFileAttributesW(overlay_path_.c_str(), attributes);
     }
@@ -330,7 +356,7 @@ void CowBackingStore::set_overlay_attributes(DWORD attributes) {
 
 void CowBackingStore::set_overlay_times(const FILETIME* creation, const FILETIME* last_access,
                                         const FILETIME* last_write) {
-    std::lock_guard lock(mutex_);
+    ExclusiveSrwLock lock(lock_);
     if (overlay_ != INVALID_HANDLE_VALUE) {
         SetFileTime(overlay_, creation, last_access, last_write);
     }

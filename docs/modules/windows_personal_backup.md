@@ -57,7 +57,8 @@ Archive。Pipeline 失败时 Archive Session 负责 Abort，Composition Root 仍
 - 调用期间有效的 password view；
 - 备份类型；增量还要求显式 parent Archive path 和调用期间有效的 parent password view；
 - 密码学随机且非零的 file UUID；全量另有互不相同的 backup-set UUID，增量由父 Archive 继承；
-- block/chunk/memory geometry、KDF 参数和可选分卷大小；
+- block/chunk/memory geometry（Worker 受信任配置默认 64 KiB block、16 MiB volume_set Chunk、256 MiB 内存预算；
+  Chunk 是挂载/boot-check 随机读的最小解码单位，也是 ADR-0022 的去重窗口）、KDF 参数和可选分卷大小；
 - 显式 `deduplication_enabled`；开启时仅按 ADR-0022 在当前物理 Volume Chunk 内去重；
 - 显式 `compression_level`（zstd Fast=1、Normal=3、High=9），用于机会性 payload 压缩；
 - created UTC、应用版本和 hostname。

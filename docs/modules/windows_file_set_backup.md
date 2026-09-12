@@ -68,7 +68,8 @@ VSS，最后删除 Job 私有 staging 目录。
 ## Geometry
 
 file_set 不沿用 volume 的 64 KiB block 作为 stream write 量子。Worker 将 file_set 的
-`block_size` 对齐到 `chunk_size`（上限 64 MiB），使每个 stream extent 对应一块大 payload，
+`block_size` 对齐到独立的 `file_set_chunk_size_bytes`（默认 64 MiB，上限 64 MiB；与 volume_set 的
+16 MiB Chunk 解耦），使每个 stream extent 对应一块大 payload，
 避免 File Index leaf（plain ≤ 1 MiB）被 extent CBOR 撑爆。Session 按 entry 数与 plain 大小
 分包 leaf，必要时写一层 internal root。
 

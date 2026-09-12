@@ -130,12 +130,78 @@ struct MountJob final {
     return channel.send(frame, cancellation);
 }
 
+/// Decoded archive chunks (base or incremental) the chain keeps for the mounted guest.
+/// Base chunks are 64 MiB, so 1 GiB holds sixteen of them: measured against a random file
+/// order, 512 MiB re-decoded each base chunk holding data about five times.
+constexpr std::uint64_t kMountRangeCacheBudgetBytes = 1024ULL * 1024ULL * 1024ULL;
+/// Threads decoding the chunks ahead of a sequential reader. Two keep a file-hashing
+/// consumer fed without saturating every core.
+constexpr std::size_t kMountRangePrefetchThreads = 2;
+
+/// Chain shape at open: tells how many overlay chunks each base chunk pulls in and how
+/// much pruning removed, so read amplification is explained before any read happens.
+void note_chain_geometry(ScopedStage& stage,
+                         const adapters::personal_archive::PersonalArchiveChainReader& chain) {
+    const auto& geometry = chain.geometry();
+    stage.note_u64("base_chunks", geometry.base_chunks);
+    stage.note_bytes("base_logical_bytes", geometry.base_logical_bytes);
+    stage.note_u64("base_chunks_not_decoded", geometry.base_chunks_not_decoded);
+    stage.note_u64("overlay_chunks", geometry.overlay_chunks);
+    stage.note_bytes("overlay_logical_bytes", geometry.overlay_logical_bytes);
+    stage.note_u64("overlay_slices_raw", geometry.overlay_slices_raw);
+    stage.note_u64("overlay_slices_visible", geometry.overlay_slices_visible);
+}
+
 struct MountedResources final {
     adapters::dokan::MountSessionInfo info;
     std::unique_ptr<adapters::personal_archive::PersonalArchiveChainReader> chain;
     std::unique_ptr<adapters::personal_archive::PersonalFileArchiveChainReader> file_chain;
     std::unique_ptr<adapters::personal_archive::WholeDiskByteReader> disk_reader;
 };
+
+/// Read-path counters of the whole-disk reader, written to the mount task log at unmount so
+/// a slow mounted read can be attributed to cache misses, decode stalls, or the consumer.
+void note_disk_read_statistics(ScopedStage& stage,
+                               const adapters::personal_archive::WholeDiskByteReader* reader) {
+    if (reader == nullptr) {
+        return;
+    }
+    const auto stats = reader->statistics();
+    stage.note_u64("read_calls", stats.read_calls);
+    stage.note_bytes("bytes_read", stats.bytes_read);
+}
+
+/// Where the decode time of the chain went: cache behaviour, base vs overlay layers,
+/// on-demand vs prefetched, and per phase (stored read / AEAD / expand) over every layer.
+void note_chain_read_statistics(
+    ScopedStage& stage, const adapters::personal_archive::PersonalArchiveChainReader* chain) {
+    if (chain == nullptr) {
+        return;
+    }
+    const auto stats = chain->statistics();
+    stage.note_u64("chain_range_reads", stats.range_reads);
+    stage.note_bytes("chain_range_bytes", stats.range_bytes);
+    stage.note_u64("chain_piece_cache_hits", stats.piece_cache_hits);
+    stage.note_u64("chain_piece_load_waits", stats.piece_load_waits);
+    stage.note_u64("chain_base_decodes", stats.base_decodes);
+    stage.note_u64("chain_base_decode_ms", stats.base_decode_microseconds / 1000U);
+    stage.note_u64("chain_overlay_decodes", stats.overlay_decodes);
+    stage.note_u64("chain_overlay_decode_ms", stats.overlay_decode_microseconds / 1000U);
+    stage.note_u64("chain_on_demand_decodes", stats.on_demand_decodes);
+    stage.note_u64("chain_on_demand_decode_ms", stats.on_demand_decode_microseconds / 1000U);
+    stage.note_u64("chain_prefetch_decodes", stats.prefetch_decodes);
+    stage.note_u64("chain_prefetch_decode_ms", stats.prefetch_decode_microseconds / 1000U);
+    stage.note_u64("chain_prefetch_failures", stats.prefetch_failures);
+    stage.note_u64("chain_cache_evictions", stats.cache_evictions);
+    stage.note_u64("chain_prefetch_unused", stats.prefetch_unused);
+    stage.note_u64("chain_prefetch_consumed", stats.prefetch_consumed);
+    stage.note_u64("chain_prefetch_throttled_plans", stats.prefetch_throttled_plans);
+    stage.note_u64("layer_chunks_decoded", stats.layers.chunks_read);
+    stage.note_bytes("layer_stored_bytes_read", stats.layers.stored_bytes_read);
+    stage.note_u64("layer_stored_read_ms", stats.layers.stored_read_microseconds / 1000U);
+    stage.note_u64("layer_authenticate_ms", stats.layers.authenticate_microseconds / 1000U);
+    stage.note_u64("layer_expand_ms", stats.layers.expand_microseconds / 1000U);
+}
 
 void log_mount_request(WorkerTaskLog* log, const MountJob& job) {
     if (log == nullptr) {
@@ -220,22 +286,32 @@ mount_volume_set(MountJob& job,
     MountedResources resources;
     {
         ScopedStage stage(log, "open_archive_chain");
-        auto opened = adapters::personal_archive::PersonalArchiveChainReader::open(open_request);
+        // A mounted volume is read at random by the file system and sequentially by the
+        // applications on top: cache decoded archive chunks by byte budget and decode the
+        // chunks ahead of a sequential stream in the background.
+        auto chain_request = open_request;
+        chain_request.range_cache_budget_bytes = kMountRangeCacheBudgetBytes;
+        chain_request.range_prefetch_threads = kMountRangePrefetchThreads;
+        auto opened = adapters::personal_archive::PersonalArchiveChainReader::open(chain_request);
         if (!opened) {
             stage.fail(opened.error(), "open_chain");
             return base::Result<MountedResources>::failure(opened.error());
         }
         resources.chain = std::move(opened).value();
         stage.note_u64("layers", open_request.layers.size());
+        stage.note_bytes("range_cache_budget", chain_request.range_cache_budget_bytes);
+        stage.note_u64("range_prefetch_threads", chain_request.range_prefetch_threads);
+        note_chain_geometry(stage, *resources.chain);
     }
     {
         ScopedStage stage(log, "open_whole_disk_reader");
         // Re-identify the presented disk (fresh MBR signature + GPT DiskGUID) so a
         // read-only attach does not collide with a still-online source disk and get
         // forced OFFLINE by Windows.
+        adapters::personal_archive::WholeDiskReaderOptions reader_options;
+        reader_options.disk_identity = adapters::personal_archive::WholeDiskIdentity::kAssignUnique;
         auto disk = adapters::personal_archive::WholeDiskByteReader::open(
-            *resources.chain, resources.chain->manifest(), job.source_disk_number,
-            /*cache_chunk_count=*/8, /*assign_unique_disk_identity=*/true);
+            *resources.chain, resources.chain->manifest(), job.source_disk_number, reader_options);
         if (!disk) {
             stage.fail(disk.error(), "open_disk");
             if (disk.error().code == base::ErrorCode::kNotFound) {
@@ -361,6 +437,8 @@ base::Result<void> run_mount_host_session(ports::IMessageChannel& channel,
 
     const auto unmounted = [&]() {
         ScopedStage cleanup_stage(task_log.get(), "unmount_and_cleanup");
+        note_disk_read_statistics(cleanup_stage, mounted.value().disk_reader.get());
+        note_chain_read_statistics(cleanup_stage, mounted.value().chain.get());
         auto result = adapters::dokan::unmount_session(job.value().session_id);
         if (!result) {
             cleanup_stage.fail(result.error(), "unmount_session");

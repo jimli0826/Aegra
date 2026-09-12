@@ -45,11 +45,37 @@ Chunk 复用；每个 worker 持有可复用的 Windows CNG SHA-256 provider/has
 persist worker；persist worker 独占加密、分卷状态和 Win32 输出句柄，使当前 Chunk 的 WriteFile 与下一
 Chunk 的 hash/zstd 重叠。交接要求前一 persist 完成后才能接受下一 Prepared Chunk，因此最多同时持有一个
 正在写入和一个正在准备的 Chunk；commit 等待 persist 清空，abort 停止并 join worker 后再删除 partial。
-pool 同时只服务一次 `parallel_for`。`PersonalArchiveReader` 同样在 reader 生命周期复用该 pool，Archive
+pool 同时只运行一个 `parallel_for` 作业（并发调用者排队）。`PersonalArchiveReader` 同样在 reader 生命周期复用该 pool，Archive
 chain 的所有底层 Reader 共享一个 pool，线程数不随链深增长；每个 worker 持有 `ZstdDecompressor`
 （`ZSTD_DCtx`）。Reader 在生命周期内保持各 Archive part 的 Win32 顺序读取句柄打开；顺序恢复可显式
 启用深度为一的 payload 预读，使下一 Chunk 的存储读取与当前 Chunk 的认证、解压重叠，随机读取默认
-不启用预读。Volume/File Archive、分卷、sidecar、secondary index 和 index spool 的生产写路径统一使用
+不启用预读。未启用 payload 预读时 `read_chunk` 允许多线程并发调用：payload 通过 `OVERLAPPED` 偏移读取，
+不依赖共享文件指针；`BlockWorkerPool::parallel_for` 对并发调用整体串行化，每个调用只看到自己作业的结果。
+启用 payload 预读（顺序恢复）时调用方必须顺序调用。`read_statistics()` 累计每层的解码次数、存储字节数与
+存储读取 / AEAD 认证 / 展开三个阶段的墙钟时间。
+
+`PersonalArchiveChainReader` 打开链时对每个基准 Chunk 做覆盖裁剪：从最新层往回走，只保留没有被更晚层改写的
+字节区间（后层胜出），因此被多个增量层反复改写的区域只解码最新那一层；基准层 `free_ranges` 覆盖整个 Chunk
+（该区域在全量备份时刻全部空闲）或裁剪后的覆盖层改写了全部字节时，基准贡献直接零填充，不解码基准层。
+除 `read_chunk`（整块合并视图，供顺序 Restore/Verify）外，链还提供 `read_range(volume_index, offset, span)`：
+只解码请求区间真正触及的归档 Chunk（基准 64 MiB 或增量层的小 Chunk），不再为一次小的随机读拼装整个基准
+Chunk。已解码的归档 Chunk 按 `(layer, chunk)` 放入按字节预算（`ArchiveChainOpenRequest.range_cache_budget_bytes`）
+的 LRU（`detail::DecodedChunkCache`）：槽位在解码开始前发布，并发 miss 同一 Chunk 只解码一次，其余线程等待；
+淘汰优先已被读方消费过的槽位，但预读后 1024 次使用内无人消费的槽位视为过期（读方去了别处），同样优先淘汰，
+避免越过文件末尾的无效预读长期占用缓存；预算 0 时不驻留任何数据，只做在途去重（Restore 默认）。
+`range_prefetch_threads` > 0 时，读请求起点落在上一请求终点附近即视为顺序流，每前进 4 MiB 规划一次，把
+后续 16 MiB 触及且未缓存的归档 Chunk 排入有界队列由预读线程解码；随机读不触发预读。链层看不到文件边界，
+消费者在短文件间随机跳转时大部分预读会越过文件末尾白解码，因此向前距离按最近 8 次预读的结算结果自适应：
+浪费（未被消费即淘汰）比例超过 50% 收窄到 4 MiB（只保证跨边界时下一个 Chunk 已在解码），低于 25% 恢复
+16 MiB；长顺序拷贝几乎无浪费，始终全速。`read_chunk`/`read_range`
+在各层未启用 payload 预读时允许并发。`statistics()` 返回 range 读次数与字节、缓存命中/在途等待、基准与覆盖层
+解码次数与耗时、按需与预读解码次数与耗时、各层阶段计时之和；`geometry()` 返回打开时固定的链形状（基准与覆盖
+层 Chunk 数与逻辑字节、裁剪前后的覆盖切片数、不需解码的基准 Chunk 数），用于在读取前解释读放大。
+
+`WholeDiskByteReader` 是 mount / boot-check 的整盘随机读取视图：只负责磁盘偏移到卷偏移的映射、卷间空洞零填充
+与分区表 raw layout 覆盖，数据全部经 `PersonalArchiveChainReader::read_range` 读取。`read_at` 允许多线程并发
+调用（Dokan 多线程派发），自身除计数器外无可变状态。mount 设置 1 GiB 缓存预算与 2 个预读线程；boot-check 的
+随机访问设置 1 GiB 预算、不预读。Volume/File Archive、分卷、sidecar、secondary index 和 index spool 的生产写路径统一使用
 持久 Win32 顺序输出句柄；Volume Chunk 的 prefix/header/BlockEntry 批量合并写入，payload 单独大块写入，
 不使用 `std::ofstream`。
 Reader 先完整认证并原地解密 VolumeChunk payload，
@@ -200,7 +226,9 @@ NtfsCore 模块说明见 [ntfs_core.md](ntfs_core.md)。
 
 - Mount Host 独立进程隔离 Dokan 回调和故障（盘符/整盘挂载用例；非 Explorer 双击浏览权威路径）。
 - 原始 backing 永远只读；写入进入独立 COW overlay 与持久化位图。
-- 读操作按 COW block 选择 overlay 或 backing，部分写执行 read-modify-write。
+- 读操作按 COW block 选择 overlay 或 backing，部分写执行 read-modify-write。相邻同源 block 合并为一次
+  读取；backing 读取不持 `CowBackingStore` 锁（backing reader 必须线程安全），只有 bitmap 查询取共享锁、
+  overlay 访问与写入取独占锁，使 Dokan 多线程派发的读请求真正并发到达 backing reader。
 - 格式层只负责 VHDX/VMDK/QCOW2 元数据与偏移翻译，数据平面通过 `IRandomAccessReader`。
 - 锁顺序固定为布局锁，再到 backing/overlay 锁；禁止持锁调用未知回调。
 - Dokan C 回调使用静态跳板进入实例，不使用全局实例。
